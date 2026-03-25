@@ -66,6 +66,7 @@ MPP.Intents.Charge         — Charge intent request schema (amount, currency, r
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
+MPP.Plug.Config            — Validated endpoint config struct (pre-computed at init)
 ```
 
 ### Design decisions

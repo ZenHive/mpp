@@ -76,6 +76,26 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 - "Intent = Schema, Method = Implementation" — methods only handle verification, shared charge struct
 - Resolved `TODO(Task 7)` in `Intents.Charge` — numeric amount validation is by design delegated to methods
 
+#### Task 8: Plug Middleware
+**Completed** | [D:5/B:10/U:10 → Eff:2.0]
+
+**What was done:**
+- `MPP.Plug` implementing the full 402 payment handshake as mountable Plug middleware
+- `MPP.Plug.Config` struct for validated, pre-computed endpoint configuration (secret_key, realm, method, charge, request, expires_in, opaque)
+- `init/1` pre-computes charge struct, method_details, and base64url request string at compile time
+- `call/2` implements: no credential → 402 challenge; valid credential → pass-through with receipt; invalid → 402 with error
+- Cross-route replay prevention: decodes credential's request and compares amount/currency against endpoint config (follows mpp-rs pattern)
+- Challenge expiration support via `expires_in` option (TTL in seconds)
+- Fresh challenge included in every 402 response for immediate retry
+- `Cache-Control: no-store` on 402 responses, `Cache-Control: private` on successful responses
+- RFC 9457 Problem Details JSON error bodies with `content-type: application/problem+json`
+- Receipt stored in `conn.assigns[:mpp_receipt]` and `Payment-Receipt` header on success
+
+**Key decisions:**
+- Config as struct (not plain map) — compile-time validation via `@enforce_keys`, self-documenting fields
+- Explicit amount/currency comparison for replay prevention — HMAC alone doesn't prevent cross-route replay when routes share a secret key
+- `require_opt!/2` raises per-field (not batch) for clear error messages at init time
+
 #### Code Review Fixes
 - Fixed `Challenge.create/2` `@doc` — removed incorrect "or map" from parameter description (only keyword lists accepted)
 - Simplified `Receipt.new/1` — removed unnecessary `then` wrapper around `struct!`

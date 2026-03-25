@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 1: Core Protocol** — Build the foundation modules that implement the MPP handshake.
+**Phase 1: Core Protocol** ✅ — All 8 tasks complete. Next: Phase 2 (Stripe Method).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -25,7 +25,7 @@
 | Task 5: Errors module | ✅ | [D:2/B:7/U:7 → Eff:3.5] | 9 RFC 9457 problem types |
 | Task 6: ChargeRequest | ✅ | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
 | Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
-| Task 8: Plug middleware | ⬜ | [D:5/B:10/U:10 → Eff:2.0] | Unblocked (4, 7 done) |
+| Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
 
 ---
 
@@ -59,21 +59,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-6-charge-request-schema) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-7-method-behaviour) for details.
 
-### Task 8: Plug Middleware
+### Task 8: Plug Middleware ✅
 
-[D:5/B:10/U:10 → Eff:2.0]
-
-Implement `MPP.Plug` — the main integration point that any Phoenix router can mount. On `init/1`, accept options: `secret_key`, `realm`, `method` (module implementing `MPP.Method`), `amount`, `currency`, and optional `recipient`, `description`, `expires_in`. On `call/2`: check for `Authorization: Payment` header. If absent, generate a fresh challenge and respond 402 with `WWW-Authenticate: Payment` + `Cache-Control: no-store`. If present, parse credential, verify challenge HMAC, verify payment via method module, and on success assign receipt to conn and set `Payment-Receipt` header. On failure, respond 402 with fresh challenge + RFC 9457 error body. Support cross-route replay prevention by checking amount/currency match.
-
-Success criteria:
-- [ ] `MPP.Plug` implements `Plug` behaviour (init/1, call/2)
-- [ ] No-credential request → 402 with WWW-Authenticate challenge
-- [ ] Valid credential → conn passes through with receipt in assigns + Payment-Receipt header
-- [ ] Invalid/expired/tampered credential → 402 with fresh challenge + error body
-- [ ] `Cache-Control: no-store` on 402 responses
-- [ ] `Cache-Control: private` on responses with Payment-Receipt
-- [ ] Cross-route replay prevention (amount/currency mismatch → rejection)
-- [ ] Tests using `Plug.Test` for the full 402 flow with a mock method module
+See [CHANGELOG.md](CHANGELOG.md#task-8-plug-middleware) for details.
 
 ---
 
