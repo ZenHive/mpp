@@ -41,6 +41,7 @@ defmodule MPP.MixProject do
     [
       {:plug, "~> 1.16"},
       {:jason, "~> 1.4"},
+      {:req, "~> 0.5"},
 
       # Dev/test tooling
       {:ex_doc, "~> 0.39", only: :dev, runtime: false},

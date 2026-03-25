@@ -64,9 +64,9 @@ MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Pay
 MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*)
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
-MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification
+MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
-MPP.Plug.Config            — Validated endpoint config struct (pre-computed at init)
+MPP.Plug.Config            — Validated endpoint config struct (pre-computed at init, includes method_config)
 ```
 
 ### Design decisions
@@ -76,6 +76,7 @@ MPP.Plug.Config            — Validated endpoint config struct (pre-computed at
 - **Explicit credentials.** Per `library-design.md`: no `Application.get_env`, no ENV fallback. Pass `secret_key`, `realm`, `method` module, and pricing explicitly via Plug opts.
 - **Per-route pricing via Plug opts.** Each route mounts `MPP.Plug` with its own amount/currency. No global pricing config.
 - **Base64url encoding preserves original bytes.** Critical for HMAC verification — never re-serialize, always use the raw base64url string from the original challenge.
+- **Server-only method_config.** `MPP.Plug` accepts `:method_config` (a map) for secrets like `stripe_secret_key`. Public fields go to the client via `challenge_method_details/1`; private fields are merged into `charge.method_details` at verify time only, never serialized into challenges.
 
 ### Protocol constants
 
@@ -94,6 +95,7 @@ MPP.Plug.Config            — Validated endpoint config struct (pre-computed at
 
 - `plug` — HTTP middleware framework (the integration surface)
 - `jason` — JSON encoding/decoding for challenge/receipt payloads
+- `req` — HTTP client for payment method API calls (Stripe, etc.)
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 
 ### First consumer

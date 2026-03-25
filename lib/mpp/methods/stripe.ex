@@ -1,0 +1,197 @@
+defmodule MPP.Methods.Stripe do
+  @moduledoc """
+  Stripe payment method — verifies payment via Stripe PaymentIntent with SPT.
+
+  The client creates a Shared Payment Granted Token (SPT) via Stripe, includes
+  it in the credential payload, and the server creates a PaymentIntent with
+  `confirm: true` to charge it immediately.
+
+  ## Configuration
+
+  Pass Stripe-specific config via `:method_config` in `MPP.Plug` opts:
+
+      plug MPP.Plug,
+        secret_key: "hmac-secret",
+        realm: "api.example.com",
+        method: MPP.Methods.Stripe,
+        amount: "5000",
+        currency: "usd",
+        method_config: %{
+          "stripe_secret_key" => "sk_test_...",
+          "network_id" => "profile_1Mqx...",
+          "payment_method_types" => ["card"]
+        }
+
+  ## Config Keys
+
+    * `"stripe_secret_key"` — (required) Stripe secret key for PaymentIntent creation
+    * `"network_id"` — (required) Stripe Business Network profile ID
+    * `"payment_method_types"` — (optional) accepted payment methods, defaults to `["card"]`
+    * `"realm"` — (optional, injected by Plug) server realm for analytics metadata
+
+  ## Credential Payload
+
+  The credential `payload` map must contain:
+
+    * `"spt"` — (required) Stripe Shared Payment Granted Token (e.g., `"spt_1N4..."`)
+    * `"externalId"` — (optional) caller-provided correlation ID, echoed in receipt
+  """
+
+  use MPP.Method
+
+  alias MPP.Errors
+  alias MPP.Intents.Charge
+  alias MPP.Receipt
+
+  @stripe_api_url "https://api.stripe.com/v1/payment_intents"
+
+  @impl MPP.Method
+  @spec method_name() :: String.t()
+  def method_name, do: "stripe"
+
+  @impl MPP.Method
+  @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+
+    with {:ok, spt} <- extract_spt(payload),
+         {:ok, stripe_secret_key} <- require_config(config, "stripe_secret_key"),
+         {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config) do
+      check_status(pi, payload)
+    end
+  end
+
+  @impl MPP.Method
+  @spec challenge_method_details(Charge.t()) :: map() | nil
+  def challenge_method_details(%Charge{} = charge) do
+    config = charge.method_details || %{}
+
+    case config["network_id"] do
+      nil ->
+        nil
+
+      network_id ->
+        types = config["payment_method_types"] || ["card"]
+        %{"networkId" => network_id, "paymentMethodTypes" => types}
+    end
+  end
+
+  # Extracts the SPT from the credential payload.
+  defp extract_spt(%{"spt" => spt}) when is_binary(spt) and byte_size(spt) > 0, do: {:ok, spt}
+  defp extract_spt(_), do: {:error, Errors.new(:invalid_payload, "Missing or invalid 'spt' field in credential payload")}
+
+  # Validates that a required config key is present.
+  defp require_config(config, key) do
+    case config[key] do
+      nil -> {:error, Errors.new(:verification_failed, "Stripe method missing required config: #{key}")}
+      value -> {:ok, value}
+    end
+  end
+
+  # Creates a Stripe PaymentIntent with the SPT and returns the response body.
+  defp create_payment_intent(spt, charge, stripe_secret_key, config) do
+    body = build_request_body(spt, charge, config)
+    auth = Base.encode64(stripe_secret_key <> ":")
+
+    idempotency_key =
+      case config["challenge_id"] do
+        nil -> "mpp_#{spt}"
+        challenge_id -> "mpp_#{challenge_id}_#{spt}"
+      end
+
+    req_options = config["req_options"] || []
+
+    result =
+      Req.request(
+        [
+          url: @stripe_api_url,
+          method: :post,
+          headers: [
+            {"authorization", "Basic #{auth}"},
+            {"idempotency-key", idempotency_key},
+            {"content-type", "application/x-www-form-urlencoded"}
+          ],
+          body: URI.encode_query(body, :www_form)
+        ],
+        req_options
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        {:ok, body}
+
+      {:ok, %Req.Response{body: body}} ->
+        message = extract_stripe_error(body)
+        {:error, Errors.new(:verification_failed, "Stripe PaymentIntent creation failed: #{message}")}
+
+      {:error, exception} ->
+        {:error, Errors.new(:verification_failed, "Stripe API request failed: #{Exception.message(exception)}")}
+    end
+  end
+
+  # Builds the form-encoded body for PaymentIntent creation.
+  defp build_request_body(spt, charge, config) do
+    base = [
+      {"amount", charge.amount},
+      {"currency", charge.currency},
+      {"confirm", "true"},
+      {"shared_payment_granted_token", spt},
+      {"automatic_payment_methods[enabled]", "true"},
+      {"automatic_payment_methods[allow_redirects]", "never"}
+    ]
+
+    metadata = build_metadata(config)
+    base ++ metadata
+  end
+
+  # Builds analytics metadata key-value pairs for Stripe PaymentIntent.
+  defp build_metadata(config) do
+    metadata = [
+      {"metadata[mpp_version]", "1"},
+      {"metadata[mpp_is_mpp]", "true"}
+    ]
+
+    metadata =
+      case config["challenge_id"] do
+        nil -> metadata
+        id -> metadata ++ [{"metadata[mpp_challenge_id]", id}]
+      end
+
+    case config["realm"] do
+      nil -> metadata
+      realm -> metadata ++ [{"metadata[mpp_server_id]", realm}]
+    end
+  end
+
+  # Checks the PaymentIntent status and returns a receipt or error.
+  defp check_status(%{"status" => "succeeded", "id" => pi_id}, payload) do
+    external_id = payload["externalId"]
+
+    receipt =
+      Receipt.new(
+        method: method_name(),
+        reference: pi_id,
+        external_id: external_id
+      )
+
+    {:ok, receipt}
+  end
+
+  defp check_status(%{"status" => "requires_action"}, _payload) do
+    {:error, Errors.new(:verification_failed, "PaymentIntent requires action (e.g., 3DS)")}
+  end
+
+  defp check_status(%{"status" => status}, _payload) do
+    {:error, Errors.new(:verification_failed, "PaymentIntent status: #{status}")}
+  end
+
+  defp check_status(_body, _payload) do
+    {:error, Errors.new(:verification_failed, "Unexpected Stripe response: missing status field")}
+  end
+
+  # Extracts the error message from a Stripe API error response.
+  defp extract_stripe_error(%{"error" => %{"message" => message}}) when is_binary(message), do: message
+  defp extract_stripe_error(%{"error" => %{"type" => type}}), do: type
+  defp extract_stripe_error(body) when is_binary(body), do: "HTTP error"
+  defp extract_stripe_error(_), do: "unknown error"
+end

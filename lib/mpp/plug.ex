@@ -38,6 +38,9 @@ defmodule MPP.Plug do
     * `:currency` — (required) currency code (string, normalized to lowercase)
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
+    * `:method_config` — (optional) server-only config map passed to `verify/2`
+      via `charge.method_details` (never serialized to the client). Use this for
+      secrets like API keys that the method needs but clients must not see.
     * `:expires_in` — (optional) challenge TTL in seconds (integer)
     * `:opaque` — (optional) base64url-encoded server correlation data
   """
@@ -63,18 +66,20 @@ defmodule MPP.Plug do
             method: module(),
             charge: Charge.t(),
             request: String.t(),
+            method_config: map(),
             expires_in: pos_integer() | nil,
             opaque: String.t() | nil
           }
 
     @enforce_keys [:secret_key, :realm, :method, :charge, :request]
-    defstruct [:secret_key, :realm, :method, :charge, :request, :expires_in, :opaque]
+    defstruct [:secret_key, :realm, :method, :charge, :request, :method_config, :expires_in, :opaque]
   end
 
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
     method = require_opt!(opts, :method)
+    method_config = Keyword.get(opts, :method_config, %{})
 
     {:ok, charge} =
       Charge.new(
@@ -84,9 +89,13 @@ defmodule MPP.Plug do
         description: Keyword.get(opts, :description)
       )
 
-    # Merge method-specific details into the charge
+    # Pass method_config via charge.method_details so challenge_method_details
+    # can read config (e.g., network_id) and return public-facing fields only
+    charge_with_config = %{charge | method_details: method_config}
+
+    # Merge method-specific public details into the charge (replaces method_config)
     charge =
-      case method.challenge_method_details(charge) do
+      case method.challenge_method_details(charge_with_config) do
         nil -> charge
         details when is_map(details) -> %{charge | method_details: details}
       end
@@ -103,6 +112,7 @@ defmodule MPP.Plug do
       method: method,
       charge: charge,
       request: request,
+      method_config: method_config,
       expires_in: Keyword.get(opts, :expires_in),
       opaque: Keyword.get(opts, :opaque)
     }
@@ -137,10 +147,21 @@ defmodule MPP.Plug do
 
   # Runs the full verification pipeline on a parsed credential.
   defp verify_credential(conn, config, credential) do
+    # Merge server-only method_config into charge.method_details for verify/2.
+    # Public method_details (from challenge_method_details) stay in the serialized
+    # challenge; method_config adds server-only fields (e.g., stripe_secret_key).
+    # Also inject challenge_id and realm for analytics metadata.
+    runtime_config =
+      config.method_config
+      |> Map.put("challenge_id", credential.challenge.id)
+      |> Map.put("realm", config.realm)
+
+    charge_for_verify = merge_method_config(config.charge, runtime_config)
+
     with :ok <- Challenge.verify(credential.challenge, config.secret_key),
          :ok <- check_expiration(credential.challenge),
          :ok <- check_request_match(credential.challenge, config),
-         {:ok, receipt} <- config.method.verify(credential.payload, config.charge) do
+         {:ok, receipt} <- config.method.verify(credential.payload, charge_for_verify) do
       conn
       |> Plug.Conn.assign(:mpp_receipt, receipt)
       |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
@@ -235,6 +256,12 @@ defmodule MPP.Plug do
     DateTime.utc_now()
     |> DateTime.add(seconds, :second)
     |> DateTime.to_iso8601()
+  end
+
+  # Merges server-only method_config into charge.method_details for verify/2.
+  defp merge_method_config(charge, config) do
+    merged = Map.merge(charge.method_details || %{}, config)
+    %{charge | method_details: merged}
   end
 
   # Appends a keyword pair only if the value is non-nil.

@@ -6,6 +6,27 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+### Phase 2: Stripe Payment Method
+
+#### Task 9: Stripe Method
+**Completed** | [D:4/B:9/U:8 → Eff:2.13]
+
+**What was done:**
+- `MPP.Methods.Stripe` implementing the `MPP.Method` behaviour — first real payment method
+- `verify/2` creates a Stripe PaymentIntent with SPT (`shared_payment_granted_token`), `confirm: true`, and immediate status check
+- Idempotency key format `mpp_{challenge_id}_{spt}` prevents duplicate charges on client retry
+- `challenge_method_details/1` returns `networkId` and `paymentMethodTypes` for client challenge
+- Analytics metadata injected into PaymentIntent (`mpp_version`, `mpp_is_mpp`, `mpp_challenge_id`, `mpp_server_id`)
+- Handles Stripe error responses (card declined, requires_action/3DS, unexpected status)
+- Added `req` as runtime dependency for Stripe API calls (no Stripe SDK needed)
+- Added `method_config` to `MPP.Plug.Config` — server-only config map passed to `verify/2` via `charge.method_details` at runtime, never serialized to the client in challenges
+
+**Key decisions:**
+- Config passed via `:method_config` Plug opt, not ENV or Application config (per library-design.md)
+- `method_config` solves the "server secrets in method_details" problem: public fields (networkId, paymentMethodTypes) go to the client via `challenge_method_details/1`; private fields (stripe_secret_key) stay server-only and are merged into charge at verify time
+- Uses `Req.Test` stub/plug pattern for unit tests — no real Stripe API calls in unit tests
+- `req_options` key in method_config allows test injection of Req adapters
+
 ### Phase 1: Core Protocol
 
 #### Task 1: Challenge Module

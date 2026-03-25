@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 1: Core Protocol** ✅ — All 8 tasks complete. Next: Phase 2 (Stripe Method).
+**Phase 2: Stripe Payment Method** — Task 9 complete. Next: Task 10 (Stripe Integration Test).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -26,6 +26,7 @@
 | Task 6: ChargeRequest | ✅ | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
 | Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
 | Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
+| Task 9: Stripe method | ✅ | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
 
 ---
 
@@ -67,20 +68,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-8-plug-middleware) for details.
 
 ## Phase 2: Stripe Payment Method
 
-### Task 9: Stripe Method
+### Task 9: Stripe Method ✅
 
-[D:4/B:9/U:8 → Eff:2.13]
-
-Implement `MPP.Methods.Stripe` — the first real `MPP.Method` implementation. Verifies payment by creating a Stripe PaymentIntent with `shared_payment_granted_token: spt_...` and `confirm: true`. Uses `Req` for Stripe API calls (not a Stripe SDK dep). Idempotency key = `{challenge_id}_{spt}` to prevent duplicate charges. `challenge_method_details/1` adds `networkId` and `paymentMethodTypes` to the challenge request. The method requires `stripe_secret_key` and `network_id` passed explicitly (no ENV fallback per library-design.md).
-
-Success criteria:
-- [ ] Implements `MPP.Method` behaviour
-- [ ] `verify/2` creates PaymentIntent with SPT, checks `status == "succeeded"`
-- [ ] Idempotency key prevents duplicate charges
-- [ ] `challenge_method_details/1` adds Stripe-specific fields
-- [ ] Explicit config (stripe_secret_key, network_id) — no ENV fallback
-- [ ] Unit tests with mocked HTTP responses
-- [ ] Handles Stripe error responses gracefully (card declined, invalid SPT, etc.)
+See [CHANGELOG.md](CHANGELOG.md#task-9-stripe-method) for details.
 
 ### Task 10: Stripe Integration Test
 
