@@ -21,11 +21,11 @@
 | Task 1: Challenge module | ✅ | [D:4/B:10/U:10 → Eff:2.5] | HMAC-SHA256 binding |
 | Task 2: Credential module | ✅ | [D:3/B:9/U:9 → Eff:3.0] | base64url JSON decode/encode |
 | Task 3: Receipt module | ✅ | [D:2/B:8/U:8 → Eff:4.0] | base64url JSON encode/decode |
-| Task 4: Headers module `[P]` | ⬜ | [D:3/B:9/U:9 → Eff:3.0] | Independent (parse/format only) |
+| Task 4: Headers module | ✅ | [D:3/B:9/U:9 → Eff:3.0] | Auth-param parser + format |
 | Task 5: Errors module | ✅ | [D:2/B:7/U:7 → Eff:3.5] | 9 RFC 9457 problem types |
 | Task 6: ChargeRequest | ✅ | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
 | Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
-| Task 8: Plug middleware | ⬜ | [D:5/B:10/U:10 → Eff:2.0] | Depends on 4 (7 done) |
+| Task 8: Plug middleware | ⬜ | [D:5/B:10/U:10 → Eff:2.0] | Unblocked (4, 7 done) |
 
 ---
 
@@ -43,20 +43,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-2-credential-module) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-3-receipt-module) for details.
 
-### Task 4: Headers Module
+### Task 4: Headers Module ✅
 
-[D:3/B:9/U:9 → Eff:3.0]
-
-Implement `MPP.Headers` — parsing and formatting the three protocol headers. `WWW-Authenticate: Payment` uses RFC 9110 auth-param syntax (key=value or key="quoted-value"). `Authorization: Payment <base64url>` is simpler. `Payment-Receipt: <base64url>` is just a base64url blob. Write a custom parser for WWW-Authenticate (the auth-param format has quoting rules that regex handles poorly). Format functions produce spec-compliant header values.
-
-Success criteria:
-- [ ] `format_challenge/1` — Challenge struct → WWW-Authenticate header value
-- [ ] `parse_challenge/1` — WWW-Authenticate header value → Challenge struct
-- [ ] `format_credential/1` — Credential struct → Authorization header value
-- [ ] `parse_credential/1` — Authorization header value → Credential struct
-- [ ] `format_receipt/1` — Receipt struct → Payment-Receipt header value
-- [ ] `parse_receipt/1` — Payment-Receipt header value → Receipt struct
-- [ ] Tests for roundtrip parsing, quoted values, multiple auth-params
+See [CHANGELOG.md](CHANGELOG.md#task-4-headers-module) for details.
 
 ### Task 5: Errors Module ✅
 

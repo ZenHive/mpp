@@ -55,6 +55,17 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 - `to_request/1` / `from_request/1` for camelCase JSON conversion per spec
 - "Intent = Schema" design — all payment methods share this structure
 
+#### Task 4: Headers Module
+**Completed** | [D:3/B:9/U:9 → Eff:3.0]
+
+**What was done:**
+- `MPP.Headers` with 6 public functions: format/parse for challenge, credential, and receipt headers
+- WWW-Authenticate auth-param parser: state-machine for quoted strings with escape handling (`\"`, `\\`)
+- CRLF rejection in quoted values (header injection prevention)
+- Validates required params, rejects duplicates and unknown params
+- Authorization/Receipt headers delegate to existing `Credential.encode/decode` and `Receipt.encode/decode`
+- Roundtrip-safe: format → parse preserves all fields including HMAC-verifiable challenge IDs
+
 #### Task 7: Method Behaviour
 **Completed** | [D:3/B:10/U:10 → Eff:3.33]
 
