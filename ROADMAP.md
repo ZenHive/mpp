@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 2: Stripe Payment Method** — Complete. Next: Phase 3 (Descripex + Discovery) or Phase 7 (v0.1.0 Release).
+**Phase 3: Descripex + Discovery** — Next up. v0.1.0 published (Phase 7 complete).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -28,6 +28,7 @@
 | Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
 | Task 9: Stripe method | ✅ | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
 | Task 10: Stripe integration test | ✅ | [D:3/B:7/U:6 → Eff:2.17] | Full 402 handshake against Stripe test API |
+| Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
 
 ---
 
@@ -159,23 +160,11 @@ Success criteria:
 
 ---
 
-## Phase 7: Hex Publish
+## Phase 7: Hex Publish ✅
 
-### Task 16: v0.1.0 Release
+### Task 16: v0.1.0 Release ✅
 
-[D:2/B:8/U:8 → Eff:4.0]
-
-Publish v0.1.0 to Hex with Phase 1 + Phase 2 complete. Update README with real usage examples (mounting the Plug, configuring Stripe). Generate ExDoc with llms.txt. Update CHANGELOG. Ensure all quality gates pass (dialyzer 0 warnings, credo strict 0 issues, doctor coverage, tests passing). First Elixir MPP implementation on Hex.
-
-Success criteria:
-- [ ] All Phase 1 + 2 tests passing
-- [ ] Dialyzer: 0 warnings
-- [ ] Credo: 0 issues (strict mode)
-- [ ] Doctor: all public modules documented
-- [ ] README has usage examples with Plug mounting + Stripe config
-- [ ] ExDoc generates cleanly with llms.txt
-- [ ] CHANGELOG updated
-- [ ] `mix hex.publish` succeeds
+See [CHANGELOG.md](CHANGELOG.md#010---2026-03-25) for details.
 
 ---
 
@@ -183,6 +172,7 @@ Success criteria:
 
 | Resource | What |
 |----------|------|
+| [ZenHive/mpp](https://github.com/ZenHive/mpp) | This repo — Elixir MPP implementation |
 | [MPP Spec](https://github.com/tempoxyz/mpp-specs) | IETF draft — core protocol, intents, methods |
 | [mpp-rs](https://github.com/tempoxyz/mpp-rs) | Rust reference implementation (Tower/Axum) |
 | [x402 Docs](https://docs.x402.org) | Coinbase-backed on-chain payment protocol |

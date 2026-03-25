@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.0.1"
+  @version "0.1.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -88,7 +88,7 @@ defmodule MPP.MixProject do
       main: "MPP",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "ROADMAP.md", "LICENSE"]
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 

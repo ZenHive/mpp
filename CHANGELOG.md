@@ -1,10 +1,19 @@
 # Changelog
 
-Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
+Completed roadmap tasks.
 
 ---
 
-## [Unreleased]
+## [0.1.0] - 2026-03-25
+
+### Task 16: v0.1.0 Hex Release
+
+First public release with core protocol (Phase 1) and Stripe payment method (Phase 2).
+
+**What was done:**
+- Published to Hex as `mpp` v0.1.0
+- README with Quick Start guide, module map, and Stripe configuration example
+- All quality gates passing: 0 dialyzer warnings, 0 credo issues, doctor passes
 
 ### Phase 2: Stripe Payment Method
 
