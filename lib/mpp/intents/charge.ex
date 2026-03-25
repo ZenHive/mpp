@@ -91,9 +91,8 @@ defmodule MPP.Intents.Charge do
 
   def from_request(_), do: {:error, :missing_required_fields}
 
-  # TODO(Task 7): Amount string is not validated as numeric — MPP.Method.verify/2
-  # validates the actual payment amount against the payment provider.
-  # Validates that amount is a non-empty string.
+  # Validates that amount is a non-empty string. Numeric validation is intentionally
+  # deferred to MPP.Method.verify/2 which checks against the payment provider.
   defp validate_amount(nil), do: {:error, :amount_required}
   defp validate_amount(amount) when is_binary(amount) and byte_size(amount) > 0, do: {:ok, amount}
   defp validate_amount(_), do: {:error, :invalid_amount}

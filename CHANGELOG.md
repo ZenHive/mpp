@@ -55,10 +55,22 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 - `to_request/1` / `from_request/1` for camelCase JSON conversion per spec
 - "Intent = Schema" design — all payment methods share this structure
 
+#### Task 7: Method Behaviour
+**Completed** | [D:3/B:10/U:10 → Eff:3.33]
+
+**What was done:**
+- `MPP.Method` behaviour with three callbacks: `method_name/0`, `verify/2`, `challenge_method_details/1`
+- `verify/2` takes raw payload map + `MPP.Intents.Charge` struct, returns `{:ok, Receipt.t()}` or `{:error, Errors.t()}`
+- `challenge_method_details/1` is optional with default `nil` via `__using__` macro
+- "Intent = Schema, Method = Implementation" — methods only handle verification, shared charge struct
+- Resolved `TODO(Task 7)` in `Intents.Charge` — numeric amount validation is by design delegated to methods
+
 #### Code Review Fixes
 - Fixed `Challenge.create/2` `@doc` — removed incorrect "or map" from parameter description (only keyword lists accepted)
 - Simplified `Receipt.new/1` — removed unnecessary `then` wrapper around `struct!`
 - Added `TODO(Task 7)` to `Intents.Charge` — amount string not validated as numeric, deferred to Method behaviour
+- Fixed `Method` `@doc` example — replaced undefined variable with string literal
+- Strengthened `MethodTest` error assertions — verify specific error types, not just shared 402 status
 
 ---
 

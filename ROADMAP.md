@@ -24,8 +24,8 @@
 | Task 4: Headers module `[P]` | ⬜ | [D:3/B:9/U:9 → Eff:3.0] | Independent (parse/format only) |
 | Task 5: Errors module | ✅ | [D:2/B:7/U:7 → Eff:3.5] | 9 RFC 9457 problem types |
 | Task 6: ChargeRequest | ✅ | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
-| Task 7: Method behaviour | ⬜ | [D:3/B:10/U:10 → Eff:3.33] | Unblocked (Tasks 1, 3, 6 done) |
-| Task 8: Plug middleware | ⬜ | [D:5/B:10/U:10 → Eff:2.0] | Depends on 4, 7 |
+| Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
+| Task 8: Plug middleware | ⬜ | [D:5/B:10/U:10 → Eff:2.0] | Depends on 4 (7 done) |
 
 ---
 
@@ -66,18 +66,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-5-errors-module) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-6-charge-request-schema) for details.
 
-### Task 7: Method Behaviour
+### Task 7: Method Behaviour ✅
 
-[D:3/B:10/U:10 → Eff:3.33]
-
-Define `MPP.Method` behaviour — the contract that payment method modules implement. Callbacks: `method_name/0` (returns lowercase string like "stripe"), `verify/2` (takes credential payload + charge request, returns `{:ok, Receipt.t()}` or `{:error, Errors.t()}`). Optional callback `challenge_method_details/1` for methods that need to add method-specific fields to the challenge request (like Stripe's `networkId`).
-
-Success criteria:
-- [ ] `MPP.Method` behaviour with `@callback` definitions and typespecs
-- [ ] `method_name/0` → `String.t()`
-- [ ] `verify/2` → `{:ok, Receipt.t()} | {:error, term()}`
-- [ ] Optional `challenge_method_details/1` callback with default impl
-- [ ] Documentation with example implementation skeleton
+See [CHANGELOG.md](CHANGELOG.md#task-7-method-behaviour) for details.
 
 ### Task 8: Plug Middleware
 
@@ -179,12 +170,14 @@ Success criteria:
 
 [D:6/B:7/U:6 → Eff:1.08]
 
-Implement `MPP.Methods.X402` — EVM on-chain payment verification. Credential payload contains either a transaction hash (already broadcast) or a signed transaction (to broadcast). Verify by checking on-chain settlement: correct amount, correct recipient, correct token (USDC/ERC-20). May use `onchain` library or direct JSON-RPC calls.
+Implement `MPP.Methods.X402` — EVM on-chain payment verification. Credential payload contains either a transaction hash (already broadcast) or a signed transaction (to broadcast). Verify by checking on-chain settlement: correct amount, correct recipient, correct token (USDC/ERC-20). Use [`onchain`](https://github.com/ZenHive/onchain) (optional dep) for RPC, ERC-20 reads, and address validation. Add as `{:onchain, github: "ZenHive/onchain", optional: true}` — runtime check in the method module that it's available.
 
 Success criteria:
 - [ ] Implements `MPP.Method` behaviour
 - [ ] Supports transaction hash and signed transaction payload types
-- [ ] Verifies on-chain settlement (amount, recipient, token)
+- [ ] Verifies on-chain settlement via `Onchain.RPC` + `Onchain.ERC20` (amount, recipient, token)
+- [ ] `Onchain.Address` for address validation/normalization
+- [ ] Runtime check that `:onchain` is loaded (clear error if missing)
 - [ ] Unit tests with mocked RPC responses
 - [ ] Integration test with testnet
 
