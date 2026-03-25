@@ -36,6 +36,16 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 - All URIs under `https://paymentauth.org/problems/` base
 - Appropriate HTTP status codes (402 for payment errors, 400 for request errors)
 
+#### Task 2: Credential Module
+**Completed** | [D:3/B:9/U:9 → Eff:3.0]
+
+**What was done:**
+- `MPP.Credential` struct with `challenge` (echoed `MPP.Challenge`), `payload` (method-specific proof map), `source` (optional payer DID)
+- `decode/1` parses base64url JSON string into credential with validation of required challenge fields
+- `encode/1` serializes credential to base64url JSON, omitting nil optional fields
+- Echoed challenge reconstructed as `MPP.Challenge` struct — compatible with `Challenge.verify/2` for HMAC validation
+- Challenge `request` preserved as raw base64url string through encode/decode roundtrip
+
 #### Task 6: Charge Request Schema
 **Completed** | [D:2/B:8/U:8 → Eff:4.0]
 
