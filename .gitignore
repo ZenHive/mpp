@@ -25,3 +25,6 @@ mpp-*.tar
 # Local hex docs cache.
 /.hex-docs/
 
+# Cloned reference repos (spec + TypeScript/Rust SDKs).
+/refs/
+

@@ -31,8 +31,9 @@ defmodule MPP.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {MPP.Application, []}
+      extra_applications: [:logger]
+      # TODO: Uncomment mod if MPP ever needs supervised processes (currently stateless)
+      # mod: {MPP.Application, []}
     ]
   end
 
@@ -86,7 +87,7 @@ defmodule MPP.MixProject do
       main: "MPP",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
+      extras: ["README.md", "CHANGELOG.md", "ROADMAP.md", "LICENSE"]
     ]
   end
 

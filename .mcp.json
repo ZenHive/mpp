@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mpp": {
+      "type": "http",
+      "url": "https://mpp.dev/api/mcp"
+    }
+  }
+}

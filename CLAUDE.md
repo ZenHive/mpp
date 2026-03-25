@@ -53,19 +53,87 @@ This is a **library** (not a Phoenix app). It provides Plug middleware that any 
 4. Client retries with `Authorization: Payment <credential>` header
 5. Server verifies payment, returns resource with `Payment-Receipt` header
 
-### Key abstractions (planned)
+### Module map
 
-- **Method behaviour** — pluggable payment methods (Stripe, x402/EVM, Tempo/stablecoins, Lightning). Each method knows how to create challenges and verify credentials.
-- **Plug middleware** — the main integration point. Intercepts requests, issues 402 challenges, verifies payment credentials.
-- **Challenge/Receipt** — structured data types for the 402 handshake.
+```
+MPP                        — Root module, convenience API, Discoverable entry point
+MPP.Challenge              — Challenge struct, HMAC-SHA256 ID binding, create/verify
+MPP.Credential             — Credential parsing, challenge echo validation, payload extraction
+MPP.Receipt                — Receipt struct, base64url JSON serialization
+MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Payment-Receipt
+MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*)
+MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
+MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
+MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification
+MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
+```
+
+### Design decisions
+
+- **Stateless HMAC-bound challenges.** Challenge ID = `base64url(HMAC-SHA256(secret, realm|method|intent|request|expires|digest|opaque))`. No challenge store needed — the server recomputes and does constant-time comparison on verification.
+- **Intent = Schema, Method = Implementation.** `MPP.Intents.Charge` defines the shared request schema (amount, currency, recipient). `MPP.Method` implementations only handle verification. All methods share the same intent structs.
+- **Explicit credentials.** Per `library-design.md`: no `Application.get_env`, no ENV fallback. Pass `secret_key`, `realm`, `method` module, and pricing explicitly via Plug opts.
+- **Per-route pricing via Plug opts.** Each route mounts `MPP.Plug` with its own amount/currency. No global pricing config.
+- **Base64url encoding preserves original bytes.** Critical for HMAC verification — never re-serialize, always use the raw base64url string from the original challenge.
+
+### Protocol constants
+
+| Constant | Value |
+|----------|-------|
+| Auth scheme | `Payment` |
+| Challenge header | `WWW-Authenticate` |
+| Credential header | `Authorization` |
+| Receipt header | `Payment-Receipt` |
+| Problem base URI | `https://paymentauth.org/problems/` |
+| HMAC algorithm | HMAC-SHA256 |
+| HMAC input separator | `\|` (pipe) |
+| Encoding | base64url (no padding) |
 
 ### Dependencies
 
 - `plug` — HTTP middleware framework (the integration surface)
 - `jason` — JSON encoding/decoding for challenge/receipt payloads
+- `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
+
+### First consumer
+
+[api_cache](../api_cache/) is the first consumer — Phase 7, Tasks 47-51 in its roadmap. The Plug API must be mountable in a Phoenix router with per-route pricing. mpp has zero api_cache dependencies.
+
+### Reference implementations (local clones)
+
+Three reference repos are cloned into `refs/` (gitignored, auto-updated on session start via hook). **Read these directly — do NOT WebFetch from GitHub.**
+
+```
+refs/mpp-specs/   — IETF spec source (specs/, examples/)
+refs/mppx/        — TypeScript SDK (primary reference). Key files in src/:
+                    Challenge.ts, Credential.ts, Receipt.ts, Errors.ts,
+                    Method.ts, PaymentRequest.ts
+refs/mpp-rs/      — Rust SDK. Key files in src/: protocol/, client/, server/
+```
+
+Also available:
+- IETF spec: https://paymentauth.org/
+- Developer docs: https://mpp.dev/ (llms-full.txt for complete docs)
+- MCP server configured in `.mcp.json`
 
 ### Conventions
 
 - Styler is the formatter plugin (runs automatically via `mix format`)
 - `test/support/` is compiled in test env (`elixirc_paths`)
-- Binary IDs are not used (standard integer/auto IDs)
+- Spec source: `refs/mpp-specs/` (local) or [tempoxyz/mpp-specs](https://github.com/tempoxyz/mpp-specs)
+- Reference impl: `refs/mppx/` (local) or [wevm/mppx](https://github.com/wevm/mppx) (TypeScript)
+- Reference impl: `refs/mpp-rs/` (local) or [tempoxyz/mpp-rs](https://github.com/tempoxyz/mpp-rs) (Rust)
+
+## Git Commit Configuration
+
+**Configured**: 2026-03-25
+
+### Commit Message Format
+
+**Format**: imperative-mood
+
+#### Imperative Mood Template
+```
+<description>
+```
+Start with imperative verb: Add, Update, Fix, Remove, etc.
