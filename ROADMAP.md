@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 2: Stripe Payment Method** — Task 9 complete. Next: Task 10 (Stripe Integration Test).
+**Phase 2: Stripe Payment Method** — Complete. Next: Phase 3 (Descripex + Discovery) or Phase 7 (v0.1.0 Release).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -27,6 +27,7 @@
 | Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
 | Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
 | Task 9: Stripe method | ✅ | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
+| Task 10: Stripe integration test | ✅ | [D:3/B:7/U:6 → Eff:2.17] | Full 402 handshake against Stripe test API |
 
 ---
 
@@ -72,17 +73,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-8-plug-middleware) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-9-stripe-method) for details.
 
-### Task 10: Stripe Integration Test
+### Task 10: Stripe Integration Test ✅
 
-[D:3/B:7/U:6 → Eff:2.17]
-
-Write integration tests for `MPP.Methods.Stripe` against Stripe's test mode API. Requires `STRIPE_SECRET_KEY` env var. Tests must flunk with actionable setup instructions if credentials are missing (never skip silently). Test the full flow: create a test SPT, submit as credential, verify PaymentIntent creation succeeds.
-
-Success criteria:
-- [ ] Integration test tagged `@moduletag :integration`
-- [ ] Missing credentials → `flunk()` with setup instructions
-- [ ] Full flow test: SPT creation → credential → verification → receipt
-- [ ] Handles expected Stripe test mode behaviors
+See [CHANGELOG.md](CHANGELOG.md#task-10-stripe-integration-test) for details.
 
 ---
 

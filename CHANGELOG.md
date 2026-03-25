@@ -8,6 +8,22 @@ Completed roadmap tasks. For upcoming work, see [ROADMAP.md](ROADMAP.md).
 
 ### Phase 2: Stripe Payment Method
 
+#### Task 10: Stripe Integration Test
+**Completed** | [D:3/B:7/U:6 → Eff:2.17]
+
+**What was done:**
+- Integration tests for `MPP.Methods.Stripe` against Stripe's real test mode API
+- Full 402 handshake test: no credential → 402 challenge → SPT creation → credential → receipt verification
+- Invalid SPT rejection test, missing SPT rejection test, receipt format stability test
+- SPT creation helper using Stripe's `test_helpers/shared_payment/granted_tokens` endpoint
+- Tests excluded by default (`ExUnit.configure(exclude: [:integration])`), opt-in with `mix test --include integration`
+- Missing `STRIPE_SECRET_KEY` → `flunk()` with actionable setup instructions (never skips silently)
+
+**Key decisions:**
+- Tests use `Plug.Test.conn` directly against `MPP.Plug` (no HTTP server needed — Plug is just a function)
+- SPT creation follows the TypeScript reference pattern using `pm_card_visa` with usage limits
+- `pm_card_visa` test payment method always succeeds in Stripe test mode
+
 #### Task 9: Stripe Method
 **Completed** | [D:4/B:9/U:8 → Eff:2.13]
 
