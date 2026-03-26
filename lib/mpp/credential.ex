@@ -28,6 +28,8 @@ defmodule MPP.Credential do
     * `source` — (optional) payer identifier, recommended as DID format
   """
 
+  use Descripex, namespace: "/protocol"
+
   alias MPP.Challenge
 
   @type t :: %__MODULE__{
@@ -41,22 +43,15 @@ defmodule MPP.Credential do
 
   @challenge_required_keys ~w(id realm method intent request)
 
-  @doc """
-  Decodes a base64url JSON string into a credential.
+  api(:decode, "Decode a base64url JSON string into a credential with echoed challenge validation.",
+    params: [
+      encoded: [kind: :value, description: "Base64url-encoded JSON credential string"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, credential}` on success, `{:error, reason}` on failure"},
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields],
+    composes_with: [:encode]
+  )
 
-  Validates that the echoed challenge contains all required fields
-  (`id`, `realm`, `method`, `intent`, `request`) and reconstructs it
-  as an `MPP.Challenge` struct.
-
-  Returns `{:ok, credential}` on success, `{:error, reason}` on failure.
-
-  ## Examples
-
-      encoded = MPP.Credential.encode(credential)
-      {:ok, decoded} = MPP.Credential.decode(encoded)
-      decoded.challenge.realm
-      "api.example.com"
-  """
   @spec decode(String.t()) :: {:ok, t()} | {:error, atom()}
   def decode(encoded) when is_binary(encoded) do
     with {:ok, json} <- url_decode64(encoded),
@@ -65,19 +60,14 @@ defmodule MPP.Credential do
     end
   end
 
-  @doc """
-  Encodes a credential to a base64url JSON string (no padding).
+  api(:encode, "Encode a credential to a base64url JSON string (no padding) for the Authorization header.",
+    params: [
+      credential: [kind: :value, description: "Credential struct to encode"]
+    ],
+    returns: %{type: :string, description: "Base64url-encoded JSON string"},
+    composes_with: [:decode]
+  )
 
-  The challenge is serialized with string keys matching the spec. Optional
-  fields (`description`, `digest`, `expires`, `opaque`, `source`) are omitted
-  when nil.
-
-  ## Examples
-
-      encoded = MPP.Credential.encode(credential)
-      String.starts_with?(encoded, "eyJ")
-      true
-  """
   @spec encode(t()) :: String.t()
   def encode(%__MODULE__{} = credential) do
     credential

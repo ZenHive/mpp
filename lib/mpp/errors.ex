@@ -19,6 +19,8 @@ defmodule MPP.Errors do
     * `:bad_request` — malformed request (400)
   """
 
+  use Descripex, namespace: "/protocol"
+
   @base_uri "https://paymentauth.org/problems/"
 
   @problem_types %{
@@ -54,15 +56,15 @@ defmodule MPP.Errors do
   @enforce_keys [:type, :title, :status, :detail]
   defstruct [:type, :title, :status, :detail]
 
-  @doc """
-  Creates a new error for the given problem type.
+  api(:new, "Create an RFC 9457 Problem Detail error for the given problem type.",
+    params: [
+      type: [kind: :value, description: "Problem type atom (e.g., `:payment_required`, `:verification_failed`)"],
+      detail: [kind: :value, description: "Human-readable error detail string"]
+    ],
+    returns: %{type: :struct, description: "Error struct with `type` URI, `title`, `status`, and `detail`"},
+    composes_with: [:to_map, :to_json]
+  )
 
-  ## Examples
-
-      error = MPP.Errors.new(:payment_required, "No Authorization header present")
-      error.status
-      402
-  """
   @spec new(problem_type(), String.t()) :: t()
   def new(type, detail) when is_atom(type) and is_binary(detail) do
     case Map.fetch(@problem_types, type) do
@@ -79,9 +81,14 @@ defmodule MPP.Errors do
     end
   end
 
-  @doc """
-  Renders the error as an RFC 9457 Problem Details JSON string.
-  """
+  api(:to_json, "Render the error as an RFC 9457 Problem Details JSON string.",
+    params: [
+      error: [kind: :value, description: "Error struct to serialize"]
+    ],
+    returns: %{type: :string, description: "JSON string with `type`, `title`, `status`, `detail` keys"},
+    composes_with: [:new, :to_map]
+  )
+
   @spec to_json(t()) :: String.t()
   def to_json(%__MODULE__{} = error) do
     error
@@ -89,12 +96,14 @@ defmodule MPP.Errors do
     |> Jason.encode!()
   end
 
-  @doc """
-  Renders the error as an RFC 9457 Problem Details map.
+  api(:to_map, "Render the error as an RFC 9457 Problem Details map with string keys.",
+    params: [
+      error: [kind: :value, description: "Error struct to render"]
+    ],
+    returns: %{type: :map, description: ~s(Map with `"type"`, `"title"`, `"status"`, `"detail"` keys)},
+    composes_with: [:new, :to_json]
+  )
 
-  Returns a map with string keys matching the RFC 9457 structure:
-  `"type"`, `"title"`, `"status"`, `"detail"`.
-  """
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = error) do
     %{
@@ -105,9 +114,8 @@ defmodule MPP.Errors do
     }
   end
 
-  @doc """
-  Returns the list of known problem type atoms.
-  """
+  api(:types, "Return the list of known problem type atoms.")
+
   @spec types :: [problem_type()]
   def types, do: Map.keys(@problem_types)
 end

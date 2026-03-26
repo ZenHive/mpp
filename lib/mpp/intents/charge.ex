@@ -19,6 +19,8 @@ defmodule MPP.Intents.Charge do
     * `method_details` — (optional) method-specific fields (e.g., Stripe's `networkId`)
   """
 
+  use Descripex, namespace: "/intents"
+
   @type t :: %__MODULE__{
           amount: String.t(),
           currency: String.t(),
@@ -31,17 +33,19 @@ defmodule MPP.Intents.Charge do
   @enforce_keys [:amount, :currency]
   defstruct [:amount, :currency, :recipient, :description, :external_id, :method_details]
 
-  @doc """
-  Creates a new charge intent with validation.
+  api(:new, "Create a new charge intent with validation. Amount must be a string, currency is normalized to lowercase.",
+    params: [
+      opts: [
+        kind: :value,
+        description:
+          "Keyword list with `:amount` (required string), `:currency` (required string), `:recipient`, `:description`, `:external_id`, `:method_details` (all optional)"
+      ]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, charge}` on success, `{:error, reason}` on failure"},
+    errors: [:amount_required, :invalid_amount, :currency_required, :invalid_currency],
+    composes_with: [:to_request]
+  )
 
-  Amount must be a string (base units). Currency is normalized to lowercase.
-
-  ## Examples
-
-      {:ok, charge} = MPP.Intents.Charge.new(amount: "1000", currency: "USD")
-      charge.currency
-      "usd"
-  """
   @spec new(keyword()) :: {:ok, t()} | {:error, atom()}
   def new(opts) when is_list(opts) do
     with {:ok, amount} <- validate_amount(opts[:amount]),
@@ -58,11 +62,14 @@ defmodule MPP.Intents.Charge do
     end
   end
 
-  @doc """
-  Serializes the charge intent to a JSON-compatible map with camelCase keys per spec.
+  api(:to_request, "Serialize the charge intent to a JSON-compatible map with camelCase keys per spec.",
+    params: [
+      charge: [kind: :value, description: "Charge struct to serialize"]
+    ],
+    returns: %{type: :map, description: "Map with camelCase string keys for JSON encoding into challenge `request`"},
+    composes_with: [:new, :from_request]
+  )
 
-  This map is what gets JSON-encoded and base64url-encoded into the challenge `request` field.
-  """
   @spec to_request(t()) :: map()
   def to_request(%__MODULE__{} = charge) do
     %{"amount" => charge.amount, "currency" => charge.currency}
@@ -72,11 +79,15 @@ defmodule MPP.Intents.Charge do
     |> put_optional("methodDetails", charge.method_details)
   end
 
-  @doc """
-  Deserializes a camelCase JSON map back into a charge intent struct.
+  api(:from_request, "Deserialize a camelCase JSON map back into a charge intent struct.",
+    params: [
+      map: [kind: :value, description: "Map with camelCase string keys (from JSON-decoded challenge request)"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, charge}` on success, `{:error, reason}` on failure"},
+    errors: [:amount_required, :invalid_amount, :currency_required, :invalid_currency, :missing_required_fields],
+    composes_with: [:new, :to_request]
+  )
 
-  Returns `{:ok, charge}` on success, `{:error, reason}` on failure.
-  """
   @spec from_request(map()) :: {:ok, t()} | {:error, atom()}
   def from_request(%{"amount" => amount, "currency" => currency} = map) do
     new(

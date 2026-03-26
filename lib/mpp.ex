@@ -32,5 +32,24 @@ defmodule MPP do
     * `MPP.Method` — Behaviour for pluggable payment methods
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
     * `MPP.Intents.Charge` — Charge intent request schema
+
+  ## Discovery
+
+  Use `MPP.describe/0-2` for progressive API discovery:
+
+      MPP.describe()                          # Level 1: all modules
+      MPP.describe(:challenge)                # Level 2: functions in Challenge
+      MPP.describe(:challenge, :create)       # Level 3: full contract for create/2
   """
+
+  use Descripex.Discoverable,
+    modules: [
+      MPP.Challenge,
+      MPP.Credential,
+      MPP.Receipt,
+      MPP.Headers,
+      MPP.Errors,
+      MPP.Intents.Charge,
+      MPP.Methods.Stripe
+    ]
 end

@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @~/.claude/includes/code-style.md
 @~/.claude/includes/development-philosophy.md
 @~/.claude/includes/documentation-guidelines.md
+@~/.claude/includes/ai-coder-docs.md
 @~/.claude/includes/agent-economy.md
 @~/.claude/includes/elixir-patterns.md
 @~/.claude/includes/elixir-setup.md
@@ -58,7 +59,7 @@ This is a **library** (not a Phoenix app). It provides Plug middleware that any 
 ### Module map
 
 ```
-MPP                        — Root module, convenience API, Discoverable entry point
+MPP                        — Root module, Discoverable entry point (describe/0-2 for progressive API discovery)
 MPP.Challenge              — Challenge struct, HMAC-SHA256 ID binding, create/verify
 MPP.Credential             — Credential parsing, challenge echo validation, payload extraction
 MPP.Receipt                — Receipt struct, base64url JSON serialization
@@ -68,7 +69,8 @@ MPP.Intents.Charge         — Charge intent request schema (amount, currency, r
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
-MPP.Plug.Config            — Validated endpoint config struct (pre-computed at init, includes method_config)
+MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
+MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
 ```
 
 ### Design decisions
@@ -120,6 +122,10 @@ Also available:
 - IETF spec: https://paymentauth.org/
 - Developer docs: https://mpp.dev/ (llms-full.txt for complete docs)
 - MCP server configured in `.mcp.json`
+
+### Upstream docs (mpp.dev)
+
+The mpp.dev docs site ([tempoxyz/mpp](https://github.com/tempoxyz/mpp)) lists official and community SDKs. Our Elixir SDK docs are added via [PR #473](https://github.com/tempoxyz/mpp/pull/473) — three pages (overview, core types, server) under `/sdk/elixir`. When releasing new versions with API changes, update the docs in the `e-fu/mpp` fork and open a follow-up PR.
 
 ### Conventions
 

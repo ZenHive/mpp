@@ -4,6 +4,61 @@ Completed roadmap tasks.
 
 ---
 
+## [Unreleased]
+
+### Phase 6: Multi-Method Challenges
+
+#### Task 15: Multi-Method 402
+**Completed** | [D:3/B:6/U:7 → Eff:2.17]
+
+**What was done:**
+- `MPP.Plug` now supports multiple payment methods per endpoint via `:methods` option
+- 402 responses include one `WWW-Authenticate: Payment` header per accepted method, each with its own HMAC-bound challenge
+- Credential routing: echoed challenge's `method` field routes to the correct `MethodEntry` for verification
+- Unknown method names return 400 with `:method_unsupported` error (pre-existing RFC 9457 type)
+- Full backwards compatibility: existing single-method `:method` + `:amount` + `:currency` opts still work
+- Introduced `MPP.Plug.MethodEntry` struct for per-method config (method, charge, request, method_config)
+- Restructured `MPP.Plug.Config` to hold shared settings + list of `MethodEntry` structs
+- Init-time validation rejects duplicate method names
+
+**Key decisions:**
+- Multi-method format uses `:methods` keyword with list of keyword lists (Elixir-idiomatic, consistent with Plug opts pattern)
+- `Plug.Conn.prepend_resp_headers/2` for multiple WWW-Authenticate headers (not `put_resp_header` which overwrites)
+- Per-method pricing: each method can have different amount/currency — the spec (§1017-1035) explicitly allows this
+- Shared secret_key/realm/expires_in/opaque across methods — HMAC binding still prevents cross-method forgery since method name is in the HMAC input
+
+### Phase 3: Descripex + Discovery
+
+#### Task 11: Descripex Annotations
+**Completed** | [D:3/B:7/U:8 → Eff:2.5]
+
+**What was done:**
+- Added `api()` macros to all public functions across 7 modules (~23 functions total)
+- Added `use Descripex.Discoverable` to root `MPP` module for `MPP.describe/0-2` progressive discovery
+- Namespace grouping: `/protocol` (Challenge, Credential, Receipt, Headers, Errors), `/intents` (Charge), `/methods` (Stripe)
+- `composes_with` links between related functions (e.g., `create` ↔ `verify`, `encode` ↔ `decode`, `format_*` ↔ `parse_*`)
+- Validation test ensures all exported functions have `:hints` metadata
+- Tests for `MPP.describe/0-2` at all three discovery levels
+
+**Key decisions:**
+- `MPP.Method` and `MPP.Plug` not annotated — behaviour definitions and framework callbacks, not agent-callable APIs
+- Error tuples in `api()` declarations document known error atoms for agent consumption
+- `describe/2` Level 3 returns a flat map with params/returns/errors at top level (not nested under `hints`)
+
+#### Task 12: mix mpp.manifest
+**Completed** | [D:2/B:6/U:7 → Eff:3.25]
+
+**What was done:**
+- `Mix.Tasks.Mpp.Manifest` generates `api_manifest.json` from descripex metadata
+- Uses `MPP.__descripex_modules__/0` as single source of truth (no hardcoded module list)
+- Pretty-printed JSON output with all 7 modules, functions, params, returns, errors, and specs
+- Added `api_manifest.json` to `.gitignore` (generated artifact)
+
+**Key decisions:**
+- Bumped descripex 0.5.2 → 0.5.3 which fixes `{atom, description}` error tuples not being JSON-serializable in `Manifest.build/1`
+
+---
+
 ## [0.1.0] - 2026-03-25
 
 ### Task 16: v0.1.0 Hex Release

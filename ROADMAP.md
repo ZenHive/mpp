@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 3: Descripex + Discovery** — Next up. v0.1.0 published (Phase 7 complete).
+**Phase 6: Multi-Method Challenges** — Complete. Task 15 done.
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -28,6 +28,9 @@
 | Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
 | Task 9: Stripe method | ✅ | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
 | Task 10: Stripe integration test | ✅ | [D:3/B:7/U:6 → Eff:2.17] | Full 402 handshake against Stripe test API |
+| Task 11: Descripex Annotations | ✅ | [D:3/B:7/U:8 → Eff:2.5] | api() on 7 modules + Discoverable |
+| Task 12: mix mpp.manifest | ✅ | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
+| Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
 
 ---
@@ -82,30 +85,13 @@ See [CHANGELOG.md](CHANGELOG.md#task-10-stripe-integration-test) for details.
 
 ## Phase 3: Descripex + Discovery
 
-### Task 11: Descripex Annotations
+### Task 11: Descripex Annotations ✅
 
-[D:3/B:7/U:8 → Eff:2.5]
+See [CHANGELOG.md](CHANGELOG.md#task-11-descripex-annotations) for details.
 
-Add `api()` macros to public-facing modules (`MPP.Challenge`, `MPP.Credential`, `MPP.Receipt`, `MPP.Plug`). Add `use Descripex.Discoverable` to the root `MPP` module for progressive discovery via `MPP.describe/0-2`. Agents calling `MPP.describe()` should see the full module tree with capabilities.
+### Task 12: mix mpp.manifest ✅
 
-Success criteria:
-- [ ] `api()` annotations on all public functions in core modules
-- [ ] `MPP.describe()` returns module overview
-- [ ] `MPP.describe(:challenge)` returns function list
-- [ ] `MPP.describe(:challenge, :create)` returns full contract
-- [ ] Validation test: all public functions have `:hints` metadata
-
-### Task 12: mix mpp.manifest
-
-[D:2/B:6/U:7 → Eff:3.25]
-
-Create a Mix task `mix mpp.manifest` that generates `api_manifest.json` from descripex metadata. Uses `Descripex.Manifest.build/1` with the list of annotated modules. Static export for agent discovery — can be published alongside the library or served as an endpoint.
-
-Success criteria:
-- [ ] `mix mpp.manifest` generates `api_manifest.json`
-- [ ] Manifest includes all annotated functions with params, returns, errors
-- [ ] JSON is valid and parseable
-- [ ] Test verifies manifest generation
+See [CHANGELOG.md](CHANGELOG.md#task-12-mix-mppmanifest) for details.
 
 ---
 
@@ -144,19 +130,11 @@ Success criteria:
 
 ---
 
-## Phase 6: Multi-Method Challenges
+## Phase 6: Multi-Method Challenges ✅
 
-### Task 15: Multi-Method 402
+### Task 15: Multi-Method 402 ✅
 
-[D:3/B:6/U:7 → Eff:2.17]
-
-Update `MPP.Plug` to support multiple payment methods in a single 402 response. The server returns multiple `WWW-Authenticate: Payment` headers, each with a different method/pricing. The agent picks whichever method it can pay with. Update init opts to accept a list of `{method_module, method_opts}` tuples. Each method may have different pricing for the same endpoint.
-
-Success criteria:
-- [ ] Plug accepts list of methods with per-method options
-- [ ] 402 response includes multiple WWW-Authenticate headers
-- [ ] Credential verification routes to correct method based on echoed method name
-- [ ] Tests for multi-method challenge generation and single-method credential verification
+See [CHANGELOG.md](CHANGELOG.md#task-15-multi-method-402) for details.
 
 ---
 

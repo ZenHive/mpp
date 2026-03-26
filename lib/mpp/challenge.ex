@@ -30,6 +30,8 @@ defmodule MPP.Challenge do
     * `opaque` — (optional) base64url-encoded JSON server correlation data
   """
 
+  use Descripex, namespace: "/protocol"
+
   @type t :: %__MODULE__{
           id: String.t() | nil,
           realm: String.t(),
@@ -47,45 +49,35 @@ defmodule MPP.Challenge do
 
   @hmac_separator "|"
 
-  @doc """
-  Creates a new challenge with an HMAC-bound ID.
+  api(:create, "Create a new challenge with an HMAC-SHA256 bound ID.",
+    params: [
+      params: [
+        kind: :value,
+        description:
+          "Keyword list with `:realm`, `:method`, `:intent`, `:request` (required) and `:description`, `:digest`, `:expires`, `:opaque` (optional)"
+      ],
+      secret_key: [kind: :value, description: "HMAC-SHA256 secret key for challenge binding"]
+    ],
+    returns: %{type: :struct, description: "Challenge struct with computed `id`"},
+    composes_with: [:verify]
+  )
 
-  Accepts a keyword list of challenge parameters plus a secret key.
-  The `id` field is computed automatically — any provided `id` is overwritten.
-
-  ## Parameters
-
-    * `params` — keyword list with `:realm`, `:method`, `:intent`, `:request` (required)
-      and `:description`, `:digest`, `:expires`, `:opaque` (optional)
-    * `secret_key` — string used as HMAC-SHA256 key
-
-  ## Examples
-
-      challenge = MPP.Challenge.create(
-        [realm: "api.example.com", method: "stripe", intent: "charge", request: "eyJhbW91bnQiOiIxMDAifQ"],
-        "my-secret-key"
-      )
-      challenge.id != nil
-      true
-  """
   @spec create(keyword(), String.t()) :: t()
   def create(params, secret_key) when is_list(params) and is_binary(secret_key) do
     challenge = struct!(__MODULE__, Keyword.delete(params, :id))
     %{challenge | id: compute_id(challenge, secret_key)}
   end
 
-  @doc """
-  Verifies a challenge's HMAC-bound ID against a secret key.
+  api(:verify, "Verify a challenge's HMAC-bound ID against a secret key using constant-time comparison.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct to verify"],
+      secret_key: [kind: :value, description: "HMAC-SHA256 secret key used when challenge was created"]
+    ],
+    returns: %{type: :tagged, description: "`:ok` if valid, `{:error, :invalid_challenge}` if tampered"},
+    errors: [:invalid_challenge],
+    composes_with: [:create]
+  )
 
-  Recomputes the HMAC from the challenge fields and performs a constant-time
-  comparison with the stored `id`. Returns `:ok` if valid, `{:error, :invalid_challenge}`
-  if the ID doesn't match or the challenge has been tampered with.
-
-  ## Examples
-
-      :ok = MPP.Challenge.verify(challenge, "my-secret-key")
-      {:error, :invalid_challenge} = MPP.Challenge.verify(tampered, "my-secret-key")
-  """
   @spec verify(t(), String.t()) :: :ok | {:error, :invalid_challenge}
   def verify(%__MODULE__{id: id} = challenge, secret_key) when is_binary(id) and is_binary(secret_key) do
     expected = compute_id(challenge, secret_key)

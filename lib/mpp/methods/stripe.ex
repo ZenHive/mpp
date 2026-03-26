@@ -38,6 +38,7 @@ defmodule MPP.Methods.Stripe do
   """
 
   use MPP.Method
+  use Descripex, namespace: "/methods"
 
   alias MPP.Errors
   alias MPP.Intents.Charge
@@ -45,9 +46,26 @@ defmodule MPP.Methods.Stripe do
 
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
 
+  api(:method_name, "Return the payment method identifier for Stripe.")
+
   @impl MPP.Method
   @spec method_name() :: String.t()
   def method_name, do: "stripe"
+
+  api(:verify, "Verify a Stripe SPT credential by creating a PaymentIntent with `confirm: true`.",
+    params: [
+      payload: [
+        kind: :value,
+        description: "Credential payload map containing `\"spt\"` (Stripe Shared Payment Granted Token)"
+      ],
+      charge: [
+        kind: :value,
+        description: "Charge intent struct with amount, currency, and method_details (including `stripe_secret_key`)"
+      ]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, error}` on failure"},
+    errors: [:invalid_payload, :verification_failed]
+  )
 
   @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
@@ -60,6 +78,21 @@ defmodule MPP.Methods.Stripe do
       check_status(pi, payload)
     end
   end
+
+  api(
+    :challenge_method_details,
+    "Return Stripe-specific fields (`networkId`, `paymentMethodTypes`) for the 402 challenge.",
+    params: [
+      charge: [
+        kind: :value,
+        description: "Charge struct with method_details containing `network_id` and optionally `payment_method_types`"
+      ]
+    ],
+    returns: %{
+      type: :map_or_nil,
+      description: "Map with `networkId` and `paymentMethodTypes` keys, or `nil` if no `network_id` configured"
+    }
+  )
 
   @impl MPP.Method
   @spec challenge_method_details(Charge.t()) :: map() | nil

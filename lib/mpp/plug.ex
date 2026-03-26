@@ -5,44 +5,58 @@ defmodule MPP.Plug do
   Mount this plug in any Phoenix or Plug router to gate endpoints behind
   payment. Each route gets its own pricing via plug opts — no global config.
 
-  ## Usage
+  ## Single-Method Usage
 
-      # In a Phoenix router
-      pipeline :paid do
-        plug MPP.Plug,
-          secret_key: "your-hmac-secret",
-          realm: "api.example.com",
-          method: MyApp.Payments.Stripe,
-          amount: "1000",
-          currency: "usd"
-      end
+      plug MPP.Plug,
+        secret_key: "your-hmac-secret",
+        realm: "api.example.com",
+        method: MyApp.Payments.Stripe,
+        amount: "1000",
+        currency: "usd"
 
-      scope "/premium", MyAppWeb do
-        pipe_through [:api, :paid]
-        get "/data", DataController, :show
-      end
+  ## Multi-Method Usage
+
+  Accept multiple payment methods per endpoint. Each method can have its own
+  pricing and config. The 402 response includes one `WWW-Authenticate` header
+  per method; the agent picks whichever it can pay with.
+
+      plug MPP.Plug,
+        secret_key: "your-hmac-secret",
+        realm: "api.example.com",
+        methods: [
+          [method: MyApp.Payments.Stripe, amount: "1000", currency: "usd",
+           method_config: %{"stripe_secret_key" => "sk_..."}],
+          [method: MyApp.Payments.Tempo, amount: "950", currency: "usd"]
+        ]
 
   ## Flow
 
-  1. Request without `Authorization: Payment` → 402 with `WWW-Authenticate` challenge
+  1. Request without `Authorization: Payment` → 402 with `WWW-Authenticate` challenge(s)
   2. Client pays off-band, retries with `Authorization: Payment <credential>`
   3. Valid credential → request passes through with `Payment-Receipt` header + receipt in assigns
-  4. Invalid credential → 402 with fresh challenge + RFC 9457 error body
+  4. Invalid credential → 402 with fresh challenge(s) + RFC 9457 error body
 
-  ## Options
+  ## Shared Options
 
     * `:secret_key` — (required) HMAC-SHA256 key for challenge binding
     * `:realm` — (required) server protection space
+    * `:expires_in` — (optional) challenge TTL in seconds (integer)
+    * `:opaque` — (optional) base64url-encoded server correlation data
+
+  ## Single-Method Options
+
     * `:method` — (required) module implementing `MPP.Method`
     * `:amount` — (required) price in base units (string)
     * `:currency` — (required) currency code (string, normalized to lowercase)
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
-    * `:method_config` — (optional) server-only config map passed to `verify/2`
-      via `charge.method_details` (never serialized to the client). Use this for
-      secrets like API keys that the method needs but clients must not see.
-    * `:expires_in` — (optional) challenge TTL in seconds (integer)
-    * `:opaque` — (optional) base64url-encoded server correlation data
+    * `:method_config` — (optional) server-only config map for `verify/2`
+
+  ## Multi-Method Options
+
+    * `:methods` — (required) list of keyword lists, each with per-method opts:
+      `:method`, `:amount`, `:currency`, and optionally `:recipient`,
+      `:description`, `:method_config`
   """
 
   @behaviour Plug
@@ -52,48 +66,98 @@ defmodule MPP.Plug do
   alias MPP.Headers
   alias MPP.Intents.Charge
 
+  defmodule MethodEntry do
+    @moduledoc """
+    Per-method configuration within a multi-method endpoint.
+
+    Holds the pre-computed charge, base64url request string, and server-only
+    config for a single payment method.
+    """
+
+    @type t :: %__MODULE__{
+            method: module(),
+            charge: Charge.t(),
+            request: String.t(),
+            method_config: map()
+          }
+
+    @enforce_keys [:method, :charge, :request]
+    defstruct [:method, :charge, :request, method_config: %{}]
+  end
+
   defmodule Config do
     @moduledoc """
     Validated configuration for `MPP.Plug`.
 
-    Built once at init time from plug opts. Holds the pre-computed charge
-    struct, base64url request string, and all endpoint-specific settings.
+    Built once at init time from plug opts. Holds shared endpoint settings
+    and a list of `MethodEntry` structs — one per accepted payment method.
     """
 
     @type t :: %__MODULE__{
             secret_key: String.t(),
             realm: String.t(),
-            method: module(),
-            charge: Charge.t(),
-            request: String.t(),
-            method_config: map(),
+            method_entries: [MethodEntry.t()],
             expires_in: pos_integer() | nil,
             opaque: String.t() | nil
           }
 
-    @enforce_keys [:secret_key, :realm, :method, :charge, :request]
-    defstruct [:secret_key, :realm, :method, :charge, :request, :method_config, :expires_in, :opaque]
+    @enforce_keys [:secret_key, :realm, :method_entries]
+    defstruct [:secret_key, :realm, :method_entries, :expires_in, :opaque]
   end
 
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
-    method = require_opt!(opts, :method)
-    method_config = Keyword.get(opts, :method_config, %{})
+    method_lists = normalize_methods(opts)
+    entries = Enum.map(method_lists, &build_method_entry/1)
+    validate_unique_method_names!(entries)
+
+    %Config{
+      secret_key: require_opt!(opts, :secret_key),
+      realm: require_opt!(opts, :realm),
+      method_entries: entries,
+      expires_in: Keyword.get(opts, :expires_in),
+      opaque: Keyword.get(opts, :opaque)
+    }
+  end
+
+  # Normalizes single-method and multi-method opts into a list of keyword lists.
+  defp normalize_methods(opts) do
+    has_method = Keyword.has_key?(opts, :method)
+    has_methods = Keyword.has_key?(opts, :methods)
+
+    cond do
+      has_method and has_methods ->
+        raise ArgumentError, "MPP.Plug: provide either :method or :methods, not both"
+
+      has_methods ->
+        Keyword.fetch!(opts, :methods)
+
+      has_method ->
+        [Keyword.take(opts, [:method, :amount, :currency, :recipient, :description, :method_config])]
+
+      true ->
+        raise ArgumentError, "MPP.Plug requires either :method or :methods option"
+    end
+  end
+
+  # Builds a MethodEntry from per-method keyword opts.
+  defp build_method_entry(method_opts) do
+    method = require_opt!(method_opts, :method)
+    method_config = Keyword.get(method_opts, :method_config, %{})
 
     {:ok, charge} =
       Charge.new(
-        amount: require_opt!(opts, :amount),
-        currency: require_opt!(opts, :currency),
-        recipient: Keyword.get(opts, :recipient),
-        description: Keyword.get(opts, :description)
+        amount: require_opt!(method_opts, :amount),
+        currency: require_opt!(method_opts, :currency),
+        recipient: Keyword.get(method_opts, :recipient),
+        description: Keyword.get(method_opts, :description)
       )
 
     # Pass method_config via charge.method_details so challenge_method_details
     # can read config (e.g., network_id) and return public-facing fields only
     charge_with_config = %{charge | method_details: method_config}
 
-    # Merge method-specific public details into the charge (replaces method_config)
     charge =
       case method.challenge_method_details(charge_with_config) do
         nil -> charge
@@ -106,16 +170,22 @@ defmodule MPP.Plug do
       |> Jason.encode!()
       |> Base.url_encode64(padding: false)
 
-    %Config{
-      secret_key: require_opt!(opts, :secret_key),
-      realm: require_opt!(opts, :realm),
+    %MethodEntry{
       method: method,
       charge: charge,
       request: request,
-      method_config: method_config,
-      expires_in: Keyword.get(opts, :expires_in),
-      opaque: Keyword.get(opts, :opaque)
+      method_config: method_config
     }
+  end
+
+  # Validates that all method entries have unique method names.
+  defp validate_unique_method_names!(entries) do
+    names = Enum.map(entries, & &1.method.method_name())
+    dupes = names -- Enum.uniq(names)
+
+    if dupes != [] do
+      raise ArgumentError, "MPP.Plug: duplicate method names: #{inspect(Enum.uniq(dupes))}"
+    end
   end
 
   @impl Plug
@@ -123,16 +193,26 @@ defmodule MPP.Plug do
   def call(conn, %Config{} = config) do
     case extract_credential(conn) do
       nil ->
-        respond_402(conn, config, Errors.new(:payment_required, "No payment credential provided"))
+        respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
 
       {:error, :invalid_scheme} ->
-        respond_402(conn, config, Errors.new(:payment_required, "No payment credential provided"))
+        respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
 
       {:error, reason} ->
-        respond_402(conn, config, Errors.new(:malformed_credential, "#{reason}"))
+        respond_error(conn, config, Errors.new(:malformed_credential, "#{reason}"))
 
       {:ok, credential} ->
-        verify_credential(conn, config, credential)
+        case find_method_entry(config, credential.challenge.method) do
+          nil ->
+            respond_error(
+              conn,
+              config,
+              Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
+            )
+
+          entry ->
+            verify_credential(conn, config, credential, entry)
+        end
     end
   end
 
@@ -145,42 +225,49 @@ defmodule MPP.Plug do
     end
   end
 
+  # Finds the MethodEntry matching the credential's method name.
+  defp find_method_entry(config, method_name) do
+    Enum.find(config.method_entries, fn entry ->
+      entry.method.method_name() == method_name
+    end)
+  end
+
   # Runs the full verification pipeline on a parsed credential.
-  defp verify_credential(conn, config, credential) do
+  defp verify_credential(conn, config, credential, entry) do
     # Merge server-only method_config into charge.method_details for verify/2.
     # Public method_details (from challenge_method_details) stay in the serialized
     # challenge; method_config adds server-only fields (e.g., stripe_secret_key).
     # Also inject challenge_id and realm for analytics metadata.
     runtime_config =
-      config.method_config
+      entry.method_config
       |> Map.put("challenge_id", credential.challenge.id)
       |> Map.put("realm", config.realm)
 
-    charge_for_verify = merge_method_config(config.charge, runtime_config)
+    charge_for_verify = merge_method_config(entry.charge, runtime_config)
 
     with :ok <- Challenge.verify(credential.challenge, config.secret_key),
          :ok <- check_expiration(credential.challenge),
-         :ok <- check_request_match(credential.challenge, config),
-         {:ok, receipt} <- config.method.verify(credential.payload, charge_for_verify) do
+         :ok <- check_request_match(credential.challenge, entry),
+         {:ok, receipt} <- entry.method.verify(credential.payload, charge_for_verify) do
       conn
       |> Plug.Conn.assign(:mpp_receipt, receipt)
       |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
       |> Plug.Conn.put_resp_header("cache-control", "private")
     else
       {:error, :invalid_challenge} ->
-        respond_402(conn, config, Errors.new(:invalid_challenge, "Challenge verification failed"))
+        respond_error(conn, config, Errors.new(:invalid_challenge, "Challenge verification failed"))
 
       {:error, :payment_expired} ->
-        respond_402(conn, config, Errors.new(:payment_expired, "Challenge has expired"))
+        respond_error(conn, config, Errors.new(:payment_expired, "Challenge has expired"))
 
       {:error, :request_mismatch} ->
-        respond_402(conn, config, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint"))
+        respond_error(conn, config, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint"))
 
       {:error, %Errors{} = error} ->
-        respond_402(conn, config, error)
+        respond_error(conn, config, error)
 
       {:error, reason} ->
-        respond_402(conn, config, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}"))
+        respond_error(conn, config, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}"))
     end
   end
 
@@ -201,16 +288,16 @@ defmodule MPP.Plug do
     end
   end
 
-  # Compares the credential's request parameters against this endpoint's config.
+  # Compares the credential's request parameters against this method entry's charge.
   # Prevents cross-route replay: a credential for $1 can't be used on a $10 endpoint.
-  defp check_request_match(%Challenge{request: request}, config) do
+  defp check_request_match(%Challenge{request: request}, entry) do
     with {:ok, json} <- Base.url_decode64(request, padding: false),
          {:ok, req_map} <- Jason.decode(json) do
       cond do
-        req_map["amount"] != config.charge.amount ->
+        req_map["amount"] != entry.charge.amount ->
           {:error, :request_mismatch}
 
-        req_map["currency"] != config.charge.currency ->
+        req_map["currency"] != entry.charge.currency ->
           {:error, :request_mismatch}
 
         true ->
@@ -221,27 +308,37 @@ defmodule MPP.Plug do
     end
   end
 
-  # Sends a 402 response with a fresh challenge header and RFC 9457 error body.
-  defp respond_402(conn, config, %Errors{} = error) do
-    challenge = generate_challenge(config)
-    challenge_header = Headers.format_challenge(challenge)
+  # Sends an error response with RFC 9457 error body.
+  # Only 402 responses include WWW-Authenticate challenge headers.
+  defp respond_error(conn, config, %Errors{} = error) do
+    conn =
+      if error.status == 402 do
+        challenge_headers =
+          Enum.map(config.method_entries, fn entry ->
+            challenge = generate_challenge(config, entry)
+            {"www-authenticate", Headers.format_challenge(challenge)}
+          end)
+
+        Plug.Conn.prepend_resp_headers(conn, challenge_headers)
+      else
+        conn
+      end
 
     conn
-    |> Plug.Conn.put_resp_header("www-authenticate", challenge_header)
     |> Plug.Conn.put_resp_header("cache-control", "no-store")
     |> Plug.Conn.put_resp_content_type("application/problem+json")
     |> Plug.Conn.send_resp(error.status, Errors.to_json(error))
     |> Plug.Conn.halt()
   end
 
-  # Generates a fresh challenge from the endpoint config.
-  defp generate_challenge(config) do
+  # Generates a fresh challenge for a specific method entry.
+  defp generate_challenge(config, entry) do
     params =
       [
         realm: config.realm,
-        method: config.method.method_name(),
+        method: entry.method.method_name(),
         intent: "charge",
-        request: config.request
+        request: entry.request
       ]
       |> maybe_add(:expires, compute_expires(config.expires_in))
       |> maybe_add(:opaque, config.opaque)
@@ -259,8 +356,8 @@ defmodule MPP.Plug do
   end
 
   # Merges server-only method_config into charge.method_details for verify/2.
-  defp merge_method_config(charge, config) do
-    merged = Map.merge(charge.method_details || %{}, config)
+  defp merge_method_config(charge, runtime_config) do
+    merged = Map.merge(charge.method_details || %{}, runtime_config)
     %{charge | method_details: merged}
   end
 

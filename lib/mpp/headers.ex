@@ -31,6 +31,8 @@ defmodule MPP.Headers do
       {:ok, receipt} = MPP.Headers.parse_receipt(header_value)
   """
 
+  use Descripex, namespace: "/protocol"
+
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Receipt
@@ -43,21 +45,16 @@ defmodule MPP.Headers do
 
   # --- Challenge (WWW-Authenticate: Payment) ---
 
-  @doc """
-  Formats a challenge as a `WWW-Authenticate: Payment` header value.
+  api(
+    :format_challenge,
+    "Format a challenge as a `WWW-Authenticate: Payment` header value with RFC 9110 auth-param syntax.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct to format"]
+    ],
+    returns: %{type: :string, description: "Header value string with quoted auth-params"},
+    composes_with: [:parse_challenge]
+  )
 
-  Produces RFC 9110 auth-param syntax with quoted string values.
-  Optional fields are omitted when nil.
-
-  ## Examples
-
-      challenge = MPP.Challenge.create(
-        [realm: "api.example.com", method: "stripe", intent: "charge", request: "eyJhbW91bnQiOiIxMDAifQ"],
-        "secret"
-      )
-      MPP.Headers.format_challenge(challenge)
-      ~s(Payment id="...", realm="api.example.com", method="stripe", intent="charge", request="eyJhbW91bnQiOiIxMDAifQ")
-  """
   @spec format_challenge(Challenge.t()) :: String.t()
   def format_challenge(%Challenge{} = challenge) do
     params =
@@ -82,23 +79,15 @@ defmodule MPP.Headers do
     "#{@payment_scheme} #{formatted}"
   end
 
-  @doc """
-  Parses a `WWW-Authenticate: Payment` header value into a challenge struct.
+  api(:parse_challenge, "Parse a `WWW-Authenticate: Payment` header value into a challenge struct.",
+    params: [
+      header: [kind: :value, description: "Raw WWW-Authenticate header value string"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, challenge}` on success, `{:error, reason}` on failure"},
+    errors: [:invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params],
+    composes_with: [:format_challenge]
+  )
 
-  Handles case-insensitive scheme matching, quoted string values with
-  escape sequences, and validates that all required params are present.
-
-  Returns `{:error, :invalid_scheme}` if the scheme is not "Payment",
-  `{:error, :missing_required_params}` if required auth-params are missing,
-  `{:error, :duplicate_param}` if a param appears more than once,
-  or `{:error, :invalid_auth_params}` for malformed syntax.
-
-  ## Examples
-
-      {:ok, challenge} = MPP.Headers.parse_challenge(~s(Payment id="abc", realm="api.example.com", method="stripe", intent="charge", request="eyJ..."))
-      challenge.realm
-      "api.example.com"
-  """
   @spec parse_challenge(String.t()) :: {:ok, Challenge.t()} | {:error, atom()}
   def parse_challenge(header) when is_binary(header) do
     with {:ok, rest} <- strip_scheme(header),
@@ -110,34 +99,28 @@ defmodule MPP.Headers do
 
   # --- Credential (Authorization: Payment) ---
 
-  @doc """
-  Formats a credential as an `Authorization: Payment` header value.
+  api(:format_credential, "Format a credential as an `Authorization: Payment` header value.",
+    params: [
+      credential: [kind: :value, description: "Credential struct to format"]
+    ],
+    returns: %{type: :string, description: "Header value with Payment scheme prefix and base64url JSON blob"},
+    composes_with: [:parse_credential]
+  )
 
-  Encodes the credential as base64url JSON and prepends the Payment scheme.
-
-  ## Examples
-
-      header = MPP.Headers.format_credential(credential)
-      String.starts_with?(header, "Payment ")
-      true
-  """
   @spec format_credential(Credential.t()) :: String.t()
   def format_credential(%Credential{} = credential) do
     "#{@payment_scheme} #{Credential.encode(credential)}"
   end
 
-  @doc """
-  Parses an `Authorization: Payment` header value into a credential struct.
+  api(:parse_credential, "Parse an `Authorization: Payment` header value into a credential struct.",
+    params: [
+      header: [kind: :value, description: "Raw Authorization header value string"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, credential}` on success, `{:error, reason}` on failure"},
+    errors: [:invalid_scheme, :invalid_base64, :invalid_json, :missing_required_fields],
+    composes_with: [:format_credential]
+  )
 
-  Strips the case-insensitive "Payment " scheme prefix and delegates
-  to `MPP.Credential.decode/1`.
-
-  ## Examples
-
-      {:ok, credential} = MPP.Headers.parse_credential("Payment eyJjaGFsbGVuZ2...")
-      credential.payload
-      %{"spt" => "spt_abc123"}
-  """
   @spec parse_credential(String.t()) :: {:ok, Credential.t()} | {:error, atom()}
   def parse_credential(header) when is_binary(header) do
     with {:ok, rest} <- strip_scheme(header) do
@@ -147,32 +130,28 @@ defmodule MPP.Headers do
 
   # --- Receipt (Payment-Receipt) ---
 
-  @doc """
-  Formats a receipt as a `Payment-Receipt` header value.
+  api(:format_receipt, "Format a receipt as a `Payment-Receipt` header value (bare base64url JSON, no scheme prefix).",
+    params: [
+      receipt: [kind: :value, description: "Receipt struct to format"]
+    ],
+    returns: %{type: :string, description: "Base64url-encoded JSON string"},
+    composes_with: [:parse_receipt]
+  )
 
-  Returns bare base64url-encoded JSON (no scheme prefix).
-
-  ## Examples
-
-      header = MPP.Headers.format_receipt(receipt)
-      {:ok, _} = Base.url_decode64(header, padding: false)
-  """
   @spec format_receipt(Receipt.t()) :: String.t()
   def format_receipt(%Receipt{} = receipt) do
     Receipt.encode(receipt)
   end
 
-  @doc """
-  Parses a `Payment-Receipt` header value into a receipt struct.
+  api(:parse_receipt, "Parse a `Payment-Receipt` header value into a receipt struct.",
+    params: [
+      header: [kind: :value, description: "Raw Payment-Receipt header value (bare base64url JSON)"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, reason}` on failure"},
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields],
+    composes_with: [:format_receipt]
+  )
 
-  The header value is bare base64url-encoded JSON (no scheme prefix).
-
-  ## Examples
-
-      {:ok, receipt} = MPP.Headers.parse_receipt(header_value)
-      receipt.status
-      "success"
-  """
   @spec parse_receipt(String.t()) :: {:ok, Receipt.t()} | {:error, atom()}
   def parse_receipt(header) when is_binary(header) do
     Receipt.decode(String.trim(header))

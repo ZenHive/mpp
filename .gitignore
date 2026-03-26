@@ -28,3 +28,9 @@ mpp-*.tar
 # Cloned reference repos (spec + TypeScript/Rust SDKs).
 /refs/
 
+# Firecrawl scrape cache.
+/.firecrawl/
+
+# Generated API manifest (mix mpp.manifest).
+/api_manifest.json
+

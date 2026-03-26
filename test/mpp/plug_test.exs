@@ -9,7 +9,7 @@ defmodule MPP.PlugTest do
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
 
-  # --- Mock Method ---
+  # --- Mock Methods ---
 
   defmodule MockMethod do
     @moduledoc false
@@ -54,6 +54,23 @@ defmodule MPP.PlugTest do
     end
   end
 
+  defmodule MockMethodB do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mock_b"
+
+    @impl MPP.Method
+    def verify(%{"token" => "valid"}, charge) do
+      {:ok, Receipt.new(method: method_name(), reference: "ref_b_#{charge.amount}")}
+    end
+
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "Missing token field")}
+    end
+  end
+
   # --- Helpers ---
 
   @secret_key "test-secret-key-for-plug"
@@ -75,20 +92,53 @@ defmodule MPP.PlugTest do
     PaymentPlug.call(conn, config)
   end
 
-  # Builds a valid credential for the given config and returns the Authorization header value.
+  # Returns the first (or only) method entry from config.
+  defp first_entry(config), do: hd(config.method_entries)
+
+  # Builds a valid credential for the given config's first method entry.
   defp build_authorization_header(config, payload \\ %{"proof" => "valid"}) do
+    build_authorization_header_for_entry(config, first_entry(config), payload)
+  end
+
+  # Builds a valid credential for a specific method entry.
+  defp build_authorization_header_for_entry(config, entry, payload) do
     challenge =
       Challenge.create(
         [
           realm: config.realm,
-          method: config.method.method_name(),
+          method: entry.method.method_name(),
           intent: "charge",
-          request: config.request
+          request: entry.request
         ],
         config.secret_key
       )
 
     credential = %Credential{challenge: challenge, payload: payload}
+    Headers.format_credential(credential)
+  end
+
+  # Builds a credential with an expires field.
+  defp build_authorization_header_with_expires(config, expires_in) do
+    entry = first_entry(config)
+
+    expires =
+      DateTime.utc_now()
+      |> DateTime.add(expires_in, :second)
+      |> DateTime.to_iso8601()
+
+    challenge =
+      Challenge.create(
+        [
+          realm: config.realm,
+          method: entry.method.method_name(),
+          intent: "charge",
+          request: entry.request,
+          expires: expires
+        ],
+        config.secret_key
+      )
+
+    credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
     Headers.format_credential(credential)
   end
 
@@ -103,7 +153,11 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- init/1 ---
+  defp get_all_resp_headers(conn, header) do
+    Plug.Conn.get_resp_header(conn, header)
+  end
+
+  # --- init/1 (single-method, backwards compat) ---
 
   describe "init/1" do
     test "returns Config struct with valid opts" do
@@ -111,9 +165,11 @@ defmodule MPP.PlugTest do
       assert %PaymentPlug.Config{} = config
       assert config.secret_key == @secret_key
       assert config.realm == "api.test.com"
-      assert config.method == MockMethod
-      assert %Charge{amount: "1000", currency: "usd"} = config.charge
-      assert is_binary(config.request)
+
+      assert [%PaymentPlug.MethodEntry{} = entry] = config.method_entries
+      assert entry.method == MockMethod
+      assert %Charge{amount: "1000", currency: "usd"} = entry.charge
+      assert is_binary(entry.request)
     end
 
     test "raises on missing required opts" do
@@ -128,8 +184,9 @@ defmodule MPP.PlugTest do
 
     test "accepts optional fields" do
       config = init_config(recipient: "acct_123", description: "Premium", expires_in: 300, opaque: "eyJ0ZXN0Ijp0cnVlfQ")
-      assert config.charge.recipient == "acct_123"
-      assert config.charge.description == "Premium"
+      entry = first_entry(config)
+      assert entry.charge.recipient == "acct_123"
+      assert entry.charge.description == "Premium"
       assert config.expires_in == 300
       assert config.opaque == "eyJ0ZXN0Ijp0cnVlfQ"
     end
@@ -138,20 +195,118 @@ defmodule MPP.PlugTest do
       config = init_config()
       assert config.expires_in == nil
       assert config.opaque == nil
-      assert config.charge.recipient == nil
+      assert first_entry(config).charge.recipient == nil
     end
 
     test "merges method_details from challenge_method_details callback" do
       config = init_config(method: MockMethodWithDetails)
-      assert config.charge.method_details == %{"networkId" => "net_test", "paymentMethodTypes" => ["card"]}
+      assert first_entry(config).charge.method_details == %{"networkId" => "net_test", "paymentMethodTypes" => ["card"]}
     end
 
     test "pre-encodes request as base64url JSON" do
       config = init_config()
-      {:ok, json} = Base.url_decode64(config.request, padding: false)
+      {:ok, json} = Base.url_decode64(first_entry(config).request, padding: false)
       {:ok, map} = Jason.decode(json)
       assert map["amount"] == "1000"
       assert map["currency"] == "usd"
+    end
+  end
+
+  # --- init/1 multi-method ---
+
+  describe "init/1 multi-method" do
+    test "returns Config with multiple MethodEntry structs" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "usd"]
+          ]
+        )
+
+      assert %PaymentPlug.Config{} = config
+      assert length(config.method_entries) == 2
+
+      [entry_a, entry_b] = config.method_entries
+      assert entry_a.method == MockMethod
+      assert entry_a.charge.amount == "1000"
+      assert entry_b.method == MockMethodB
+      assert entry_b.charge.amount == "500"
+    end
+
+    test "each entry has independent request encoding" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "eur"]
+          ]
+        )
+
+      [entry_a, entry_b] = config.method_entries
+      refute entry_a.request == entry_b.request
+
+      {:ok, json_a} = Base.url_decode64(entry_a.request, padding: false)
+      {:ok, map_a} = Jason.decode(json_a)
+      assert map_a["amount"] == "1000"
+      assert map_a["currency"] == "usd"
+
+      {:ok, json_b} = Base.url_decode64(entry_b.request, padding: false)
+      {:ok, map_b} = Jason.decode(json_b)
+      assert map_b["amount"] == "500"
+      assert map_b["currency"] == "eur"
+    end
+
+    test "raises when both :method and :methods present" do
+      assert_raise ArgumentError, ~r/either :method or :methods/, fn ->
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: MockMethod,
+          amount: "1000",
+          currency: "usd",
+          methods: [[method: MockMethodB, amount: "500", currency: "usd"]]
+        )
+      end
+    end
+
+    test "raises when neither :method nor :methods present" do
+      assert_raise ArgumentError, ~r/either :method or :methods/, fn ->
+        PaymentPlug.init(secret_key: @secret_key, realm: "api.test.com")
+      end
+    end
+
+    test "raises on duplicate method names" do
+      assert_raise ArgumentError, ~r/duplicate method names/, fn ->
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethod, amount: "500", currency: "usd"]
+          ]
+        )
+      end
+    end
+
+    test "per-method method_config stays independent" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd", method_config: %{"key" => "a"}],
+            [method: MockMethodB, amount: "500", currency: "usd", method_config: %{"key" => "b"}]
+          ]
+        )
+
+      [entry_a, entry_b] = config.method_entries
+      assert entry_a.method_config == %{"key" => "a"}
+      assert entry_b.method_config == %{"key" => "b"}
     end
   end
 
@@ -297,10 +452,11 @@ defmodule MPP.PlugTest do
     end
 
     test "tampered challenge returns 402 with invalid_challenge", %{config: config} do
-      # Build a credential but with a different secret key (simulates tampering)
+      entry = first_entry(config)
+
       challenge =
         Challenge.create(
-          [realm: config.realm, method: "mock", intent: "charge", request: config.request],
+          [realm: config.realm, method: "mock", intent: "charge", request: entry.request],
           "wrong-secret-key"
         )
 
@@ -319,6 +475,8 @@ defmodule MPP.PlugTest do
     end
 
     test "expired challenge returns 402 with payment_expired", %{config: config} do
+      entry = first_entry(config)
+
       past_time =
         DateTime.utc_now()
         |> DateTime.add(-3600, :second)
@@ -330,7 +488,7 @@ defmodule MPP.PlugTest do
             realm: config.realm,
             method: "mock",
             intent: "charge",
-            request: config.request,
+            request: entry.request,
             expires: past_time
           ],
           config.secret_key
@@ -380,7 +538,6 @@ defmodule MPP.PlugTest do
     end
 
     test "402 responses always include a fresh challenge", %{config: config} do
-      # Malformed credential
       conn =
         :get
         |> Plug.Test.conn("/premium")
@@ -402,10 +559,8 @@ defmodule MPP.PlugTest do
       config_cheap = init_config(amount: "1000")
       config_expensive = init_config(amount: "5000")
 
-      # Build credential for the cheap route
       auth_header = build_authorization_header(config_cheap)
 
-      # Try to use it on the expensive route
       conn =
         :get
         |> Plug.Test.conn("/expensive")
@@ -470,26 +625,219 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # Helper that builds a credential with an expires field
-  defp build_authorization_header_with_expires(config, expires_in) do
-    expires =
-      DateTime.utc_now()
-      |> DateTime.add(expires_in, :second)
-      |> DateTime.to_iso8601()
+  # --- Multi-method 402 response ---
 
-    challenge =
-      Challenge.create(
-        [
-          realm: config.realm,
-          method: config.method.method_name(),
-          intent: "charge",
-          request: config.request,
-          expires: expires
-        ],
-        config.secret_key
-      )
+  describe "call/2 multi-method 402 response" do
+    setup do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "usd"]
+          ]
+        )
 
-    credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
-    Headers.format_credential(credential)
+      {:ok, config: config}
+    end
+
+    test "returns multiple WWW-Authenticate headers", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      assert conn.status == 402
+      headers = get_all_resp_headers(conn, "www-authenticate")
+      assert length(headers) == 2
+    end
+
+    test "each header has correct method name", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      headers = get_all_resp_headers(conn, "www-authenticate")
+
+      challenges =
+        Enum.map(headers, fn h ->
+          {:ok, c} = Headers.parse_challenge(h)
+          c
+        end)
+
+      method_names = challenges |> Enum.map(& &1.method) |> Enum.sort()
+      assert method_names == ["mock", "mock_b"]
+    end
+
+    test "all challenges share the same realm", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      headers = get_all_resp_headers(conn, "www-authenticate")
+
+      realms =
+        Enum.map(headers, fn h ->
+          {:ok, c} = Headers.parse_challenge(h)
+          c.realm
+        end)
+
+      assert Enum.uniq(realms) == ["api.test.com"]
+    end
+
+    test "each challenge has a unique HMAC-bound ID", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      headers = get_all_resp_headers(conn, "www-authenticate")
+
+      ids =
+        Enum.map(headers, fn h ->
+          {:ok, c} = Headers.parse_challenge(h)
+          c.id
+        end)
+
+      assert length(Enum.uniq(ids)) == 2
+    end
+  end
+
+  # --- Multi-method credential routing ---
+
+  describe "call/2 multi-method credential routing" do
+    setup do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "usd"]
+          ]
+        )
+
+      {:ok, config: config}
+    end
+
+    test "credential for method A routes to A and succeeds", %{config: config} do
+      [entry_a, _entry_b] = config.method_entries
+      auth_header = build_authorization_header_for_entry(config, entry_a, %{"proof" => "valid"})
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute conn.halted
+      {:ok, receipt} = Headers.parse_receipt(get_resp_header(conn, "payment-receipt"))
+      assert receipt.method == "mock"
+      assert receipt.reference == "ref_1000"
+    end
+
+    test "credential for method B routes to B and succeeds", %{config: config} do
+      [_entry_a, entry_b] = config.method_entries
+      auth_header = build_authorization_header_for_entry(config, entry_b, %{"token" => "valid"})
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute conn.halted
+      {:ok, receipt} = Headers.parse_receipt(get_resp_header(conn, "payment-receipt"))
+      assert receipt.method == "mock_b"
+      assert receipt.reference == "ref_b_500"
+    end
+
+    test "credential for unknown method returns method_unsupported", %{config: config} do
+      # Build a credential with a method name that doesn't match any entry
+      challenge =
+        Challenge.create(
+          [
+            realm: config.realm,
+            method: "nonexistent",
+            intent: "charge",
+            request: first_entry(config).request
+          ],
+          config.secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 400
+      body = decode_json_body(conn)
+      assert body["type"] =~ "method-unsupported"
+      assert get_all_resp_headers(conn, "www-authenticate") == []
+    end
+
+    test "method A payload rejected by method B", %{config: config} do
+      [_entry_a, entry_b] = config.method_entries
+      # Send MockMethod's payload format to MockMethodB (expects "token", not "proof")
+      auth_header = build_authorization_header_for_entry(config, entry_b, %{"proof" => "valid"})
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-payload"
+    end
+  end
+
+  # --- Multi-method cross-route replay ---
+
+  describe "multi-method cross-route replay" do
+    test "credential for method A at price X rejected when method A has price Y" do
+      config_cheap =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "usd"]
+          ]
+        )
+
+      config_expensive =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "5000", currency: "usd"],
+            [method: MockMethodB, amount: "2500", currency: "usd"]
+          ]
+        )
+
+      # Build credential for cheap MockMethod
+      [entry_a, _] = config_cheap.method_entries
+      auth_header = build_authorization_header_for_entry(config_cheap, entry_a, %{"proof" => "valid"})
+
+      # Try on expensive endpoint
+      conn =
+        :get
+        |> Plug.Test.conn("/expensive")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config_expensive)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+    end
   end
 end

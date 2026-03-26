@@ -17,6 +17,8 @@ defmodule MPP.Receipt do
     * `external_id` — optional, echoed from the credential payload
   """
 
+  use Descripex, namespace: "/protocol"
+
   @type t :: %__MODULE__{
           status: String.t(),
           method: String.t(),
@@ -32,22 +34,17 @@ defmodule MPP.Receipt do
             reference: nil,
             external_id: nil
 
-  @doc """
-  Creates a new receipt with defaults for `status` and `timestamp`.
+  api(:new, "Create a new receipt with defaults for `status` and `timestamp`.",
+    params: [
+      opts: [
+        kind: :value,
+        description:
+          "Keyword list with `:method` (required), `:reference` (required), `:external_id` (optional), `:timestamp` (optional, defaults to now)"
+      ]
+    ],
+    returns: %{type: :struct, description: "Receipt struct with status `\"success\"` and RFC 3339 timestamp"}
+  )
 
-  ## Options
-
-    * `:method` — (required) payment method name
-    * `:reference` — (required) method-specific payment reference
-    * `:external_id` — (optional) echoed from credential payload
-    * `:timestamp` — (optional) RFC 3339 string, defaults to `DateTime.utc_now/0`
-
-  ## Examples
-
-      receipt = MPP.Receipt.new(method: "stripe", reference: "pi_abc123")
-      receipt.status
-      "success"
-  """
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
     timestamp = Keyword.get(opts, :timestamp) || DateTime.to_iso8601(DateTime.utc_now())
@@ -55,9 +52,14 @@ defmodule MPP.Receipt do
     struct!(__MODULE__, Keyword.put(opts, :timestamp, timestamp))
   end
 
-  @doc """
-  Encodes a receipt to a base64url JSON string (no padding) for the `Payment-Receipt` header.
-  """
+  api(:encode, "Encode a receipt to a base64url JSON string (no padding) for the `Payment-Receipt` header.",
+    params: [
+      receipt: [kind: :value, description: "Receipt struct to encode"]
+    ],
+    returns: %{type: :string, description: "Base64url-encoded JSON string"},
+    composes_with: [:decode]
+  )
+
   @spec encode(t()) :: String.t()
   def encode(%__MODULE__{} = receipt) do
     receipt
@@ -66,11 +68,15 @@ defmodule MPP.Receipt do
     |> Base.url_encode64(padding: false)
   end
 
-  @doc """
-  Decodes a base64url JSON string into a receipt.
+  api(:decode, "Decode a base64url JSON string into a receipt.",
+    params: [
+      encoded: [kind: :value, description: "Base64url-encoded JSON receipt string"]
+    ],
+    returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, reason}` on failure"},
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields],
+    composes_with: [:encode]
+  )
 
-  Returns `{:ok, receipt}` on success, `{:error, reason}` on failure.
-  """
   @spec decode(String.t()) :: {:ok, t()} | {:error, atom()}
   def decode(encoded) when is_binary(encoded) do
     with {:ok, json} <- Base.url_decode64(encoded, padding: false),
