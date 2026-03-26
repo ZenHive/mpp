@@ -179,7 +179,13 @@ defmodule MPP.Headers do
   # --- Private: Auth-param formatting ---
 
   # Escapes a value for use inside a quoted-string (RFC 9110 Section 5.6.4).
+  # Rejects CR/LF which would produce invalid header text or break HMAC binding.
   defp escape_quoted(value) do
+    if String.contains?(value, ["\r", "\n"]) do
+      raise ArgumentError,
+            "MPP challenge field contains CR/LF which is invalid in HTTP headers: #{inspect(value)}"
+    end
+
     value
     |> String.replace("\\", "\\\\")
     |> String.replace("\"", "\\\"")

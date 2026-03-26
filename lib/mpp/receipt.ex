@@ -107,12 +107,13 @@ defmodule MPP.Receipt do
   end
 
   # Deserializes a string-keyed map into a receipt struct.
-  defp from_map(%{"method" => method, "reference" => reference} = map) do
+  defp from_map(%{"method" => method, "reference" => reference, "timestamp" => timestamp} = map)
+       when is_binary(timestamp) do
     {:ok,
      %__MODULE__{
        status: Map.get(map, "status", "success"),
        method: method,
-       timestamp: Map.get(map, "timestamp"),
+       timestamp: timestamp,
        reference: reference,
        external_id: Map.get(map, "externalId")
      }}

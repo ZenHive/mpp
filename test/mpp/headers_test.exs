@@ -65,6 +65,14 @@ defmodule MPP.HeadersTest do
 
       assert header =~ ~s(description="path\\\\to\\\\file")
     end
+
+    test "raises on CR/LF in values to prevent invalid header text" do
+      challenge = make_challenge(description: "line1\r\nInjected: x")
+
+      assert_raise ArgumentError, ~r/CR\/LF/, fn ->
+        Headers.format_challenge(challenge)
+      end
+    end
   end
 
   describe "parse_challenge/1" do

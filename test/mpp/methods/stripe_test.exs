@@ -240,6 +240,31 @@ defmodule MPP.Methods.StripeTest do
     end
   end
 
+  describe "validate_config!/1" do
+    test "accepts config with all required keys" do
+      config = %{"stripe_secret_key" => "sk_test_...", "network_id" => "profile_..."}
+      assert :ok = Stripe.validate_config!(config)
+    end
+
+    test "raises when stripe_secret_key is missing" do
+      assert_raise ArgumentError, ~r/stripe_secret_key/, fn ->
+        Stripe.validate_config!(%{"network_id" => "profile_..."})
+      end
+    end
+
+    test "raises when network_id is missing" do
+      assert_raise ArgumentError, ~r/network_id/, fn ->
+        Stripe.validate_config!(%{"stripe_secret_key" => "sk_test_..."})
+      end
+    end
+
+    test "raises when both required keys are missing" do
+      assert_raise ArgumentError, ~r/stripe_secret_key/, fn ->
+        Stripe.validate_config!(%{})
+      end
+    end
+  end
+
   describe "challenge_method_details/1" do
     test "returns networkId and paymentMethodTypes from config" do
       {:ok, charge} = Charge.new(amount: "5000", currency: "usd")

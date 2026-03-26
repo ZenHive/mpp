@@ -145,6 +145,7 @@ defmodule MPP.Plug do
   defp build_method_entry(method_opts) do
     method = require_opt!(method_opts, :method)
     method_config = Keyword.get(method_opts, :method_config, %{})
+    method.validate_config!(method_config)
 
     {:ok, charge} =
       Charge.new(
@@ -246,6 +247,7 @@ defmodule MPP.Plug do
     charge_for_verify = merge_method_config(entry.charge, runtime_config)
 
     with :ok <- Challenge.verify(credential.challenge, config.secret_key),
+         :ok <- check_realm_match(credential.challenge, config),
          :ok <- check_expiration(credential.challenge),
          :ok <- check_request_match(credential.challenge, entry),
          {:ok, receipt} <- entry.method.verify(credential.payload, charge_for_verify) do
@@ -271,6 +273,12 @@ defmodule MPP.Plug do
     end
   end
 
+  # Verifies the credential's realm matches this endpoint's realm.
+  # Defense-in-depth: HMAC binding covers realm when secrets are unique per realm,
+  # but an explicit check prevents cross-realm replay in shared-secret deployments.
+  defp check_realm_match(%Challenge{realm: realm}, %Config{realm: realm}), do: :ok
+  defp check_realm_match(_challenge, _config), do: {:error, :request_mismatch}
+
   # Checks whether a challenge has expired based on its `expires` field.
   defp check_expiration(%Challenge{expires: nil}), do: :ok
 
@@ -289,7 +297,8 @@ defmodule MPP.Plug do
   end
 
   # Compares the credential's request parameters against this method entry's charge.
-  # Prevents cross-route replay: a credential for $1 can't be used on a $10 endpoint.
+  # Prevents cross-route replay: a credential for one endpoint can't be used on another.
+  # Checks amount, currency, and recipient to match the reference implementation.
   defp check_request_match(%Challenge{request: request}, entry) do
     with {:ok, json} <- Base.url_decode64(request, padding: false),
          {:ok, req_map} <- Jason.decode(json) do
@@ -300,6 +309,9 @@ defmodule MPP.Plug do
         req_map["currency"] != entry.charge.currency ->
           {:error, :request_mismatch}
 
+        !recipient_matches?(req_map["recipient"], entry.charge.recipient) ->
+          {:error, :request_mismatch}
+
         true ->
           :ok
       end
@@ -307,6 +319,11 @@ defmodule MPP.Plug do
       _ -> {:error, :request_mismatch}
     end
   end
+
+  # Compares recipient values, treating nil as "not configured" (matches anything).
+  # When the endpoint has a recipient configured, the credential must match it.
+  defp recipient_matches?(_credential_recipient, nil), do: true
+  defp recipient_matches?(credential_recipient, endpoint_recipient), do: credential_recipient == endpoint_recipient
 
   # Sends an error response with RFC 9457 error body.
   # Only 402 responses include WWW-Authenticate challenge headers.

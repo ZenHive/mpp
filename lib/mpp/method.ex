@@ -80,7 +80,18 @@ defmodule MPP.Method do
   """
   @callback challenge_method_details(charge :: Charge.t()) :: map() | nil
 
-  @optional_callbacks [challenge_method_details: 1]
+  @doc """
+  Validates method_config at init time. Raises on missing required keys.
+
+  Called during `MPP.Plug` init for each method entry. Use this to
+  fail fast on misconfiguration (e.g., missing Stripe secret key or
+  network ID) rather than discovering it at request time.
+
+  The default implementation is a no-op (all configs accepted).
+  """
+  @callback validate_config!(config :: map()) :: :ok
+
+  @optional_callbacks [challenge_method_details: 1, validate_config!: 1]
 
   @doc false
   defmacro __using__(_opts) do
@@ -90,7 +101,10 @@ defmodule MPP.Method do
       @impl MPP.Method
       def challenge_method_details(_charge), do: nil
 
-      defoverridable challenge_method_details: 1
+      @impl MPP.Method
+      def validate_config!(_config), do: :ok
+
+      defoverridable challenge_method_details: 1, validate_config!: 1
     end
   end
 end

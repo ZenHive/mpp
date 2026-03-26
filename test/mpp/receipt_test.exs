@@ -82,5 +82,11 @@ defmodule MPP.ReceiptTest do
       encoded = Base.url_encode64(json, padding: false)
       assert {:error, :missing_required_fields} = Receipt.decode(encoded)
     end
+
+    test "returns error for missing timestamp" do
+      json = Jason.encode!(%{"method" => "stripe", "reference" => "pi_123", "status" => "success"})
+      encoded = Base.url_encode64(json, padding: false)
+      assert {:error, :missing_required_fields} = Receipt.decode(encoded)
+    end
   end
 end

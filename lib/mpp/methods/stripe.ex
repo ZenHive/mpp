@@ -46,11 +46,35 @@ defmodule MPP.Methods.Stripe do
 
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
 
+  @required_config_keys ~w(stripe_secret_key network_id)
+
   api(:method_name, "Return the payment method identifier for Stripe.")
 
   @impl MPP.Method
   @spec method_name() :: String.t()
   def method_name, do: "stripe"
+
+  api(
+    :validate_config!,
+    "Validate Stripe method_config at init time. Raises on missing `stripe_secret_key` or `network_id`.",
+    params: [
+      config: [kind: :value, description: "method_config map to validate"]
+    ],
+    returns: %{type: :atom, description: "`:ok` on success, raises `ArgumentError` on missing keys"}
+  )
+
+  @impl MPP.Method
+  @spec validate_config!(map()) :: :ok
+  def validate_config!(config) do
+    missing = Enum.filter(@required_config_keys, &is_nil(config[&1]))
+
+    if missing != [] do
+      raise ArgumentError,
+            "MPP.Methods.Stripe requires these keys in method_config: #{Enum.join(missing, ", ")}"
+    end
+
+    :ok
+  end
 
   api(:verify, "Verify a Stripe SPT credential by creating a PaymentIntent with `confirm: true`.",
     params: [

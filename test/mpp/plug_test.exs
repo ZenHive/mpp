@@ -588,6 +588,60 @@ defmodule MPP.PlugTest do
       body = decode_json_body(conn)
       assert body["type"] =~ "invalid-challenge"
     end
+
+    test "rejects credential with wrong recipient" do
+      config_alice = init_config(recipient: "acct_alice")
+      config_bob = init_config(recipient: "acct_bob")
+
+      auth_header = build_authorization_header(config_alice)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/bob-endpoint")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config_bob)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+    end
+
+    test "rejects credential with no recipient on endpoint that requires one" do
+      config_no_recipient = init_config()
+      config_with_recipient = init_config(recipient: "acct_bob")
+
+      # Credential from an endpoint with no recipient
+      auth_header = build_authorization_header(config_no_recipient)
+
+      # Presented to an endpoint that requires a specific recipient
+      conn =
+        :get
+        |> Plug.Test.conn("/bob-endpoint")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config_with_recipient)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+    end
+
+    test "rejects credential with wrong realm (shared-secret deployment)" do
+      # Both configs use the same secret_key but different realms
+      config_a = init_config(realm: "api-a.example.com")
+      config_b = init_config(realm: "api-b.example.com")
+
+      auth_header = build_authorization_header(config_a)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/endpoint-b")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config_b)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+    end
   end
 
   # --- Expiration ---
