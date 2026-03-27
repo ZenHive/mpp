@@ -59,6 +59,9 @@ defmodule MPP.MixProject do
       {:ex_dna, "~> 1.1", only: [:dev, :test], runtime: false},
       {:ex_ast, "~> 0.2", only: [:dev, :test], runtime: false},
 
+      # On-chain verification (optional — required by Tempo and x402 methods)
+      {:onchain, "~> 0.4", optional: true},
+
       # Self-describing APIs
       {:descripex, "~> 0.4"}
     ]

@@ -6,6 +6,27 @@ Completed roadmap tasks.
 
 ## [Unreleased]
 
+### Phase 4: Tempo Payment Method
+
+#### Task 13a: Tempo Method Skeleton
+**Completed** | [D:2/B:7/U:8 → Eff:3.75]
+
+**What was done:**
+- `MPP.Methods.Tempo` module implementing the `MPP.Method` behaviour — second payment method after Stripe
+- `method_name/0` returns `"tempo"`, `validate_config!/1` requires `rpc_url` in method_config
+- `challenge_method_details/1` returns `chainId` (default 42431 Moderato testnet), `feePayer` (default false), and optional `memo`
+- Runtime availability check for `onchain` dependency in `validate_config!/1`
+- `verify/2` stub returns `:verification_failed` — implementation deferred to Task 13b (hash) and 13c (transaction)
+- Descripex `api()` annotations on all 4 public functions, registered in `MPP.describe/0`
+- Added `onchain` ~> 0.4 as optional Hex dependency
+
+**Key decisions:**
+- `onchain` is optional (not required at compile time) — runtime check raises with install instructions if missing
+- Challenge details always return a map (never nil) — Tempo always needs `chainId` in the challenge
+- `type="hash"` is the primary verification path — all RPC primitives exist in `onchain` today
+- `type="transaction"` requires Tempo-specific 0x76 tx parsing — lives in `MPP.Tempo.Transaction` within mpp (protocol-specific, not chain-generic)
+- Fee payer support (Task 13d) deferred until demand — low efficiency score
+
 ### Phase 6: Multi-Method Challenges
 
 #### Task 15: Multi-Method 402

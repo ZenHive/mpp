@@ -31,6 +31,7 @@ defmodule MPP do
     * `MPP.Errors` — RFC 9457 Problem Detail error types
     * `MPP.Method` — Behaviour for pluggable payment methods
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
+    * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
     * `MPP.Intents.Charge` — Charge intent request schema
 
   ## Discovery
@@ -50,6 +51,7 @@ defmodule MPP do
       MPP.Headers,
       MPP.Errors,
       MPP.Intents.Charge,
-      MPP.Methods.Stripe
+      MPP.Methods.Stripe,
+      MPP.Methods.Tempo
     ]
 end

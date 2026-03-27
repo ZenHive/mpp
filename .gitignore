@@ -34,3 +34,6 @@ mpp-*.tar
 # Generated API manifest (mix mpp.manifest).
 /api_manifest.json
 
+# Fork of tempoxyz/mpp docs site (for PR #473).
+/mpp-docs-fork/
+

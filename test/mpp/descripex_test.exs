@@ -3,6 +3,7 @@ defmodule MPP.DescripexTest do
 
   alias MPP.Intents.Charge
   alias MPP.Methods.Stripe
+  alias MPP.Methods.Tempo
 
   @annotated_modules [
     MPP.Challenge,
@@ -11,7 +12,8 @@ defmodule MPP.DescripexTest do
     MPP.Headers,
     MPP.Errors,
     Charge,
-    Stripe
+    Stripe,
+    Tempo
   ]
 
   describe "api() annotations" do
@@ -122,8 +124,12 @@ defmodule MPP.DescripexTest do
     end
 
     test "method modules have /methods namespace" do
-      {:docs_v1, _, _, _, _, meta, _} = Code.fetch_docs(Stripe)
-      assert meta[:namespace] == "/methods"
+      for mod <- [Stripe, Tempo] do
+        {:docs_v1, _, _, _, _, meta, _} = Code.fetch_docs(mod)
+
+        assert meta[:namespace] == "/methods",
+               "#{inspect(mod)} should have namespace /methods, got #{inspect(meta[:namespace])}"
+      end
     end
   end
 end
