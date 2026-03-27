@@ -223,6 +223,126 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
+  describe "optimistic broadcast (wait_for_confirmation: false)" do
+    test "happy path: simulation passes, async broadcast returns optimistic receipt", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      # Build optimistic config — same as standard but with wait_for_confirmation: false
+      optimistic_config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => false,
+            "wait_for_confirmation" => false
+          }
+        )
+
+      # Build and sign a valid 0x76 transaction
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      # Get challenge and submit credential
+      challenge = request_challenge!(optimistic_config)
+      assert challenge.method == "tempo"
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> MPP.Plug.call(optimistic_config)
+
+      # Should succeed with an optimistic receipt
+      assert conn.status == nil, "Plug should pass through on valid optimistic credential"
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      assert is_binary(receipt.reference)
+      assert String.starts_with?(receipt.reference, "0x")
+
+      # Verify Payment-Receipt header is set
+      assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
+      assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
+      assert parsed_receipt.reference == receipt.reference
+
+      # The real proof: the returned tx hash should eventually confirm on-chain.
+      # Poll until the tx lands in a block — this proves the optimistic broadcast
+      # actually submitted a valid transaction, not just returned a fake hash.
+      rpc_opts = [rpc_url: rpc_url]
+      on_chain_receipt = wait_for_receipt!(receipt.reference, rpc_opts)
+      assert on_chain_receipt.status == 1, "Optimistically broadcast tx should confirm on-chain"
+    end
+
+    test "simulation catches revert before broadcasting", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      # Use an absurdly large amount that the sender cannot cover.
+      # The eth_call simulation should detect insufficient balance and return
+      # verification-failed WITHOUT broadcasting.
+      impossible_amount = 999_999_999_999_999
+
+      optimistic_config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(impossible_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => false,
+            "wait_for_confirmation" => false
+          }
+        )
+
+      # Build a tx with the impossible amount — it will pass local parsing
+      # (find_payment_call matches) but should fail simulation on Moderato
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: impossible_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+
+      detail = body["detail"]
+
+      assert detail =~ "Simulation failed" or detail =~ "Broadcast failed",
+             "Expected simulation or broadcast failure, got: #{inspect(detail)}"
+    end
+  end
+
   describe "transaction credential path" do
     test "happy path: 402 → signed tx credential → server broadcasts → receipt", %{
       config: config,

@@ -547,6 +547,137 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — optimistic broadcast (wait_for_confirmation: false)" do
+    setup %{charge: charge} do
+      # Enable optimistic mode
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "wait_for_confirmation", false)
+      }
+
+      # Build a valid 0x76 transaction with a transfer call matching the charge
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      {:ok, charge: charge, tx_hex: tx_hex}
+    end
+
+    test "returns optimistic receipt after simulation + async broadcast", %{charge: charge, tx_hex: tx_hex} do
+      stub_optimistic_flow(@tx_hash)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.method == "tempo"
+      assert receipt.status == "success"
+      assert receipt.reference == @tx_hash
+    end
+
+    test "preserves external_id in optimistic receipt", %{charge: charge, tx_hex: tx_hex} do
+      charge = %{charge | external_id: "optimistic-order-1"}
+      stub_optimistic_flow(@tx_hash)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.external_id == "optimistic-order-1"
+    end
+
+    test "returns error when simulation fails (never broadcasts)", %{charge: charge, tx_hex: tx_hex} do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+
+        case request["method"] do
+          "eth_call" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "execution reverted"},
+              "id" => 1
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Simulation failed"
+
+      # Verify simulation was called but broadcast was NOT
+      assert_received {:rpc_call, "eth_call"}
+      refute_received {:rpc_call, "eth_sendRawTransaction"}
+    end
+
+    test "returns error when async broadcast fails after successful simulation", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_call" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+          "eth_sendRawTransaction" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "nonce too low"},
+              "id" => 1
+            })
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Broadcast failed"
+    end
+
+    test "calls eth_call then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_call" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+          "eth_sendRawTransaction" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => @tx_hash, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Verify the correct RPC methods were called with the raw tx
+      assert_received {:rpc_call, "eth_call", _}
+      assert_received {:rpc_call, "eth_sendRawTransaction", [sent_hex]}
+      assert sent_hex == tx_hex
+
+      # Verify sync variant was NOT called
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+    end
+
+    test "simulation network failure returns error", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Simulation request failed"
+    end
+  end
+
   # --- Test helpers ---
 
   # Stubs a successful JSON-RPC response wrapping the given receipt map.
@@ -632,6 +763,22 @@ defmodule MPP.Methods.TempoTest do
       "transactionHash" => @tx_hash,
       "logIndex" => "0x0"
     }
+  end
+
+  # Stubs the two-step optimistic flow: eth_call succeeds, eth_sendRawTransaction returns tx hash.
+  defp stub_optimistic_flow(tx_hash) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      case request["method"] do
+        "eth_call" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+        "eth_sendRawTransaction" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => tx_hash, "id" => 1})
+      end
+    end)
   end
 
   # Stubs eth_sendRawTransactionSync to return a receipt directly (synchronous broadcast).

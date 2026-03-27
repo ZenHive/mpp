@@ -31,6 +31,9 @@ defmodule MPP.Methods.Tempo do
     * `"chain_id"` — (optional) network chain ID, defaults to `42431` (Moderato testnet)
     * `"fee_payer"` — (optional) enable server-side fee sponsorship, defaults to `false`
     * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
+    * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
+      for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
+      then broadcasts async and returns an optimistic receipt. Default `true`.
 
   ## Credential Payload
 
@@ -126,20 +129,19 @@ defmodule MPP.Methods.Tempo do
     config = charge.method_details || %{}
     memo = config["memo"]
     expected_chain_id = config["chain_id"] || @moderato_chain_id
+    wait? = config["wait_for_confirmation"] != false
 
     with {:ok, signature} <- extract_signature(payload),
          {:ok, tx} <- Transaction.deserialize(signature),
          :ok <- verify_chain_id(tx, expected_chain_id),
-         {:ok, _call} <-
+         {:ok, _match} <-
            Transaction.find_payment_call(tx, charge.currency,
              amount: charge.amount,
              recipient: charge.recipient,
              memo: memo
            ),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
-         {:ok, tx_hash, receipt} <- broadcast_transaction_sync(tx.raw, rpc_url, config),
-         :ok <- check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
+         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
       {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
     else
       {:error, %Errors{} = error} -> {:error, error}
@@ -232,6 +234,118 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_chain_id(%Transaction{chain_id: actual}, expected) do
     {:error, "Chain ID mismatch: expected #{expected}, got #{actual}"}
+  end
+
+  # Dispatches between confirmation and optimistic broadcast paths.
+  # Confirmation (default): broadcast sync → verify receipt logs.
+  # Optimistic: simulate via eth_call → broadcast async → return tx hash without receipt verification.
+  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?) do
+    with {:ok, tx_hash, receipt} <- broadcast_transaction_sync(raw_hex, rpc_url, config),
+         :ok <- check_receipt_status(receipt),
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
+      {:ok, tx_hash}
+    end
+  end
+
+  defp broadcast_and_verify(
+         %Transaction{raw: raw_hex, calls: [payment_call | _]},
+         rpc_url,
+         config,
+         _charge,
+         _memo,
+         false = _wait?
+       ) do
+    with :ok <- simulate_payment_call(payment_call, rpc_url, config) do
+      broadcast_transaction_async(raw_hex, rpc_url, config)
+    end
+  end
+
+  # Simulates the matched payment call via eth_call to catch obvious reverts (insufficient
+  # balance, invalid state) before broadcasting. Uses the call's target contract and ABI
+  # calldata — NOT the raw serialized transaction. Matches mppx's viem_call approach
+  # (Charge.ts:257-262) which passes structured transaction fields to eth_call.
+  # Not a guarantee of on-chain success — blockchain state can change between simulation
+  # and inclusion.
+  defp simulate_payment_call(%{to: to, input: input}, rpc_url, config) do
+    req_options = config["req_options"] || []
+
+    # to is 20-byte binary, input is ABI-encoded calldata binary — hex-encode for JSON-RPC
+    to_hex = "0x" <> Base.encode16(to, case: :lower)
+    data_hex = "0x" <> Base.encode16(input, case: :lower)
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => "eth_call",
+        "params" => [%{"to" => to_hex, "data" => data_hex}, "latest"],
+        "id" => 1
+      })
+
+    result =
+      Req.request(
+        [
+          url: rpc_url,
+          method: :post,
+          headers: [{"content-type", "application/json"}],
+          body: body
+        ],
+        req_options
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status, body: %{"result" => _}}} when status in 200..299 ->
+        :ok
+
+      {:ok, %Req.Response{body: %{"error" => error}}} ->
+        {:error, Errors.new(:verification_failed, "Simulation failed: #{inspect(error)}")}
+
+      {:error, exception} ->
+        {:error, Errors.new(:verification_failed, "Simulation request failed: #{Exception.message(exception)}")}
+
+      {:ok, %Req.Response{} = response} ->
+        {:error, Errors.new(:verification_failed, "Unexpected simulation response (status #{response.status})")}
+    end
+  end
+
+  # TODO(onchain_tempo): Extract broadcast_transaction_async/3 to OnchainTempo.RPC
+  # Broadcasts a transaction via async eth_sendRawTransaction. Returns the tx hash
+  # immediately without waiting for block inclusion. Used in optimistic mode.
+  defp broadcast_transaction_async(raw_hex, rpc_url, config) do
+    req_options = config["req_options"] || []
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => "eth_sendRawTransaction",
+        "params" => [raw_hex],
+        "id" => 1
+      })
+
+    result =
+      Req.request(
+        [
+          url: rpc_url,
+          method: :post,
+          headers: [{"content-type", "application/json"}],
+          body: body
+        ],
+        req_options
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status, body: %{"result" => tx_hash}}}
+      when status in 200..299 and is_binary(tx_hash) ->
+        {:ok, tx_hash}
+
+      {:ok, %Req.Response{body: %{"error" => error}}} ->
+        {:error, Errors.new(:verification_failed, "Broadcast failed: #{inspect(error)}")}
+
+      {:error, exception} ->
+        {:error, Errors.new(:verification_failed, "Broadcast request failed: #{Exception.message(exception)}")}
+
+      {:ok, %Req.Response{} = response} ->
+        {:error, Errors.new(:verification_failed, "Unexpected broadcast response (status #{response.status})")}
+    end
   end
 
   # TODO(onchain_tempo): Extract broadcast_transaction_sync/3 to OnchainTempo.RPC

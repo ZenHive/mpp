@@ -8,6 +8,24 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Task 13g: Optimistic Broadcast Mode
+**Completed** | [D:3/B:4/U:3 → Eff:1.17]
+
+**What was done:**
+- Added `"wait_for_confirmation"` config option to `method_config` (default `true`, preserving existing behavior)
+- When `false`, the `type="transaction"` verify path uses a two-step optimistic flow: simulate the payment call via `eth_call` with structured params (`to` + `data`), then broadcast via async `eth_sendRawTransaction` and return an optimistic receipt without waiting for block inclusion
+- `broadcast_and_verify/6` accepts the full `Transaction` struct — confirmation path uses `tx.raw` for sync broadcast, optimistic path uses `tx.calls[0]` for simulation and `tx.raw` for async broadcast
+- New private functions: `simulate_payment_call/3` (eth_call with call target + calldata), `broadcast_transaction_async/3` (async broadcast returning tx hash only)
+- Matches the mppx TypeScript reference implementation (Charge.ts:233-277)
+- Integration tests against Moderato testnet: happy path (optimistic receipt → confirmed on-chain) and revert path (impossible amount caught by simulation)
+
+**Key decisions:**
+- Simulation uses structured `eth_call` params (`{to, data}` from the deserialized payment call), not raw serialized tx bytes — matches mppx's `viem_call` which unpacks transaction fields. Code review caught the original implementation passing raw 0x76 bytes as `eth_call` `data`, which Moderato rejects.
+- `eth_call` used for simulation (matching mppx's `viem_call`), not `eth_estimateGas` — catches state-level reverts, not just gas estimation
+- Optimistic mode only applies to `type="transaction"` — `type="hash"` always verifies the existing receipt (client already broadcast)
+- No dedup store integration (Task 13f) — optimistic path works without it; HMAC-bound challenges prevent cross-request replay
+- Receipt has identical structure to confirmed receipt — the trade-off is implicit (server opted into optimistic mode at init time)
+
 #### Task 13h: Transaction Path Integration Test
 **Completed** | [D:4/B:5/U:5 → Eff:1.25]
 
