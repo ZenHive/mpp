@@ -8,6 +8,31 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Task 13b: Hash Credential Verification
+**Completed** | [D:4/B:8/U:8 → Eff:2.0]
+
+**What was done:**
+- `verify/2` for `type="hash"` credentials — full on-chain payment verification via JSON-RPC
+- Fetches transaction receipt via `eth_getTransactionReceipt` using Req (same HTTP pattern as Stripe)
+- Parses Transfer event logs with `Onchain.Transfer.parse_logs/1` and verifies amount, token, and recipient match the challenge using `Onchain.Address.equal?/2`
+- Memo enforcement per spec (draft-tempo-charge-00.md §Transaction Verification): when `methodDetails.memo` is configured, requires `TransferWithMemo` event with matching memo; without memo, accepts both `Transfer` and `TransferWithMemo`
+- Memo validation in `validate_config!/1` — rejects invalid memo format at init time (32 bytes hex, optional 0x prefix)
+- Dispatches `type="hash"` vs `type="transaction"` vs unknown type with pattern-matched function heads
+- Preserves `external_id` from charge in receipt
+
+**Key decisions:**
+- Req for HTTP, onchain for parsing — follows Stripe pattern for `Req.Test` mockability while leveraging onchain's pure parsing functions
+- Raw JSON-RPC response converted to atom-keyed format matching onchain's transfer log parser expectations
+- `@dialyzer {:nowarn_function, ...}` for optional onchain calls — runtime availability enforced by `validate_config!/1` at Plug init
+- `TransferWithMemo` parsed directly in Tempo module (not in onchain — TIP-20 specific, not chain-generic) using `Onchain.Log.decode_event/2` with custom event signature
+- Memo validation is validate-only (no normalization) — Method behaviour returns `:ok`, can't thread normalized config back
+- Safe `Integer.parse/1` for charge amounts and catch-all in RPC response handling — typed error contract preserved on all paths
+
+**Code review fixes (post-implementation):**
+- Memo enforcement gap: `find_matching_transfer/3` now branches on memo presence, matching mppx reference (Charge.ts:337-378)
+- `fetch_receipt/3` catch-all clause for unexpected RPC responses (prevents CaseClauseError)
+- Safe amount parsing via `Integer.parse/1` instead of `String.to_integer/1` (prevents ArgumentError on non-numeric amounts)
+
 #### Task 13a: Tempo Method Skeleton
 **Completed** | [D:2/B:7/U:8 → Eff:3.75]
 

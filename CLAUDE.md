@@ -18,6 +18,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @~/.claude/includes/ex-unit-json.md
 @~/.claude/includes/dialyzer-json.md
 @~/.claude/includes/library-design.md
+@~/.claude/includes/meta-development.md
+@~/.claude/includes/workflow-philosophy.md
+@~/.claude/includes/skills-awareness.md
 
 ## Project
 

@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — Task 13a complete. Next: 13b (hash credential verification via onchain RPC).
+**Phase 4: Tempo Payment Method** — Task 13b complete (hash credential verification). Next: 13e (integration tests against Moderato testnet) or 13c (transaction credential).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -31,7 +31,7 @@
 | Task 11: Descripex Annotations | ✅ | [D:3/B:7/U:8 → Eff:2.5] | api() on 7 modules + Discoverable |
 | Task 12: mix mpp.manifest | ✅ | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
 | Task 13a: Tempo skeleton | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Method module + challenge details |
-| Task 13b: Tempo hash verify | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via onchain RPC |
+| Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
 | Task 13c: Tempo tx verify | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
 | Task 13d: Tempo fee payer | ⬜ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
 | Task 13e: Tempo integration | ⬜ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
@@ -112,11 +112,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-12-mix-mppmanifest) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-13a-tempo-method-skeleton) for details.
 
-### Task 13b: Hash Credential Verification (type="hash")
+### Task 13b: Hash Credential Verification (type="hash") ✅
 
-[D:4/B:8/U:8 → Eff:2.0] 🎯
-
-Implement `verify/2` for `type="hash"` credentials in `MPP.Methods.Tempo`. Extract tx hash from `payload["hash"]`, call `Onchain.RPC.get_transaction_receipt/2`, verify receipt status is success, parse Transfer event logs using `Onchain.Transfer.parse_logs/1`, and verify the Transfer event matches the challenge (token address = currency, recipient, amount). Return receipt with tx hash as reference. Handle errors: tx not found, tx failed, Transfer event mismatch. Unit tests with mocked RPC responses following Stripe's `Req.Test` pattern. Reference: `refs/mpp-rs/src/server/tempo.rs` for hash verification logic, `refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md` §Hash Settlement for spec. Depends on Task 13a.
+See [CHANGELOG.md](CHANGELOG.md#task-13b-hash-credential-verification) for details.
 
 ### Task 13c: Transaction Credential Verification (type="transaction")
 
