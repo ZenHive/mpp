@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — Task 13b complete (hash credential verification). Next: 13e (integration tests against Moderato testnet) or 13c (transaction credential).
+**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13e complete (skeleton, hash verification, integration tests). Next: 13c (transaction credential, Eff:0.92) or Task 17 (mix mpp.demo, Eff:2.83).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -34,11 +34,15 @@
 | Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
 | Task 13c: Tempo tx verify | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
 | Task 13d: Tempo fee payer | ⬜ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
-| Task 13e: Tempo integration | ⬜ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
+| Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
 | Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
 | Task 17: mix mpp.demo | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | After Tasks 13/14 |
 | Task 18: Live integration tests | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
+| Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
+| Task 20: Lightning session | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming (deposit/topUp/close) |
+| Task 21: Solana charge | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes, fee payer, splits |
+| Task 22: Card charge | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | JWE encrypted network tokens, intermediaries |
 
 ---
 
@@ -128,11 +132,9 @@ Implement `verify/2` for `type="transaction"` credentials. Create `MPP.Tempo.Tra
 
 Implement server-side fee sponsorship for `feePayer: true`. Accept `fee_payer_private_key` and `fee_token` in method_config. Extract client-signed transaction, add server's fee payer signature (domain 0x78), construct dual-signed transaction, broadcast and verify. Reference: `refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md` §Fee Payment for spec, `refs/mppx/src/tempo/server/` for dual-signature construction. Depends on Task 13c. Defer until demand exists.
 
-### Task 13e: Tempo Integration Tests
+### Task 13e: Tempo Integration Tests ✅
 
-[D:3/B:6/U:5 → Eff:1.83] 🚀
-
-Integration tests against Tempo Moderato testnet (chainId 42431). Full 402 handshake with `type="hash"` credential. Requires `TEMPO_RPC_URL` env var. Tests excluded by default (`@tag :integration`), following Stripe pattern. Missing credentials → `flunk()` with setup instructions. Depends on Task 13b.
+See [CHANGELOG.md](CHANGELOG.md#task-13e-tempo-integration-tests) for details.
 
 ---
 
@@ -201,6 +203,85 @@ Success criteria:
 - [ ] Verify challenge fields (realm, method, intent, request, expires)
 - [ ] Optional: full roundtrip with Tempo wallet (if credentials available)
 - [ ] Tagged `@moduletag :integration`, fails loudly on missing credentials
+
+---
+
+## Phase 9: Lightning Payment Method
+
+> Lightning has two specs: charge (one-time BOLT11 invoice) and session (prepaid streaming with deposit/topUp/close). Verification is simple: SHA256(preimage) == payment_hash. Neither mppx nor mpp-rs implement Lightning — we'd be first movers.
+>
+> Specs: `refs/mpp-specs/specs/methods/lightning/draft-lightning-charge-00.md`, `draft-lightning-session-00.md`
+
+### Task 19: Lightning Charge Method
+
+[D:5/B:7/U:7 → Eff:1.4] 📋
+
+Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
+
+Success criteria:
+- [ ] Implements `MPP.Method` behaviour
+- [ ] `challenge_method_details/1` returns invoice, paymentHash, network
+- [ ] `verify/2` checks SHA256(preimage) == paymentHash
+- [ ] Unit tests with known preimage/hash pairs
+- [ ] Integration test with regtest Lightning node (if available)
+
+### Task 20: Lightning Session Method
+
+[D:8/B:5/U:4 → Eff:0.56] ⚠️
+
+Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close. Defer until charge method proven and demand exists.
+
+Success criteria:
+- [ ] Session lifecycle: open → bearer → topUp → close
+- [ ] Per-unit metering with balance tracking
+- [ ] SSE "need-topup" event emission
+- [ ] Refund via return invoice on close
+- [ ] Session store behaviour (pluggable: ETS, database, etc.)
+
+---
+
+## Phase 10: Solana Payment Method
+
+> Solana supports two modes: pull (client signs tx, server broadcasts — default) and push (client broadcasts, sends confirmed signature). Supports native SOL and SPL tokens, fee payer option, and payment splits (up to 8 recipients). Similar pattern to Tempo's on-chain verification. Neither mppx nor mpp-rs implement Solana.
+>
+> Spec: `refs/mpp-specs/specs/methods/solana/draft-solana-charge-00.md`
+
+### Task 21: Solana Charge Method
+
+[D:6/B:6/U:5 → Eff:0.92] ⚠️
+
+Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency ("sol" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).
+
+Success criteria:
+- [ ] Implements `MPP.Method` behaviour
+- [ ] Pull mode: verify signed tx bytes, broadcast, confirm
+- [ ] Push mode: verify confirmed signature via RPC
+- [ ] SOL native + SPL token support
+- [ ] Fee payer co-signing
+- [ ] Payment splits (up to 8 recipients)
+- [ ] Unit tests with mocked Solana RPC responses
+
+---
+
+## Phase 11: Card Payment Method
+
+> Card is the most complex method — uses JWE-encrypted network tokens with RSA-OAEP-256 + AES-256-GCM. Requires "Client Enabler" (token provisioning) and "Server Enabler" (decryption + processing) intermediaries. Least aligned with machine-to-machine payments. Neither mppx nor mpp-rs implement Card. Defer until ecosystem demand.
+>
+> Spec: `refs/mpp-specs/specs/methods/card/draft-card-charge-00.md`
+
+### Task 22: Card Charge Method
+
+[D:8/B:5/U:4 → Eff:0.56] ⚠️
+
+Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. Defer until ecosystem demand.
+
+Success criteria:
+- [ ] Implements `MPP.Method` behaviour
+- [ ] RSA key pair generation and JWKS endpoint support
+- [ ] JWE token decryption (RSA-OAEP-256 + AES-256-GCM)
+- [ ] Network token validation (PAN, expiry, network)
+- [ ] Server Enabler integration pattern
+- [ ] Unit tests with crafted JWE tokens
 
 ---
 

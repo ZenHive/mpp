@@ -8,6 +8,23 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Task 13e: Tempo Integration Tests
+**Completed** | [D:3/B:6/U:5 → Eff:1.83]
+
+**What was done:**
+- Integration tests against Tempo Moderato testnet (chainId 42431) validating the full 402 handshake with `type="hash"` credentials
+- Fully automated test setup: derives addresses from deterministic test keys, funds sender via `tempo_fundAddress` custom RPC, executes a real pathUSD TIP-20 transfer on-chain, polls for confirmation
+- Five tests: happy path 402→credential→receipt roundtrip, challenge method details verification, non-existent hash rejection, malformed hash rejection, missing type field rejection
+- Tagged `@moduletag :integration` — excluded by default, run with `--include integration`
+
+**Key decisions:**
+- `setup_all` (not `setup`) — single on-chain transfer shared across all tests, avoids per-test faucet/transfer overhead
+- Hardcoded deterministic private keys (Hardhat default #0 and #1) — testnet only, no security concern
+- Polling loop for tx confirmation with configurable interval and max attempts — Moderato block times vary
+- Follows Stripe integration test patterns: `flunk()` with actionable instructions on missing deps or network failures
+- `TEMPO_RPC_URL` env var read at runtime (not compile-time module attribute) — avoids stale-compilation gotcha
+- `fund_test_address` checks JSON-RPC error-in-200 body — faucet rate limiting or errors surface immediately, not as confusing downstream failures
+
 #### Task 13b: Hash Credential Verification
 **Completed** | [D:4/B:8/U:8 → Eff:2.0]
 
