@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13e complete (skeleton, hash verification, integration tests). Next: 13c (transaction credential, Eff:0.92) or Task 17 (mix mpp.demo, Eff:2.83).
+**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13c/13e/13h complete (skeleton, hash verification, transaction verification, integration tests for both paths). Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -32,11 +32,15 @@
 | Task 12: mix mpp.manifest | ✅ | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
 | Task 13a: Tempo skeleton | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Method module + challenge details |
 | Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
-| Task 13c: Tempo tx verify | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
+| Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
 | Task 13d: Tempo fee payer | ⬜ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
 | Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
+| Task 13f: Tx dedup store | ⬜ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
+| Task 13g: Optimistic broadcast | ⬜ | [D:3/B:4/U:3 → Eff:1.17] | waitForConfirmation: false mode |
+| Task 13h: Tx integration test | ✅ | [D:4/B:5/U:5 → Eff:1.25] | Testnet test for type="transaction" path |
 | Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
+| Task 23: onchain_tempo extraction | ⬜ | [D:4/B:6/U:7 → Eff:1.63] | Extract Tempo chain primitives to onchain_tempo package |
 | Task 17: mix mpp.demo | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | After Tasks 13/14 |
 | Task 18: Live integration tests | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
 | Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
@@ -120,11 +124,25 @@ See [CHANGELOG.md](CHANGELOG.md#task-13a-tempo-method-skeleton) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-13b-hash-credential-verification) for details.
 
-### Task 13c: Transaction Credential Verification (type="transaction")
+### Task 13c: Transaction Credential Verification (type="transaction") ✅
 
-[D:6/B:6/U:5 → Eff:0.92] ⚠️
+See [CHANGELOG.md](CHANGELOG.md#task-13c-transaction-credential-verification) for details.
 
-Implement `verify/2` for `type="transaction"` credentials. Create `MPP.Tempo.Transaction` helper module for 0x76 tx decoding (uses signet's RLP primitives + `Onchain.ABI` for standard parts; custom envelope parsing is mpp's responsibility). Decode the RLP Tempo Transaction from `payload["signature"]`, verify it contains `transfer(recipient, amount)` or `transferWithMemo(recipient, amount, memo)` on the correct TIP-20 token, verify amount/recipient match challenge, broadcast via `eth_sendRawTxSync`, verify receipt. Unit tests with crafted test transactions. Reference: `refs/mppx/src/tempo/server/` for broadcast + verify flow, `refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md` §Transaction Verification for spec. Depends on Task 13a.
+### Task 13f: Transaction Dedup Store
+
+[D:4/B:5/U:4 → Eff:1.13] 📋
+
+Add optional replay protection for `type="transaction"` credentials. Pre-broadcast: hash serialized tx with keccak256, check store. Post-broadcast: store on-chain tx hash (catches malleable variants). Provide a `Store` behaviour consumers implement — the library stays stateless by default. The mppx TS reference implements this; mpp-rs relies on nonce consumption instead. Our HMAC-bound challenges prevent cross-request reuse, but within a single challenge window a client could resubmit the same signed tx.
+
+### Task 13g: Optimistic Broadcast Mode
+
+[D:3/B:4/U:3 → Eff:1.17] 📋
+
+Add `waitForConfirmation: false` mode for `type="transaction"`. Simulate via `eth_call`, broadcast without waiting, return optimistic receipt. Useful for latency-sensitive endpoints. Add as a `method_config` option. Default remains synchronous (wait for confirmation). Reference: mppx Charge.ts optimistic path.
+
+### Task 13h: Transaction Path Integration Test ✅
+
+See [CHANGELOG.md](CHANGELOG.md#task-13h-transaction-path-integration-test) for details.
 
 ### Task 13d: Fee Payer Support
 
@@ -135,6 +153,25 @@ Implement server-side fee sponsorship for `feePayer: true`. Accept `fee_payer_pr
 ### Task 13e: Tempo Integration Tests ✅
 
 See [CHANGELOG.md](CHANGELOG.md#task-13e-tempo-integration-tests) for details.
+
+### Task 23: Extract onchain_tempo Package
+
+[D:4/B:6/U:7 → Eff:1.63] 🚀 `[P]`
+
+Extract Tempo-specific chain primitives from mpp into a standalone `onchain_tempo` package (part of the [onchain package family](https://github.com/ZenHive/onchain)). Code is tagged with `TODO(onchain_tempo)` markers. After extraction, mpp depends on `onchain_tempo` instead of implementing chain ops directly.
+
+Extraction targets:
+- `MPP.Tempo.Transaction` → `OnchainTempo.Transaction` (deserialize + build + sign 0x76)
+- `test/support/tempo_tx_builder.ex` → merge into `OnchainTempo.Transaction`
+- `parse_transfer_with_memo_logs/1` → `OnchainTempo.Transfer` (TIP-20 event parsing)
+- `broadcast_transaction_sync/3` → `OnchainTempo.RPC` (Tempo-specific RPC methods)
+- New: `OnchainTempo.TIP20` (transfer/transferWithMemo helpers, like `Onchain.ERC20`)
+
+Success criteria:
+- [ ] `onchain_tempo` package created with extracted modules
+- [ ] mpp depends on `onchain_tempo`, `MPP.Methods.Tempo` is a thin verification shell
+- [ ] All existing mpp tests pass with the dependency swap
+- [ ] `onchain_tempo` has its own unit + integration tests
 
 ---
 

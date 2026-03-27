@@ -72,6 +72,7 @@ MPP.Intents.Charge         — Charge intent request schema (amount, currency, r
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
+MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization and payment call matching (TODO: extract to onchain_tempo)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
@@ -126,7 +127,10 @@ refs/mpp-rs/      — Rust SDK. Key files in src/: protocol/, client/, server/
 Also available:
 - IETF spec: https://paymentauth.org/
 - Developer docs: https://mpp.dev/ (llms-full.txt for complete docs)
-- MCP server configured in `.mcp.json`
+- MCP server at `.mcp.json` — `mcp__mpp__*` tools for cross-referencing SDK source code:
+  - `search_source` / `read_source_file` / `get_file_tree` — work for **mppx**, **mpp-rs**, **pympp**, **tempo**
+  - `list_pages` / `search_docs` — not functional (docs not indexed); use WebFetch for mpp.dev content
+  - `mpp-specs` source — empty via MCP; use local `refs/mpp-specs/` instead
 
 ### Upstream docs (mpp.dev)
 

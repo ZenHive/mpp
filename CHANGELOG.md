@@ -8,6 +8,44 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Task 13h: Transaction Path Integration Test
+**Completed** | [D:4/B:5/U:5 → Eff:1.25]
+
+**What was done:**
+- Integration tests against Tempo Moderato testnet for `type="transaction"` credential path — the server-broadcast flow where the client sends a signed 0x76 Tempo Transaction and the server deserializes, verifies, broadcasts, and checks the receipt
+- New `test/support/tempo_tx_builder.ex` module that constructs and signs real 0x76 Tempo Transactions using Signet (secp256k1) and ExRLP — first Elixir implementation of Tempo Transaction building
+- Three tests: happy path (build signed tx → credential → server broadcasts → receipt with on-chain tx hash), wrong recipient rejection, wrong amount rejection
+- Tagged existing Tempo chain primitives with `TODO(onchain_tempo)` for future extraction to `onchain_tempo` package
+- Added Task 23 (onchain_tempo extraction) to roadmap
+
+**Key decisions:**
+- Tx builder lives in `test/support/` (not `lib/`) — mpp is server-side verification only; building/signing is client-side work that belongs in `onchain_tempo`
+- Signing preimage excludes `sender_signature` from RLP (matching EIP-1559 pattern where signature fields are appended after signing, not included in the hash)
+- `key_authorization?` field omitted entirely when absent (14-field RLP, not 15) — the Tempo node discriminates by peeking at the next byte (`>= 0xc0` = list = key_auth present)
+- `fee_payer_signature = <<>>` (RLP `0x80` = absent) when client pays fees, not `<<0>>` (which is a 1-byte value)
+- Moderato minimum base fee is 20 gwei — default `max_fee_per_gas` set to 25 gwei with 1 gwei priority fee
+
+#### Task 13c: Transaction Credential Verification
+**Completed** | [D:6/B:6/U:5 → Eff:0.92]
+
+**What was done:**
+- `verify/2` for `type="transaction"` credentials — full pre-broadcast verification + broadcast + receipt check
+- New `MPP.Tempo.Transaction` module (`lib/mpp/tempo/transaction.ex`) for 0x76 Tempo Transaction RLP deserialization and payment call matching
+- Deserializes the RLP envelope, extracts `chain_id` (index 0) and `calls` (index 4), preserves raw hex for broadcast passthrough
+- Pre-broadcast verification: iterates transaction calls, matches `transfer(address,uint256)` or `transferWithMemo(address,uint256,bytes32)` selectors against the challenge's currency/recipient/amount/memo
+- Chain ID validation prevents cross-chain replay
+- Broadcasts via Tempo's synchronous `eth_sendRawTransactionSync` JSON-RPC method, which waits for block inclusion (~500ms) and returns the receipt directly — eliminates the async broadcast race condition where a separate receipt fetch arrives before mining
+- Memo enforcement follows same spec rules as hash path: when memo configured, requires `transferWithMemo` with matching memo
+
+**Key decisions:**
+- Transaction module returns `{:error, String.t()}` (no MPP.Errors dependency) — verify/2 wraps into protocol errors via `else` clause, keeping the module cleanly separated
+- Only `chain_id` and `calls` are extracted from the RLP envelope — all other fields (gas, nonce, signatures) are opaque for payment verification purposes
+- RLP field positions confirmed against the official Tempo Transaction Specification at docs.tempo.xyz
+- ABI selectors match mpp-rs constants: `transfer` = `0xa9059cbb`, `transferWithMemo` = `0x95777d59`
+- Constant-time address comparison via `:crypto.hash_equals/2`
+- `ExRLP.decode/1` dialyzer warning suppressed — transitive dep (signet → onchain) with default-arg arity mismatch
+- Fee payer co-signing deferred to Task 13d, transaction dedup to Task 13f, optimistic broadcast to Task 13g
+
 #### Task 13e: Tempo Integration Tests
 **Completed** | [D:3/B:6/U:5 → Eff:1.83]
 

@@ -1,6 +1,8 @@
 defmodule MPP.Methods.TempoTest do
   use ExUnit.Case, async: true
 
+  import MPP.Test.TempoTestHelpers
+
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
@@ -280,11 +282,11 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "Unexpected RPC response"
     end
 
-    test "returns not-implemented for transaction type", %{charge: charge} do
+    test "rejects transaction with invalid hex in signature field", %{charge: charge} do
       payload = %{"type" => "transaction", "signature" => "0xdeadbeef"}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "not yet implemented"
+      assert error.detail =~ "Not a Tempo transaction"
     end
 
     test "preserves external_id in receipt", %{charge: charge} do
@@ -379,6 +381,172 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — transaction credential" do
+    setup %{charge: charge} do
+      # Build a valid 0x76 transaction with a transfer call matching the charge
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      {:ok, tx_hex: tx_hex, charge: charge}
+    end
+
+    test "returns receipt on valid transaction credential", %{charge: charge, tx_hex: tx_hex} do
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.method == "tempo"
+      assert receipt.status == "success"
+    end
+
+    test "preserves external_id in transaction receipt", %{charge: charge, tx_hex: tx_hex} do
+      charge = %{charge | external_id: "tx-order-99"}
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.external_id == "tx-order-99"
+    end
+
+    test "returns error on missing signature field", %{charge: charge} do
+      payload = %{"type" => "transaction"}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "signature"
+    end
+
+    test "returns error on empty signature field", %{charge: charge} do
+      payload = %{"type" => "transaction", "signature" => ""}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "signature"
+    end
+
+    test "returns error on chain_id mismatch", %{charge: charge} do
+      # Build tx with wrong chain_id
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      wrong_chain_tx = build_tempo_tx(calls: [call], chain_id: 9999)
+
+      payload = %{"type" => "transaction", "signature" => wrong_chain_tx}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Chain ID mismatch"
+    end
+
+    test "returns error when no matching transfer call", %{charge: charge} do
+      # Build tx with transfer to wrong recipient
+      wrong_recipient = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      calldata = transfer_calldata(wrong_recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      bad_tx = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      payload = %{"type" => "transaction", "signature" => bad_tx}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching transfer call"
+    end
+
+    test "returns error on broadcast failure", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        Req.Test.json(conn, %{
+          "jsonrpc" => "2.0",
+          "error" => %{"code" => -32_000, "message" => "nonce too low"},
+          "id" => 1
+        })
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Broadcast failed"
+    end
+
+    test "returns error when transaction reverts on-chain", %{charge: charge, tx_hex: tx_hex} do
+      stub_broadcast_and_receipt(reverted_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "reverted"
+    end
+
+    test "returns error on non-0x76 transaction", %{charge: charge} do
+      # Build something that starts with 0x02 (EIP-1559)
+      body = ExRLP.encode([<<1>>, <<>>, <<>>, <<>>, [], [], <<>>, <<>>, <<>>])
+      bad_hex = "0x02" <> Base.encode16(body, case: :lower)
+
+      payload = %{"type" => "transaction", "signature" => bad_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Not a Tempo transaction"
+    end
+
+    test "sends raw hex via eth_sendRawTransactionSync and uses receipt tx hash", %{charge: charge, tx_hex: tx_hex} do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        # eth_sendRawTransactionSync returns the full receipt directly
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.reference == @tx_hash
+
+      # Verify the sync RPC method was called with raw tx hex
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [sent_hex]}
+      assert sent_hex == tx_hex
+
+      # Verify NO separate receipt fetch was made (sync returns receipt directly)
+      refute_received {:rpc_call, "eth_getTransactionReceipt", _}
+    end
+
+    test "returns receipt on valid transferWithMemo transaction when memo configured", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
+
+      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      receipt = success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)])
+      stub_broadcast_and_receipt(receipt)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.reference == @tx_hash
+    end
+
+    test "returns error on broadcast network failure", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Broadcast request failed"
+    end
+
+    test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        conn
+        |> Plug.Conn.put_status(500)
+        |> Req.Test.json(%{"oops" => true})
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Unexpected broadcast response"
+    end
+  end
+
   # --- Test helpers ---
 
   # Stubs a successful JSON-RPC response wrapping the given receipt map.
@@ -466,6 +634,19 @@ defmodule MPP.Methods.TempoTest do
     }
   end
 
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
+  # Stubs eth_sendRawTransactionSync to return a receipt directly (synchronous broadcast).
+  defp stub_broadcast_and_receipt(receipt) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      case request["method"] do
+        "eth_sendRawTransactionSync" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+
+        other ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1, "_method" => other})
+      end
+    end)
+  end
 end

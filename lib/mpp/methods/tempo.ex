@@ -51,9 +51,10 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Receipt
-
   # onchain is optional — suppress unknown function warnings for its APIs.
   # Runtime availability is enforced by validate_config!/1 at Plug init time.
+  alias MPP.Tempo.Transaction
+
   @dialyzer {:nowarn_function, [find_matching_transfer: 3, parse_transfer_with_memo_logs: 1]}
 
   @moderato_chain_id 42_431
@@ -121,9 +122,29 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # TODO(Task 13c): Implement transaction credential verification (type="transaction")
-  def verify(%{"type" => "transaction"}, %Charge{}) do
-    {:error, Errors.new(:verification_failed, "Tempo transaction verification not yet implemented")}
+  def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+    memo = config["memo"]
+    expected_chain_id = config["chain_id"] || @moderato_chain_id
+
+    with {:ok, signature} <- extract_signature(payload),
+         {:ok, tx} <- Transaction.deserialize(signature),
+         :ok <- verify_chain_id(tx, expected_chain_id),
+         {:ok, _call} <-
+           Transaction.find_payment_call(tx, charge.currency,
+             amount: charge.amount,
+             recipient: charge.recipient,
+             memo: memo
+           ),
+         {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         {:ok, tx_hash, receipt} <- broadcast_transaction_sync(tx.raw, rpc_url, config),
+         :ok <- check_receipt_status(receipt),
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
+      {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      {:error, reason} when is_binary(reason) -> {:error, Errors.new(:verification_failed, reason)}
+    end
   end
 
   def verify(_payload, %Charge{}) do
@@ -197,6 +218,67 @@ defmodule MPP.Methods.Tempo do
     {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
   end
 
+  # Extracts and validates the serialized transaction from a transaction credential payload.
+  defp extract_signature(%{"signature" => sig}) when is_binary(sig) and byte_size(sig) > 0 do
+    {:ok, sig}
+  end
+
+  defp extract_signature(_) do
+    {:error, Errors.new(:invalid_payload, "Missing or invalid 'signature' field in credential payload")}
+  end
+
+  # Compares the transaction's chain_id against the expected value from config.
+  defp verify_chain_id(%Transaction{chain_id: actual}, expected) when actual == expected, do: :ok
+
+  defp verify_chain_id(%Transaction{chain_id: actual}, expected) do
+    {:error, "Chain ID mismatch: expected #{expected}, got #{actual}"}
+  end
+
+  # TODO(onchain_tempo): Extract broadcast_transaction_sync/3 to OnchainTempo.RPC
+  # Broadcasts a signed transaction via Tempo's synchronous eth_sendRawTransactionSync
+  # JSON-RPC method. Unlike eth_sendRawTransaction (async), the sync variant waits for
+  # block inclusion (~500ms on Tempo) and returns the full receipt directly — eliminating
+  # the race condition where a separate eth_getTransactionReceipt call arrives before mining.
+  # Returns {:ok, tx_hash, parsed_receipt} on success.
+  defp broadcast_transaction_sync(raw_hex, rpc_url, config) do
+    req_options = config["req_options"] || []
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => "eth_sendRawTransactionSync",
+        "params" => [raw_hex],
+        "id" => 1
+      })
+
+    result =
+      Req.request(
+        [
+          url: rpc_url,
+          method: :post,
+          headers: [{"content-type", "application/json"}],
+          body: body
+        ],
+        req_options
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status, body: %{"result" => receipt}}}
+      when status in 200..299 and is_map(receipt) ->
+        tx_hash = receipt["transactionHash"]
+        {:ok, tx_hash, parse_rpc_receipt(receipt)}
+
+      {:ok, %Req.Response{body: %{"error" => error}}} ->
+        {:error, Errors.new(:verification_failed, "Broadcast failed: #{inspect(error)}")}
+
+      {:error, exception} ->
+        {:error, Errors.new(:verification_failed, "Broadcast request failed: #{Exception.message(exception)}")}
+
+      {:ok, %Req.Response{} = response} ->
+        {:error, Errors.new(:verification_failed, "Unexpected broadcast response (status #{response.status})")}
+    end
+  end
+
   # Gets a required key from the method_details config map.
   defp require_config(config, key) do
     case config[key] do
@@ -254,6 +336,7 @@ defmodule MPP.Methods.Tempo do
     {:error, Errors.new(:verification_failed, "Transaction failed on-chain (reverted)")}
   end
 
+  # TODO(onchain_tempo): Extract parse_transfer_with_memo_logs/1 to OnchainTempo.Transfer
   # TIP-20 TransferWithMemo event signature — Tempo-specific, not in onchain.
   @transfer_with_memo_sig "TransferWithMemo(address indexed from, address indexed to, uint256 amount, bytes32 memo)"
 

@@ -2,8 +2,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
   @moduledoc """
   Integration tests for the Tempo payment method against Tempo's Moderato testnet.
 
-  Creates a real TIP-20 (pathUSD) transfer on-chain, then verifies the full 402
-  handshake using the transaction hash as a `type="hash"` credential.
+  Tests both credential types:
+
+    * `type="hash"` — Client broadcasts a TIP-20 transfer, sends the tx hash as credential.
+      Server fetches receipt via RPC and verifies Transfer events.
+
+    * `type="transaction"` — Client builds and signs a 0x76 Tempo Transaction, sends the
+      raw signed bytes as credential. Server deserializes, verifies payment call, broadcasts
+      via `eth_sendRawTransactionSync`, and verifies the receipt.
 
   Run with: `mix test test/mpp/methods/tempo_integration_test.exs --include integration`
   """
@@ -14,6 +20,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Headers
   alias MPP.Methods.Tempo
   alias MPP.Receipt
+  alias MPP.Test.TempoTxBuilder
 
   @moduletag :integration
 
@@ -99,7 +106,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     config = MPP.Plug.init(plug_opts)
 
-    {:ok, config: config, tx_hash: tx_hash, sender: sender_address, recipient: recipient_address}
+    {:ok, config: config, tx_hash: tx_hash, sender: sender_address, recipient: recipient_address, rpc_url: rpc_url}
   end
 
   describe "full 402 handshake" do
@@ -199,10 +206,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert body["type"] =~ "invalid-payload"
     end
 
-    test "rejects transaction type as not yet implemented", %{config: config} do
+    test "rejects malformed transaction credential", %{config: config} do
       body = submit_credential!(config, %{"type" => "transaction", "signature" => "0xdead"})
       assert body["type"] =~ "verification-failed"
-      assert body["detail"] =~ "not yet implemented"
+      assert body["detail"] =~ "Not a Tempo transaction"
     end
 
     test "error responses follow RFC 9457 Problem Details structure", %{config: config} do
@@ -213,6 +220,106 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert is_binary(body["title"])
       assert body["status"] == 402
       assert is_binary(body["detail"])
+    end
+  end
+
+  describe "transaction credential path" do
+    test "happy path: 402 → signed tx credential → server broadcasts → receipt", %{
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      # Build and sign a 0x76 Tempo Transaction with a matching TIP-20 transfer
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      # Step 1: Get a 402 challenge
+      challenge = request_challenge!(config)
+      assert challenge.method == "tempo"
+
+      # Step 2: Submit credential with signed transaction
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      auth_header = Headers.format_credential(credential)
+
+      # Step 3: Server deserializes, verifies call, broadcasts, checks receipt
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil, "Plug should pass through on valid transaction credential"
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      # Reference is the on-chain tx hash from broadcast (not the input hex)
+      assert is_binary(receipt.reference)
+      assert String.starts_with?(receipt.reference, "0x")
+      assert receipt.timestamp
+
+      # Verify Payment-Receipt header
+      assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
+      assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
+      assert parsed_receipt.reference == receipt.reference
+    end
+
+    test "rejects transaction with wrong recipient", %{
+      config: config,
+      rpc_url: rpc_url
+    } do
+      # Build tx transferring to a different address than the challenge expects
+      wrong_recipient = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: wrong_recipient,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "No matching transfer call"
+    end
+
+    test "rejects transaction with wrong amount", %{
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      # Build tx with a different amount than the challenge expects
+      wrong_amount = @transfer_amount + 1
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: wrong_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "No matching transfer call"
     end
   end
 
