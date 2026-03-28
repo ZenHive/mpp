@@ -8,6 +8,39 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Fix: Tempo Store Dedup — Per-Path Semantics and Error Handling
+
+**What was done:**
+- **[High] Fixed hash path burning hashes on transient failures.** The hash path (`type="hash"`) now uses check → verify on-chain → mark, matching mppx (Charge.ts:126-141). Previously, hashes were reserved before verification, so transient RPC failures permanently burned legitimate retries.
+- **[Medium] Fixed non-atomic fallback ignoring `put/2` errors.** The sequential `get` + `put` fallback in `reserve_hash_atomic` now propagates `{:error, reason}` from `put/2` instead of unconditionally returning `:ok`.
+- **[Medium] Fixed `safe_dedup_post_broadcast` not catching process exits.** Added `catch :exit` alongside `rescue` — dead Agent/GenServer processes now handled correctly, not just raised exceptions.
+- Removed unused `alias MPP.Tempo.Store` from test file
+- Added regression test: hash path allows retry after transient RPC failure
+- Added regression test: dead store process doesn't crash post-broadcast dedup
+
+**Key decisions:**
+- Hash and transaction paths intentionally use **different dedup semantics** matching their risk profiles: hash path marks only after success (burned hash = bad UX); transaction path reserves atomically before broadcast (duplicate broadcast = correctness/money problem). This matches mppx's two-path design.
+- `check_and_mark/2` remains `@optional_callbacks`, used only on the transaction path where atomic reservation matters for concurrent request safety
+
+#### Task 13f: Transaction Dedup Store
+**Completed** | [D:4/B:5/U:4 → Eff:1.13]
+
+**What was done:**
+- New `MPP.Tempo.Store` behaviour with `get/1`, `put/2`, and optional `check_and_mark/2` callbacks for pluggable dedup backends
+- Optional `"store"` key in `method_config` — when `nil` (default), library stays stateless; when set, enables within-challenge replay protection
+- Hash reservation happens before network I/O (receipt fetch / broadcast) to prevent concurrent replay attacks
+- Transaction path: reserves store key before broadcast; post-broadcast dedup catches malleable variants when on-chain hash differs from input
+- Post-broadcast store writes are best-effort with crash protection — payment already succeeded on-chain, so store failure doesn't fail the request
+- Integration test against Moderato testnet: submit same hash credential twice through full 402 flow, second rejected with "already used"
+- Agent-based `MPP.Test.TempoMemoryStore` in `test/support/` with atomic `check_and_mark/2` for test use
+
+**Key decisions:**
+- Store is optional (matching mpp-rs pattern) rather than defaulting to in-memory (mppx pattern) — library users manage their own state, more Elixir-idiomatic
+- No built-in store implementation in `lib/` — ETS/Redis/database stores are trivial to implement and app-specific
+- Raw hex string used as store key (no keccak256 pre-hash) — deterministic for identical signed transactions, avoids adding a hash dependency
+- Store key format `"mpp:charge:<lowercase_hash>"` matches mpp-rs convention
+- `check_and_mark/2` optional callback for atomic stores; sequential `get` + `put` fallback for simple stores
+
 #### Task 13g: Optimistic Broadcast Mode
 **Completed** | [D:3/B:4/U:3 → Eff:1.17]
 

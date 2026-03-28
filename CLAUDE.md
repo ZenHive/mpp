@@ -73,6 +73,7 @@ MPP.Method                 — Behaviour for pluggable payment methods (verify/2
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
 MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization and payment call matching (TODO: extract to onchain_tempo)
+MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)

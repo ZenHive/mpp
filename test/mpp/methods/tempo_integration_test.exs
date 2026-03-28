@@ -20,6 +20,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Headers
   alias MPP.Methods.Tempo
   alias MPP.Receipt
+  alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTxBuilder
 
   @moduletag :integration
@@ -148,6 +149,56 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert [receipt_header] = Plug.Conn.get_resp_header(conn_200, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference
+    end
+  end
+
+  describe "dedup store" do
+    test "hash credential replay rejected with store", %{
+      config: config,
+      tx_hash: tx_hash
+    } do
+      # Start an in-memory store and inject it into the config's method_config
+      start_supervised!(TempoMemoryStore)
+
+      [entry] = config.method_entries
+      updated_entry = %{entry | method_config: Map.put(entry.method_config, "store", TempoMemoryStore)}
+      config_with_store = %{config | method_entries: [updated_entry]}
+
+      # First request: 402 → credential → success
+      challenge1 = request_challenge!(config_with_store)
+
+      credential1 = %Credential{
+        challenge: challenge1,
+        payload: %{"type" => "hash", "hash" => tx_hash}
+      }
+
+      conn1 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential1))
+        |> MPP.Plug.call(config_with_store)
+
+      assert conn1.status == nil, "First request should pass through"
+      assert %Receipt{} = conn1.assigns[:mpp_receipt]
+
+      # Second request: same hash → 402 with "already used" error
+      challenge2 = request_challenge!(config_with_store)
+
+      credential2 = %Credential{
+        challenge: challenge2,
+        payload: %{"type" => "hash", "hash" => tx_hash}
+      }
+
+      conn2 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential2))
+        |> MPP.Plug.call(config_with_store)
+
+      assert conn2.status == 402
+      body = Jason.decode!(conn2.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "already used"
     end
   end
 

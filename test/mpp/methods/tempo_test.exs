@@ -7,6 +7,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
   alias MPP.Receipt
+  alias MPP.Test.TempoMemoryStore
 
   @rpc_url "https://rpc.moderato.tempo.xyz"
   @token_address "0x20C0000000000000000000000000000000000000"
@@ -675,6 +676,338 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Simulation request failed"
+    end
+
+    test "async broadcast network failure returns error", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_call" ->
+            # Simulation succeeds
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+          "eth_sendRawTransaction" ->
+            # Broadcast hits network error
+            Req.Test.transport_error(conn, :econnrefused)
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Broadcast request failed"
+    end
+
+    test "async broadcast unexpected response status returns error", %{charge: charge, tx_hex: tx_hex} do
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_call" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+          "eth_sendRawTransaction" ->
+            # Return 503 with no error/result fields
+            conn
+            |> Plug.Conn.put_status(503)
+            |> Req.Test.json(%{"jsonrpc" => "2.0", "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Unexpected broadcast response"
+    end
+  end
+
+  describe "verify/2 — dedup store" do
+    setup %{charge: charge} do
+      start_supervised!(TempoMemoryStore)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", TempoMemoryStore)
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "hash path rejects replay of already-used hash", %{charge: charge} do
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      # First call succeeds
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Second call with same hash is rejected
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "already used"
+    end
+
+    test "transaction path rejects replay of already-used signed tx", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # First call succeeds
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Second call with same signed tx is rejected before broadcast
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "already used"
+    end
+
+    test "hash path allows retry after transient RPC failure", %{charge: charge} do
+      # First attempt: RPC returns error (transient failure)
+      stub_receipt_response(%{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "timeout"}, "id" => 1})
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{}} = Tempo.verify(payload, charge)
+
+      # Hash should NOT be burned — store should have no entry
+      expected_key = "mpp:charge:" <> String.downcase(@tx_hash)
+      assert :not_found = TempoMemoryStore.get(expected_key)
+
+      # Second attempt: RPC succeeds — retry should work
+      stub_receipt(success_receipt())
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Now the hash IS marked
+      assert {:ok, _timestamp} = TempoMemoryStore.get(expected_key)
+    end
+
+    test "hash path records key in store after success", %{charge: charge} do
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      expected_key = "mpp:charge:" <> String.downcase(@tx_hash)
+      assert {:ok, _timestamp} = TempoMemoryStore.get(expected_key)
+    end
+
+    test "post-broadcast dedup records on-chain hash when it differs from input", %{charge: charge} do
+      # Stub broadcast to return a DIFFERENT tx hash than the input
+      different_on_chain_hash = "0x" <> String.duplicate("cd", 32)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        "eth_sendRawTransactionSync" = request["method"]
+        receipt = %{success_receipt() | "transactionHash" => different_on_chain_hash}
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+      end)
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Both the input hex and the on-chain hash should be recorded
+      input_key = "mpp:charge:" <> String.downcase(tx_hex)
+      onchain_key = "mpp:charge:" <> String.downcase(different_on_chain_hash)
+      assert {:ok, _} = TempoMemoryStore.get(input_key)
+      assert {:ok, _} = TempoMemoryStore.get(onchain_key)
+    end
+
+    test "store get error surfaces as verification_failed", %{charge: charge} do
+      # Override store with a failing module
+      defmodule FailingStore do
+        @moduledoc false
+        @behaviour Store
+
+        def get(_key), do: {:error, :connection_refused}
+        def put(_key, _value), do: :ok
+      end
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FailingStore)
+      }
+
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Dedup store error"
+    end
+
+    test "concurrent requests with same signed tx — only one succeeds", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # Fire two concurrent verify calls with identical signed tx
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn -> Tempo.verify(payload, charge) end)
+        end
+
+      results = Task.await_many(tasks)
+
+      ok_count = Enum.count(results, &match?({:ok, _}, &1))
+      error_count = Enum.count(results, &match?({:error, _}, &1))
+
+      assert ok_count == 1, "Expected exactly 1 success, got #{ok_count}: #{inspect(results)}"
+      assert error_count == 1, "Expected exactly 1 rejection, got #{error_count}: #{inspect(results)}"
+
+      # The rejected one should cite "already used"
+      [{:error, %Errors{} = error}] =
+        Enum.filter(results, &match?({:error, _}, &1))
+
+      assert error.detail =~ "already used"
+    end
+
+    test "post-broadcast store.put crash does not fail the request", %{charge: charge} do
+      # Store that succeeds on check_and_mark but raises on put (post-broadcast path)
+      defmodule CrashingPutStore do
+        @moduledoc false
+        @behaviour Store
+
+        use Agent
+
+        def start_link(_opts), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+        def get(key) do
+          case Agent.get(__MODULE__, &Map.get(&1, key)) do
+            nil -> :not_found
+            value -> {:ok, value}
+          end
+        end
+
+        def put(_key, _value), do: raise("store crashed!")
+
+        def check_and_mark(key, value) do
+          Agent.get_and_update(__MODULE__, fn state ->
+            if Map.has_key?(state, key) do
+              {{:error, :already_exists}, state}
+            else
+              {:ok, Map.put(state, key, value)}
+            end
+          end)
+        end
+      end
+
+      start_supervised!(CrashingPutStore)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", CrashingPutStore)
+      }
+
+      # Broadcast returns a DIFFERENT hash to trigger safe_dedup_post_broadcast
+      different_hash = "0x" <> String.duplicate("ef", 32)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        "eth_sendRawTransactionSync" = request["method"]
+        receipt = %{success_receipt() | "transactionHash" => different_hash}
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+      end)
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # Should succeed despite post-broadcast store.put raising
+      assert {:ok, %Receipt{reference: ^different_hash}} = Tempo.verify(payload, charge)
+    end
+
+    test "post-broadcast dead store process does not fail the request", %{charge: charge} do
+      # Store with a real Agent for check_and_mark, but we kill it before post-broadcast
+      defmodule DeadProcessStore do
+        @moduledoc false
+        @behaviour MPP.Tempo.Store
+
+        use Agent
+
+        def start_link(_opts), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+        def get(key) do
+          case Agent.get(__MODULE__, &Map.get(&1, key)) do
+            nil -> :not_found
+            value -> {:ok, value}
+          end
+        end
+
+        def put(_key, _value), do: Agent.update(__MODULE__, & &1)
+
+        def check_and_mark(key, value) do
+          Agent.get_and_update(__MODULE__, fn state ->
+            if Map.has_key?(state, key) do
+              {{:error, :already_exists}, state}
+            else
+              {:ok, Map.put(state, key, value)}
+            end
+          end)
+        end
+      end
+
+      start_supervised!(DeadProcessStore)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", DeadProcessStore)
+      }
+
+      # Broadcast returns a DIFFERENT hash to trigger safe_dedup_post_broadcast
+      different_hash = "0x" <> String.duplicate("de", 32)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        "eth_sendRawTransactionSync" = request["method"]
+
+        # Kill the store process AFTER broadcast succeeds but before post-broadcast dedup runs.
+        # We can't time it precisely, so we kill it here — the post-broadcast put will hit a dead process.
+        Agent.stop(DeadProcessStore)
+
+        receipt = %{success_receipt() | "transactionHash" => different_hash}
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+      end)
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # Should succeed despite post-broadcast store process being dead (catch :exit)
+      assert {:ok, %Receipt{reference: ^different_hash}} = Tempo.verify(payload, charge)
+    end
+
+    test "validate_config! rejects invalid store module" do
+      assert_raise ArgumentError, ~r/must be a module implementing/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => :not_a_real_module})
+      end
+
+      assert_raise ArgumentError, ~r/must be a module implementing/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => "not_a_module"})
+      end
     end
   end
 

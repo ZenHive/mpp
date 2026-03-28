@@ -34,6 +34,9 @@ defmodule MPP.Methods.Tempo do
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
       then broadcasts async and returns an optimistic receipt. Default `true`.
+    * `"store"` — (optional) module implementing `MPP.Tempo.Store` behaviour for
+      transaction dedup. Prevents within-challenge replay by tracking used tx hashes.
+      When `nil` (default), no dedup is performed — library stays stateless.
 
   ## Credential Payload
 
@@ -90,6 +93,7 @@ defmodule MPP.Methods.Tempo do
     end
 
     validate_memo!(config["memo"])
+    validate_store!(config["store"])
     check_onchain_available!()
 
     :ok
@@ -115,12 +119,15 @@ defmodule MPP.Methods.Tempo do
   def verify(%{"type" => "hash"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
     memo = config["memo"]
+    store = config["store"]
 
     with {:ok, hash} <- extract_hash(payload),
+         :ok <- check_hash_unused(store, hash),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
          :ok <- check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
+         :ok <- mark_hash_used(store, hash) do
       {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
     end
   end
@@ -128,6 +135,7 @@ defmodule MPP.Methods.Tempo do
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
     memo = config["memo"]
+    store = config["store"]
     expected_chain_id = config["chain_id"] || @moderato_chain_id
     wait? = config["wait_for_confirmation"] != false
 
@@ -140,8 +148,12 @@ defmodule MPP.Methods.Tempo do
              recipient: charge.recipient,
              memo: memo
            ),
+         :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
+      # Post-broadcast: record on-chain hash if it differs from input (malleable variants).
+      # Best-effort — payment already succeeded, so store failures don't fail the request.
+      safe_dedup_post_broadcast(store, tx_hash, tx.raw)
       {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
     else
       {:error, %Errors{} = error} -> {:error, error}
@@ -185,6 +197,122 @@ defmodule MPP.Methods.Tempo do
   end
 
   # --- Private helpers ---
+
+  # Validates that the store config is a module implementing the Store behaviour.
+  defp validate_store!(nil), do: :ok
+
+  defp validate_store!(store) do
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo :store must be a module implementing MPP.Tempo.Store (get/1, put/2)"
+    end
+
+    :ok
+  end
+
+  # --- Dedup store helpers ---
+  # No-op when store is nil (library stays stateless by default).
+  #
+  # Hash path (type="hash"): check → verify on-chain → mark. The hash is only
+  # marked after successful verification so transient RPC failures don't burn
+  # legitimate retries. Matches mppx (Charge.ts:126-141).
+  #
+  # Transaction path (type="transaction"): atomic reserve → verify → broadcast.
+  # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
+  # the same signed tx. Matches mppx (Charge.ts:144-146).
+
+  # TODO(Task 23): When extracting to onchain_tempo, consider switching to keccak256(raw_hex)
+  # for fixed-length keys (matches mppx/mpp-rs convention). Currently using raw hex to avoid
+  # adding a hash dependency.
+  @store_key_prefix "mpp:charge:"
+
+  # Checks if a hash has already been used (read-only). Used by hash path before verification.
+  defp check_hash_unused(nil, _hash), do: :ok
+
+  defp check_hash_unused(store, hash) do
+    key = store_key(hash)
+
+    case store.get(key) do
+      :not_found -> :ok
+      {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+    end
+  end
+
+  # Marks a hash as used after successful verification. Used by hash path after on-chain check.
+  defp mark_hash_used(nil, _hash), do: :ok
+
+  defp mark_hash_used(store, hash) do
+    key = store_key(hash)
+    ts = System.system_time(:millisecond)
+
+    case store.put(key, ts) do
+      :ok -> :ok
+      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+    end
+  end
+
+  # Atomically checks and reserves a hash before broadcast. Used by transaction path.
+  # Uses check_and_mark/2 when available (atomic); falls back to get + put.
+  defp reserve_hash_atomic(nil, _hash), do: :ok
+
+  defp reserve_hash_atomic(store, hash) do
+    key = store_key(hash)
+    ts = System.system_time(:millisecond)
+
+    if function_exported?(store, :check_and_mark, 2) do
+      case store.check_and_mark(key, ts) do
+        :ok -> :ok
+        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      end
+    else
+      reserve_hash_sequential(store, key, ts)
+    end
+  end
+
+  # Non-atomic fallback: check then mark as separate steps. Small race window.
+  defp reserve_hash_sequential(store, key, ts) do
+    case store.get(key) do
+      :not_found ->
+        case store.put(key, ts) do
+          :ok -> :ok
+          {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+        end
+
+      {:ok, _} ->
+        {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+
+      {:error, reason} ->
+        {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+    end
+  end
+
+  # Post-broadcast dedup: if the on-chain tx hash differs from the input hash
+  # (malleable variants), record the on-chain hash too.
+  # Payment already succeeded on-chain at this point — a store crash (e.g. dead
+  # Agent process, network partition to Redis) must not fail the HTTP response.
+  # The pre-broadcast reserve_hash_atomic is the critical gate; this is
+  # supplementary protection against hash malleability.
+  # Uses both rescue (exceptions) and catch (process exits from dead Agents/GenServers).
+  # TODO: Add telemetry/logging for post-broadcast store failures so operators
+  # can detect and investigate store health issues.
+  defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
+
+  defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
+    if String.downcase(tx_hash) != String.downcase(input_hash) do
+      key = store_key(tx_hash)
+      store.put(key, System.system_time(:millisecond))
+    end
+
+    :ok
+  rescue
+    _exception -> :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
   # Validates memo format: exactly 32 bytes of hex (64 chars), optional 0x prefix.
   defp validate_memo!(nil), do: :ok

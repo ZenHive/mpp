@@ -160,6 +160,32 @@ defmodule MPP.HeadersTest do
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", unknown="x"))
     end
 
+    test "rejects scheme-only input with no params" do
+      assert {:error, :invalid_scheme} = Headers.parse_challenge("Payment")
+    end
+
+    test "rejects param without equals sign" do
+      assert {:error, :invalid_auth_params} =
+               Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", opaque))
+    end
+
+    test "rejects unterminated quoted string" do
+      assert {:error, :invalid_auth_params} =
+               Headers.parse_challenge(~s(Payment id="unterminated))
+    end
+
+    test "handles generic backslash escape in quoted string" do
+      # \x should be parsed as literal x (generic escape)
+      header = ~s(Payment id="a\\x", realm="b", method="c", intent="d", request="e")
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.id == "ax"
+    end
+
+    test "rejects bare newline in quoted string" do
+      assert {:error, :invalid_auth_params} =
+               Headers.parse_challenge(~s(Payment id="a\nb", realm="x", method="y", intent="z", request="w"))
+    end
+
     test "rejects CRLF in quoted values (header injection)" do
       assert {:error, :invalid_auth_params} =
                Headers.parse_challenge(

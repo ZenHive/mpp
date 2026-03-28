@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13c/13e/13g/13h complete (skeleton, hash verification, transaction verification, optimistic broadcast, integration tests for both paths). Code review fixed eth_call simulation params (raw tx → structured call fields) and added optimistic-mode integration tests against Moderato. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13c/13e/13f/13g/13h complete (skeleton, hash verification, transaction verification, dedup store, optimistic broadcast, integration tests). Store dedup fixed: per-path semantics matching mppx (hash: check→verify→mark, transaction: atomic reserve→broadcast). Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -35,7 +35,7 @@
 | Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
 | Task 13d: Tempo fee payer | ⬜ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
 | Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
-| Task 13f: Tx dedup store | ⬜ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
+| Task 13f: Tx dedup store | ✅ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
 | Task 13g: Optimistic broadcast | ✅ | [D:3/B:4/U:3 → Eff:1.17] | waitForConfirmation: false mode |
 | Task 13h: Tx integration test | ✅ | [D:4/B:5/U:5 → Eff:1.25] | Testnet test for type="transaction" path |
 | Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
@@ -128,11 +128,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-13b-hash-credential-verification) for detai
 
 See [CHANGELOG.md](CHANGELOG.md#task-13c-transaction-credential-verification) for details.
 
-### Task 13f: Transaction Dedup Store
+### Task 13f: Transaction Dedup Store ✅
 
-[D:4/B:5/U:4 → Eff:1.13] 📋
-
-Add optional replay protection for `type="transaction"` credentials. Pre-broadcast: hash serialized tx with keccak256, check store. Post-broadcast: store on-chain tx hash (catches malleable variants). Provide a `Store` behaviour consumers implement — the library stays stateless by default. The mppx TS reference implements this; mpp-rs relies on nonce consumption instead. Our HMAC-bound challenges prevent cross-request reuse, but within a single challenge window a client could resubmit the same signed tx.
+See [CHANGELOG.md](CHANGELOG.md#task-13f-transaction-dedup-store) for details.
 
 ### Task 13g: Optimistic Broadcast Mode ✅
 
