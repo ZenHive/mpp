@@ -2,7 +2,8 @@
 # (merge with test/support/tempo_tx_builder.ex for full deserialize + build + sign)
 defmodule MPP.Tempo.Transaction do
   @moduledoc """
-  Deserializes and inspects Tempo Transactions (EIP-2718 type 0x76).
+  Tempo Transaction (EIP-2718 type 0x76) — RLP deserialization, payment call
+  matching, and fee payer co-signing (0x78 domain).
 
   A Tempo Transaction is an RLP-encoded envelope prefixed with `0x76`:
 
@@ -13,9 +14,10 @@ defmodule MPP.Tempo.Transaction do
 
   Each `call` is `rlp([to, value, input])`.
 
-  This module extracts only the fields needed for payment verification:
-  `chain_id` and `calls`. The full serialized hex is preserved as `raw`
-  for broadcast passthrough.
+  This module extracts the fields needed for payment verification (`chain_id`,
+  `calls`) and preserves the full serialized hex as `raw` for broadcast
+  passthrough. When fee payer mode is enabled, it co-signs the transaction
+  with a server-side key using the 0x78 domain separator.
 
   ## Dependencies
 
@@ -23,13 +25,18 @@ defmodule MPP.Tempo.Transaction do
   decoding. No additional dependencies required.
   """
 
-  @enforce_keys [:chain_id, :calls, :raw]
-  defstruct [:chain_id, :calls, :raw]
+  alias Curvy.Signature, as: CurvySig
+  alias Signet.Recover
+  alias Signet.Signer.Curvy
 
-  @typedoc "A parsed Tempo Transaction with only verification-relevant fields."
+  @enforce_keys [:chain_id, :calls, :raw]
+  defstruct [:chain_id, :calls, :fields, :raw]
+
+  @typedoc "A parsed Tempo Transaction with verification-relevant fields."
   @type t :: %__MODULE__{
           chain_id: non_neg_integer(),
           calls: [call()],
+          fields: [term()],
           raw: String.t()
         }
 
@@ -47,6 +54,25 @@ defmodule MPP.Tempo.Transaction do
   @transfer_selector <<0xA9, 0x05, 0x9C, 0xBB>>
   # transferWithMemo(address,uint256,bytes32)
   @transfer_with_memo_selector <<0x95, 0x77, 0x7D, 0x59>>
+
+  # approve(address,uint256)
+  @approve_selector <<0x09, 0x5E, 0xA7, 0xB3>>
+  # swapExactAmountOut(address,address,uint128,uint128)
+  @swap_exact_amount_out_selector <<0xF0, 0x12, 0x2B, 0x75>>
+
+  # Tempo stablecoin DEX contract address (canonical, from viem/tempo).
+  @stablecoin_dex_address <<0xDE, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00>>
+
+  # Allowed call patterns for fee-payer sponsored transactions.
+  # Each inner list is an ordered list of function selectors that must match exactly.
+  # Matches mppx callScopes (fee-payer.ts:21-26).
+  @call_scopes [
+    [@transfer_selector],
+    [@transfer_with_memo_selector],
+    [@approve_selector, @swap_exact_amount_out_selector, @transfer_selector],
+    [@approve_selector, @swap_exact_amount_out_selector, @transfer_with_memo_selector]
+  ]
 
   # Calldata sizes used in pattern match guards (4-byte selector + ABI-encoded args).
   # transfer: 4 + 32 (address) + 32 (uint256) = 68 → 64 bytes after selector
@@ -74,7 +100,7 @@ defmodule MPP.Tempo.Transaction do
          {:ok, fields} <- rlp_decode(rlp_body),
          {:ok, chain_id} <- extract_chain_id(fields),
          {:ok, calls} <- extract_calls(fields) do
-      {:ok, %__MODULE__{chain_id: chain_id, calls: calls, raw: hex}}
+      {:ok, %__MODULE__{chain_id: chain_id, calls: calls, fields: fields, raw: hex}}
     end
   end
 
@@ -126,6 +152,228 @@ defmodule MPP.Tempo.Transaction do
     end
   end
 
+  @doc """
+  Validate that a transaction's calls match an allowed fee-payer pattern.
+
+  Fee-payer sponsored transactions are restricted to specific call sequences
+  to prevent clients from bundling rogue calls that the server would pay gas for.
+
+  Allowed patterns (matching mppx `callScopes`):
+    * `[transfer]`
+    * `[transferWithMemo]`
+    * `[approve, swapExactAmountOut, transfer]`
+    * `[approve, swapExactAmountOut, transferWithMemo]`
+
+  When `approve` is present, the spender must be the stablecoin DEX.
+  When `swapExactAmountOut` is present, the call target must be the stablecoin DEX.
+
+  Returns `:ok` or `{:error, reason}`.
+  """
+  @spec validate_call_scope(t()) :: :ok | {:error, String.t()}
+  def validate_call_scope(%__MODULE__{calls: calls}) do
+    selectors = Enum.map(calls, &extract_selector/1)
+
+    if Enum.any?(@call_scopes, &(&1 == selectors)) do
+      with :ok <- validate_approve_spender(calls, selectors) do
+        validate_swap_target(calls, selectors)
+      end
+    else
+      {:error, "disallowed call pattern in fee-payer transaction"}
+    end
+  end
+
+  # Extracts the 4-byte function selector from a call's input.
+  defp extract_selector(%{input: <<selector::binary-size(4), _::binary>>}), do: selector
+  defp extract_selector(%{input: _}), do: <<>>
+
+  # Validates that the approve spender is the stablecoin DEX.
+  # ABI layout: approve(address,uint256) → 4 + 32(address) + 32(uint256)
+  # The address is right-padded in the first 32-byte word: 12 zero bytes + 20 address bytes.
+  defp validate_approve_spender(calls, selectors) do
+    case Enum.find_index(selectors, &(&1 == @approve_selector)) do
+      nil ->
+        :ok
+
+      idx ->
+        call = Enum.at(calls, idx)
+        validate_approve_input(call.input)
+    end
+  end
+
+  # Extracts the spender address from approve calldata and validates it's the DEX.
+  defp validate_approve_input(<<_selector::binary-size(4), _pad::binary-size(12), spender::binary-size(20), _::binary>>) do
+    if addresses_equal?(spender, @stablecoin_dex_address), do: :ok, else: {:error, "approve spender is not the DEX"}
+  end
+
+  defp validate_approve_input(_), do: {:error, "malformed approve calldata"}
+
+  # Validates that the swapExactAmountOut call targets the stablecoin DEX.
+  defp validate_swap_target(calls, selectors) do
+    case Enum.find_index(selectors, &(&1 == @swap_exact_amount_out_selector)) do
+      nil ->
+        :ok
+
+      idx ->
+        call = Enum.at(calls, idx)
+
+        if addresses_equal?(call.to, @stablecoin_dex_address) do
+          :ok
+        else
+          {:error, "buy target is not the DEX"}
+        end
+    end
+  end
+
+  # --- Fee payer support ---
+
+  # 0x76 RLP field indices.
+  @fee_token_index 10
+  @fee_payer_sig_index 11
+
+  # Fee payer signing domain prefix (distinct from 0x76 sender domain).
+  @fee_payer_domain 0x78
+
+  @doc """
+  Check if the transaction has a fee payer signature placeholder (`0x00`).
+
+  Per spec, clients set `fee_payer_signature` to `0x00` when requesting
+  server-side fee sponsorship.
+  """
+  @spec has_fee_payer_placeholder?(t()) :: boolean()
+  def has_fee_payer_placeholder?(%__MODULE__{fields: fields}) do
+    fee_payer_sig = Enum.at(fields, @fee_payer_sig_index)
+    fee_payer_sig == <<0x00>>
+  end
+
+  @doc """
+  Check if the transaction's `fee_token` field is empty (RLP null).
+
+  Clients leave `fee_token` empty when `feePayer: true`, allowing the
+  server to choose the fee payment token.
+  """
+  @spec fee_token_empty?(t()) :: boolean()
+  def fee_token_empty?(%__MODULE__{fields: fields}) do
+    fee_token = Enum.at(fields, @fee_token_index)
+    fee_token == <<>> or fee_token == []
+  end
+
+  @doc """
+  Co-sign a client's transaction as fee payer and return the updated hex.
+
+  Takes the client-signed 0x76 transaction, adds the server's fee payer
+  signature (domain 0x78), injects the fee token, and returns a new
+  0x76 hex string ready for broadcast.
+
+  ## Steps
+
+  1. Recover the sender address from the client's `sender_signature`
+  2. Build the fee payer signing preimage (`0x78 || rlp([...])`)
+  3. Sign with the fee payer's private key
+  4. Reconstruct a complete 0x76 transaction with both signatures
+
+  ## Parameters
+
+    * `tx` — deserialized transaction with fee payer placeholder
+    * `fee_payer_key` — 32-byte binary private key for fee sponsorship
+    * `fee_token` — 20-byte binary TIP-20 token address for fee payment
+
+  ## Returns
+
+    * `{:ok, updated_tx}` — transaction with new `raw` hex for broadcast
+    * `{:error, reason}` — on signing or recovery failure
+  """
+  @dialyzer {:nowarn_function, cosign_fee_payer: 3}
+  @spec cosign_fee_payer(t(), binary(), binary()) :: {:ok, t()} | {:error, String.t()}
+  def cosign_fee_payer(%__MODULE__{fields: fields} = tx, fee_payer_key, fee_token)
+      when is_binary(fee_payer_key) and byte_size(fee_payer_key) == 32 and is_binary(fee_token) and
+             byte_size(fee_token) == 20 do
+    # The sender_signature is the last element in the fields list.
+    sender_sig_raw = List.last(fields)
+    # Fields before sender_signature (the "base" fields that were signed by client).
+    {base_fields, has_key_auth} = split_base_fields(fields)
+
+    # 1. Recover sender address from client's signature.
+    # The client signed: keccak256(0x76 || rlp(base_fields))
+    # where base_fields excludes sender_signature. When fee_payer_signature
+    # is a placeholder (0x00), the signature_hash also includes fee_payer_signature
+    # but EXCLUDES fee_token (per Tempo spec — client doesn't commit to fee token).
+    client_signing_payload = <<@tempo_tx_type>> <> rlp_encode(base_fields)
+
+    with {:ok, sender_address} <- recover_sender(client_signing_payload, sender_sig_raw) do
+      # 2. Build fee payer signing preimage: 0x78 || rlp([fields + fee_token + sender - signatures])
+      # The fee payer preimage replaces:
+      #   - fee_token (index 10): server's chosen token (was empty)
+      #   - fee_payer_signature (index 11): replaced by sender_address
+      # And excludes: sender_signature (last field)
+      # key_authorization is included if present.
+      fp_preimage_fields = build_fee_payer_preimage_fields(base_fields, fee_token, sender_address, has_key_auth)
+      fp_signing_payload = <<@fee_payer_domain>> <> rlp_encode(fp_preimage_fields)
+
+      # 3. Sign with fee payer's private key.
+      with {:ok, fp_sig} <- Curvy.sign(fp_signing_payload, fee_payer_key),
+           {:ok, fp_address} <- Curvy.get_address(fee_payer_key),
+           {:ok, fp_recid} <- Recover.find_recid(fp_signing_payload, fp_sig, fp_address) do
+        # fee_payer_signature is RLP-encoded as [yParity, r, s] tuple (not raw bytes).
+        # This matches ox/tempo's Signature.toTuple format used in TxEnvelopeTempo.serialize.
+        # yParity: 0x01 for odd, <<>> (RLP empty) for even. r/s: big-endian, leading zeros stripped.
+        fp_sig_tuple = [
+          if(fp_recid == 1, do: <<1>>, else: <<>>),
+          :binary.encode_unsigned(fp_sig.r),
+          :binary.encode_unsigned(fp_sig.s)
+        ]
+
+        # 4. Reconstruct 0x76 transaction with fee_token + fee_payer_signature + original sender_signature.
+        signed_fields =
+          base_fields
+          |> List.replace_at(@fee_token_index, fee_token)
+          |> List.replace_at(@fee_payer_sig_index, fp_sig_tuple)
+          |> Kernel.++([sender_sig_raw])
+
+        signed_raw = <<@tempo_tx_type>> <> rlp_encode(signed_fields)
+        new_hex = "0x" <> Base.encode16(signed_raw, case: :lower)
+
+        {:ok, %{tx | raw: new_hex, fields: signed_fields}}
+      end
+    end
+  end
+
+  # Splits the fields list into base fields (everything before sender_signature)
+  # and a flag indicating if key_authorization is present.
+  # 0x76 layout: 13 base fields + sender_sig (no key_auth) or 14 base fields + sender_sig (with key_auth).
+  # Standard field count: chain_id(0) through aa_authorization_list(12) = 13 fields.
+  # With key_authorization: 14 fields before sender_sig.
+  @min_field_count_without_key_auth 14
+  defp split_base_fields(fields) do
+    total = length(fields)
+    # Last element is always sender_signature.
+    base = Enum.take(fields, total - 1)
+    has_key_auth = total > @min_field_count_without_key_auth
+    {base, has_key_auth}
+  end
+
+  # Builds the RLP field list for the fee payer signing preimage (0x78 domain).
+  # Layout: [chain_id..valid_after, fee_token, sender_address, aa_auth_list, key_auth?]
+  # Replaces fee_token (index 10) with server's token and fee_payer_sig (index 11) with sender_address.
+  defp build_fee_payer_preimage_fields(base_fields, fee_token, sender_address, _has_key_auth) do
+    base_fields
+    |> List.replace_at(@fee_token_index, fee_token)
+    |> List.replace_at(@fee_payer_sig_index, sender_address)
+  end
+
+  # Recovers the sender's 20-byte Ethereum address from the signing payload and raw signature bytes.
+  # Signet.Recover is a transitive dep via onchain — suppress dialyzer unknown_function warning.
+  @dialyzer {:nowarn_function, recover_sender: 2}
+  defp recover_sender(signing_payload, <<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>) do
+    sig = %CurvySig{crv: :secp256k1, r: r, s: s, recid: v}
+    {:ok, Recover.recover_eth(signing_payload, sig)}
+  rescue
+    e -> {:error, "Failed to recover sender: #{Exception.message(e)}"}
+  end
+
+  defp recover_sender(_signing_payload, _sig_bytes) do
+    {:error, "Invalid sender signature format: expected 65 bytes (r, s, v)"}
+  end
+
   # --- Private: hex decoding ---
 
   defp decode_hex("0x" <> hex), do: decode_hex_string(hex)
@@ -152,12 +400,15 @@ defmodule MPP.Tempo.Transaction do
 
   # ExRLP is a transitive dep (signet → onchain). Dialyzer can't resolve its
   # default-arg arity — suppress the false positive.
-  @dialyzer {:nowarn_function, rlp_decode: 1}
+  @dialyzer {:nowarn_function, [rlp_decode: 1, rlp_encode: 1]}
   defp rlp_decode(binary) do
     {:ok, ExRLP.decode(binary)}
   rescue
     _ -> {:error, "Failed to RLP-decode transaction"}
   end
+
+  # ExRLP wrapper for encoding — same dialyzer suppression as rlp_decode.
+  defp rlp_encode(data), do: ExRLP.encode(data)
 
   # --- Private: field extraction ---
 

@@ -8,6 +8,56 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### TxEnvelopeTempo Cross-Validation via QuickBEAM + esbuild
+
+**What was done:**
+- Runtime cross-validation of our Elixir 0x76 RLP encoding against ox/tempo's TypeScript `TxEnvelopeTempo.deserialize`/`serialize` via QuickBEAM
+- New `MPP.Test.OxTempoBundle` helper: bundles ox/tempo into a QuickBEAM-loadable IIFE using esbuild, with caching to `_build/test/`
+- Entry point at `test/support/ox_tempo_entry.mjs` — exports only `deserialize`, `serialize`, `serializedType`, `feePayerMagic`
+- Six new cross-validation tests: Elixir->JS unsigned transfer, fee payer placeholder, JS->Elixir serialize, full round-trip, multi-call, protocol constants
+
+**Key decisions:**
+- **esbuild over OXC bundler** — OXC's bundler mixes ESM and CJS resolution for `@noble/*` dependencies, producing `let`/`const` redefinitions and `require()` calls that QuickJS rejects. esbuild respects ESM export conditions throughout, producing a clean ~154KB IIFE.
+- Bundle cached to `_build/test/ox_tempo_bundle.js` — rebuilt only when entry point or ox `package.json` changes
+- `npx esbuild` used at test time (not a dev dependency) — keeps the dependency footprint minimal
+
+#### Security Fix: Fee-Payer Call Scope Validation
+
+**What was done:**
+- **[Critical] Added `validate_call_scope/1` to `MPP.Tempo.Transaction`.** The fee-payer co-signing path previously checked for a valid payment call but co-signed and broadcast the entire transaction — including any rogue extra calls the client may have bundled. The server was sponsoring gas for all calls.
+- New selectors: `@approve_selector`, `@swap_exact_amount_out_selector`
+- New constant: `@stablecoin_dex_address` (canonical Tempo DEX address from viem/tempo)
+- `@call_scopes` whitelist of 4 allowed ordered selector patterns, matching mppx `callScopes` (fee-payer.ts:21-26)
+- Validation checks: selector pattern match, approve spender = DEX, swap target = DEX
+- Wired into `verify/2` pipeline between `find_payment_call` and `maybe_cosign_fee_payer` — fires only when `fee_payer: true`
+- `TempoTxBuilder.build_fee_payer_multicall/1` for building multi-call test transactions
+- QuickBEAM cross-validation test against viem/tempo canonical source (tagged `:cross_validation`)
+- Integration tests for fee-payer co-signing path against Moderato testnet
+
+**Key decisions:**
+- Error messages match TS reference exactly (lowercase): "disallowed call pattern in fee-payer transaction", "approve spender is not the DEX", "buy target is not the DEX"
+- Cross-validation test loads viem/tempo ABIs via QuickBEAM and verifies selectors via keccak256 of canonical function signatures — catches drift if Tempo protocol evolves
+- `swapExactAmountOut` actual signature is `(address,address,uint128,uint128)` (4 params, uint128 not uint256) — discovered during cross-validation
+
+#### Task 13d: Fee Payer Support
+**Completed** | [D:7/B:4/U:3 → Eff:0.5]
+
+**What was done:**
+- Server-side fee sponsorship for `feePayer: true` — server co-signs client transactions with domain `0x78` to pay transaction fees on behalf of the client
+- Extended `MPP.Tempo.Transaction` struct with `fields` list preserving all RLP elements for reconstruction after co-signing
+- New `cosign_fee_payer/3` function: recovers sender from client's signature, builds 0x78 domain signing preimage, signs with fee payer's private key, reconstructs complete 0x76 transaction with both signatures
+- New predicates: `has_fee_payer_placeholder?/1`, `fee_token_empty?/1`
+- `validate_config!/1` enforces `fee_payer_private_key` and `fee_token` when `fee_payer: true`
+- `type="hash"` rejected when `feePayer: true` (per spec §Fee Payment: server cannot modify client-broadcast transactions)
+- `TempoTxBuilder.build_fee_payer_transfer/1` for building test transactions with fee payer placeholder
+
+**Key decisions:**
+- Follows mpp-rs inline co-signing approach (not mppx's external relay) — self-contained, no external service dependency
+- 0x78 signing domain for fee payer preimage includes `sender_address` (recovered from client sig) and `fee_token` (server's choice), replaces `fee_payer_signature` field position
+- `fields` stored as raw RLP-decoded list — avoids re-encoding issues by preserving exact binary representations for untouched fields
+- Config-based fee token (`"fee_token"` required in method_config) rather than auto-discovery from chain defaults
+- Co-signing happens after payment call validation but before dedup store reservation — ensures only valid transactions get co-signed
+
 #### Fix: Tempo Store Dedup — Per-Path Semantics and Error Handling
 
 **What was done:**

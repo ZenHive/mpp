@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — Tasks 13a/13b/13c/13e/13f/13g/13h complete (skeleton, hash verification, transaction verification, dedup store, optimistic broadcast, integration tests). Store dedup fixed: per-path semantics matching mppx (hash: check→verify→mark, transaction: atomic reserve→broadcast). Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**Phase 4: Tempo Payment Method** — All subtasks complete (13a-13h + 13d fee payer + fee-payer call scope security fix). Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -33,7 +33,7 @@
 | Task 13a: Tempo skeleton | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Method module + challenge details |
 | Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
 | Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
-| Task 13d: Tempo fee payer | ⬜ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
+| Task 13d: Tempo fee payer | ✅ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
 | Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
 | Task 13f: Tx dedup store | ✅ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
 | Task 13g: Optimistic broadcast | ✅ | [D:3/B:4/U:3 → Eff:1.17] | waitForConfirmation: false mode |
@@ -140,11 +140,9 @@ See [CHANGELOG.md](CHANGELOG.md#task-13g-optimistic-broadcast-mode) for details.
 
 See [CHANGELOG.md](CHANGELOG.md#task-13h-transaction-path-integration-test) for details.
 
-### Task 13d: Fee Payer Support
+### Task 13d: Fee Payer Support ✅
 
-[D:7/B:4/U:3 → Eff:0.5] ⚠️
-
-Implement server-side fee sponsorship for `feePayer: true`. Accept `fee_payer_private_key` and `fee_token` in method_config. Extract client-signed transaction, add server's fee payer signature (domain 0x78), construct dual-signed transaction, broadcast and verify. Reference: `refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md` §Fee Payment for spec, `refs/mppx/src/tempo/server/` for dual-signature construction. Depends on Task 13c. Defer until demand exists.
+See [CHANGELOG.md](CHANGELOG.md#task-13d-fee-payer-support) for details.
 
 ### Task 13e: Tempo Integration Tests ✅
 

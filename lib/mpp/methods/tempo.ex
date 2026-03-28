@@ -29,7 +29,13 @@ defmodule MPP.Methods.Tempo do
 
     * `"rpc_url"` — (required) Tempo RPC endpoint URL
     * `"chain_id"` — (optional) network chain ID, defaults to `42431` (Moderato testnet)
-    * `"fee_payer"` — (optional) enable server-side fee sponsorship, defaults to `false`
+    * `"fee_payer"` — (optional) enable server-side fee sponsorship, defaults to `false`.
+      When `true`, the server co-signs client transactions with domain `0x78` to pay
+      transaction fees. Requires `"fee_payer_private_key"` and `"fee_token"`.
+    * `"fee_payer_private_key"` — (required when `fee_payer: true`) hex-encoded 32-byte
+      secp256k1 private key for the fee payer account
+    * `"fee_token"` — (required when `fee_payer: true`) hex address of a USD-denominated
+      TIP-20 token to use for fee payment (e.g., pathUSD)
     * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
@@ -57,10 +63,12 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Receipt
-  # onchain is optional — suppress unknown function warnings for its APIs.
-  # Runtime availability is enforced by validate_config!/1 at Plug init time.
   alias MPP.Tempo.Transaction
 
+  require Logger
+
+  # onchain is optional — suppress unknown function warnings for its APIs.
+  # Runtime availability is enforced by validate_config!/1 at Plug init time.
   @dialyzer {:nowarn_function, [find_matching_transfer: 3, parse_transfer_with_memo_logs: 1]}
 
   @moderato_chain_id 42_431
@@ -94,6 +102,7 @@ defmodule MPP.Methods.Tempo do
 
     validate_memo!(config["memo"])
     validate_store!(config["store"])
+    validate_fee_payer!(config)
     check_onchain_available!()
 
     :ok
@@ -118,17 +127,22 @@ defmodule MPP.Methods.Tempo do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "hash"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    memo = config["memo"]
-    store = config["store"]
 
-    with {:ok, hash} <- extract_hash(payload),
-         :ok <- check_hash_unused(store, hash),
-         {:ok, rpc_url} <- require_config(config, "rpc_url"),
-         {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
-         :ok <- check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
-         :ok <- mark_hash_used(store, hash) do
-      {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
+    if config["fee_payer"] do
+      {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
+    else
+      memo = config["memo"]
+      store = config["store"]
+
+      with {:ok, hash} <- extract_hash(payload),
+           :ok <- check_hash_unused(store, hash),
+           {:ok, rpc_url} <- require_config(config, "rpc_url"),
+           {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
+           :ok <- check_receipt_status(receipt),
+           {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
+           :ok <- mark_hash_used(store, hash) do
+        {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
+      end
     end
   end
 
@@ -148,6 +162,8 @@ defmodule MPP.Methods.Tempo do
              recipient: charge.recipient,
              memo: memo
            ),
+         :ok <- maybe_validate_call_scope(tx, config),
+         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
@@ -209,6 +225,84 @@ defmodule MPP.Methods.Tempo do
 
     :ok
   end
+
+  # --- Fee payer helpers ---
+
+  # Validates fee payer config at init time. When fee_payer is enabled,
+  # requires fee_payer_private_key (32-byte hex) and fee_token (20-byte hex address).
+  defp validate_fee_payer!(%{"fee_payer" => true} = config) do
+    key = config["fee_payer_private_key"]
+    token = config["fee_token"]
+
+    if !is_binary(key) or byte_size(strip_0x(key)) != 64 or !hex_string?(strip_0x(key)) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer requires \"fee_payer_private_key\" (32-byte hex string) in method_config"
+    end
+
+    if !is_binary(token) or byte_size(strip_0x(token)) != 40 or !hex_string?(strip_0x(token)) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer requires \"fee_token\" (20-byte hex address) in method_config"
+    end
+
+    :ok
+  end
+
+  defp validate_fee_payer!(_config), do: :ok
+
+  # Validates call scope when fee_payer is enabled.
+  # No-op when fee_payer is falsy — any call pattern is allowed for self-paying txs.
+  defp maybe_validate_call_scope(tx, %{"fee_payer" => true}), do: Transaction.validate_call_scope(tx)
+
+  defp maybe_validate_call_scope(_tx, _config), do: :ok
+
+  # Co-signs transaction as fee payer when fee_payer is enabled.
+  # No-op when fee_payer is falsy — passes transaction through unchanged.
+  defp maybe_cosign_fee_payer(tx, %{"fee_payer" => true} = config) do
+    with {:ok, key} <- decode_hex_key(config["fee_payer_private_key"]),
+         {:ok, token} <- decode_hex_address(config["fee_token"]),
+         :ok <- check_fee_payer_placeholder(tx),
+         :ok <- check_fee_token_empty(tx) do
+      Transaction.cosign_fee_payer(tx, key, token)
+    end
+  end
+
+  defp maybe_cosign_fee_payer(tx, _config), do: {:ok, tx}
+
+  defp check_fee_payer_placeholder(tx) do
+    if Transaction.has_fee_payer_placeholder?(tx) do
+      :ok
+    else
+      {:error, "Transaction missing fee_payer_signature placeholder (expected 0x00)"}
+    end
+  end
+
+  defp check_fee_token_empty(tx) do
+    if Transaction.fee_token_empty?(tx) do
+      :ok
+    else
+      {:error, "Transaction must have empty fee_token when feePayer is true"}
+    end
+  end
+
+  # Decodes a hex private key string to 32-byte binary.
+  defp decode_hex_key(hex) when is_binary(hex) do
+    case Base.decode16(strip_0x(hex), case: :mixed) do
+      {:ok, <<key::binary-size(32)>>} -> {:ok, key}
+      _ -> {:error, "Invalid fee_payer_private_key format"}
+    end
+  end
+
+  defp decode_hex_key(_), do: {:error, "Missing fee_payer_private_key"}
+
+  # Decodes a hex address string to 20-byte binary.
+  defp decode_hex_address(hex) when is_binary(hex) do
+    case Base.decode16(strip_0x(hex), case: :mixed) do
+      {:ok, <<addr::binary-size(20)>>} -> {:ok, addr}
+      _ -> {:error, "Invalid fee_token address format"}
+    end
+  end
+
+  defp decode_hex_address(_), do: {:error, "Missing fee_token"}
 
   # --- Dedup store helpers ---
   # No-op when store is nil (library stays stateless by default).
@@ -295,8 +389,8 @@ defmodule MPP.Methods.Tempo do
   # The pre-broadcast reserve_hash_atomic is the critical gate; this is
   # supplementary protection against hash malleability.
   # Uses both rescue (exceptions) and catch (process exits from dead Agents/GenServers).
-  # TODO: Add telemetry/logging for post-broadcast store failures so operators
-  # can detect and investigate store health issues.
+  # TODO: Replace Logger.warning with :telemetry.execute/3 when adding telemetry
+  # events for the full verify lifecycle (e.g. [:mpp, :tempo, :store, :error]).
   defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
 
   defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
@@ -307,9 +401,13 @@ defmodule MPP.Methods.Tempo do
 
     :ok
   rescue
-    _exception -> :ok
+    exception ->
+      Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store failed: #{Exception.message(exception)}")
+      :ok
   catch
-    :exit, _reason -> :ok
+    :exit, reason ->
+      Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store exited: #{inspect(reason)}")
+      :ok
   end
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)

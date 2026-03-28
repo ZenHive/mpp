@@ -21,6 +21,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
+  alias MPP.Test.TempoTestHelpers
   alias MPP.Test.TempoTxBuilder
 
   @moduletag :integration
@@ -491,6 +492,116 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "No matching transfer call"
+    end
+  end
+
+  describe "fee payer co-signing" do
+    test "happy path: single transfer with fee payer co-signing", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      # Fee payer key — Hardhat account #2 (testnet only, no security concern)
+      fee_payer_key = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+
+      # Fund fee payer so it can pay gas
+      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> fee_payer_key)
+      :ok = fund_test_address(fee_payer_address, rpc_url)
+      Process.sleep(@confirmation_poll_interval_ms)
+
+      fee_payer_config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => true,
+            "fee_payer_private_key" => fee_payer_key,
+            "fee_token" => @path_usd
+          }
+        )
+
+      # Build a fee-payer transfer (placeholder sig, empty fee_token)
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url
+        )
+
+      # 402 → credential → server co-signs → broadcasts → receipt
+      challenge = request_challenge!(fee_payer_config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> MPP.Plug.call(fee_payer_config)
+
+      assert conn.status == nil,
+             "Expected plug passthrough, got status #{conn.status}: #{conn.resp_body}"
+
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      assert String.starts_with?(receipt.reference, "0x")
+    end
+
+    test "rogue call rejected before broadcast", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      import TempoTestHelpers, only: [build_call: 2, transfer_calldata: 2]
+
+      fee_payer_key = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+
+      fee_payer_config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => true,
+            "fee_payer_private_key" => fee_payer_key,
+            "fee_token" => @path_usd
+          }
+        )
+
+      # Build a multicall with valid transfer + rogue extra call
+      valid_call = build_call(@path_usd, transfer_calldata(recipient_address, @transfer_amount))
+      token_bytes = TempoTestHelpers.decode_address(@path_usd)
+      rogue_call = [token_bytes, <<>>, <<0xDE, 0xAD, 0xBE, 0xEF>> <> :binary.copy(<<0>>, 64)]
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_multicall(
+          private_key: @sender_key,
+          calls: [valid_call, rogue_call],
+          chain_id: @chain_id,
+          rpc_url: rpc_url
+        )
+
+      body = submit_credential!(fee_payer_config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "disallowed call pattern"
     end
   end
 

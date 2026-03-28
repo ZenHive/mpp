@@ -441,4 +441,134 @@ defmodule MPP.Tempo.TransactionTest do
       assert match.amount == 1_000_000
     end
   end
+
+  # --- validate_call_scope/1 tests ---
+
+  describe "validate_call_scope/1" do
+    @dex_hex dex_address()
+
+    defp build_scoped_tx(calls) do
+      rlp_calls = Enum.map(calls, fn {to, input} -> build_call(to, input) end)
+      hex = build_tempo_tx(calls: rlp_calls, fee_payer: true)
+      {:ok, tx} = Transaction.deserialize(hex)
+      tx
+    end
+
+    test "accepts single transfer" do
+      tx = build_scoped_tx([{@token_hex, transfer_calldata(@recipient_hex, 1_000_000)}])
+      assert :ok = Transaction.validate_call_scope(tx)
+    end
+
+    test "accepts single transferWithMemo" do
+      memo = "0x" <> String.duplicate("ab", 32)
+      tx = build_scoped_tx([{@token_hex, transfer_with_memo_calldata(@recipient_hex, 500_000, memo)}])
+      assert :ok = Transaction.validate_call_scope(tx)
+    end
+
+    test "accepts approve + swapExactAmountOut + transfer" do
+      tx =
+        build_scoped_tx([
+          {@token_hex, approve_calldata(@dex_hex, 1_000_000)},
+          {@dex_hex, swap_calldata()},
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)}
+        ])
+
+      assert :ok = Transaction.validate_call_scope(tx)
+    end
+
+    test "accepts approve + swapExactAmountOut + transferWithMemo" do
+      memo = "0x" <> String.duplicate("cd", 32)
+
+      tx =
+        build_scoped_tx([
+          {@token_hex, approve_calldata(@dex_hex, 1_000_000)},
+          {@dex_hex, swap_calldata()},
+          {@token_hex, transfer_with_memo_calldata(@recipient_hex, 1_000_000, memo)}
+        ])
+
+      assert :ok = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects empty calls" do
+      tx = build_scoped_tx([])
+      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects unknown selector" do
+      unknown = <<0xDE, 0xAD, 0xBE, 0xEF>> <> :binary.copy(<<0>>, 64)
+      tx = build_scoped_tx([{@token_hex, unknown}])
+      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects extra call beyond allowed patterns" do
+      tx =
+        build_scoped_tx([
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)},
+          {@token_hex, transfer_calldata(@recipient_hex, 500_000)}
+        ])
+
+      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects wrong order (transfer before approve + swap)" do
+      tx =
+        build_scoped_tx([
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)},
+          {@token_hex, approve_calldata(@dex_hex, 1_000_000)},
+          {@dex_hex, swap_calldata()}
+        ])
+
+      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects approve with non-DEX spender" do
+      non_dex = "0x1111111111111111111111111111111111111111"
+
+      tx =
+        build_scoped_tx([
+          {@token_hex, approve_calldata(non_dex, 1_000_000)},
+          {@dex_hex, swap_calldata()},
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)}
+        ])
+
+      assert {:error, "approve spender is not the DEX"} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects approve with truncated calldata" do
+      # approve selector + only 10 bytes (needs at least 36 = 12 pad + 20 address)
+      truncated = <<0x09, 0x5E, 0xA7, 0xB3>> <> :binary.copy(<<0>>, 10)
+
+      tx =
+        build_scoped_tx([
+          {@token_hex, truncated},
+          {@dex_hex, swap_calldata()},
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)}
+        ])
+
+      assert {:error, "malformed approve calldata"} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects swap targeting non-DEX address" do
+      non_dex = "0x2222222222222222222222222222222222222222"
+
+      tx =
+        build_scoped_tx([
+          {@token_hex, approve_calldata(@dex_hex, 1_000_000)},
+          {non_dex, swap_calldata()},
+          {@token_hex, transfer_calldata(@recipient_hex, 1_000_000)}
+        ])
+
+      assert {:error, "buy target is not the DEX"} = Transaction.validate_call_scope(tx)
+    end
+
+    test "rejects approve + swap without transfer (no matching 2-call pattern)" do
+      tx =
+        build_scoped_tx([
+          {@token_hex, approve_calldata(@dex_hex, 1_000_000)},
+          {@dex_hex, swap_calldata()}
+        ])
+
+      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+    end
+  end
 end

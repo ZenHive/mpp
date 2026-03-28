@@ -74,7 +74,7 @@ MPP.Intents.Charge         — Charge intent request schema (amount, currency, r
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
-MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization, payment call matching, fee payer co-signing (0x78 domain) (TODO: extract to onchain_tempo)
+MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization, payment call matching, fee payer co-signing (0x78 domain), call scope validation for fee-payer txs (TODO: extract to onchain_tempo)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
@@ -123,8 +123,25 @@ Three tools for verifying our implementation against the mppx TypeScript referen
 | Extract schemas/types to compare against our Elixir structs | **OXC** | "Do our Receipt fields match mppx's?" |
 | Compliance check (do our error types match?) | **OXC** | Extract all mppx error URIs, compare against `MPP.Errors` |
 | Verify runtime behavior matches | **QuickBEAM** | "Does mppx's HMAC produce the same output as ours for this input?" |
-| Load mppx browser bundle | **npm + QuickBEAM** | `mix npm.install` first, then load bundle into runtime |
-| Small file (<150 lines) | **Read** | Receipt.ts is 131 lines — OXC adds overhead for no benefit |
+| Load ox/tempo for runtime cross-validation | **esbuild + QuickBEAM** | `MPP.Test.OxTempoBundle.load!(rt)` -- see below |
+| Small file (<150 lines) | **Read** | Receipt.ts is 131 lines -- OXC adds overhead for no benefit |
+
+#### Loading ox/tempo into QuickBEAM (esbuild pattern)
+
+OXC's bundler can't produce clean IIFEs for packages with mixed ESM/CJS deps (like ox with @noble/*). Use **esbuild** instead:
+
+```elixir
+# In tests -- OxTempoBundle handles bundling + caching automatically
+{:ok, rt} = QuickBEAM.start(apis: :browser)
+MPP.Test.OxTempoBundle.load!(rt)
+{:ok, result} = QuickBEAM.call(rt, "TxET.deserialize", ["0x76..."])
+```
+
+How it works:
+- `test/support/ox_tempo_entry.mjs` -- thin entry importing `deserialize`/`serialize` from ox/tempo
+- `test/support/ox_tempo_bundle.ex` -- shells out to `npx esbuild` with `--format=iife --platform=browser`
+- Bundle cached to `_build/test/ox_tempo_bundle.js`, rebuilt when entry or ox version changes
+- esbuild resolves all deps via ESM export conditions -- no scope collisions in QuickJS
 
 #### OXC strengths and limitations
 

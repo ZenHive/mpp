@@ -109,6 +109,98 @@ defmodule MPP.Test.TempoTxBuilder do
     end
   end
 
+  @doc """
+  Build and sign a TIP-20 transfer transaction with fee payer placeholder.
+
+  Same as `build_signed_transfer/1` but sets `fee_payer_signature` to `<<0x00>>`
+  (placeholder) and `fee_token` to `<<>>` (empty), signaling the server should
+  co-sign as fee payer.
+
+  Accepts the same options as `build_signed_transfer/1`. The `:fee_token` option
+  is ignored (always empty for fee payer mode).
+  """
+  @spec build_fee_payer_transfer(keyword()) :: {:ok, String.t()} | {:error, term()}
+  def build_fee_payer_transfer(opts) do
+    with {:ok, private_key} <- require_opt(opts, :private_key, &decode_key/1),
+         {:ok, token} <- require_opt(opts, :token, &decode_address(:token, &1)),
+         {:ok, recipient} <- require_opt(opts, :recipient, &decode_address(:recipient, &1)),
+         {:ok, amount} <- require_opt(opts, :amount, &validate_uint(:amount, &1)),
+         {:ok, chain_id} <- require_opt(opts, :chain_id, &validate_uint(:chain_id, &1)),
+         {:ok, rpc_url} <- require_opt(opts, :rpc_url, &validate_non_empty_binary(:rpc_url, &1)),
+         {:ok, nonce_key} <- optional_opt(opts, :nonce_key, 0, &validate_uint(:nonce_key, &1)),
+         {:ok, gas_limit} <- optional_opt(opts, :gas_limit, @default_gas_limit, &validate_uint(:gas_limit, &1)),
+         {:ok, valid_before} <- optional_opt(opts, :valid_before, 0, &validate_uint(:valid_before, &1)),
+         {:ok, valid_after} <- optional_opt(opts, :valid_after, 0, &validate_uint(:valid_after, &1)),
+         {:ok, sender_address} <- Curvy.get_address(private_key),
+         {:ok, nonce} <- resolve_nonce(opts, sender_address, rpc_url) do
+      calldata = encode_transfer_calldata(recipient, amount)
+      call = [token, <<>>, calldata]
+
+      # fee_payer_signature = <<0x00>> (placeholder), fee_token = <<>> (empty).
+      # Client signs this preimage — fee_token excluded from hash when
+      # fee_payer_signature is present (per Tempo spec).
+      base_fields = [
+        encode_uint(chain_id),
+        encode_uint(@default_max_priority_fee_per_gas),
+        encode_uint(@default_max_fee_per_gas),
+        encode_uint(gas_limit),
+        [call],
+        [],
+        encode_uint(nonce_key),
+        encode_uint(nonce),
+        encode_uint(valid_before),
+        encode_uint(valid_after),
+        <<>>,
+        <<0x00>>,
+        []
+      ]
+
+      sign_and_encode(base_fields, private_key, sender_address)
+    end
+  end
+
+  @doc """
+  Build and sign a fee-payer transaction with arbitrary calls.
+
+  Accepts a `:calls` list of `[to, value, input]` RLP-ready tuples (as built by
+  `MPP.Test.TempoTestHelpers.build_call/2`). Sets fee payer placeholder and empty
+  fee token, same as `build_fee_payer_transfer/1`.
+
+  Accepts the same base options as `build_fee_payer_transfer/1` except `:token`,
+  `:recipient`, and `:amount` are replaced by `:calls`.
+  """
+  @spec build_fee_payer_multicall(keyword()) :: {:ok, String.t()} | {:error, term()}
+  def build_fee_payer_multicall(opts) do
+    with {:ok, private_key} <- require_opt(opts, :private_key, &decode_key/1),
+         {:ok, calls} <- require_opt(opts, :calls, &validate_calls/1),
+         {:ok, chain_id} <- require_opt(opts, :chain_id, &validate_uint(:chain_id, &1)),
+         {:ok, rpc_url} <- require_opt(opts, :rpc_url, &validate_non_empty_binary(:rpc_url, &1)),
+         {:ok, nonce_key} <- optional_opt(opts, :nonce_key, 0, &validate_uint(:nonce_key, &1)),
+         {:ok, gas_limit} <- optional_opt(opts, :gas_limit, @default_gas_limit, &validate_uint(:gas_limit, &1)),
+         {:ok, valid_before} <- optional_opt(opts, :valid_before, 0, &validate_uint(:valid_before, &1)),
+         {:ok, valid_after} <- optional_opt(opts, :valid_after, 0, &validate_uint(:valid_after, &1)),
+         {:ok, sender_address} <- Curvy.get_address(private_key),
+         {:ok, nonce} <- resolve_nonce(opts, sender_address, rpc_url) do
+      base_fields = [
+        encode_uint(chain_id),
+        encode_uint(@default_max_priority_fee_per_gas),
+        encode_uint(@default_max_fee_per_gas),
+        encode_uint(gas_limit),
+        calls,
+        [],
+        encode_uint(nonce_key),
+        encode_uint(nonce),
+        encode_uint(valid_before),
+        encode_uint(valid_after),
+        <<>>,
+        <<0x00>>,
+        []
+      ]
+
+      sign_and_encode(base_fields, private_key, sender_address)
+    end
+  end
+
   # --- Private helpers ---
 
   # Signs the base fields and returns the full encoded 0x76 transaction.
@@ -201,6 +293,9 @@ defmodule MPP.Test.TempoTxBuilder do
 
   defp validate_non_empty_binary(_key, value) when is_binary(value) and byte_size(value) > 0, do: {:ok, value}
   defp validate_non_empty_binary(key, _value), do: {:error, "invalid #{key}: expected non-empty string"}
+
+  defp validate_calls([_ | _] = calls), do: {:ok, calls}
+  defp validate_calls(_), do: {:error, "invalid calls: expected non-empty list"}
 
   # ExRLP wrapper — suppresses dialyzer false positive from default-arg arity mismatch.
   defp rlp_encode(data), do: ExRLP.encode(data)

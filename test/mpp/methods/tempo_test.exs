@@ -1298,6 +1298,67 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — fee payer call scope validation" do
+    @fee_payer_private_key_scope "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    @fee_token_address_scope "0x20C0000000000000000000000000000000000000"
+
+    setup %{charge: charge} do
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer" => true,
+              "fee_payer_private_key" => @fee_payer_private_key_scope,
+              "fee_token" => @fee_token_address_scope
+            })
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "rejects rogue extra call in fee-payer transaction", %{charge: charge} do
+      # transfer + rogue transfer = 2 calls, doesn't match any callScope
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      rogue_calldata = transfer_calldata(@recipient, 999)
+      call1 = build_call(@token_address, calldata)
+      call2 = build_call(@token_address, rogue_calldata)
+      tx_hex = build_tempo_tx(calls: [call1, call2], chain_id: 42_431, fee_payer: true)
+
+      # No RPC stubs needed — validation fires before broadcast
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "disallowed call pattern"
+    end
+
+    test "rejects valid transfer + rogue unknown selector in fee-payer transaction", %{charge: charge} do
+      # Valid transfer (so find_payment_call passes) + unknown rogue call
+      valid_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+      unknown = <<0xDE, 0xAD, 0xBE, 0xEF>> <> :binary.copy(<<0>>, 64)
+      rogue_call = build_call(@token_address, unknown)
+      tx_hex = build_tempo_tx(calls: [valid_call, rogue_call], chain_id: 42_431, fee_payer: true)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "disallowed call pattern"
+    end
+
+    test "passes through when fee_payer is false (no scope validation)", %{charge: charge} do
+      # Disable fee_payer — rogue calls should not be rejected
+      charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", false)}
+
+      # Two transfers would fail scope validation, but fee_payer is false
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call1 = build_call(@token_address, calldata)
+      call2 = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call1, call2], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+  end
+
   # Stubs the two-step optimistic flow: eth_call succeeds, eth_sendRawTransaction returns tx hash.
   defp stub_optimistic_flow(tx_hash) do
     Req.Test.stub(Tempo, fn conn ->
