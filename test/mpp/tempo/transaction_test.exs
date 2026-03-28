@@ -164,6 +164,11 @@ defmodule MPP.Tempo.TransactionTest do
       assert {:error, "Transaction too short: missing calls field"} = Transaction.deserialize(hex)
     end
 
+    test "rejects empty calls list" do
+      hex = build_tempo_tx(calls: [])
+      assert {:error, "Calls list cannot be empty"} = Transaction.deserialize(hex)
+    end
+
     test "handles call with two elements (to, value, no input)" do
       # [to, value] without input — should parse with empty input
       to = decode_address(@token_hex)
@@ -490,8 +495,9 @@ defmodule MPP.Tempo.TransactionTest do
     end
 
     test "rejects empty calls" do
-      tx = build_scoped_tx([])
-      assert {:error, "disallowed call pattern" <> _} = Transaction.validate_call_scope(tx)
+      # Empty calls are now rejected at deserialize time (before validate_call_scope)
+      hex = build_tempo_tx(calls: [], fee_payer: true)
+      assert {:error, "Calls list cannot be empty"} = Transaction.deserialize(hex)
     end
 
     test "rejects unknown selector" do

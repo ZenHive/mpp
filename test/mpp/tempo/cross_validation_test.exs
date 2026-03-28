@@ -23,6 +23,8 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   alias MPP.Tempo.Transaction
   alias MPP.Test.OxTempoBundle
+  alias MPP.Test.TempoTxBuilder
+  alias Signet.Signer.Curvy
 
   # Our hardcoded values (must match canonical viem/tempo source).
   @stablecoin_dex_hex "0xdec0000000000000000000000000000000000000"
@@ -44,25 +46,7 @@ defmodule MPP.Tempo.CrossValidationTest do
   }
 
   describe "viem/tempo constant cross-validation" do
-    setup do
-      if !Code.ensure_loaded?(QuickBEAM) do
-        flunk("""
-        Missing `quickbeam` dependency!
-
-        QuickBEAM is required for cross-validation tests.
-        Add it to your mix.exs:
-          {:quickbeam, "~> 0.6", only: [:dev, :test]}
-        """)
-      end
-
-      {:ok, rt} = QuickBEAM.start(apis: :browser)
-
-      on_exit(fn ->
-        if Process.alive?(rt), do: QuickBEAM.stop(rt)
-      end)
-
-      {:ok, rt: rt}
-    end
+    setup :start_quickbeam
 
     test "stablecoinDex address matches viem/tempo", %{rt: rt} do
       # Strip ES module `export` keywords -- QuickBEAM doesn't support ESM syntax
@@ -131,20 +115,7 @@ defmodule MPP.Tempo.CrossValidationTest do
   end
 
   describe "TxEnvelopeTempo transaction cross-validation" do
-    setup do
-      if !Code.ensure_loaded?(QuickBEAM) do
-        flunk("Missing `quickbeam` dependency -- see cross_validation tag docs")
-      end
-
-      {:ok, rt} = QuickBEAM.start(apis: :browser)
-      OxTempoBundle.load!(rt)
-
-      on_exit(fn ->
-        if Process.alive?(rt), do: QuickBEAM.stop(rt)
-      end)
-
-      {:ok, rt: rt}
-    end
+    setup :start_quickbeam_with_ox_tempo
 
     test "Elixir->JS: unsigned transfer deserializes correctly in ox/tempo", %{rt: rt} do
       hex = build_unsigned_transfer_hex(chain_id: 42_431, nonce: 1, gas: 200_000)
@@ -251,6 +222,315 @@ defmodule MPP.Tempo.CrossValidationTest do
     end
   end
 
+  describe "encoding edge cases" do
+    setup :start_quickbeam_with_ox_tempo
+
+    test "zero-value fields round-trip (nonce=0, gas=0, maxFee=0, maxPriorityFee=0)", %{rt: rt} do
+      hex = build_unsigned_transfer_hex(chain_id: 42_431, nonce: 0, gas: 0, max_fee: 0, max_priority_fee: 0)
+
+      {:ok, elixir_tx} = Transaction.deserialize(hex)
+      assert elixir_tx.chain_id == 42_431
+
+      js_tx = js_deserialize!(rt, hex)
+      assert js_tx["chainId"] == 42_431
+      # ox/tempo: nonce=0 -> "0" (present, special-cased), gas=0 -> absent
+      assert js_tx["nonce"] == "0"
+      assert js_tx["gas"] == nil
+
+      assert_js_round_trip!(rt, hex)
+    end
+
+    test "large BigInt values (near uint256 max) round-trip", %{rt: rt} do
+      large_amount = Bitwise.bsl(1, 255) - 1
+      hex = build_unsigned_transfer_hex(chain_id: 1, nonce: 1, gas: 21_000, amount: large_amount)
+
+      {:ok, elixir_tx} = Transaction.deserialize(hex)
+      assert length(elixir_tx.calls) == 1
+
+      js_tx = js_deserialize!(rt, hex)
+      assert length(js_tx["calls"]) == 1
+
+      assert_js_round_trip!(rt, hex)
+    end
+
+    test "empty calls list: both parsers reject", %{rt: rt} do
+      hex = build_empty_calls_hex(chain_id: 42_431)
+
+      assert {:error, "Calls list cannot be empty"} = Transaction.deserialize(hex)
+
+      {:ok, error_name} =
+        QuickBEAM.eval(rt, """
+          try {
+            TxET.deserialize('#{hex}');
+            'no_error';
+          } catch(e) {
+            e.name || 'UnknownError';
+          }
+        """)
+
+      assert error_name =~ "CallsEmpty" or error_name =~ "Error",
+             "Expected CallsEmptyError from ox/tempo, got: #{inspect(error_name)}"
+    end
+
+    test "transferWithMemo calldata (100-byte input) matches between parsers", %{rt: rt} do
+      memo = :binary.copy(<<0xAB>>, 32)
+      hex = build_transfer_with_memo_hex(chain_id: 42_431, nonce: 1, memo: memo)
+
+      {:ok, elixir_tx} = Transaction.deserialize(hex)
+      [elixir_call] = elixir_tx.calls
+      assert byte_size(elixir_call.input) == 100
+
+      js_tx = js_deserialize!(rt, hex)
+      [js_call] = js_tx["calls"]
+
+      elixir_data_hex = "0x" <> Base.encode16(elixir_call.input, case: :lower)
+      assert String.downcase(elixir_data_hex) == String.downcase(js_call["data"])
+
+      assert_js_round_trip!(rt, hex)
+    end
+
+    test "fee token present (non-empty) visible to both parsers", %{rt: rt} do
+      fee_token = Base.decode16!("20c0000000000000000000000000000000000001", case: :lower)
+      hex = build_with_fee_token_hex(chain_id: 42_431, nonce: 1, fee_token: fee_token)
+
+      {:ok, elixir_tx} = Transaction.deserialize(hex)
+      assert elixir_tx.chain_id == 42_431
+
+      js_tx = js_deserialize!(rt, hex)
+      expected_token_hex = "0x" <> Base.encode16(fee_token, case: :lower)
+
+      assert String.downcase(js_tx["feeToken"]) == expected_token_hex,
+             "Fee token mismatch: JS=#{js_tx["feeToken"]}, expected=#{expected_token_hex}"
+
+      assert_js_round_trip!(rt, hex)
+    end
+  end
+
+  describe "signed transaction cross-validation" do
+    setup :start_quickbeam_with_ox_tempo
+
+    test "signed tx: JS recovers correct sender address", %{rt: rt} do
+      private_key_hex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+      {:ok, tx_hex} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: private_key_hex,
+          token: "0xdec0000000000000000000000000000000000000",
+          recipient: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: "unused",
+          nonce: 1
+        )
+
+      js_tx = js_deserialize!(rt, tx_hex)
+
+      {:ok, sender_bytes} = Curvy.get_address(Base.decode16!(private_key_hex, case: :lower))
+      expected_sender = "0x" <> Base.encode16(sender_bytes, case: :lower)
+
+      assert String.downcase(js_tx["from"]) == expected_sender,
+             "Sender mismatch: JS recovered=#{js_tx["from"]}, expected=#{expected_sender}"
+    end
+
+    test "fee-payer co-signed tx: both signatures visible to JS", %{rt: rt} do
+      sender_key_hex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      fee_payer_key = Base.decode16!("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", case: :lower)
+      fee_token = Base.decode16!("20c0000000000000000000000000000000000001", case: :lower)
+
+      {:ok, client_hex} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: sender_key_hex,
+          token: "0xdec0000000000000000000000000000000000000",
+          recipient: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: "unused",
+          nonce: 1
+        )
+
+      {:ok, tx} = Transaction.deserialize(client_hex)
+      {:ok, cosigned_tx} = Transaction.cosign_fee_payer(tx, fee_payer_key, fee_token)
+      cosigned_hex = cosigned_tx.raw
+
+      js_tx = js_deserialize!(rt, cosigned_hex)
+
+      {:ok, sender_bytes} = Curvy.get_address(Base.decode16!(sender_key_hex, case: :lower))
+      expected_sender = "0x" <> Base.encode16(sender_bytes, case: :lower)
+
+      assert String.downcase(js_tx["from"]) == expected_sender
+      assert js_tx["feePayerSignature"] != nil, "Expected feePayerSignature to be present"
+      assert is_map(js_tx["feePayerSignature"]), "Expected feePayerSignature to be an object"
+
+      expected_token_hex = "0x" <> Base.encode16(fee_token, case: :lower)
+      assert String.downcase(js_tx["feeToken"]) == expected_token_hex
+    end
+  end
+
+  describe "JS->Elixir serialization" do
+    setup :start_quickbeam_with_ox_tempo
+
+    test "JS serialize with format 'feePayer' produces 0x78 prefix (rejected by our parser)", %{rt: rt} do
+      {:ok, hex} =
+        QuickBEAM.eval(rt, """
+          const _fpKey = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+          const _fpEnvelope = TxET.from({
+            chainId: 42431,
+            type: 'tempo',
+            maxFeePerGas: 25000000000n,
+            maxPriorityFeePerGas: 1000000000n,
+            gas: 200000n,
+            nonce: 1n,
+            nonceKey: 0n,
+            calls: [{
+              to: '0x70997970c51812dc3a010c7d01b50e0d17dc79c8',
+              value: 0n,
+              data: '0xa9059cbb00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c80000000000000000000000000000000000000000000000000000000000000001'
+            }]
+          });
+          const _fpPayload = TxET.getSignPayload(_fpEnvelope);
+          const _fpSig = OxSecp256k1.sign({ payload: _fpPayload, privateKey: _fpKey });
+          const _fpSigned = {
+            ..._fpEnvelope,
+            senderSignature: _fpSig,
+            feePayerSignature: _fpSig,
+            feeToken: '0x20c0000000000000000000000000000000000001'
+          };
+          TxET.serialize(_fpSigned, { format: 'feePayer' });
+        """)
+
+      assert String.starts_with?(hex, "0x78"),
+             "Expected 0x78 prefix from feePayer format, got: #{String.slice(hex, 0, 4)}"
+
+      assert {:error, message} = Transaction.deserialize(hex)
+      assert message =~ "0x76", "Expected error mentioning 0x76, got: #{message}"
+    end
+
+    test "keyAuthorization field: 14-field RLP accepted by Elixir parser", %{rt: rt} do
+      token = decode_hex!("0xdec0000000000000000000000000000000000000")
+      recipient = decode_hex!("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
+      selector = <<0xA9, 0x05, 0x9C, 0xBB>>
+      calldata = selector <> <<0::96, recipient::binary, 1_000_000::unsigned-big-256>>
+      call = [token, <<>>, calldata]
+
+      fields = [
+        encode_uint(42_431),
+        encode_uint(1_000_000_000),
+        encode_uint(25_000_000_000),
+        encode_uint(200_000),
+        [call],
+        [],
+        encode_uint(0),
+        encode_uint(1),
+        encode_uint(0),
+        encode_uint(0),
+        <<>>,
+        <<>>,
+        [],
+        [<<1>>, <<2>>, <<3>>]
+      ]
+
+      hex = "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+
+      # Elixir parser should accept it (14 fields)
+      {:ok, elixir_tx} = Transaction.deserialize(hex)
+      assert elixir_tx.chain_id == 42_431
+      assert length(elixir_tx.calls) == 1
+
+      # ox/tempo rejects dummy keyAuthorization data (validates key type).
+      # This documents the asymmetry: Elixir accepts any RLP at index 13,
+      # while JS validates the key type field within the tuple.
+      {:ok, error_name} =
+        QuickBEAM.eval(rt, """
+          try {
+            TxET.deserialize('#{hex}');
+            'no_error';
+          } catch(e) {
+            e.name || e.message || 'UnknownError';
+          }
+        """)
+
+      assert error_name != "no_error",
+             "Expected JS to reject dummy keyAuthorization, but it deserialized without error"
+    end
+  end
+
+  describe "regression guards" do
+    setup :start_quickbeam_with_ox_tempo
+
+    test "golden hex: fee_payer_signature encoding deterministic and cross-validated", %{rt: rt} do
+      sender_key_hex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      fee_payer_key = Base.decode16!("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", case: :lower)
+      fee_token = Base.decode16!("20c0000000000000000000000000000000000001", case: :lower)
+
+      {:ok, client_hex} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: sender_key_hex,
+          token: "0xdec0000000000000000000000000000000000000",
+          recipient: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: "unused",
+          nonce: 42
+        )
+
+      {:ok, tx} = Transaction.deserialize(client_hex)
+      {:ok, cosigned_tx} = Transaction.cosign_fee_payer(tx, fee_payer_key, fee_token)
+      cosigned_hex = cosigned_tx.raw
+
+      {:ok, elixir_tx} = Transaction.deserialize(cosigned_hex)
+      js_tx = js_deserialize!(rt, cosigned_hex)
+
+      assert elixir_tx.chain_id == 42_431
+      assert js_tx["chainId"] == 42_431
+      assert length(elixir_tx.calls) == length(js_tx["calls"])
+
+      assert js_tx["feePayerSignature"]
+      assert is_map(js_tx["feePayerSignature"])
+
+      expected_token_hex = "0x" <> Base.encode16(fee_token, case: :lower)
+      assert String.downcase(js_tx["feeToken"]) == expected_token_hex
+
+      # Exact byte round-trip: builder now encodes yParity as legacy v=27/28,
+      # matching ox/tempo convention. No normalization needed — bytes should match.
+      assert_js_round_trip!(rt, cosigned_hex)
+    end
+  end
+
+  # --- Helpers: shared setup ---
+
+  # Named setup: bare QuickBEAM runtime (no ox/tempo bundle).
+  # Used by viem/tempo constant tests that load viem files directly.
+  defp start_quickbeam(_context) do
+    if !Code.ensure_loaded?(QuickBEAM) do
+      flunk("Missing `quickbeam` dependency -- see cross_validation tag docs")
+    end
+
+    {:ok, rt} = QuickBEAM.start(apis: :browser)
+
+    on_exit(fn ->
+      if Process.alive?(rt), do: QuickBEAM.stop(rt)
+    end)
+
+    {:ok, rt: rt}
+  end
+
+  # Named setup: QuickBEAM runtime with ox/tempo bundle loaded.
+  # Used by all describe blocks that call TxET.deserialize/serialize.
+  defp start_quickbeam_with_ox_tempo(_context) do
+    if !Code.ensure_loaded?(QuickBEAM) do
+      flunk("Missing `quickbeam` dependency -- see cross_validation tag docs")
+    end
+
+    {:ok, rt} = QuickBEAM.start(apis: :browser)
+    OxTempoBundle.load!(rt)
+
+    on_exit(fn ->
+      if Process.alive?(rt), do: QuickBEAM.stop(rt)
+    end)
+
+    {:ok, rt: rt}
+  end
+
   # --- Helpers: JS interop ---
 
   # Deserializes a hex string via ox/tempo and returns parsed map.
@@ -264,17 +544,35 @@ defmodule MPP.Tempo.CrossValidationTest do
     Jason.decode!(json)
   end
 
+  # Asserts that ox/tempo round-trips the hex without changing bytes.
+  defp assert_js_round_trip!(rt, hex) do
+    {:ok, reserialized} =
+      QuickBEAM.eval(rt, """
+        const _rttx = TxET.deserialize('#{hex}');
+        TxET.serialize(_rttx);
+      """)
+
+    assert String.downcase(reserialized) == String.downcase(hex),
+           "Round-trip hex mismatch:\n  original:     #{hex}\n  reserialized: #{reserialized}"
+  end
+
   # --- Helpers: Elixir RLP transaction builders ---
+
+  @default_max_priority_fee 1_000_000_000
+  @default_max_fee 25_000_000_000
+  @default_amount 1_000_000_000_000_000_000
 
   # Builds an unsigned 0x76 transfer transaction hex string.
   defp build_unsigned_transfer_hex(opts) do
     chain_id = Keyword.fetch!(opts, :chain_id)
     nonce = Keyword.fetch!(opts, :nonce)
     gas = Keyword.fetch!(opts, :gas)
+    max_fee = Keyword.get(opts, :max_fee, @default_max_fee)
+    max_priority_fee = Keyword.get(opts, :max_priority_fee, @default_max_priority_fee)
+    amount = Keyword.get(opts, :amount, @default_amount)
 
     token = decode_hex!("0xdec0000000000000000000000000000000000000")
     recipient = decode_hex!("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
-    amount = 1_000_000_000_000_000_000
 
     selector = <<0xA9, 0x05, 0x9C, 0xBB>>
     calldata = selector <> <<0::size(96), recipient::binary, amount::unsigned-big-size(256)>>
@@ -282,8 +580,8 @@ defmodule MPP.Tempo.CrossValidationTest do
 
     fields = [
       encode_uint(chain_id),
-      encode_uint(1_000_000_000),
-      encode_uint(25_000_000_000),
+      encode_uint(max_priority_fee),
+      encode_uint(max_fee),
       encode_uint(gas),
       [call],
       [],
@@ -356,6 +654,98 @@ defmodule MPP.Tempo.CrossValidationTest do
       encode_uint(0),
       encode_uint(0),
       <<>>,
+      <<>>,
+      []
+    ]
+
+    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+  end
+
+  # transferWithMemo selector
+  @transfer_with_memo_selector <<0x95, 0x77, 0x7D, 0x59>>
+
+  # Builds a 0x76 tx with transferWithMemo calldata (100-byte input).
+  defp build_transfer_with_memo_hex(opts) do
+    chain_id = Keyword.fetch!(opts, :chain_id)
+    nonce = Keyword.fetch!(opts, :nonce)
+    memo = Keyword.fetch!(opts, :memo)
+
+    token = decode_hex!("0xdec0000000000000000000000000000000000000")
+    recipient = decode_hex!("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
+
+    calldata =
+      @transfer_with_memo_selector <>
+        <<0::96, recipient::binary, @default_amount::unsigned-big-256, memo::binary-size(32)>>
+
+    call = [token, <<>>, calldata]
+
+    fields = [
+      encode_uint(chain_id),
+      encode_uint(@default_max_priority_fee),
+      encode_uint(@default_max_fee),
+      encode_uint(200_000),
+      [call],
+      [],
+      encode_uint(0),
+      encode_uint(nonce),
+      encode_uint(0),
+      encode_uint(0),
+      <<>>,
+      <<>>,
+      []
+    ]
+
+    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+  end
+
+  # Builds a 0x76 tx with empty calls list.
+  defp build_empty_calls_hex(opts) do
+    chain_id = Keyword.fetch!(opts, :chain_id)
+
+    fields = [
+      encode_uint(chain_id),
+      encode_uint(@default_max_priority_fee),
+      encode_uint(@default_max_fee),
+      encode_uint(200_000),
+      [],
+      [],
+      encode_uint(0),
+      encode_uint(0),
+      encode_uint(0),
+      encode_uint(0),
+      <<>>,
+      <<>>,
+      []
+    ]
+
+    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+  end
+
+  # Builds a 0x76 tx with a non-empty fee_token field.
+  defp build_with_fee_token_hex(opts) do
+    chain_id = Keyword.fetch!(opts, :chain_id)
+    nonce = Keyword.fetch!(opts, :nonce)
+    fee_token = Keyword.fetch!(opts, :fee_token)
+
+    token = decode_hex!("0xdec0000000000000000000000000000000000000")
+    recipient = decode_hex!("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
+
+    selector = <<0xA9, 0x05, 0x9C, 0xBB>>
+    calldata = selector <> <<0::96, recipient::binary, @default_amount::unsigned-big-256>>
+    call = [token, <<>>, calldata]
+
+    fields = [
+      encode_uint(chain_id),
+      encode_uint(@default_max_priority_fee),
+      encode_uint(@default_max_fee),
+      encode_uint(200_000),
+      [call],
+      [],
+      encode_uint(0),
+      encode_uint(nonce),
+      encode_uint(0),
+      encode_uint(0),
+      fee_token,
       <<>>,
       []
     ]

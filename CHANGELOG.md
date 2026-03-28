@@ -8,6 +8,56 @@ Completed roadmap tasks.
 
 ### Phase 4: Tempo Payment Method
 
+#### Bug Fix: Reject Empty Calls in Transaction Deserialization
+
+**What was done:**
+- `extract_calls/2` now returns `{:error, "Calls list cannot be empty"}` for empty call lists, matching ox/tempo's `CallsEmptyError` behavior
+- Updated cross-validation test from documenting asymmetry to asserting both parsers reject
+- Added unit test for the empty-calls error path in `transaction_test.exs`
+
+#### Bug Fix: Normalize Sender Signature v-values in `recover_sender`
+
+**What was done:**
+- `recover_sender/2` now normalizes legacy v-values (27/28) to recid (0/1) before passing to `Curvy.Signature`. Previously, transactions signed by ox/tempo SDK (which encodes yParity as 0x1b/0x1c) would pass `recid: 27` to Curvy, causing recovery failure. Matches Signet's own `decode_signature` normalization logic.
+
+**Key decisions:**
+- This is a library-level interop fix — any client using ox/tempo, viem, or ethers.js to sign Tempo transactions would hit this
+- Separate from the test builder change (below) which is cosmetic
+
+#### Test Support: Builder yParity Encoding Aligned with ox/tempo
+
+**What was done:**
+- `TempoTxBuilder.sign_and_encode/3` now encodes sender signature yParity as legacy v-values (recid + 27) matching ox/tempo convention
+- Golden hex regression test upgraded from structural comparison to exact byte round-trip via `assert_js_round_trip!/2`
+
+#### Docs: Clarify Transaction `raw` Field Encoding
+
+**What was done:**
+- Updated `@typedoc` for `Transaction.t()` to explicitly note that `raw` is a hex string with `0x` prefix, suitable for direct JSON-RPC broadcast
+
+#### Bug Fix: Optimistic Multicall Simulation Target
+
+**What was done:**
+- Fixed optimistic broadcast path simulating the wrong call in multicall transactions. In a `[approve, swap, transfer]` batch, `eth_call` was targeting the first call (approve) instead of the matched payment call (transfer). The simulation could pass while the actual payment call reverts.
+- Threaded the matched payment call from `find_payment_call` through to `broadcast_and_verify` via a new `:call` key in the match result
+- Added multicall regression test verifying `eth_call` targets the token contract (transfer's `to`), not the DEX (approve's `to`)
+
+**Key decisions:**
+- Backwards-compatible: added `:call` key to `match_call` return — existing code only checks `:recipient`/`:amount`/`:memo` keys
+- Both `broadcast_and_verify` clauses updated from arity /6 to /7 — confirmation path ignores the payment_call (verifies via receipt logs)
+
+#### Cross-Validation Tests: 10 New ox/tempo Compatibility Tests
+
+**What was done:**
+- Added `from`, `getSignPayload` (TxEnvelopeTempo) and `Secp256k1.sign`/`recoverAddress` exports to `ox_tempo_entry.mjs`
+- 10 new tests across 4 categories: encoding edge cases (5), signed tx cross-validation (2), JS→Elixir serialization (2), regression guards (1)
+- Documents asymmetries: empty calls (Elixir accepts, JS throws CallsEmptyError), keyAuthorization dummy data (Elixir accepts, JS validates key type), sender signature yParity normalization (our 0x00 → ox/tempo's 0x1b)
+
+**Key decisions:**
+- Used Hardhat deterministic test keys (account #0 and #1) — public, not secrets
+- Golden hex test generates at test time via RFC 6979 deterministic signing rather than hardcoding — avoids stale hex if upstream signing changes
+- `tx.raw` is already a hex string — no double-encoding with `Base.encode16`
+
 #### TxEnvelopeTempo Cross-Validation via QuickBEAM + esbuild
 
 **What was done:**

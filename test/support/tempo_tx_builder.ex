@@ -209,7 +209,9 @@ defmodule MPP.Test.TempoTxBuilder do
 
     with {:ok, sig} <- Curvy.sign(signing_payload, private_key),
          {:ok, recid} <- Signet.Recover.find_recid(signing_payload, sig, sender_address) do
-      sender_sig = <<sig.r::unsigned-big-size(256), sig.s::unsigned-big-size(256), recid::8>>
+      # Encode yParity as legacy v-value (27/28) to match ox/tempo convention.
+      v = recid + 27
+      sender_sig = <<sig.r::unsigned-big-size(256), sig.s::unsigned-big-size(256), v::8>>
 
       signed_fields = base_fields ++ [sender_sig]
       signed_raw = <<@tempo_tx_type>> <> rlp_encode(signed_fields)

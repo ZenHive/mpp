@@ -32,7 +32,12 @@ defmodule MPP.Tempo.Transaction do
   @enforce_keys [:chain_id, :calls, :raw]
   defstruct [:chain_id, :calls, :fields, :raw]
 
-  @typedoc "A parsed Tempo Transaction with verification-relevant fields."
+  @typedoc """
+  A parsed Tempo Transaction with verification-relevant fields.
+
+  `raw` is the full serialized transaction as a hex string ("0x76...") with
+  0x prefix, suitable for direct JSON-RPC broadcast.
+  """
   @type t :: %__MODULE__{
           chain_id: non_neg_integer(),
           calls: [call()],
@@ -364,7 +369,10 @@ defmodule MPP.Tempo.Transaction do
   # Signet.Recover is a transitive dep via onchain — suppress dialyzer unknown_function warning.
   @dialyzer {:nowarn_function, recover_sender: 2}
   defp recover_sender(signing_payload, <<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>) do
-    sig = %CurvySig{crv: :secp256k1, r: r, s: s, recid: v}
+    # Normalize legacy v-values (27/28) to recid (0/1). ox/tempo and other SDKs
+    # encode yParity as 0x1b/0x1c; Curvy.Signature expects 0 or 1.
+    recid = if v >= 27, do: v - 27, else: v
+    sig = %CurvySig{crv: :secp256k1, r: r, s: s, recid: recid}
     {:ok, Recover.recover_eth(signing_payload, sig)}
   rescue
     e -> {:error, "Failed to recover sender: #{Exception.message(e)}"}
@@ -424,7 +432,11 @@ defmodule MPP.Tempo.Transaction do
     raw_calls = Enum.at(fields, @calls_index)
 
     if is_list(raw_calls) do
-      parse_all_calls(raw_calls, [], 0)
+      if raw_calls == [] do
+        {:error, "Calls list cannot be empty"}
+      else
+        parse_all_calls(raw_calls, [], 0)
+      end
     else
       {:error, "Invalid calls field: expected a list"}
     end
@@ -456,9 +468,12 @@ defmodule MPP.Tempo.Transaction do
 
   # Attempts to match a call against expected payment parameters.
   # Returns a match map or nil.
-  defp match_call(%{to: to, input: input}, currency_bytes, recipient_bytes, amount_int, memo) do
+  defp match_call(%{to: to, input: input} = call, currency_bytes, recipient_bytes, amount_int, memo) do
     if addresses_equal?(to, currency_bytes) do
-      match_input(input, recipient_bytes, amount_int, memo)
+      case match_input(input, recipient_bytes, amount_int, memo) do
+        nil -> nil
+        match -> Map.put(match, :call, call)
+      end
     end
   end
 

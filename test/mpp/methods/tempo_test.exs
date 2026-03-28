@@ -723,6 +723,48 @@ defmodule MPP.Methods.TempoTest do
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Unexpected broadcast response"
     end
+
+    test "multicall: simulates the matched payment call, not the first call in batch", %{charge: charge} do
+      # Build a 3-call multicall: [approve(dex), swap(dex), transfer(token)]
+      # The payment call (transfer) is at index 2, NOT index 0.
+      dex_address = dex_address()
+      approve_data = approve_calldata(dex_address, 1_000_000)
+      approve_call = build_call(@token_address, approve_data)
+
+      swap_data = swap_calldata()
+      swap_call = build_call(dex_address, swap_data)
+
+      transfer_data = transfer_calldata(@recipient, 1_000_000)
+      transfer_call = build_call(@token_address, transfer_data)
+
+      tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: 42_431)
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_call" ->
+            [call_params, _block] = request["params"]
+            send(test_pid, {:eth_call_to, call_params["to"]})
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
+          "eth_sendRawTransaction" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => @tx_hash, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # The eth_call must target the TOKEN contract (transfer's to), not the DEX (approve's to).
+      assert_received {:eth_call_to, simulated_to}
+
+      assert String.downcase(simulated_to) == String.downcase(@token_address),
+             "eth_call targeted #{simulated_to} (first call) instead of #{@token_address} (matched payment call)"
+    end
   end
 
   describe "verify/2 — dedup store" do

@@ -156,7 +156,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, signature} <- extract_signature(payload),
          {:ok, tx} <- Transaction.deserialize(signature),
          :ok <- verify_chain_id(tx, expected_chain_id),
-         {:ok, _match} <-
+         {:ok, %{call: payment_call}} <-
            Transaction.find_payment_call(tx, charge.currency,
              amount: charge.amount,
              recipient: charge.recipient,
@@ -166,7 +166,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
-         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
+         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?, payment_call) do
       # Post-broadcast: record on-chain hash if it differs from input (malleable variants).
       # Best-effort — payment already succeeded, so store failures don't fail the request.
       safe_dedup_post_broadcast(store, tx_hash, tx.raw)
@@ -465,7 +465,7 @@ defmodule MPP.Methods.Tempo do
   # Dispatches between confirmation and optimistic broadcast paths.
   # Confirmation (default): broadcast sync → verify receipt logs.
   # Optimistic: simulate via eth_call → broadcast async → return tx hash without receipt verification.
-  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?) do
+  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?, _payment_call) do
     with {:ok, tx_hash, receipt} <- broadcast_transaction_sync(raw_hex, rpc_url, config),
          :ok <- check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
@@ -473,14 +473,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_and_verify(
-         %Transaction{raw: raw_hex, calls: [payment_call | _]},
-         rpc_url,
-         config,
-         _charge,
-         _memo,
-         false = _wait?
-       ) do
+  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false = _wait?, payment_call) do
     with :ok <- simulate_payment_call(payment_call, rpc_url, config) do
       broadcast_transaction_async(raw_hex, rpc_url, config)
     end
