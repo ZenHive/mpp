@@ -21,6 +21,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @~/.claude/includes/meta-development.md
 @~/.claude/includes/workflow-philosophy.md
 @~/.claude/includes/skills-awareness.md
+@~/.claude/includes/quickbeam.md
+@~/.claude/includes/oxc.md
 
 ## Project
 
@@ -72,7 +74,7 @@ MPP.Intents.Charge         — Charge intent request schema (amount, currency, r
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
-MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization and payment call matching (TODO: extract to onchain_tempo)
+MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization, payment call matching, fee payer co-signing (0x78 domain) (TODO: extract to onchain_tempo)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
@@ -108,6 +110,76 @@ MPP.Plug.Config            — Validated endpoint config struct (shared settings
 - `req` — HTTP client for payment method API calls (Stripe, etc.)
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 - `onchain` — (optional) Ethereum/Tempo RPC and transaction utilities for on-chain payment methods
+### JS/TS cross-referencing (dev/test only)
+
+Three tools for verifying our implementation against the mppx TypeScript reference impl (`refs/mppx/`). **These are NEVER production dependencies.** MPP is a library — consumers must not pull in JS runtimes.
+
+#### When to use what
+
+| Question type | Tool | Example |
+|---------------|------|---------|
+| Understand logic/flow of one file | **Read** | "How does mppx's auth-param parser handle escapes?" |
+| Structural query across files | **OXC** | "What functions does mppx export?" / "Who imports Challenge?" |
+| Extract schemas/types to compare against our Elixir structs | **OXC** | "Do our Receipt fields match mppx's?" |
+| Compliance check (do our error types match?) | **OXC** | Extract all mppx error URIs, compare against `MPP.Errors` |
+| Verify runtime behavior matches | **QuickBEAM** | "Does mppx's HMAC produce the same output as ours for this input?" |
+| Load mppx browser bundle | **npm + QuickBEAM** | `mix npm.install` first, then load bundle into runtime |
+| Small file (<150 lines) | **Read** | Receipt.ts is 131 lines — OXC adds overhead for no benefit |
+
+#### OXC strengths and limitations
+
+**OXC excels at:** cross-file function inventories (`OXC.collect` across all `src/*.ts`), import graph analysis (`OXC.imports/2`), schema field extraction from Zod objects, finding which functions use specific APIs (Base64, Hash, etc.).
+
+**OXC struggles with:** complex AST node types your collection logic doesn't handle (SpreadElement, ConditionalExpression in object literals). When the JS uses patterns beyond simple properties, the collector crashes. Read doesn't have this problem.
+
+**OXC comparison scripts need domain awareness:** OXC extracts mppx data perfectly, but comparing against our Elixir code requires understanding how we structure things (e.g., `@base_uri <> suffix` vs literal URI strings). Naive `String.contains?` misses these patterns.
+
+#### How to use OXC (patterns that work)
+
+```elixir
+# Parse a file
+{:ok, ast} = OXC.parse(File.read!("refs/mppx/src/Challenge.ts"), "Challenge.ts")
+
+# Collect exported functions with arities
+OXC.collect(ast, fn
+  %{type: "ExportNamedDeclaration", declaration: %{type: "FunctionDeclaration", id: %{name: name}, params: params}} ->
+    {:keep, {name, length(params)}}
+  _ -> :skip
+end)
+
+# Extract z.object schema fields with required/optional
+OXC.collect(ast, fn
+  %{type: "CallExpression", callee: %{property: %{name: "object"}}, arguments: [%{type: "ObjectExpression", properties: props}]} ->
+    fields = Enum.map(props, fn p ->
+      key = Map.get(p.key, :name) || Map.get(p.key, :value)
+      optional? = match?(%{callee: %{property: %{name: "optional"}}}, p.value)
+      {key, if(optional?, do: :optional, else: :required)}
+    end)
+    {:keep, fields}
+  _ -> :skip
+end)
+
+# Import graph (fast, no full parse)
+{:ok, imports} = OXC.imports(File.read!("refs/mppx/src/Credential.ts"), "Credential.ts")
+# => ["ox", "./Challenge.js", "./PaymentRequest.js"]
+
+# Cross-file: find which functions touch Base64
+for file <- ~w[Challenge.ts Credential.ts Receipt.ts] do
+  source = File.read!("refs/mppx/src/#{file}")
+  {:ok, ast} = OXC.parse(source, file)
+  fns = OXC.collect(ast, fn
+    %{type: "FunctionDeclaration", id: %{name: name}, body: body} ->
+      if String.contains?(String.slice(source, body.start..body.end), "Base64"),
+        do: {:keep, name}, else: :skip
+    _ -> :skip
+  end)
+  if fns != [], do: IO.puts("#{file}: #{Enum.join(fns, ", ")}")
+end
+```
+
+Run scripts with: `MIX_ENV=dev mix run /tmp/script.exs`
+
+**Explore freely.** These patterns are starting points — try your own OXC queries against `refs/mppx/` to discover what works best for your specific question.
 
 ### First consumer
 

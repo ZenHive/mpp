@@ -37,3 +37,8 @@ mpp-*.tar
 # Fork of tempoxyz/mpp docs site (for PR #473).
 /mpp-docs-fork/
 
+# npm_ex artifacts (dev/test only — JS tooling for mppx cross-referencing).
+/node_modules/
+/npm.lock
+/package.json
+

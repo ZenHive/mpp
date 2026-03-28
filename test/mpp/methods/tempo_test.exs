@@ -8,6 +8,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
+  alias MPP.Test.TempoTxBuilder
 
   @rpc_url "https://rpc.moderato.tempo.xyz"
   @token_address "0x20C0000000000000000000000000000000000000"
@@ -1096,6 +1097,205 @@ defmodule MPP.Methods.TempoTest do
       "transactionHash" => @tx_hash,
       "logIndex" => "0x0"
     }
+  end
+
+  describe "validate_config!/1 — fee payer" do
+    @fee_payer_key String.duplicate("ab", 32)
+    @fee_payer_token "0x20C0000000000000000000000000000000000000"
+
+    test "accepts valid fee payer config" do
+      assert :ok =
+               Tempo.validate_config!(%{
+                 "rpc_url" => @rpc_url,
+                 "fee_payer" => true,
+                 "fee_payer_private_key" => @fee_payer_key,
+                 "fee_token" => @fee_payer_token
+               })
+    end
+
+    test "raises when fee_payer true but missing fee_payer_private_key" do
+      assert_raise ArgumentError, ~r/fee_payer_private_key/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_token" => @fee_payer_token
+        })
+      end
+    end
+
+    test "raises when fee_payer true but missing fee_token" do
+      assert_raise ArgumentError, ~r/fee_token/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => @fee_payer_key
+        })
+      end
+    end
+
+    test "raises on invalid fee_payer_private_key (wrong length)" do
+      assert_raise ArgumentError, ~r/fee_payer_private_key/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => "deadbeef",
+          "fee_token" => @fee_payer_token
+        })
+      end
+    end
+
+    test "raises on invalid fee_token (wrong length)" do
+      assert_raise ArgumentError, ~r/fee_token/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => @fee_payer_key,
+          "fee_token" => "0xdead"
+        })
+      end
+    end
+
+    test "skips fee payer validation when fee_payer is false" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "fee_payer" => false})
+    end
+
+    test "skips fee payer validation when fee_payer is absent" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url})
+    end
+  end
+
+  describe "verify/2 — hash + fee_payer rejection" do
+    test "rejects type=hash when fee_payer is true", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", true)}
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "hash"
+      assert error.detail =~ "feePayer"
+    end
+
+    test "allows type=hash when fee_payer is false", %{charge: charge} do
+      stub_receipt(success_receipt())
+      charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", false)}
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+  end
+
+  describe "verify/2 — fee payer co-signing" do
+    # Hardhat default test keys (testnet only, no security concern).
+    @client_private_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    @fee_payer_private_key "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    @fee_token_address "0x20C0000000000000000000000000000000000000"
+
+    setup %{charge: charge} do
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer" => true,
+              "fee_payer_private_key" => @fee_payer_private_key,
+              "fee_token" => @fee_token_address
+            })
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "co-signs and broadcasts fee payer transaction", %{charge: charge} do
+      # Build a real signed tx with fee payer placeholder using TempoTxBuilder
+      {:ok, tx_hex} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @client_private_key,
+          token: @token_address,
+          recipient: @recipient,
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: @rpc_url,
+          nonce: 0
+        )
+
+      # Stub broadcast — server will co-sign then broadcast the modified tx
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.method == "tempo"
+      assert receipt.status == "success"
+
+      # Verify the broadcast used a DIFFERENT hex than the original (co-signed version)
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
+      assert broadcast_hex != tx_hex
+      assert String.starts_with?(broadcast_hex, "0x76")
+    end
+
+    test "rejects transaction without fee_payer_signature placeholder", %{charge: charge} do
+      # Build a normal tx (no fee payer placeholder)
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431, fee_payer: false)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "placeholder"
+    end
+
+    test "rejects transaction with non-empty fee_token", %{charge: charge} do
+      # Build a tx with fee_payer placeholder but with fee_token set
+      # (client shouldn't set fee_token when requesting fee sponsorship)
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call_rlp = build_call(@token_address, calldata)
+      token_bytes = decode_address(@token_address)
+
+      body = [
+        :binary.encode_unsigned(42_431),
+        <<>>,
+        <<>>,
+        :binary.encode_unsigned(21_000),
+        [call_rlp],
+        [],
+        <<>>,
+        <<>>,
+        <<>>,
+        <<>>,
+        token_bytes,
+        <<0x00>>,
+        [],
+        <<1::512>>
+      ]
+
+      raw = <<0x76>> <> ExRLP.encode(body)
+      tx_hex = "0x" <> Base.encode16(raw, case: :lower)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "fee_token"
+    end
+
+    test "passes through when fee_payer is false (no co-signing)", %{charge: charge} do
+      # Disable fee_payer
+      charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", false)}
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
   end
 
   # Stubs the two-step optimistic flow: eth_call succeeds, eth_sendRawTransaction returns tx hash.
