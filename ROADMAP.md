@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**v0.2.0 released** (2026-03-28) — Tempo payment method, multi-method 402, ConCacheStore dedup. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**v0.2.0 released** (2026-03-28) — Tempo payment method, multi-method 402, ConCacheStore dedup. Task 23 (onchain_tempo extraction) complete. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -32,7 +32,7 @@
 | Task 12: mix mpp.manifest | ✅ | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
 | Task 13a: Tempo skeleton | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Method module + challenge details |
 | Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
-| Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + MPP.Tempo.Transaction |
+| Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + 0x76 transaction verification |
 | Task 13d: Tempo fee payer | ✅ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
 | Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
 | Task 13f: Tx dedup store | ✅ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
@@ -40,7 +40,7 @@
 | Task 13h: Tx integration test | ✅ | [D:4/B:5/U:5 → Eff:1.25] | Testnet test for type="transaction" path |
 | Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
-| Task 23: onchain_tempo extraction | ⬜ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
+| Task 23: onchain_tempo extraction | ✅ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
 | Task 17: mix mpp.demo | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | After Tasks 13/14 |
 | Task 18: Live integration tests | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
 | Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
@@ -72,58 +72,9 @@
 
 > 8 tasks complete (v0.2.0). Hash + transaction credential paths, fee payer co-signing, optimistic broadcast, dedup store, ConCacheStore, integration tests against Moderato testnet, ox/tempo cross-validation.
 
-### Task 23: Extract onchain_tempo Package
+### Task 23: Extract onchain_tempo Package ✅
 
-[D:5/B:6/U:7 → Eff:1.3] 🚀 `[P]`
-
-Extract Tempo-specific chain primitives from mpp into a standalone `onchain_tempo` package (part of the [onchain package family](https://github.com/ZenHive/onchain)). This pushes chain primitives *downstream* — MPP method implementations stay in mpp. Code is tagged with `TODO(onchain_tempo)` markers.
-
-**Why:** Transaction deserialization, RLP encoding, TIP-20 event parsing, and Tempo-specific RPC methods are chain primitives, not payment protocol logic. They're useful outside MPP (wallets, indexers, explorers). Keeping them in mpp means anyone who wants Tempo chain ops must pull in the entire payment middleware.
-
-**Extraction targets (from mpp to onchain_tempo):**
-
-| Source (mpp) | Target (onchain_tempo) | What |
-|---|---|---|
-| `MPP.Tempo.Transaction` (lib) | `OnchainTempo.Transaction` | deserialize/1, find_payment_call/3, validate_call_scope/1, has_fee_payer_placeholder?/1, fee_token_empty?/1, cosign_fee_payer/3 |
-| `TempoTxBuilder` (test/support) | `OnchainTempo.Transaction` | **serialize/1** + build helpers (build_signed_transfer, build_signed_multicall, build_fee_payer_transfer, build_fee_payer_multicall). The current `sign_and_encode/3` is serialize — it builds RLP fields, signs, encodes, prepends 0x76. Merge into Transaction for full round-trip: `serialize(fields) ↔ deserialize(hex)` |
-| `TempoTestHelpers` (test/support) | `OnchainTempo.TIP20` | transfer_calldata, transfer_with_memo_calldata, build_call, decode_address — plus new transfer/transferWithMemo public API like `Onchain.ERC20` |
-| `broadcast_transaction_sync/3` (tempo.ex:576) | `OnchainTempo.RPC` | Tempo's `eth_sendRawTransactionSync` — returns receipt inline instead of requiring poll |
-| `broadcast_transaction_async/3` (tempo.ex:532) | `OnchainTempo.RPC` | Standard `eth_sendRawTransaction` but could stay in `Onchain.RPC` if generic enough |
-| `parse_transfer_with_memo_logs/1` (tempo.ex:731) | `OnchainTempo.Transfer` | TransferWithMemo event signature + log parsing (TIP-20 specific, not ERC-20) |
-
-**What stays in mpp (NOT extracted):**
-- `MPP.Methods.Tempo` — verify/2, challenge_method_details/1, dedup store integration, Plug error wrapping
-- `MPP.Tempo.Store` behaviour — payment-protocol concern (replay protection), not chain primitive
-- Optimistic vs confirmed broadcast decision logic — payment-protocol policy
-- `eth_call` multicall simulation — MPP-specific (simulates fee-payer co-signed tx)
-
-**After extraction, `OnchainTempo.Transaction` has full round-trip:**
-```
-serialize:   %{calls, chain_id, ...} → sign → RLP encode → "0x76..."
-deserialize: "0x76..." → RLP decode → extract calls, chain_id, signatures → %Transaction{}
-```
-
-**`MPP.Methods.Tempo` becomes a thin verification shell:**
-```
-credential → OnchainTempo.Transaction.deserialize/1
-           → OnchainTempo.Transaction.find_payment_call/3
-           → OnchainTempo.Transaction.cosign_fee_payer/3
-           → OnchainTempo.RPC.broadcast_sync/2
-           → OnchainTempo.Transfer.parse_logs/1
-           → MPP receipt
-```
-
-**D bumped from 4→5:** The TxBuilder merge is non-trivial — it currently uses `Curvy` for signing (mpp test dep), but `onchain_tempo` should use `Onchain.Signer` instead. Also needs its own integration tests against Moderato.
-
-Success criteria:
-- [ ] `onchain_tempo` package created in the onchain family
-- [ ] Modules: Transaction, TIP20, Transfer, RPC (at minimum)
-- [ ] Transaction module handles both deserialize and build (merged from TxBuilder)
-- [ ] mpp depends on `{:onchain_tempo, "~> 0.1", optional: true}` like `onchain`
-- [ ] `MPP.Methods.Tempo` delegates chain ops to onchain_tempo
-- [ ] All existing mpp tests pass with the dependency swap
-- [ ] `onchain_tempo` has its own unit + Moderato integration tests
-- [ ] mpp `test/support/tempo_tx_builder.ex` removed (replaced by onchain_tempo dep in test env)
+[D:5/B:6/U:7 → Eff:1.3] — Completed 2026-03-28. See [CHANGELOG.md](CHANGELOG.md#task-23-onchain_tempo-extraction).
 
 ---
 

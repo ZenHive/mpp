@@ -73,8 +73,7 @@ MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
-MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
-MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization, payment call matching, fee payer co-signing (0x78 domain), call scope validation for fee-payer txs (TODO: extract to onchain_tempo)
+MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (optional dep)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
@@ -119,7 +118,8 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `jason` — JSON encoding/decoding for challenge/receipt payloads
 - `req` — HTTP client for payment method API calls (Stripe, etc.)
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
-- `onchain` — (optional) Ethereum/Tempo RPC and transaction utilities for on-chain payment methods
+- `onchain` — (optional) Ethereum RPC, address validation, and ERC-20 transfer parsing
+- `onchain_tempo` — (optional) Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
 - `con_cache` — (optional) ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
 ### JS/TS cross-referencing (dev/test only)
 

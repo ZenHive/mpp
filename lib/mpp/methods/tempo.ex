@@ -54,8 +54,9 @@ defmodule MPP.Methods.Tempo do
 
   ## Dependencies
 
-  Requires the `onchain` package (optional dependency) for RPC calls and transfer
-  log parsing. The method checks availability at init time via `validate_config!/1`.
+  Requires the `onchain` and `onchain_tempo` packages (optional dependencies)
+  for RPC calls, transfer log parsing, and 0x76 Tempo transaction handling.
+  The method checks availability at init time via `validate_config!/1`.
   """
 
   use MPP.Method
@@ -65,13 +66,15 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Intents.Charge
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
-  alias MPP.Tempo.Transaction
+  alias Onchain.Tempo.RPC
+  alias Onchain.Tempo.Transaction
+  alias Onchain.Tempo.Transfer
 
   require Logger
 
-  # onchain is optional — suppress unknown function warnings for its APIs.
+  # onchain/onchain_tempo are optional — suppress unknown function warnings for their APIs.
   # Runtime availability is enforced by validate_config!/1 at Plug init time.
-  @dialyzer {:nowarn_function, [find_matching_transfer: 3, parse_transfer_with_memo_logs: 1]}
+  @dialyzer {:nowarn_function, find_matching_transfer: 3}
 
   @moderato_chain_id 42_431
   @required_config_keys ~w(rpc_url)
@@ -85,7 +88,7 @@ defmodule MPP.Methods.Tempo do
 
   api(
     :validate_config!,
-    "Validate Tempo method_config at init time. Raises on missing `rpc_url` or unavailable `onchain` dependency.",
+    "Validate Tempo method_config at init time. Raises on missing `rpc_url` or unavailable `onchain` / `onchain_tempo` dependencies.",
     params: [
       config: [kind: :value, description: "method_config map to validate"]
     ],
@@ -139,7 +142,7 @@ defmodule MPP.Methods.Tempo do
       with {:ok, hash} <- extract_hash(payload),
            :ok <- check_hash_unused(store, hash),
            {:ok, rpc_url} <- require_config(config, "rpc_url"),
-           {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
+           {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
            :ok <- check_receipt_status(receipt),
            {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
            :ok <- mark_hash_used(store, hash) do
@@ -340,9 +343,6 @@ defmodule MPP.Methods.Tempo do
   # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
   # the same signed tx. Matches mppx (Charge.ts:144-146).
 
-  # TODO(Task 23): When extracting to onchain_tempo, consider switching to keccak256(raw_hex)
-  # for fixed-length keys (matches mppx/mpp-rs convention). Currently using raw hex to avoid
-  # adding a hash dependency.
   @store_key_prefix "mpp:charge:"
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
@@ -504,7 +504,9 @@ defmodule MPP.Methods.Tempo do
   # Confirmation (default): broadcast sync → verify receipt logs.
   # Optimistic: simulate via eth_call → broadcast async → return tx hash without receipt verification.
   defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?, _payment_call) do
-    with {:ok, tx_hash, receipt} <- broadcast_transaction_sync(raw_hex, rpc_url, config),
+    rpc_opts = rpc_options(config)
+
+    with {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
          :ok <- check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
       {:ok, tx_hash}
@@ -512,8 +514,10 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false = _wait?, payment_call) do
+    rpc_opts = rpc_options(config)
+
     with :ok <- simulate_payment_call(payment_call, rpc_url, config) do
-      broadcast_transaction_async(raw_hex, rpc_url, config)
+      rpc_broadcast_async(raw_hex, rpc_url, rpc_opts)
     end
   end
 
@@ -564,92 +568,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # TODO(onchain_tempo): Extract broadcast_transaction_async/3 to OnchainTempo.RPC
-  # Broadcasts a transaction via async eth_sendRawTransaction. Returns the tx hash
-  # immediately without waiting for block inclusion. Used in optimistic mode.
-  defp broadcast_transaction_async(raw_hex, rpc_url, config) do
-    req_options = config["req_options"] || []
-
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => "eth_sendRawTransaction",
-        "params" => [raw_hex],
-        "id" => 1
-      })
-
-    result =
-      Req.request(
-        [
-          url: rpc_url,
-          method: :post,
-          headers: [{"content-type", "application/json"}],
-          body: body
-        ],
-        req_options
-      )
-
-    case result do
-      {:ok, %Req.Response{status: status, body: %{"result" => tx_hash}}}
-      when status in 200..299 and is_binary(tx_hash) ->
-        {:ok, tx_hash}
-
-      {:ok, %Req.Response{body: %{"error" => error}}} ->
-        {:error, Errors.new(:verification_failed, "Broadcast failed: #{inspect(error)}")}
-
-      {:error, exception} ->
-        {:error, Errors.new(:verification_failed, "Broadcast request failed: #{Exception.message(exception)}")}
-
-      {:ok, %Req.Response{} = response} ->
-        {:error, Errors.new(:verification_failed, "Unexpected broadcast response (status #{response.status})")}
-    end
-  end
-
-  # TODO(onchain_tempo): Extract broadcast_transaction_sync/3 to OnchainTempo.RPC
-  # Broadcasts a signed transaction via Tempo's synchronous eth_sendRawTransactionSync
-  # JSON-RPC method. Unlike eth_sendRawTransaction (async), the sync variant waits for
-  # block inclusion (~500ms on Tempo) and returns the full receipt directly — eliminating
-  # the race condition where a separate eth_getTransactionReceipt call arrives before mining.
-  # Returns {:ok, tx_hash, parsed_receipt} on success.
-  defp broadcast_transaction_sync(raw_hex, rpc_url, config) do
-    req_options = config["req_options"] || []
-
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => "eth_sendRawTransactionSync",
-        "params" => [raw_hex],
-        "id" => 1
-      })
-
-    result =
-      Req.request(
-        [
-          url: rpc_url,
-          method: :post,
-          headers: [{"content-type", "application/json"}],
-          body: body
-        ],
-        req_options
-      )
-
-    case result do
-      {:ok, %Req.Response{status: status, body: %{"result" => receipt}}}
-      when status in 200..299 and is_map(receipt) ->
-        tx_hash = receipt["transactionHash"]
-        {:ok, tx_hash, parse_rpc_receipt(receipt)}
-
-      {:ok, %Req.Response{body: %{"error" => error}}} ->
-        {:error, Errors.new(:verification_failed, "Broadcast failed: #{inspect(error)}")}
-
-      {:error, exception} ->
-        {:error, Errors.new(:verification_failed, "Broadcast request failed: #{Exception.message(exception)}")}
-
-      {:ok, %Req.Response{} = response} ->
-        {:error, Errors.new(:verification_failed, "Unexpected broadcast response (status #{response.status})")}
-    end
-  end
-
   # Gets a required key from the method_details config map.
   defp require_config(config, key) do
     case config[key] do
@@ -658,45 +576,31 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Fetches a transaction receipt via JSON-RPC using Req.
-  defp fetch_receipt(hash, rpc_url, config) do
-    req_options = config["req_options"] || []
+  # --- Onchain.Tempo.RPC adapter functions ---
+  # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
 
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => "eth_getTransactionReceipt",
-        "params" => [hash],
-        "id" => 1
-      })
+  defp rpc_options(config), do: [req_options: config["req_options"] || []]
 
-    result =
-      Req.request(
-        [
-          url: rpc_url,
-          method: :post,
-          headers: [{"content-type", "application/json"}],
-          body: body
-        ],
-        req_options
-      )
+  @dialyzer {:nowarn_function, [rpc_broadcast_async: 3, rpc_broadcast_sync: 3, rpc_fetch_receipt: 3]}
 
-    case result do
-      {:ok, %Req.Response{status: status, body: %{"result" => receipt}}} when status in 200..299 ->
-        if is_nil(receipt) do
-          {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
-        else
-          {:ok, parse_rpc_receipt(receipt)}
-        end
+  defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
+    case RPC.broadcast_async(raw_hex, rpc_url, opts) do
+      {:ok, _tx_hash} = ok -> ok
+      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
+    end
+  end
 
-      {:ok, %Req.Response{body: %{"error" => error}}} ->
-        {:error, Errors.new(:verification_failed, "RPC error: #{inspect(error)}")}
+  defp rpc_broadcast_sync(raw_hex, rpc_url, opts) do
+    case RPC.broadcast_sync(raw_hex, rpc_url, opts) do
+      {:ok, _tx_hash, _receipt} = ok -> ok
+      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
+    end
+  end
 
-      {:error, exception} ->
-        {:error, Errors.new(:verification_failed, "RPC request failed: #{Exception.message(exception)}")}
-
-      {:ok, %Req.Response{} = response} ->
-        {:error, Errors.new(:verification_failed, "Unexpected RPC response (status #{response.status})")}
+  defp rpc_fetch_receipt(hash, rpc_url, opts) do
+    case RPC.fetch_receipt(hash, rpc_url, opts) do
+      {:ok, _receipt} = ok -> ok
+      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
     end
   end
 
@@ -706,11 +610,6 @@ defmodule MPP.Methods.Tempo do
   defp check_receipt_status(%{status: _}) do
     {:error, Errors.new(:verification_failed, "Transaction failed on-chain (reverted)")}
   end
-
-  # TODO(onchain_tempo): Extract parse_transfer_with_memo_logs/1 to OnchainTempo.Transfer
-  # TIP-20 TransferWithMemo event signature — Tempo-specific, not in onchain.
-  # Moderato emits `memo` as an indexed topic and `amount` in the data payload.
-  @transfer_with_memo_sig "TransferWithMemo(address indexed from, address indexed to, uint256 amount, bytes32 indexed memo)"
 
   # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
   # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.
@@ -722,7 +621,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, amount_int} <- parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       # Also check TransferWithMemo events (onchain only parses standard Transfer)
-      memo_transfers = parse_transfer_with_memo_logs(logs)
+      memo_transfers = Transfer.parse_transfer_with_memo_logs(logs)
 
       match =
         Enum.find(transfers ++ memo_transfers, fn transfer ->
@@ -745,7 +644,7 @@ defmodule MPP.Methods.Tempo do
 
       match =
         logs
-        |> parse_transfer_with_memo_logs()
+        |> Transfer.parse_transfer_with_memo_logs()
         |> Enum.find(fn transfer ->
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
@@ -763,38 +662,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Parses TransferWithMemo events from raw logs. Returns a flat list of maps
-  # with :token, :from, :to, :amount, :memo keys (same shape as Onchain.Transfer
-  # structs plus :memo, for uniform matching).
-  defp parse_transfer_with_memo_logs(logs) do
-    Enum.flat_map(logs, fn log ->
-      case Onchain.Log.decode_event(log, @transfer_with_memo_sig) do
-        {:ok, %{from: from, to: to, amount: amount, memo: memo_bytes}} ->
-          [
-            %{
-              token: log.address,
-              from: from,
-              to: to,
-              amount: amount,
-              memo: encode_memo(memo_bytes)
-            }
-          ]
-
-        _ ->
-          []
-      end
-    end)
-  end
-
-  # Encodes a raw bytes32 memo value to hex string for comparison.
-  # Onchain.Log.decode_event returns bytes32 as a 32-byte binary.
-  defp encode_memo(memo) when is_binary(memo) and byte_size(memo) == 32 do
-    Base.encode16(memo, case: :lower)
-  end
-
-  defp encode_memo(<<"0x", _::binary>> = hex), do: String.downcase(strip_0x(hex))
-  defp encode_memo(memo) when is_binary(memo), do: String.downcase(memo)
-
   # Parses charge amount string to integer safely.
   defp parse_charge_amount(amount) do
     case Integer.parse(amount) do
@@ -803,31 +670,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Parses raw JSON-RPC receipt into the atom-keyed format expected by Onchain.Transfer.
-  defp parse_rpc_receipt(raw) do
-    %{
-      status: parse_hex_integer(raw["status"]),
-      logs: Enum.map(raw["logs"] || [], &parse_rpc_log/1)
-    }
-  end
-
-  # Converts a raw JSON-RPC log entry to atom-keyed map for Onchain.Transfer.parse_log/1.
-  defp parse_rpc_log(log) do
-    %{
-      address: log["address"],
-      topics: log["topics"] || [],
-      data: log["data"],
-      block_number: parse_hex_integer(log["blockNumber"]) || 0,
-      transaction_hash: log["transactionHash"],
-      log_index: parse_hex_integer(log["logIndex"]) || 0
-    }
-  end
-
-  # Parses a hex string like "0x1" into an integer.
-  defp parse_hex_integer(nil), do: nil
-  defp parse_hex_integer("0x" <> hex), do: String.to_integer(hex, 16)
-  defp parse_hex_integer(_), do: nil
-
   # Strips the optional "0x" prefix from a hex string.
   defp strip_0x("0x" <> rest), do: rest
   defp strip_0x(hex), do: hex
@@ -835,7 +677,7 @@ defmodule MPP.Methods.Tempo do
   # Checks if a string contains only hex characters.
   defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
 
-  # Checks that the onchain library is available at runtime.
+  # Checks that the onchain and onchain_tempo libraries are available at runtime.
   defp check_onchain_available! do
     if !Code.ensure_loaded?(Onchain) do
       raise ArgumentError, """
@@ -844,6 +686,16 @@ defmodule MPP.Methods.Tempo do
       Add it to your mix.exs dependencies:
 
           {:onchain, "~> 0.4"}
+      """
+    end
+
+    if !Code.ensure_loaded?(Transaction) do
+      raise ArgumentError, """
+      MPP.Methods.Tempo requires the `onchain_tempo` package.
+
+      Add it to your mix.exs dependencies:
+
+          {:onchain_tempo, "~> 0.1"}
       """
     end
   end

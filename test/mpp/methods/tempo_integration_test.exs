@@ -22,7 +22,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
-  alias MPP.Test.TempoTxBuilder
+  alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @moduletag :integration
 

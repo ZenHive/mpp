@@ -9,7 +9,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.TempoMemoryStore
-  alias MPP.Test.TempoTxBuilder
+  alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @rpc_url "https://rpc.moderato.tempo.xyz"
   @token_address "0x20C0000000000000000000000000000000000000"
@@ -463,7 +463,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Broadcast failed"
+      assert error.detail =~ "RPC error"
     end
 
     test "returns error when transaction reverts on-chain", %{charge: charge, tx_hex: tx_hex} do
@@ -533,7 +533,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Broadcast request failed"
+      assert error.detail =~ "RPC request failed"
     end
 
     test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
@@ -546,7 +546,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected broadcast response"
+      assert error.detail =~ "Unexpected RPC response"
     end
   end
 
@@ -637,7 +637,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Broadcast failed"
+      assert error.detail =~ "RPC error"
     end
 
     test "calls eth_call then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
@@ -699,7 +699,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Broadcast request failed"
+      assert error.detail =~ "RPC request failed"
     end
 
     test "async broadcast unexpected response status returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -722,7 +722,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected broadcast response"
+      assert error.detail =~ "Unexpected RPC response"
     end
 
     test "multicall: simulates the matched payment call, not the first call in batch", %{charge: charge} do

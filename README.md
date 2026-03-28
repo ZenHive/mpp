@@ -70,10 +70,10 @@ pipeline :paid_tempo do
     method: MPP.Methods.Tempo,
     amount: "1000000",
     currency: "0x...(pathUSD token address)",
+    recipient: "0x...your-address",
     method_config: %{
       "rpc_url" => "https://rpc.tempo.xyz",
       "chain_id" => 4217,
-      "recipient" => "0x...your-address",
       "fee_payer" => true,
       "fee_payer_private_key" => "0x...",
       "fee_token" => "0x...(fee token address)",
@@ -103,7 +103,8 @@ pipeline :paid_multi do
         method: MPP.Methods.Tempo,
         amount: "5000000",
         currency: "0x...(pathUSD)",
-        method_config: %{"rpc_url" => "https://rpc.tempo.xyz", "recipient" => "0x..."}
+        recipient: "0x...",
+        method_config: %{"rpc_url" => "https://rpc.tempo.xyz"}
       ]
     ]
 end
@@ -165,8 +166,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
-| `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification |
-| `MPP.Tempo.Transaction` | 0x76 Tempo Transaction RLP deserialization and payment call matching |
+| `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache (optional) |
 
@@ -179,6 +179,21 @@ def deps do
   ]
 end
 ```
+
+If you use `MPP.Methods.Tempo`, also add the optional chain dependencies at the
+top level of your app:
+
+```elixir
+def deps do
+  [
+    {:mpp, "~> 0.2.0"},
+    {:onchain, "~> 0.4"},
+    {:onchain_tempo, "~> 0.1"}
+  ]
+end
+```
+
+Add `{:con_cache, "~> 1.1"}` too if you want the built-in `MPP.Tempo.ConCacheStore`.
 
 ## References
 

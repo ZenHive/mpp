@@ -12,6 +12,7 @@ defmodule MPP.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      dialyzer: dialyzer(),
       description: description(),
       package: package(),
       docs: docs(),
@@ -67,6 +68,9 @@ defmodule MPP.MixProject do
       # On-chain verification (optional — required by Tempo method)
       {:onchain, "~> 0.4", optional: true},
 
+      # Tempo chain primitives (optional — required by Tempo method)
+      {:onchain_tempo, "~> 0.1", optional: true},
+
       # ETS-based dedup store with TTL (optional — used by ConCacheStore)
       {:con_cache, "~> 1.1", optional: true},
 
@@ -91,6 +95,28 @@ defmodule MPP.MixProject do
         "MPP Spec" => "https://mpp.dev",
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       }
+    ]
+  end
+
+  defp dialyzer do
+    [
+      plt_add_apps: [
+        :mix,
+        :plug,
+        :plug_crypto,
+        :jason,
+        :req,
+        :descripex,
+        :onchain,
+        :onchain_tempo,
+        :signet,
+        :curvy,
+        :ex_rlp,
+        :con_cache
+      ],
+      plt_local_path: "_build/dialyzer",
+      plt_core_path: "_build/dialyzer",
+      ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end
 

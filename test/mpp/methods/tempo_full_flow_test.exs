@@ -20,7 +20,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
-  alias MPP.Test.TempoTxBuilder
+  alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   # --- Constants ---
 

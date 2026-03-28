@@ -21,9 +21,9 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   use ExUnit.Case, async: true
 
-  alias MPP.Tempo.Transaction
   alias MPP.Test.OxTempoBundle
-  alias MPP.Test.TempoTxBuilder
+  alias Onchain.Tempo.Transaction
+  alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
   alias Signet.Signer.Curvy
 
   # Our hardcoded values (must match canonical viem/tempo source).
