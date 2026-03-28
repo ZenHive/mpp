@@ -8,15 +8,21 @@ defmodule MPP.Tempo.CrossValidationTest do
   2. **Transaction encoding** — our RLP bytes round-trip through ox/tempo's
      TxEnvelopeTempo.deserialize/serialize, proving byte-level compatibility
 
-  Run with: `mix test test/mpp/tempo/cross_validation_test.exs --include cross_validation`
+  These tests are deterministic and run on every `mix test`. They require
+  QuickBEAM, node_modules/ox, node_modules/viem, and npx (for esbuild bundling).
+
+  ## Required test dependencies
+
+    * `quickbeam` — JS runtime for the BEAM
+    * `ox` npm package — TypeScript SDK with TxEnvelopeTempo
+    * `viem` npm package — TypeScript SDK with Tempo ABIs/addresses
+    * `npx` + `esbuild` — bundles ox/tempo into QuickBEAM-loadable IIFE
   """
 
   use ExUnit.Case, async: true
 
   alias MPP.Tempo.Transaction
   alias MPP.Test.OxTempoBundle
-
-  @moduletag :cross_validation
 
   # Our hardcoded values (must match canonical viem/tempo source).
   @stablecoin_dex_hex "0xdec0000000000000000000000000000000000000"
