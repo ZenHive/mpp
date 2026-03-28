@@ -104,6 +104,15 @@ MPP.Plug.Config            — Validated endpoint config struct (shared settings
 | HMAC input separator | `\|` (pipe) |
 | Encoding | base64url (no padding) |
 
+### Tempo network chain IDs
+
+| Network | Chain ID | RPC URL | Docs |
+|---------|----------|---------|------|
+| Tempo Mainnet | `4217` | `https://rpc.tempo.xyz` | [connection-details#mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) |
+| Tempo Testnet (Moderato) | `42431` | `https://rpc.moderato.tempo.xyz` | [connection-details#testnet](https://docs.tempo.xyz/quickstart/connection-details#testnet) |
+
+Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in `MPP.Methods.Tempo`. README examples use `4217` (mainnet).
+
 ### Dependencies
 
 - `plug` — HTTP middleware framework (the integration surface)

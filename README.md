@@ -60,6 +60,55 @@ defmodule MyAppWeb.Router do
 end
 ```
 
+### Tempo (Stablecoins)
+
+```elixir
+pipeline :paid_tempo do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    method: MPP.Methods.Tempo,
+    amount: "1000000",
+    currency: "0x...(pathUSD token address)",
+    method_config: %{
+      "rpc_url" => "https://rpc.tempo.xyz",
+      "chain_id" => 4217,
+      "recipient" => "0x...your-address",
+      "fee_payer" => true,
+      "fee_payer_private_key" => "0x...",
+      "fee_token" => "0x...(fee token address)",
+      "wait_for_confirmation" => false,
+      "memo" => "0x...(optional 32-byte memo)"
+    }
+end
+```
+
+### Multi-Method (Stripe + Tempo)
+
+Offer multiple payment options in a single 402 response — the agent picks whichever it can pay with:
+
+```elixir
+pipeline :paid_multi do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    methods: [
+      [
+        method: MPP.Methods.Stripe,
+        amount: "5000",
+        currency: "usd",
+        method_config: %{"stripe_secret_key" => "sk_test_..."}
+      ],
+      [
+        method: MPP.Methods.Tempo,
+        amount: "5000000",
+        currency: "0x...(pathUSD)",
+        method_config: %{"rpc_url" => "https://rpc.tempo.xyz", "recipient" => "0x..."}
+      ]
+    ]
+end
+```
+
 Requests without payment get a `402 Payment Required` with a challenge. Requests with a valid `Authorization: Payment` credential pass through with a `Payment-Receipt` header and the receipt in `conn.assigns[:mpp_receipt]`.
 
 Each route can have its own pricing — just mount `MPP.Plug` with different `amount`/`currency` per pipeline or scope.
@@ -91,32 +140,42 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 | Method | Protocol | Settlement | Status |
 |--------|----------|------------|--------|
 | Stripe | MPP | Fiat (cards, wallets) | v0.1.0 |
-| Tempo | MPP | Stablecoins (TIP-20) | Planned |
+| Tempo | MPP | Stablecoins (TIP-20) | v0.2.0 |
 | x402 | x402/MPP | EVM/Solana on-chain (USDC, ERC-20) | Planned |
 | Lightning | MPP | Bitcoin (BOLT11) | Future |
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
+
+**Tempo capabilities:** Fee payer co-signing (server sponsors gas), optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, and pluggable dedup stores with a built-in ETS+TTL option via ConCache.
+
+**Tempo networks:** [Mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) (chain ID `4217`, `rpc.tempo.xyz`) | [Testnet (Moderato)](https://docs.tempo.xyz/quickstart/connection-details#testnet) (chain ID `42431`, `rpc.moderato.tempo.xyz`)
 
 ## Modules
 
 | Module | Purpose |
 |--------|---------|
 | `MPP.Plug` | Plug middleware — the main integration point |
+| `MPP.Plug.Config` | Validated endpoint config (shared settings + method entries) |
+| `MPP.Plug.MethodEntry` | Per-method config within a multi-method endpoint |
 | `MPP.Challenge` | HMAC-SHA256 bound challenge creation/verification |
 | `MPP.Credential` | Payment credential encoding/decoding |
 | `MPP.Receipt` | Proof-of-payment receipt serialization |
 | `MPP.Headers` | WWW-Authenticate, Authorization, Payment-Receipt headers |
 | `MPP.Errors` | RFC 9457 Problem Detail error types |
 | `MPP.Method` | Behaviour for pluggable payment methods |
-| `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Intents.Charge` | Charge intent request schema |
+| `MPP.Methods.Stripe` | Stripe SPT payment verification |
+| `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification |
+| `MPP.Tempo.Transaction` | 0x76 Tempo Transaction RLP deserialization and payment call matching |
+| `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
+| `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache (optional) |
 
 ## Installation
 
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.1.0"}
+    {:mpp, "~> 0.2.0"}
   ]
 end
 ```

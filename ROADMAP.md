@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — All subtasks complete (13a-13h + fee payer + call scope security + optimistic multicall fix + cross-validation + full-flow Plug pipeline tests + real Moderato integration tests covering all feature combinations). Integration test nonce flakes fixed via Agent-based nonce tracking. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**v0.2.0 released** (2026-03-28) — Tempo payment method, multi-method 402, ConCacheStore dedup. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -50,103 +50,27 @@
 
 ---
 
-## Phase 1: Core Protocol
+## Phase 1: Core Protocol ✅
 
-### Task 1: Challenge Module ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-1-challenge-module) for details.
-
-### Task 2: Credential Module ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-2-credential-module) for details.
-
-### Task 3: Receipt Module ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-3-receipt-module) for details.
-
-### Task 4: Headers Module ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-4-headers-module) for details.
-
-### Task 5: Errors Module ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-5-errors-module) for details.
-
-### Task 6: Charge Request Schema ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-6-charge-request-schema) for details.
-
-### Task 7: Method Behaviour ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-7-method-behaviour) for details.
-
-### Task 8: Plug Middleware ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-8-plug-middleware) for details.
+> 8 tasks complete (v0.1.0). Challenge, Credential, Receipt, Headers, Errors, Charge intent, Method behaviour, Plug middleware.
 
 ---
 
-## Phase 2: Stripe Payment Method
+## Phase 2: Stripe Payment Method ✅
 
-### Task 9: Stripe Method ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-9-stripe-method) for details.
-
-### Task 10: Stripe Integration Test ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-10-stripe-integration-test) for details.
+> 2 tasks complete (v0.1.0). Stripe SPT verification + integration tests against Stripe test API.
 
 ---
 
-## Phase 3: Descripex + Discovery
+## Phase 3: Descripex + Discovery ✅
 
-### Task 11: Descripex Annotations ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-11-descripex-annotations) for details.
-
-### Task 12: mix mpp.manifest ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-12-mix-mppmanifest) for details.
+> 2 tasks complete (v0.1.0). `api()` annotations on all public functions, `MPP.describe/0-2`, `mix mpp.manifest`.
 
 ---
 
-## Phase 4: Tempo Payment Method
+## Phase 4: Tempo Payment Method ✅
 
-> Tempo has two credential types: `type="hash"` (client already broadcast, server verifies via RPC) and `type="transaction"` (client sends signed tx, server decodes/broadcasts). The hash path uses standard EVM RPC calls that `onchain` already provides. The transaction path requires Tempo-specific 0x76 tx parsing — lives in `MPP.Tempo.Transaction` within mpp (not in onchain; protocol-specific, not chain-generic).
->
-> Spec: `refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md`
-
-### Task 13a: Tempo Method Skeleton + Challenge Details ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13a-tempo-method-skeleton) for details.
-
-### Task 13b: Hash Credential Verification (type="hash") ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13b-hash-credential-verification) for details.
-
-### Task 13c: Transaction Credential Verification (type="transaction") ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13c-transaction-credential-verification) for details.
-
-### Task 13f: Transaction Dedup Store ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13f-transaction-dedup-store) for details.
-
-### Task 13g: Optimistic Broadcast Mode ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13g-optimistic-broadcast-mode) for details.
-
-### Task 13h: Transaction Path Integration Test ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13h-transaction-path-integration-test) for details.
-
-### Task 13d: Fee Payer Support ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13d-fee-payer-support) for details.
-
-### Task 13e: Tempo Integration Tests ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-13e-tempo-integration-tests) for details.
+> 8 tasks complete (v0.2.0). Hash + transaction credential paths, fee payer co-signing, optimistic broadcast, dedup store, ConCacheStore, integration tests against Moderato testnet, ox/tempo cross-validation.
 
 ### Task 23: Extract onchain_tempo Package
 
@@ -224,17 +148,13 @@ Success criteria:
 
 ## Phase 6: Multi-Method Challenges ✅
 
-### Task 15: Multi-Method 402 ✅
-
-See [CHANGELOG.md](CHANGELOG.md#task-15-multi-method-402) for details.
+> 1 task complete (v0.2.0). Multiple payment methods per endpoint with per-method pricing and credential routing.
 
 ---
 
 ## Phase 7: Hex Publish ✅
 
-### Task 16: v0.1.0 Release ✅
-
-See [CHANGELOG.md](CHANGELOG.md#010---2026-03-25) for details.
+> v0.1.0 published to Hex (2026-03-25). v0.2.0 published (2026-03-28).
 
 ---
 

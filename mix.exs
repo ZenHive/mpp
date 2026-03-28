@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.1.1"
+  @version "0.2.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -64,7 +64,7 @@ defmodule MPP.MixProject do
       {:oxc, "~> 0.5", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
 
-      # On-chain verification (optional — required by Tempo and x402 methods)
+      # On-chain verification (optional — required by Tempo method)
       {:onchain, "~> 0.4", optional: true},
 
       # ETS-based dedup store with TTL (optional — used by ConCacheStore)
@@ -79,7 +79,7 @@ defmodule MPP.MixProject do
     """
     Elixir implementation of the Machine Payments Protocol (MPP) — HTTP 402
     payment middleware for AI agents and machine-to-machine commerce. Supports
-    Stripe, x402, and pluggable payment methods.
+    Stripe and Tempo payment methods with pluggable architecture.
     """
   end
 
