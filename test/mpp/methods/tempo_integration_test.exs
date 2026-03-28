@@ -34,9 +34,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Deterministic testnet-only private keys (no value on mainnet)
   @sender_key "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
   @recipient_key "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  @fee_payer_key "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 
   # 1 pathUSD (6 decimals)
   @transfer_amount 1_000_000
+  @test_memo "0x" <> String.duplicate("ab", 32)
 
   # Plug config
   @hmac_secret "test-hmac-secret-for-tempo-integration"
@@ -91,6 +93,23 @@ defmodule MPP.Methods.TempoIntegrationTest do
       flunk("Test setup: pathUSD transfer reverted (tx: #{tx_hash})")
     end
 
+    memo_call =
+      TempoTestHelpers.build_call(
+        @path_usd,
+        TempoTestHelpers.transfer_with_memo_calldata(recipient_address, @transfer_amount, @test_memo)
+      )
+
+    {:ok, memo_tx} =
+      TempoTxBuilder.build_signed_multicall(
+        private_key: @sender_key,
+        calls: [memo_call],
+        chain_id: @chain_id,
+        rpc_url: rpc_url,
+        fee_token: @path_usd
+      )
+
+    memo_tx_hash = broadcast_raw_transaction_sync!(memo_tx, rpc_url)
+
     # Build Plug config for 402 handshake tests
     plug_opts = [
       secret_key: @hmac_secret,
@@ -108,7 +127,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     config = MPP.Plug.init(plug_opts)
 
-    {:ok, config: config, tx_hash: tx_hash, sender: sender_address, recipient: recipient_address, rpc_url: rpc_url}
+    {:ok,
+     config: config,
+     tx_hash: tx_hash,
+     memo_tx_hash: memo_tx_hash,
+     sender: sender_address,
+     recipient: recipient_address,
+     rpc_url: rpc_url}
   end
 
   describe "full 402 handshake" do
@@ -200,6 +225,103 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = Jason.decode!(conn2.resp_body)
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
+    end
+  end
+
+  describe "transferWithMemo hash credential path" do
+    test "happy path: matching transferWithMemo hash succeeds", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      memo_tx_hash: memo_tx_hash
+    } do
+      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+
+      challenge = request_challenge!(memo_config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "hash", "hash" => memo_tx_hash}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(memo_config)
+
+      assert conn.status == nil, "Plug should pass through on valid memo hash credential"
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      assert receipt.reference == memo_tx_hash
+    end
+
+    test "rejects plain transfer hash when memo is configured", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      tx_hash: tx_hash
+    } do
+      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+
+      body = submit_credential!(memo_config, %{"type" => "hash", "hash" => tx_hash})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "TransferWithMemo"
+    end
+
+    test "rejects transferWithMemo hash when memo mismatches", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      memo_tx_hash: memo_tx_hash
+    } do
+      wrong_memo = "0x" <> String.duplicate("cd", 32)
+      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => wrong_memo})
+
+      body = submit_credential!(memo_config, %{"type" => "hash", "hash" => memo_tx_hash})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "TransferWithMemo"
+    end
+  end
+
+  describe "transferWithMemo transaction credential path" do
+    test "happy path: 402 -> signed transferWithMemo credential -> server broadcasts -> receipt", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+
+      memo_call =
+        TempoTestHelpers.build_call(
+          @path_usd,
+          TempoTestHelpers.transfer_with_memo_calldata(recipient_address, @transfer_amount, @test_memo)
+        )
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_multicall(
+          private_key: @sender_key,
+          calls: [memo_call],
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      challenge = request_challenge!(memo_config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(memo_config)
+
+      assert conn.status == nil, "Plug should pass through on valid memo transaction credential"
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      assert String.starts_with?(receipt.reference, "0x")
     end
   end
 
@@ -393,6 +515,50 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert detail =~ "Simulation failed" or detail =~ "Broadcast failed",
              "Expected simulation or broadcast failure, got: #{inspect(detail)}"
     end
+
+    test "multicall: matched payment call is simulated before broadcast", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      impossible_amount = 999_999_999_999_999
+
+      optimistic_config =
+        tempo_config(
+          recipient_address,
+          rpc_url,
+          %{"wait_for_confirmation" => false},
+          impossible_amount
+        )
+
+      harmless_call =
+        TempoTestHelpers.build_call(
+          @path_usd,
+          TempoTestHelpers.transfer_calldata(recipient_address, 1)
+        )
+
+      payment_call =
+        TempoTestHelpers.build_call(
+          @path_usd,
+          TempoTestHelpers.transfer_calldata(recipient_address, impossible_amount)
+        )
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_multicall(
+          private_key: @sender_key,
+          calls: [harmless_call, payment_call],
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+
+      detail = body["detail"]
+
+      assert detail =~ "Simulation failed" or detail =~ "Broadcast failed",
+             "Expected simulation or broadcast failure, got: #{inspect(detail)}"
+    end
   end
 
   describe "transaction credential path" do
@@ -492,6 +658,46 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "No matching transfer call"
+    end
+
+    test "same signed transaction is rejected on second submit when store is enabled", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      challenge = request_challenge!(config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil, "First transaction submission should pass through"
+      assert %Receipt{} = conn.assigns[:mpp_receipt]
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "already used"
     end
   end
 
@@ -605,6 +811,339 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
+  describe "fee-payer validation" do
+    defp fee_payer_config(recipient_address, rpc_url, extra \\ %{}) do
+      tempo_config(
+        recipient_address,
+        rpc_url,
+        Map.merge(
+          %{
+            "fee_payer" => true,
+            "fee_payer_private_key" => @fee_payer_key,
+            "fee_token" => @path_usd
+          },
+          extra
+        )
+      )
+    end
+
+    test "rejects hash credential when feePayer is true", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      tx_hash: tx_hash
+    } do
+      config = fee_payer_config(recipient_address, rpc_url)
+
+      body = submit_credential!(config, %{"type" => "hash", "hash" => tx_hash})
+      assert body["type"] =~ "invalid-payload"
+      assert body["detail"] =~ "feePayer"
+    end
+
+    test "rejects transaction missing fee_payer_signature placeholder", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      config = fee_payer_config(recipient_address, rpc_url)
+
+      # build_signed_transfer sets fee_payer_signature = <<>> (absent), NOT <<0x00>> (placeholder)
+      {:ok, non_fp_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => non_fp_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "placeholder"
+    end
+
+    test "rejects transaction with non-empty fee_token in fee-payer mode", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      config = fee_payer_config(recipient_address, rpc_url)
+
+      # Build raw 0x76 with placeholder sig but non-empty fee_token
+      token_bytes = TempoTestHelpers.decode_address(@path_usd)
+      calldata = TempoTestHelpers.transfer_calldata(recipient_address, @transfer_amount)
+      call = [token_bytes, <<>>, calldata]
+
+      fields = [
+        :binary.encode_unsigned(@chain_id),
+        <<1>>,
+        <<1>>,
+        :binary.encode_unsigned(21_000),
+        [call],
+        [],
+        <<>>,
+        <<>>,
+        <<>>,
+        <<>>,
+        # fee_token: NON-EMPTY (this is what we're testing)
+        token_bytes,
+        # fee_payer_signature: placeholder
+        <<0x00>>,
+        []
+      ]
+
+      tx_hex = "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "fee_token"
+    end
+  end
+
+  describe "fee-payer dedup" do
+    test "co-signed transaction rejected on second submission", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> @fee_payer_key)
+      :ok = fund_test_address(fee_payer_address, rpc_url)
+      Process.sleep(@confirmation_poll_interval_ms)
+
+      config =
+        tempo_config(
+          recipient_address,
+          rpc_url,
+          %{
+            "fee_payer" => true,
+            "fee_payer_private_key" => @fee_payer_key,
+            "fee_token" => @path_usd,
+            "store" => TempoMemoryStore
+          }
+        )
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url
+        )
+
+      # First: co-signed and broadcast succeeds
+      challenge = request_challenge!(config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil,
+             "First submission should pass through, got #{conn.status}: #{conn.resp_body}"
+
+      assert %Receipt{} = conn.assigns[:mpp_receipt]
+
+      # Second: same client tx -> store catches duplicate
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "already used"
+    end
+  end
+
+  describe "fee payer + optimistic broadcast" do
+    test "fee payer co-signs and optimistically broadcasts transfer", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> @fee_payer_key)
+      :ok = fund_test_address(fee_payer_address, rpc_url)
+      Process.sleep(@confirmation_poll_interval_ms)
+
+      config =
+        tempo_config(
+          recipient_address,
+          rpc_url,
+          %{
+            "fee_payer" => true,
+            "fee_payer_private_key" => @fee_payer_key,
+            "fee_token" => @path_usd,
+            "wait_for_confirmation" => false,
+            "store" => TempoMemoryStore
+          }
+        )
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url
+        )
+
+      challenge = request_challenge!(config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil,
+             "Fee payer + optimistic should pass through, got #{conn.status}: #{conn.resp_body}"
+
+      receipt = conn.assigns[:mpp_receipt]
+      assert %Receipt{} = receipt
+      assert receipt.status == "success"
+      assert receipt.reference
+
+      # Confirm the co-signed tx actually landed on-chain
+      on_chain_receipt = wait_for_receipt!(receipt.reference, rpc_url: rpc_url)
+      assert on_chain_receipt.status == 1
+    end
+  end
+
+  describe "optimistic broadcast + dedup store" do
+    test "optimistic broadcast rejects duplicate via store", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      config =
+        tempo_config(
+          recipient_address,
+          rpc_url,
+          %{
+            "wait_for_confirmation" => false,
+            "store" => TempoMemoryStore
+          }
+        )
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: @sender_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd
+        )
+
+      # First submission: optimistic pass-through
+      challenge = request_challenge!(config)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil,
+             "First optimistic submission should pass through, got #{conn.status}: #{conn.resp_body}"
+
+      assert %Receipt{} = conn.assigns[:mpp_receipt]
+
+      # Second submission: store catches duplicate before broadcast
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "already used"
+    end
+  end
+
+  describe "challenge expiration" do
+    test "expired challenge rejected before method verification", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      tx_hash: tx_hash
+    } do
+      # 2-second TTL — short enough to expire during the sleep
+      config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          expires_in: 2,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => false
+          }
+        )
+
+      challenge = request_challenge!(config)
+
+      # Wait for the challenge to expire
+      Process.sleep(3_000)
+
+      # Submit with the now-expired challenge — should be rejected at the
+      # expiration check, before method.verify/2 is ever called
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "hash", "hash" => tx_hash}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "payment-expired"
+    end
+  end
+
+  describe "memo in challenge details" do
+    test "challenge includes memo when configured", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      config =
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+
+      challenge = request_challenge!(config)
+      assert {:ok, request_json} = Base.url_decode64(challenge.request, padding: false)
+      assert {:ok, request_map} = Jason.decode(request_json)
+
+      assert request_map["methodDetails"]["memo"] == @test_memo
+    end
+
+    test "challenge omits memo when not configured", %{config: config} do
+      challenge = request_challenge!(config)
+      assert {:ok, request_json} = Base.url_decode64(challenge.request, padding: false)
+      assert {:ok, request_map} = Jason.decode(request_json)
+
+      refute request_map["methodDetails"]["memo"]
+    end
+  end
+
   # --- Private helpers ---
 
   # Requests a 402 challenge from the Plug and parses it.
@@ -640,6 +1179,31 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     assert conn.status == 402
     Jason.decode!(conn.resp_body)
+  end
+
+  # Builds a Tempo Plug config with common test defaults plus method_config overrides.
+  defp tempo_config(recipient_address, rpc_url, method_config_overrides) do
+    tempo_config(recipient_address, rpc_url, method_config_overrides, @transfer_amount)
+  end
+
+  defp tempo_config(recipient_address, rpc_url, method_config_overrides, amount) do
+    MPP.Plug.init(
+      secret_key: @hmac_secret,
+      realm: @realm,
+      method: Tempo,
+      amount: Integer.to_string(amount),
+      currency: @path_usd,
+      recipient: recipient_address,
+      method_config:
+        Map.merge(
+          %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer" => false
+          },
+          method_config_overrides
+        )
+    )
   end
 
   # Funds a test address via Tempo's custom `tempo_fundAddress` JSON-RPC method.
@@ -690,6 +1254,38 @@ defmodule MPP.Methods.TempoIntegrationTest do
         Check network connectivity and that the RPC URL is correct.
         Set TEMPO_RPC_URL to override: export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
         """)
+    end
+  end
+
+  # Broadcasts a prebuilt signed Tempo transaction via the sync RPC and returns its tx hash.
+  defp broadcast_raw_transaction_sync!(raw_tx, rpc_url) do
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => "eth_sendRawTransactionSync",
+        "params" => [raw_tx],
+        "id" => 1
+      })
+
+    case Req.post(rpc_url, headers: [{"content-type", "application/json"}], body: body) do
+      {:ok, %Req.Response{status: status, body: %{"result" => receipt}}}
+      when status in 200..299 and is_map(receipt) ->
+        tx_hash = receipt["transactionHash"]
+
+        if receipt["status"] != "0x1" do
+          flunk("Broadcasted raw transaction reverted (tx: #{tx_hash || inspect(receipt)})")
+        end
+
+        tx_hash
+
+      {:ok, %Req.Response{status: status, body: %{"error" => error}}} when status in 200..299 ->
+        flunk("Failed to broadcast raw transaction: #{inspect(error)}")
+
+      {:ok, %Req.Response{status: status, body: resp_body}} ->
+        flunk("Unexpected response broadcasting raw transaction: status=#{status}, body=#{inspect(resp_body)}")
+
+      {:error, exception} ->
+        flunk("Failed to broadcast raw transaction: #{Exception.message(exception)}")
     end
   end
 

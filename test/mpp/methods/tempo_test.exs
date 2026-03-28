@@ -1114,8 +1114,8 @@ defmodule MPP.Methods.TempoTest do
     }
   end
 
-  # Builds a raw TIP-20 TransferWithMemo log entry matching JSON-RPC format.
-  # TransferWithMemo(address indexed from, address indexed to, uint256 amount, bytes32 memo)
+  # Builds a raw TIP-20 TransferWithMemo log entry matching real Moderato JSON-RPC format.
+  # The memo is indexed, so it appears in topics[3]; data contains only the amount.
   defp transfer_with_memo_log(opts) do
     amount = Keyword.get(opts, :amount, 1_000_000)
     from = Keyword.get(opts, :from, "0x" <> String.duplicate("00", 20))
@@ -1126,14 +1126,13 @@ defmodule MPP.Methods.TempoTest do
     from_padded = "0x" <> String.pad_leading(strip_0x(from), 64, "0")
     to_padded = "0x" <> String.pad_leading(strip_0x(to), 64, "0")
 
-    # Data contains amount (uint256) + memo (bytes32), each 32 bytes
+    memo_topic = "0x" <> String.pad_leading(strip_0x(memo), 64, "0")
     amount_hex = String.pad_leading(Integer.to_string(amount, 16), 64, "0")
-    memo_hex = String.pad_leading(strip_0x(memo), 64, "0")
-    data = "0x" <> amount_hex <> memo_hex
+    data = "0x" <> amount_hex
 
     %{
       "address" => token,
-      "topics" => [@transfer_with_memo_topic, from_padded, to_padded],
+      "topics" => [@transfer_with_memo_topic, from_padded, to_padded, memo_topic],
       "data" => data,
       "blockNumber" => "0x1a",
       "transactionHash" => @tx_hash,

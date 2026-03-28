@@ -671,7 +671,8 @@ defmodule MPP.Methods.Tempo do
 
   # TODO(onchain_tempo): Extract parse_transfer_with_memo_logs/1 to OnchainTempo.Transfer
   # TIP-20 TransferWithMemo event signature — Tempo-specific, not in onchain.
-  @transfer_with_memo_sig "TransferWithMemo(address indexed from, address indexed to, uint256 amount, bytes32 memo)"
+  # Moderato emits `memo` as an indexed topic and `amount` in the data payload.
+  @transfer_with_memo_sig "TransferWithMemo(address indexed from, address indexed to, uint256 amount, bytes32 indexed memo)"
 
   # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
   # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.

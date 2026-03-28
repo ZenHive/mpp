@@ -110,6 +110,66 @@ defmodule MPP.Test.TempoTxBuilder do
   end
 
   @doc """
+  Build and sign a 0x76 transaction with arbitrary calls.
+
+  Useful for integration tests that need real multicall transactions or custom
+  calldata such as `transferWithMemo`.
+
+  ## Options (required)
+
+    * `:private_key` — hex-encoded secp256k1 private key (with or without 0x prefix)
+    * `:calls` — non-empty list of RLP-ready `[to, value, input]` call tuples
+    * `:chain_id` — Tempo chain ID (integer)
+    * `:rpc_url` — RPC endpoint for nonce fetching
+    * `:fee_token` — TIP-20 token address (hex) used for fee payment
+
+  ## Options (optional)
+
+    * `:nonce_key` — 2D nonce lane (integer, default 0)
+    * `:nonce` — explicit nonce (skips RPC fetch if provided)
+    * `:gas_limit` — gas limit (default #{@default_gas_limit})
+    * `:valid_before` — Unix timestamp (default 0 = no expiry)
+    * `:valid_after` — Unix timestamp (default 0)
+
+  ## Returns
+
+    * `{:ok, hex_string}` — `"0x76..."` hex-encoded signed transaction
+    * `{:error, reason}` — on signing or RPC failure
+  """
+  @spec build_signed_multicall(keyword()) :: {:ok, String.t()} | {:error, term()}
+  def build_signed_multicall(opts) do
+    with {:ok, private_key} <- require_opt(opts, :private_key, &decode_key/1),
+         {:ok, calls} <- require_opt(opts, :calls, &validate_calls/1),
+         {:ok, chain_id} <- require_opt(opts, :chain_id, &validate_uint(:chain_id, &1)),
+         {:ok, rpc_url} <- require_opt(opts, :rpc_url, &validate_non_empty_binary(:rpc_url, &1)),
+         {:ok, fee_token} <- require_opt(opts, :fee_token, &decode_address(:fee_token, &1)),
+         {:ok, nonce_key} <- optional_opt(opts, :nonce_key, 0, &validate_uint(:nonce_key, &1)),
+         {:ok, gas_limit} <- optional_opt(opts, :gas_limit, @default_gas_limit, &validate_uint(:gas_limit, &1)),
+         {:ok, valid_before} <- optional_opt(opts, :valid_before, 0, &validate_uint(:valid_before, &1)),
+         {:ok, valid_after} <- optional_opt(opts, :valid_after, 0, &validate_uint(:valid_after, &1)),
+         {:ok, sender_address} <- Curvy.get_address(private_key),
+         {:ok, nonce} <- resolve_nonce(opts, sender_address, rpc_url) do
+      base_fields = [
+        encode_uint(chain_id),
+        encode_uint(@default_max_priority_fee_per_gas),
+        encode_uint(@default_max_fee_per_gas),
+        encode_uint(gas_limit),
+        calls,
+        [],
+        encode_uint(nonce_key),
+        encode_uint(nonce),
+        encode_uint(valid_before),
+        encode_uint(valid_after),
+        fee_token,
+        <<>>,
+        []
+      ]
+
+      sign_and_encode(base_fields, private_key, sender_address)
+    end
+  end
+
+  @doc """
   Build and sign a TIP-20 transfer transaction with fee payer placeholder.
 
   Same as `build_signed_transfer/1` but sets `fee_payer_signature` to `<<0x00>>`

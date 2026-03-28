@@ -6,6 +6,39 @@ Completed roadmap tasks.
 
 ## [Unreleased]
 
+### Additional Tempo Integration Tests
+
+**What was done:**
+- Added 5 integration tests against live Moderato testnet: fee payer + optimistic broadcast (co-sign, pass-through, poll for on-chain confirmation), optimistic broadcast + dedup store (reserve_hash_atomic fires before async broadcast), challenge expiration (2s TTL, 3s sleep, rejected before method.verify), memo in challenge details (present when configured, absent when not)
+
+**Key decisions:**
+- Challenge expiration test doesn't need a real tx — expiration check runs before method.verify in the plug pipeline
+- Optimistic + dedup test proves ordering guarantee: store reservation happens before broadcast in async mode
+
+### Tempo Real Integration Tests + TransferWithMemo Event Fix
+
+**What was done:**
+- Extended `tempo_integration_test.exs` with real Moderato testnet tests: transferWithMemo (hash + tx paths, memo mismatch rejection, plain transfer rejection when memo configured), fee-payer validation (hash rejection, missing placeholder, non-empty fee_token), transaction dedup, optimistic multicall targeting, fee-payer dedup
+- Fixed TransferWithMemo event signature — `memo` parameter is `indexed` (topic, not data), discovered via real Moderato receipts
+- Updated stub log builders in `tempo_test.exs` and `tempo_full_flow_test.exs` to match real on-chain format
+- Added `build_signed_multicall/1` to `TempoTxBuilder` for arbitrary-calldata 0x76 transactions
+- Added `broadcast_raw_transaction_sync!/2` helper and `tempo_config/3,4` config builder
+
+**Key decisions:**
+- All new tests in existing integration file (same `:integration` tag, same `setup_all`)
+- `setup_all` extended to also execute a real `transferWithMemo` on Moderato
+- Stub-based `tempo_full_flow_test.exs` retained for pipeline wiring coverage
+
+### Tempo Full-Flow Stub Tests
+
+**What was done:**
+- Added `test/mpp/methods/tempo_full_flow_test.exs` — stub-based tests exercising the complete Plug pipeline (402 → credential → verify → receipt) with `Req.Test` stubs
+- Covers: memo matching, dedup replay prevention, fee-payer edge cases, optimistic multicall simulation targeting, log filtering with unrelated events
+
+**Key decisions:**
+- Separate from unit tests (`tempo_test.exs`) and real integration tests — tests Plug wiring layer specifically
+- No `:integration` tag — always runnable without network access
+
 ### Phase 4: Tempo Payment Method
 
 #### Bug Fix: Reject Empty Calls in Transaction Deserialization
