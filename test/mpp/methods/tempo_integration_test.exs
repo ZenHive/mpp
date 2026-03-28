@@ -48,6 +48,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
   @confirmation_poll_interval_ms 2_000
   @confirmation_max_attempts 30
 
+  # Atomically returns the current sender nonce and increments the counter.
+  # Only used by tests that actually broadcast transactions.
+  # Requires async: false — tests must run sequentially.
+  defp checkout_nonce do
+    Agent.get_and_update(__MODULE__.NonceAgent, fn n -> {n, n + 1} end)
+  end
+
   setup_all do
     if !Code.ensure_loaded?(Onchain) do
       flunk("""
@@ -105,10 +112,15 @@ defmodule MPP.Methods.TempoIntegrationTest do
         calls: [memo_call],
         chain_id: @chain_id,
         rpc_url: rpc_url,
-        fee_token: @path_usd
+        fee_token: @path_usd,
+        nonce: nonce + 1
       )
 
     memo_tx_hash = broadcast_raw_transaction_sync!(memo_tx, rpc_url)
+
+    # Track sender nonce across tests. ERC20 transfer used `nonce`,
+    # memo tx used `nonce + 1`, so next available is `nonce + 2`.
+    {:ok, _} = Agent.start_link(fn -> nonce + 2 end, name: __MODULE__.NonceAgent)
 
     # Build Plug config for 402 handshake tests
     plug_opts = [
@@ -301,7 +313,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           calls: [memo_call],
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce: checkout_nonce()
         )
 
       challenge = request_challenge!(memo_config)
@@ -428,7 +441,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce: checkout_nonce()
         )
 
       # Get challenge and submit credential
@@ -576,7 +590,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce: checkout_nonce()
         )
 
       # Step 1: Get a 402 challenge
@@ -676,7 +691,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce: checkout_nonce()
         )
 
       challenge = request_challenge!(config)
@@ -739,7 +755,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
-          rpc_url: rpc_url
+          rpc_url: rpc_url,
+          nonce: checkout_nonce()
         )
 
       # 402 → credential → server co-signs → broadcasts → receipt
@@ -929,7 +946,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
-          rpc_url: rpc_url
+          rpc_url: rpc_url,
+          nonce: checkout_nonce()
         )
 
       # First: co-signed and broadcast succeeds
@@ -989,7 +1007,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
-          rpc_url: rpc_url
+          rpc_url: rpc_url,
+          nonce: checkout_nonce()
         )
 
       challenge = request_challenge!(config)
@@ -1044,7 +1063,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce: checkout_nonce()
         )
 
       # First submission: optimistic pass-through

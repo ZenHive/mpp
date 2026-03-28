@@ -2,16 +2,25 @@ defmodule MPP.Tempo.Store do
   @moduledoc """
   Behaviour for transaction dedup stores used by `MPP.Methods.Tempo`.
 
-  Prevents within-challenge replay attacks by tracking which transaction hashes
-  have already been used. HMAC-bound challenges prevent cross-request replay;
-  this store prevents a client from resubmitting the same signed transaction
-  within a single challenge window.
+  Prevents replay attacks by tracking which transaction hashes have already
+  been used. HMAC-bound challenges prevent cross-request replay; this store
+  prevents a client from resubmitting the same signed transaction within
+  the store's TTL window.
 
-  ## Implementation
+  **Important:** The store's TTL must be ≥ your challenge `expires_in` to
+  ensure a tx hash cannot be evicted and replayed while the challenge is
+  still valid. A good default is 2× the challenge expiry.
 
-  Consumers implement this behaviour with their choice of backend (ETS, Redis,
-  database, etc.). The library does not provide a built-in implementation —
-  store lifecycle and cleanup are the consumer's responsibility.
+  ## Built-in Store
+
+  `MPP.Tempo.ConCacheStore` provides an ETS-based implementation with automatic
+  TTL expiry via ConCache (optional dependency). For most single-node deployments,
+  this is all you need — add it to your supervision tree and pass it in method_config.
+
+  ## Custom Implementations
+
+  Implement this behaviour with your choice of backend (Redis, database, etc.)
+  for custom needs. Store lifecycle and cleanup are the consumer's responsibility.
 
   Keys are formatted as `"mpp:charge:<lowercase_hex_value>"` where the value is
   the transaction hash (for `type="hash"`) or the full serialized transaction

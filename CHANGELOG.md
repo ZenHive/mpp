@@ -6,6 +6,32 @@ Completed roadmap tasks.
 
 ## [Unreleased]
 
+### Fix Nonce Contention Flakes in Integration Tests
+
+**What was done:**
+- Added nonce tracking Agent to `tempo_integration_test.exs` — eliminates "nonce too low" flakes when integration tests run as part of the full suite
+- `checkout_nonce/0` atomically returns and increments the sender nonce for broadcasting tests
+- Made setup_all's memo tx nonce explicit (`nonce + 1`) and starts Agent at `nonce + 2`
+- 8 broadcasting test builder calls now pass `nonce: checkout_nonce()` instead of fetching from RPC
+
+**Key decisions:**
+- Agent over ETS/ConCache — atomic get-and-increment counter is exactly what Agent is for; a key-value store with TTL adds ceremony without benefit
+- Non-broadcasting tests left unchanged — txs rejected before broadcast (wrong recipient, simulation revert, etc.) don't consume on-chain nonces, so stale RPC values are harmless
+- Only sender nonces tracked — fee payer co-signs but doesn't contribute a nonce field in the 0x76 envelope
+
+### Built-in ConCacheStore for Transaction Dedup
+
+**What was done:**
+- Added `MPP.Tempo.ConCacheStore` — built-in ETS-based dedup store with automatic TTL via ConCache (Saša Jurić)
+- `con_cache` added as optional dependency (same pattern as `onchain`)
+- `validate_store!` in `MPP.Methods.Tempo` gives clear error when ConCache is missing
+- Configurable TTL and check interval via `child_spec/1` options
+
+**Key decisions:**
+- Multi-node dedup not needed — HMAC-bound challenges + on-chain nonces provide sufficient replay protection; ETS is the right backend
+- ConCache over raw ETS — built-in TTL expiry avoids manual cleanup; entries auto-expire with challenge windows
+- Optional dep, not required — consumers can still implement custom stores via the `MPP.Tempo.Store` behaviour
+
 ### Additional Tempo Integration Tests
 
 **What was done:**

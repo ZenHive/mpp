@@ -7,6 +7,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTxBuilder
 
@@ -1051,6 +1052,110 @@ defmodule MPP.Methods.TempoTest do
       assert_raise ArgumentError, ~r/must be a module implementing/, fn ->
         Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => "not_a_module"})
       end
+    end
+  end
+
+  describe "verify/2 — ConCacheStore" do
+    setup %{charge: charge} do
+      start_supervised!(ConCacheStore.child_spec(ttl: to_timeout(second: 10)))
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", ConCacheStore)
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "hash path stores and rejects replay", %{charge: charge} do
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Replay rejected
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "transaction path stores and rejects replay", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Replay rejected
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "validate_config! accepts ConCacheStore" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => ConCacheStore})
+    end
+
+    test "validate_config! accepts named ConCacheStore tuple" do
+      assert :ok =
+               Tempo.validate_config!(%{
+                 "rpc_url" => "https://example.com",
+                 "store" => {ConCacheStore, name: :my_custom_dedup}
+               })
+    end
+
+    test "child_spec id avoids ConCache collision" do
+      spec = ConCacheStore.child_spec([])
+      assert spec.id == {ConCacheStore, :mpp_tempo_dedup}
+    end
+
+    test "child_spec accepts custom name" do
+      spec = ConCacheStore.child_spec(name: :my_custom_dedup)
+      assert spec.id == {ConCacheStore, :my_custom_dedup}
+    end
+
+    test "custom named store works end-to-end", %{charge: charge} do
+      custom_name = :my_custom_dedup
+      start_supervised!(ConCacheStore.child_spec(name: custom_name, ttl: to_timeout(second: 10)))
+
+      named_charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", {ConCacheStore, name: custom_name})
+      }
+
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, named_charge)
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, named_charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "check_and_mark is atomic — concurrent tx submissions", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # Run 5 concurrent verifications — exactly 1 should succeed via atomic reserve
+      tasks =
+        for _ <- 1..5 do
+          Task.async(fn -> Tempo.verify(payload, charge) end)
+        end
+
+      results = Task.await_many(tasks)
+      successes = Enum.count(results, &match?({:ok, _}, &1))
+      failures = Enum.count(results, &match?({:error, _}, &1))
+
+      assert successes == 1, "Expected exactly 1 success, got #{successes}"
+      assert failures == 4, "Expected exactly 4 failures, got #{failures}"
     end
   end
 

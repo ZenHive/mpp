@@ -41,8 +41,9 @@ defmodule MPP.Methods.Tempo do
       for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
       then broadcasts async and returns an optimistic receipt. Default `true`.
     * `"store"` — (optional) module implementing `MPP.Tempo.Store` behaviour for
-      transaction dedup. Prevents within-challenge replay by tracking used tx hashes.
-      When `nil` (default), no dedup is performed — library stays stateless.
+      transaction dedup, or `{MPP.Tempo.ConCacheStore, opts}` to configure the built-in
+      ConCache store (for example a custom cache `:name`). Prevents replay by tracking
+      used tx hashes. When `nil` (default), no dedup is performed — library stays stateless.
 
   ## Credential Payload
 
@@ -63,6 +64,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Transaction
 
   require Logger
@@ -217,6 +219,29 @@ defmodule MPP.Methods.Tempo do
   # Validates that the store config is a module implementing the Store behaviour.
   defp validate_store!(nil), do: :ok
 
+  defp validate_store!({ConCacheStore, _opts}) do
+    validate_store!(ConCacheStore)
+  end
+
+  defp validate_store!(ConCacheStore) do
+    if !Code.ensure_loaded?(ConCache) do
+      raise ArgumentError, """
+      MPP.Tempo.ConCacheStore requires the `con_cache` package.
+
+      Add it to your mix.exs dependencies:
+
+          {:con_cache, "~> 1.1"}
+      """
+    end
+
+    :ok
+  end
+
+  defp validate_store!({store, _opts}) do
+    raise ArgumentError,
+          "MPP.Methods.Tempo :store tuple form is only supported for {MPP.Tempo.ConCacheStore, opts}; got: #{inspect(store)}"
+  end
+
   defp validate_store!(store) do
     if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
       raise ArgumentError,
@@ -326,7 +351,7 @@ defmodule MPP.Methods.Tempo do
   defp check_hash_unused(store, hash) do
     key = store_key(hash)
 
-    case store.get(key) do
+    case store_get(store, key) do
       :not_found -> :ok
       {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
       {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
@@ -340,7 +365,7 @@ defmodule MPP.Methods.Tempo do
     key = store_key(hash)
     ts = System.system_time(:millisecond)
 
-    case store.put(key, ts) do
+    case store_put(store, key, ts) do
       :ok -> :ok
       {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
     end
@@ -354,8 +379,8 @@ defmodule MPP.Methods.Tempo do
     key = store_key(hash)
     ts = System.system_time(:millisecond)
 
-    if function_exported?(store, :check_and_mark, 2) do
-      case store.check_and_mark(key, ts) do
+    if store_supports_atomic?(store) do
+      case store_check_and_mark(store, key, ts) do
         :ok -> :ok
         {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
         {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
@@ -367,9 +392,9 @@ defmodule MPP.Methods.Tempo do
 
   # Non-atomic fallback: check then mark as separate steps. Small race window.
   defp reserve_hash_sequential(store, key, ts) do
-    case store.get(key) do
+    case store_get(store, key) do
       :not_found ->
-        case store.put(key, ts) do
+        case store_put(store, key, ts) do
           :ok -> :ok
           {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
         end
@@ -396,7 +421,7 @@ defmodule MPP.Methods.Tempo do
   defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
     if String.downcase(tx_hash) != String.downcase(input_hash) do
       key = store_key(tx_hash)
-      store.put(key, System.system_time(:millisecond))
+      store_put(store, key, System.system_time(:millisecond))
     end
 
     :ok
@@ -409,6 +434,19 @@ defmodule MPP.Methods.Tempo do
       Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store exited: #{inspect(reason)}")
       :ok
   end
+
+  defp store_get({ConCacheStore, opts}, key), do: ConCacheStore.get(key, opts)
+  defp store_get(store, key), do: store.get(key)
+
+  defp store_put({ConCacheStore, opts}, key, value), do: ConCacheStore.put(key, value, opts)
+  defp store_put(store, key, value), do: store.put(key, value)
+
+  defp store_check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
+
+  defp store_check_and_mark(store, key, value), do: store.check_and_mark(key, value)
+
+  defp store_supports_atomic?({ConCacheStore, _opts}), do: true
+  defp store_supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 

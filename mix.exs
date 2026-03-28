@@ -67,6 +67,9 @@ defmodule MPP.MixProject do
       # On-chain verification (optional — required by Tempo and x402 methods)
       {:onchain, "~> 0.4", optional: true},
 
+      # ETS-based dedup store with TTL (optional — used by ConCacheStore)
+      {:con_cache, "~> 1.1", optional: true},
+
       # Self-describing APIs
       {:descripex, "~> 0.4"}
     ]

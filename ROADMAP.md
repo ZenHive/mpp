@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Phase 4: Tempo Payment Method** — All subtasks complete (13a-13h + fee payer + call scope security + optimistic multicall fix + cross-validation + full-flow Plug pipeline tests + real Moderato integration tests covering all feature combinations). Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**Phase 4: Tempo Payment Method** — All subtasks complete (13a-13h + fee payer + call scope security + optimistic multicall fix + cross-validation + full-flow Plug pipeline tests + real Moderato integration tests covering all feature combinations). Integration test nonce flakes fixed via Agent-based nonce tracking. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 

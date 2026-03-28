@@ -76,6 +76,7 @@ MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, n
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (requires onchain, optional dep)
 MPP.Tempo.Transaction      — 0x76 Tempo Transaction RLP deserialization, payment call matching, fee payer co-signing (0x78 domain), call scope validation for fee-payer txs (TODO: extract to onchain_tempo)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
+MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (optional dep)
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
@@ -110,6 +111,7 @@ MPP.Plug.Config            — Validated endpoint config struct (shared settings
 - `req` — HTTP client for payment method API calls (Stripe, etc.)
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 - `onchain` — (optional) Ethereum/Tempo RPC and transaction utilities for on-chain payment methods
+- `con_cache` — (optional) ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
 ### JS/TS cross-referencing (dev/test only)
 
 Three tools for verifying our implementation against the mppx TypeScript reference impl (`refs/mppx/`). **These are NEVER production dependencies.** MPP is a library — consumers must not pull in JS runtimes.
