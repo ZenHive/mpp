@@ -54,6 +54,19 @@ defmodule MPP.PlugTest do
     end
   end
 
+  defmodule MockMethodUnexpectedError do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mock_unexpected"
+
+    @impl MPP.Method
+    def verify(_payload, _charge) do
+      {:error, :some_unknown_reason}
+    end
+  end
+
   defmodule MockMethodB do
     @moduledoc false
     use MPP.Method
@@ -892,6 +905,59 @@ defmodule MPP.PlugTest do
       assert conn.status == 402
       body = decode_json_body(conn)
       assert body["type"] =~ "invalid-challenge"
+    end
+  end
+
+  # --- Coverage: unexpected verify error and malformed expires ---
+
+  describe "verify_credential/4 catch-all error" do
+    test "unexpected error type from method returns 402 with verification_failed" do
+      config = init_config(method: MockMethodUnexpectedError)
+      auth_header = build_authorization_header(config, %{"anything" => "value"})
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "Payment verification failed"
+    end
+  end
+
+  describe "check_expiration/1 malformed expires" do
+    test "malformed expires timestamp returns 402 payment_expired" do
+      config = init_config()
+      entry = first_entry(config)
+
+      # Build a challenge with an invalid expires value
+      challenge =
+        Challenge.create(
+          [
+            realm: config.realm,
+            method: entry.method.method_name(),
+            intent: "charge",
+            request: entry.request,
+            expires: "not-a-valid-date"
+          ],
+          config.secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "payment-expired"
     end
   end
 end

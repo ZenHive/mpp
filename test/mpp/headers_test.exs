@@ -199,6 +199,22 @@ defmodule MPP.HeadersTest do
       assert parsed.id == "abc"
       assert parsed.realm == "test.com"
     end
+
+    test "parses unquoted tokens separated by spaces" do
+      header = ~s(Payment id=abc realm=test.com method=stripe intent=charge request=eyJ0ZXN0Ijp0cnVlfQ)
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.id == "abc"
+      assert parsed.realm == "test.com"
+      assert parsed.method == "stripe"
+    end
+
+    test "parses unquoted tokens separated by tabs" do
+      header = "Payment id=abc\trealm=test.com\tmethod=stripe\tintent=charge\trequest=eyJ0ZXN0Ijp0cnVlfQ"
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.id == "abc"
+      assert parsed.realm == "test.com"
+      assert parsed.method == "stripe"
+    end
   end
 
   describe "format_credential/1" do

@@ -229,6 +229,77 @@ defmodule MPP.Methods.StripeTest do
       assert auth == expected_auth
     end
 
+    test "idempotency key uses spt only when challenge_id is nil", %{charge: charge} do
+      test_pid = self()
+
+      charge = %{
+        charge
+        | method_details: Map.delete(charge.method_details, "challenge_id")
+      }
+
+      Req.Test.stub(Stripe, fn conn ->
+        send(test_pid, {:request_headers, conn.req_headers})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:ok, _receipt} = Stripe.verify(%{"spt" => @spt}, charge)
+
+      assert_received {:request_headers, headers}
+      {_, idempotency_key} = List.keyfind(headers, "idempotency-key", 0)
+      assert idempotency_key == "mpp_#{@spt}"
+    end
+
+    test "metadata excludes challenge_id and realm when nil", %{charge: charge} do
+      test_pid = self()
+
+      charge = %{
+        charge
+        | method_details:
+            charge.method_details
+            |> Map.delete("challenge_id")
+            |> Map.delete("realm")
+      }
+
+      Req.Test.stub(Stripe, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:request_body, body})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:ok, _receipt} = Stripe.verify(%{"spt" => @spt}, charge)
+
+      assert_received {:request_body, body}
+      params = URI.decode_query(body)
+
+      assert params["metadata[mpp_version]"] == "1"
+      assert params["metadata[mpp_is_mpp]"] == "true"
+      refute Map.has_key?(params, "metadata[mpp_challenge_id]")
+      refute Map.has_key?(params, "metadata[mpp_server_id]")
+    end
+
+    test "returns error on plain string error body", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_status(500)
+        |> Plug.Conn.put_resp_content_type("text/plain")
+        |> Plug.Conn.send_resp(500, "Internal Server Error")
+      end)
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.type =~ "verification-failed"
+    end
+
+    test "returns error on unexpected response body format", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_status(400)
+        |> Req.Test.json(%{"totally" => "unexpected"})
+      end)
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.type =~ "verification-failed"
+    end
+
     test "handles missing status field in response", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.json(conn, %{"id" => @pi_id})

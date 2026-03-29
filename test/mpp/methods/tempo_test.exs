@@ -8,6 +8,10 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.FailingPutStore
+  alias MPP.Test.NonAtomicFailingPutStore
+  alias MPP.Test.NonAtomicGetFailStore
+  alias MPP.Test.NonAtomicStore
   alias MPP.Test.TempoMemoryStore
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -1112,6 +1116,12 @@ defmodule MPP.Methods.TempoTest do
       assert spec.id == {ConCacheStore, :mpp_tempo_dedup}
     end
 
+    test "child_spec with no args uses defaults" do
+      spec = ConCacheStore.child_spec()
+      assert spec.id == {ConCacheStore, :mpp_tempo_dedup}
+      assert is_tuple(spec.start)
+    end
+
     test "child_spec accepts custom name" do
       spec = ConCacheStore.child_spec(name: :my_custom_dedup)
       assert spec.id == {ConCacheStore, :my_custom_dedup}
@@ -1131,6 +1141,31 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
       assert {:ok, %Receipt{}} = Tempo.verify(payload, named_charge)
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, named_charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "named ConCacheStore tuple works for transaction path (atomic reserve)", %{charge: charge} do
+      custom_name = :tx_path_dedup
+      start_supervised!(ConCacheStore.child_spec(name: custom_name, ttl: to_timeout(second: 10)))
+
+      named_charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", {ConCacheStore, name: custom_name})
+      }
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # First call succeeds via atomic check_and_mark on named store
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, named_charge)
+
+      # Replay rejected
       assert {:error, %Errors{} = error} = Tempo.verify(payload, named_charge)
       assert error.detail =~ "already used"
     end
@@ -1156,6 +1191,188 @@ defmodule MPP.Methods.TempoTest do
 
       assert successes == 1, "Expected exactly 1 success, got #{successes}"
       assert failures == 4, "Expected exactly 4 failures, got #{failures}"
+    end
+  end
+
+  # --- Coverage: store error paths and edge cases ---
+
+  describe "verify/2 — store put error (mark_hash_used)" do
+    test "put failure surfaces as verification_failed", %{charge: charge} do
+      # FailingPutStore: get returns :not_found (no dedup hit), put returns {:error, :store_failure}
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FailingPutStore)
+      }
+
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Dedup store error"
+    end
+  end
+
+  describe "verify/2 — atomic store unexpected error" do
+    test "unexpected check_and_mark error surfaces as verification_failed", %{charge: charge} do
+      # FailingPutStore has check_and_mark returning {:error, :unexpected_store_error}
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FailingPutStore)
+      }
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Dedup store error"
+    end
+  end
+
+  describe "verify/2 — non-atomic store (sequential fallback)" do
+    setup %{charge: charge} do
+      start_supervised!(NonAtomicStore)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", NonAtomicStore)
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "sequential path succeeds and rejects replay", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # First call succeeds via sequential get+put
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Second call rejected via sequential get (already exists)
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+  end
+
+  describe "verify/2 — non-atomic store put error" do
+    test "sequential put failure surfaces as verification_failed", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", NonAtomicFailingPutStore)
+      }
+
+      start_supervised!(NonAtomicFailingPutStore)
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Dedup store error"
+    end
+  end
+
+  describe "verify/2 — non-atomic store get error" do
+    test "sequential get failure surfaces as verification_failed", %{charge: charge} do
+      # NonAtomicGetFailStore: get returns {:error, :connection_lost}
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", NonAtomicGetFailStore)
+      }
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Dedup store error"
+    end
+  end
+
+  describe "validate_config! — store tuple edge cases" do
+    test "rejects unsupported tuple store" do
+      assert_raise ArgumentError, ~r/only supported for.*ConCacheStore/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => {SomeOtherModule, []}})
+      end
+    end
+  end
+
+  describe "verify/2 — simulation unexpected response" do
+    test "malformed RPC response without result or error keys", %{charge: charge} do
+      # Simulation only runs on async path (wait_for_confirmation: false)
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "wait_for_confirmation", false)
+      }
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      # Stub eth_call (simulation) to return a malformed response
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_call" ->
+            # Malformed: no "result" or "error" key
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "unexpected" => "field", "id" => 1})
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Unexpected simulation response"
+    end
+  end
+
+  describe "verify/2 — missing required config" do
+    test "missing rpc_url returns error" do
+      {:ok, charge} =
+        Charge.new(
+          amount: "1000000",
+          currency: @token_address,
+          recipient: @recipient
+        )
+
+      # method_details without rpc_url
+      charge = %{
+        charge
+        | method_details: %{
+            "chain_id" => 42_431,
+            "req_options" => [plug: {Req.Test, Tempo}]
+          }
+      }
+
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "rpc_url"
     end
   end
 
