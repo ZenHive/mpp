@@ -22,6 +22,17 @@ defmodule MPP.Tempo.Store do
   Implement this behaviour with your choice of backend (Redis, database, etc.)
   for custom needs. Store lifecycle and cleanup are the consumer's responsibility.
 
+  ## Deployment Strategies
+
+  The store choice depends on your deployment topology:
+
+  - **Single node:** `ConCacheStore` is sufficient — all requests hit the same ETS table.
+  - **Multi-node with sticky routing:** If your load balancer pins clients to nodes
+    (e.g., Fly.io's `fly-replay` header with IP hash), per-node `ConCacheStore`
+    is effectively global — the same client always hits the same node's store.
+  - **Multi-node without sticky routing:** Use a shared backend (Redis, Postgres)
+    to ensure a tx replayed on a different node is still caught.
+
   Keys are formatted as `"mpp:charge:<lowercase_hex_value>"` where the value is
   the transaction hash (for `type="hash"`) or the full serialized transaction
   hex (for `type="transaction"`).
