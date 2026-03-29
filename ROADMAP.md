@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Task 17 complete** (2026-03-29) — `mix mpp.demo` interactive demo server. Next: Task 18 (live integration tests, Eff:1.88) or Task 14 (x402/EVM method, Eff:1.08).
+**Task 18 complete** (2026-03-29) — Live protocol integration tests against mpp.dev. Next: Task 14 (x402/EVM method, Eff:1.08) or Task 19 (Lightning charge, Eff:1.4).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -42,7 +42,7 @@
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
 | Task 23: onchain_tempo extraction | ✅ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
 | Task 17: mix mpp.demo | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Interactive demo server on port 4402 |
-| Task 18: Live integration tests | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
+| Task 18: Live integration tests | ✅ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
 | Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
 | Task 20: Lightning session | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming (deposit/topUp/close) |
 | Task 21: Solana charge | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes, fee payer, splits |
@@ -115,19 +115,9 @@ Success criteria:
 
 [D:3/B:8/U:9 → Eff:2.83] — Completed 2026-03-29. See [CHANGELOG.md](CHANGELOG.md#task-17-mix-mppdemo).
 
-### Task 18: Live Protocol Integration Tests
+### Task 18: Live Protocol Integration Tests ✅
 
-[D:4/B:7/U:8 → Eff:1.88] 🚀
-
-Integration tests against the live `mpp.dev/api/ping/paid` endpoint. Verify our client-side modules (Headers.parse_challenge, Credential.encode, Receipt.decode) work correctly against a real MPP server. Uses the Tempo payment method — requires Tempo wallet credentials. Tagged `:integration` so they don't run by default.
-
-Success criteria:
-- [ ] Hit `https://mpp.dev/api/ping/paid`, parse the 402 response
-- [ ] Verify Challenge struct parsed correctly from WWW-Authenticate header
-- [ ] Verify RFC 9457 error body matches our Errors module
-- [ ] Verify challenge fields (realm, method, intent, request, expires)
-- [ ] Optional: full roundtrip with Tempo wallet (if credentials available)
-- [ ] Tagged `@moduletag :integration`, fails loudly on missing credentials
+[D:4/B:7/U:8 → Eff:1.88] — Completed 2026-03-29. See [CHANGELOG.md](CHANGELOG.md#task-18-live-protocol-integration-tests).
 
 ---
 

@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 18: Live Protocol Integration Tests
+
+Read-only integration tests against the live `mpp.dev/api/ping/paid` endpoint, validating protocol compatibility with the reference MPP server.
+
+**What was built:**
+- `test/mpp/integration/mpp_dev_test.exs` — verifies client-side parsing against a real 402 Tempo challenge
+- Covers: 402 response structure, challenge parsing via `Headers.parse_challenge/1`, challenge field validation, charge request decoding via `Charge.from_request/1`, RFC 9457 error body format, and challengeId cross-validation between body and header
+
+**Key decisions:**
+- Read-only tests only (no wallet/payment required) — validates parsing without needing Tempo credentials
+- Each test fetches a fresh 402 to avoid challenge expiration (5-minute window)
+- Validates protocol invariants (non-empty realm, integer chainId, Ethereum-style recipient address) rather than deployment-specific values
+- Uses `Req.get/1` with proper error handling (network failures flunk with actionable messages)
+
 ### Task 17: mix mpp.demo
 
 Interactive demo server for exploring the MPP 402 payment flow without real payment credentials.
