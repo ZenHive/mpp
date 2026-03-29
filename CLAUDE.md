@@ -45,6 +45,7 @@ mix credo --strict --format json  # static analysis
 mix sobelow                # security scanner
 mix doctor                 # docs/specs coverage
 
+mix mpp.demo               # start demo server on port 4402 (--port to override)
 mix format                 # auto-format (Styler runs as plugin)
 mix docs                   # generate ExDoc
 ```
@@ -79,6 +80,8 @@ MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (o
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
+MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
+MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
 ### Design decisions

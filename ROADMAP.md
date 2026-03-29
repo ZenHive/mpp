@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**v0.2.0 released** (2026-03-28) — Tempo payment method, multi-method 402, ConCacheStore dedup. Task 23 (onchain_tempo extraction) complete. Next: Task 17 (mix mpp.demo, Eff:2.83) or Task 18 (live integration tests, Eff:1.88).
+**Task 17 complete** (2026-03-29) — `mix mpp.demo` interactive demo server. Next: Task 18 (live integration tests, Eff:1.88) or Task 14 (x402/EVM method, Eff:1.08).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -41,7 +41,7 @@
 | Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
 | Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
 | Task 23: onchain_tempo extraction | ✅ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
-| Task 17: mix mpp.demo | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | After Tasks 13/14 |
+| Task 17: mix mpp.demo | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Interactive demo server on port 4402 |
 | Task 18: Live integration tests | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
 | Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
 | Task 20: Lightning session | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming (deposit/topUp/close) |
@@ -111,20 +111,9 @@ Success criteria:
 
 ## Phase 8: Developer Experience
 
-### Task 17: mix mpp.demo — Interactive Demo Server
+### Task 17: mix mpp.demo — Interactive Demo Server ✅
 
-[D:3/B:8/U:9 → Eff:2.83] 🎯
-
-Ship a `mix mpp.demo` task that starts a local Bandit server with a demo payment method. Users run it, see the full 402 flow in action, and get copy-paste curl commands. No real payment provider needed — a magic "demo-token" succeeds. Serves as both a learning tool and a local test target for client implementations.
-
-Success criteria:
-- [ ] `mix mpp.demo` starts server on port 4402 (configurable via `--port`)
-- [ ] Demo payment method accepts `"demo-token"` payload
-- [ ] GET /resource returns 402 with proper WWW-Authenticate challenge
-- [ ] Valid credential returns 200 with Payment-Receipt header
-- [ ] Startup banner prints working curl commands (pre-computed credential)
-- [ ] Runtime check for Bandit with clear error if missing
-- [ ] Tests for DemoMethod and Router via Plug.Test
+[D:3/B:8/U:9 → Eff:2.83] — Completed 2026-03-29. See [CHANGELOG.md](CHANGELOG.md#task-17-mix-mppdemo).
 
 ### Task 18: Live Protocol Integration Tests
 

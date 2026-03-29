@@ -6,6 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 17: mix mpp.demo
+
+Interactive demo server for exploring the MPP 402 payment flow without real payment credentials.
+
+**What was built:**
+- `MPP.Demo.Method` — toy payment method accepting `"demo-token"` as magic payload
+- `MPP.Demo.Router` — Plug.Router with protected `/resource` endpoint, welcome page, and healthcheck
+- `Mix.Tasks.Mpp.Demo` — `mix mpp.demo` starts a Bandit server on port 4402 (configurable via `--port`), prints copy-paste curl commands with a pre-computed valid credential
+
+**Key decisions:**
+- Fixed HMAC secret key (`"mpp-demo-secret-key"`) enables pre-computing a valid credential for the startup banner — zero-friction first experience
+- Port 4402 chosen as memorable (HTTP 402 is the protocol's status code)
+- Runtime check for Bandit (`:dev` only dep) with actionable error message
+- `challenge_method_details/1` returns `%{"acceptedTokens" => ["demo-token"]}` so agents/clients know what payload to send
+
 ### Task 23: onchain_tempo Extraction
 
 Extracted Tempo chain primitives from mpp into the standalone `onchain_tempo` package. MPP now depends on `onchain_tempo` (optional, Hex.pm) and delegates chain operations instead of implementing them directly.
