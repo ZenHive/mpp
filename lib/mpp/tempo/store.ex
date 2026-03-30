@@ -27,9 +27,10 @@ defmodule MPP.Tempo.Store do
   The store choice depends on your deployment topology:
 
   - **Single node:** `ConCacheStore` is sufficient — all requests hit the same ETS table.
-  - **Multi-node with sticky routing:** If your load balancer pins clients to nodes
-    (e.g., Fly.io's `fly-replay` header with IP hash), per-node `ConCacheStore`
-    is effectively global — the same client always hits the same node's store.
+  - **Multi-node with sticky routing:** If your load balancer pins clients to specific
+    nodes (e.g., Fly.io's `fly-replay` with cookie-based sticky sessions, or consistent
+    hashing by session ID), per-node `ConCacheStore` is effectively global — the same
+    client always hits the same node's store.
   - **Multi-node without sticky routing:** Use a shared backend (Redis, Postgres)
     to ensure a tx replayed on a different node is still caught.
 

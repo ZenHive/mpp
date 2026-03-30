@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Store Deployment Strategies
+
+Added deployment topology guidance to `MPP.Tempo.Store` moduledoc — documents when `ConCacheStore` is sufficient (single node, sticky routing) vs when a shared backend is needed (multi-node without sticky routing). Includes Fly.io `fly-replay` as a concrete example of cookie-based sticky sessions.
+
 ### Task 18: Live Protocol Integration Tests
 
 Read-only integration tests against the live `mpp.dev/api/ping/paid` endpoint, validating protocol compatibility with the reference MPP server.
