@@ -195,6 +195,28 @@ end
 
 Add `{:con_cache, "~> 1.1"}` too if you want the built-in `MPP.Tempo.ConCacheStore`.
 
+## Live Example
+
+[Strip0x](https://strip0x.com) — blockchain tools API using MPP with Tempo payments. $0.0001 per paid request (100 base units USDC.e on Tempo mainnet).
+
+```bash
+# Free endpoint (no payment needed)
+curl "https://strip0x.com/api/hex/encode?value=hello"
+
+# See the 402 challenge on a paid endpoint
+curl -i "https://strip0x.com/api/address/validate?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+
+# Pay and get the response (~2s round-trip including on-chain settlement)
+tempo request -t -X GET "https://strip0x.com/api/address/validate?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+
+# Machine-readable discovery (OpenAPI 3.1 with x-payment-info extensions)
+curl https://strip0x.com/openapi.json
+```
+
+**Observed latency:** ~2s end-to-end for a paid request (402 challenge + Tempo on-chain TIP-20 transfer + credential retry). Free endpoints respond in ~70ms (network only — business logic is sub-10μs on the BEAM).
+
+Try it and [open an issue](https://github.com/ZenHive/mpp/issues) if anything breaks.
+
 ## References
 
 - [MPP Specification](https://github.com/tempoxyz/mpp-specs) — IETF draft, core protocol
