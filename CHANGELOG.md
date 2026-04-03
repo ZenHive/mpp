@@ -6,6 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### EVM Integration Tests
+
+Added integration tests for `MPP.Methods.EVM` against Sepolia testnet — validates real RPC round-trips that unit stubs can't catch.
+
+**What was built:**
+- `test/mpp/methods/evm_integration_test.exs` — 10 tests covering direct `verify/2` and full 402 Plug handshake
+- ERC-20 path: wraps ETH → WETH via `deposit()`, transfers to recipient, verifies via Transfer log parsing
+- Native ETH path: sends ETH to recipient, verifies via transaction value/recipient matching
+- Error cases: wrong amount, wrong recipient, non-existent tx hash
+- Full 402 flow: challenge parsing, credential submission, receipt verification, Payment-Receipt header
+
+**Key decisions:**
+- Sepolia (not Tempo Moderato) — proves EVM method works on a vanilla EVM chain, not just Tempo infrastructure
+- WETH for ERC-20 tests — wrapping ETH guarantees token balance without external faucets
+- Fixed inaccurate RPC comment — Onchain.RPC uses Signet → Finch, not Req; that's the real reason EVM uses Req directly
+
+---
+
+## [0.3.0] - 2026-04-03
+
 ### Task 14: Generic EVM Method
 
 On-chain payment verification for any EVM chain (Ethereum, Base, Polygon, Arbitrum, etc.).
@@ -19,7 +39,7 @@ On-chain payment verification for any EVM chain (Ethereum, Base, Polygon, Arbitr
 
 **Key decisions:**
 - Hash-only verification (no signed-tx broadcast path) — simpler, universally works across all EVM chains without chain-specific transaction types. Signed-tx broadcast can be added later if needed.
-- RPC calls via Req directly (not Onchain.RPC/Signet) — enables Req.Test stubbing for clean unit tests, consistent with Tempo's approach
+- RPC calls via Req directly — Onchain.RPC delegates to Signet → Finch, bypassing Req entirely; using Req enables Req.Test stubbing for unit tests
 - No dedup store — hash-only path is inherently idempotent (same receipt verification produces same result)
 - Chain ID is optional in method_config — included in challenge details when configured so client knows which chain to use
 

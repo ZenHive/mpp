@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -85,7 +85,7 @@ defmodule MPP.MixProject do
     """
     Elixir implementation of the Machine Payments Protocol (MPP) — HTTP 402
     payment middleware for AI agents and machine-to-machine commerce. Supports
-    Stripe and Tempo payment methods with pluggable architecture.
+    Stripe, Tempo, and generic EVM payment methods with pluggable architecture.
     """
   end
 

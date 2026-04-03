@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Task 14 complete** (2026-04-03) — Generic EVM on-chain payment method. Next: Task 19 (Lightning charge, Eff:1.4) or Task 21 (Solana charge, Eff:0.92).
+**Task 14 complete** (2026-04-03) — Generic EVM on-chain payment method + Sepolia integration tests (2026-04-04). Next: Task 19 (Lightning charge, Eff:1.4) or Task 21 (Solana charge, Eff:0.92).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 

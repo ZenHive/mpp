@@ -214,7 +214,8 @@ defmodule MPP.Methods.EVM do
   end
 
   # --- RPC helpers ---
-  # Uses Req directly (not Onchain.RPC/Signet) so tests can stub via Req.Test.
+  # Uses Req directly because Onchain.RPC delegates to Signet.RPC → Finch,
+  # bypassing Req entirely. Req.Test stubs only intercept Req.request/2 calls.
 
   defp rpc_get_receipt(hash, rpc_url, config) do
     case rpc_request("eth_getTransactionReceipt", [hash], rpc_url, config) do

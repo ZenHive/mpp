@@ -83,6 +83,26 @@ pipeline :paid_tempo do
 end
 ```
 
+### EVM (Ethereum, Base, Polygon, etc.)
+
+```elixir
+pipeline :paid_evm do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    method: MPP.Methods.EVM,
+    amount: "1000000",
+    currency: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    recipient: "0x...your-address",
+    method_config: %{
+      "rpc_url" => "https://mainnet.infura.io/v3/YOUR_KEY",
+      "chain_id" => 1
+    }
+end
+```
+
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. The client broadcasts a transaction, then sends the hash as a credential.
+
 ### Multi-Method (Stripe + Tempo)
 
 Offer multiple payment options in a single 402 response — the agent picks whichever it can pay with:
@@ -176,18 +196,28 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.2.0"}
+    {:mpp, "~> 0.3.0"}
   ]
 end
 ```
 
-If you use `MPP.Methods.Tempo`, also add the optional chain dependencies at the
-top level of your app:
+If you use `MPP.Methods.EVM`, add the optional chain dependency:
 
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.2.0"},
+    {:mpp, "~> 0.3.0"},
+    {:onchain, "~> 0.4"}
+  ]
+end
+```
+
+If you use `MPP.Methods.Tempo`, also add the Tempo chain primitives:
+
+```elixir
+def deps do
+  [
+    {:mpp, "~> 0.3.0"},
     {:onchain, "~> 0.4"},
     {:onchain_tempo, "~> 0.1"}
   ]
