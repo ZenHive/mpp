@@ -47,7 +47,9 @@ defmodule MPP.MixProject do
       # Dev/test tooling
       {:ex_doc, "~> 0.39", only: :dev, runtime: false},
       {:styler, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      # TODO: Using git branch as workaround for Credo 1.7.x crash on Elixir 1.20-rc multi-line sigils.
+      # Switch back to hex {:credo, "~> 1.8"} when a compatible release is published.
+      {:credo, github: "rrrene/credo", branch: "release/1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.22", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},

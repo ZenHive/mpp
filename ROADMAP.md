@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Task 18 complete** (2026-03-29) — Live protocol integration tests against mpp.dev. Next: Task 14 (x402/EVM method, Eff:1.08) or Task 19 (Lightning charge, Eff:1.4).
+**Task 14 complete** (2026-04-03) — Generic EVM on-chain payment method. Next: Task 19 (Lightning charge, Eff:1.4) or Task 21 (Solana charge, Eff:0.92).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -43,6 +43,7 @@
 | Task 23: onchain_tempo extraction | ✅ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
 | Task 17: mix mpp.demo | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Interactive demo server on port 4402 |
 | Task 18: Live integration tests | ✅ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
+| Task 14: Generic EVM method | ✅ | [D:6/B:7/U:6 → Eff:1.08] | Any EVM chain on-chain verification |
 | Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
 | Task 20: Lightning session | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming (deposit/topUp/close) |
 | Task 21: Solana charge | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes, fee payer, splits |
@@ -78,22 +79,11 @@
 
 ---
 
-## Phase 5: x402 Payment Method
+## Phase 5: EVM Payment Method ✅
 
-### Task 14: x402/EVM Method
+### Task 14: Generic EVM Method ✅
 
-[D:6/B:7/U:6 → Eff:1.08]
-
-Implement `MPP.Methods.X402` — EVM on-chain payment verification. Credential payload contains either a transaction hash (already broadcast) or a signed transaction (to broadcast). Verify by checking on-chain settlement: correct amount, correct recipient, correct token (USDC/ERC-20). Use [`onchain`](https://github.com/ZenHive/onchain) (optional dep) for RPC, ERC-20 reads, and address validation. Add as `{:onchain, github: "ZenHive/onchain", optional: true}` — runtime check in the method module that it's available.
-
-Success criteria:
-- [ ] Implements `MPP.Method` behaviour
-- [ ] Supports transaction hash and signed transaction payload types
-- [ ] Verifies on-chain settlement via `Onchain.RPC` + `Onchain.ERC20` (amount, recipient, token)
-- [ ] `Onchain.Address` for address validation/normalization
-- [ ] Runtime check that `:onchain` is loaded (clear error if missing)
-- [ ] Unit tests with mocked RPC responses
-- [ ] Integration test with testnet
+[D:6/B:7/U:6 → Eff:1.08] — Completed 2026-04-03. See [CHANGELOG.md](CHANGELOG.md#task-14-generic-evm-method).
 
 ---
 

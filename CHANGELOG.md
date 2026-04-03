@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 14: Generic EVM Method
+
+On-chain payment verification for any EVM chain (Ethereum, Base, Polygon, Arbitrum, etc.).
+
+**What was built:**
+- `MPP.Methods.EVM` — generic EVM payment method implementing `MPP.Method` behaviour
+- Hash-only credential path: client broadcasts tx, sends hash, server verifies receipt
+- ERC-20 transfers verified via Transfer event log parsing (`Onchain.Transfer.parse_logs/1`)
+- Native ETH transfers verified via transaction value + recipient matching
+- Currency convention: ERC-20 tokens use contract address; native ETH uses `"ETH"` or zero address
+
+**Key decisions:**
+- Hash-only verification (no signed-tx broadcast path) — simpler, universally works across all EVM chains without chain-specific transaction types. Signed-tx broadcast can be added later if needed.
+- RPC calls via Req directly (not Onchain.RPC/Signet) — enables Req.Test stubbing for clean unit tests, consistent with Tempo's approach
+- No dedup store — hash-only path is inherently idempotent (same receipt verification produces same result)
+- Chain ID is optional in method_config — included in challenge details when configured so client knows which chain to use
+
 ### Store Deployment Strategies
 
 Added deployment topology guidance to `MPP.Tempo.Store` moduledoc — documents when `ConCacheStore` is sufficient (single node, sticky routing) vs when a shared backend is needed (multi-node without sticky routing). Includes Fly.io `fly-replay` as a concrete example of cookie-based sticky sessions.

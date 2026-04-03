@@ -142,7 +142,7 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 |--------|----------|------------|--------|
 | Stripe | MPP | Fiat (cards, wallets) | v0.1.0 |
 | Tempo | MPP | Stablecoins (TIP-20) | v0.2.0 |
-| x402 | x402/MPP | EVM/Solana on-chain (USDC, ERC-20) | Planned |
+| EVM | MPP | Any EVM chain (ETH, USDC, ERC-20) | v0.3.0 |
 | Lightning | MPP | Bitcoin (BOLT11) | Future |
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
@@ -167,6 +167,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
+| `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache (optional) |
 

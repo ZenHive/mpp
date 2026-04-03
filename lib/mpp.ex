@@ -32,6 +32,7 @@ defmodule MPP do
     * `MPP.Method` — Behaviour for pluggable payment methods
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
     * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
+    * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Intents.Charge` — Charge intent request schema
 
   ## Discovery
@@ -52,6 +53,7 @@ defmodule MPP do
       MPP.Errors,
       MPP.Intents.Charge,
       MPP.Methods.Stripe,
-      MPP.Methods.Tempo
+      MPP.Methods.Tempo,
+      MPP.Methods.EVM
     ]
 end

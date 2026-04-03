@@ -2,6 +2,7 @@ defmodule MPP.DescripexTest do
   use ExUnit.Case, async: true
 
   alias MPP.Intents.Charge
+  alias MPP.Methods.EVM
   alias MPP.Methods.Stripe
   alias MPP.Methods.Tempo
 
@@ -13,7 +14,8 @@ defmodule MPP.DescripexTest do
     MPP.Errors,
     Charge,
     Stripe,
-    Tempo
+    Tempo,
+    EVM
   ]
 
   describe "api() annotations" do
