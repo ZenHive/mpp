@@ -77,7 +77,7 @@ defmodule MPP.MixProject do
       {:con_cache, "~> 1.1", optional: true},
 
       # Self-describing APIs
-      {:descripex, "~> 0.4"}
+      {:descripex, "~> 0.6"}
     ]
   end
 
