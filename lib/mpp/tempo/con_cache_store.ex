@@ -63,8 +63,6 @@ defmodule MPP.Tempo.ConCacheStore do
   @default_ttl_ms to_timeout(minute: 5)
   @default_check_interval_ms to_timeout(second: 30)
 
-  @dialyzer {:nowarn_function, [child_spec: 1, get: 1, get: 2, put: 2, put: 3, check_and_mark: 2, check_and_mark: 3]}
-
   @doc """
   Returns a child spec for the ConCache process.
 

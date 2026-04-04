@@ -30,6 +30,8 @@ defmodule Mix.Tasks.Mpp.Demo do
 
   alias MPP.Demo.Router
 
+  @compile {:no_warn_undefined, Bandit}
+
   @default_port 4402
 
   @impl Mix.Task

@@ -72,10 +72,6 @@ defmodule MPP.Methods.Tempo do
 
   require Logger
 
-  # onchain/onchain_tempo are optional — suppress unknown function warnings for their APIs.
-  # Runtime availability is enforced by validate_config!/1 at Plug init time.
-  @dialyzer {:nowarn_function, find_matching_transfer: 3}
-
   @moderato_chain_id 42_431
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
@@ -108,8 +104,6 @@ defmodule MPP.Methods.Tempo do
     validate_memo!(config["memo"])
     validate_store!(config["store"])
     validate_fee_payer!(config)
-    check_onchain_available!()
-
     :ok
   end
 
@@ -226,19 +220,7 @@ defmodule MPP.Methods.Tempo do
     validate_store!(ConCacheStore)
   end
 
-  defp validate_store!(ConCacheStore) do
-    if !Code.ensure_loaded?(ConCache) do
-      raise ArgumentError, """
-      MPP.Tempo.ConCacheStore requires the `con_cache` package.
-
-      Add it to your mix.exs dependencies:
-
-          {:con_cache, "~> 1.1"}
-      """
-    end
-
-    :ok
-  end
+  defp validate_store!(ConCacheStore), do: :ok
 
   defp validate_store!({store, _opts}) do
     raise ArgumentError,
@@ -581,8 +563,6 @@ defmodule MPP.Methods.Tempo do
 
   defp rpc_options(config), do: [req_options: config["req_options"] || []]
 
-  @dialyzer {:nowarn_function, [rpc_broadcast_async: 3, rpc_broadcast_sync: 3, rpc_fetch_receipt: 3]}
-
   defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
     case RPC.broadcast_async(raw_hex, rpc_url, opts) do
       {:ok, _tx_hash} = ok -> ok
@@ -676,27 +656,4 @@ defmodule MPP.Methods.Tempo do
 
   # Checks if a string contains only hex characters.
   defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
-
-  # Checks that the onchain and onchain_tempo libraries are available at runtime.
-  defp check_onchain_available! do
-    if !Code.ensure_loaded?(Onchain) do
-      raise ArgumentError, """
-      MPP.Methods.Tempo requires the `onchain` package.
-
-      Add it to your mix.exs dependencies:
-
-          {:onchain, "~> 0.4"}
-      """
-    end
-
-    if !Code.ensure_loaded?(Transaction) do
-      raise ArgumentError, """
-      MPP.Methods.Tempo requires the `onchain_tempo` package.
-
-      Add it to your mix.exs dependencies:
-
-          {:onchain_tempo, "~> 0.1"}
-      """
-    end
-  end
 end

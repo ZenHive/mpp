@@ -124,9 +124,9 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `jason` — JSON encoding/decoding for challenge/receipt payloads
 - `req` — HTTP client for payment method API calls (Stripe, etc.)
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
-- `onchain` — (optional) Ethereum RPC, address validation, and ERC-20 transfer parsing
-- `onchain_tempo` — (optional) Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
-- `con_cache` — (optional) ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
+- `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
+- `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
+- `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
 ### JS/TS cross-referencing (dev/test only)
 
 Three tools for verifying our implementation against the mppx TypeScript reference impl (`refs/mppx/`). **These are NEVER production dependencies.** MPP is a library — consumers must not pull in JS runtimes.

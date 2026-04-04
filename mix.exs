@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.2"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -67,14 +67,14 @@ defmodule MPP.MixProject do
       {:oxc, "~> 0.5", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
 
-      # On-chain verification (optional — required by Tempo method)
-      {:onchain, "~> 0.4", optional: true},
+      # On-chain verification (Tempo and EVM methods)
+      {:onchain, "~> 0.4"},
 
-      # Tempo chain primitives (optional — required by Tempo method)
-      {:onchain_tempo, "~> 0.1", optional: true},
+      # Tempo chain primitives (Tempo method)
+      {:onchain_tempo, "~> 0.1"},
 
-      # ETS-based dedup store with TTL (optional — used by ConCacheStore)
-      {:con_cache, "~> 1.1", optional: true},
+      # ETS-based dedup store with TTL (ConCacheStore)
+      {:con_cache, "~> 1.1"},
 
       # Self-describing APIs
       {:descripex, "~> 0.6"}

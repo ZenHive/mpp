@@ -56,10 +56,6 @@ defmodule MPP.Methods.EVM do
   alias MPP.Intents.Charge
   alias MPP.Receipt
 
-  # Suppress unknown function warnings for optional dep Onchain.
-  # Runtime availability is enforced by validate_config!/1 at Plug init time.
-  @dialyzer {:nowarn_function, [find_matching_transfer: 2, check_native_transfer: 2]}
-
   @required_config_keys ~w(rpc_url)
   @zero_address "0x0000000000000000000000000000000000000000"
 
@@ -87,8 +83,6 @@ defmodule MPP.Methods.EVM do
       raise ArgumentError,
             "MPP.Methods.EVM requires these keys in method_config: #{Enum.join(missing, ", ")}"
     end
-
-    check_onchain_available!()
 
     :ok
   end
@@ -366,16 +360,4 @@ defmodule MPP.Methods.EVM do
   defp hex_to_integer(nil), do: nil
   defp hex_to_integer("0x" <> hex), do: String.to_integer(hex, 16)
   defp hex_to_integer(val) when is_integer(val), do: val
-
-  defp check_onchain_available! do
-    if !Code.ensure_loaded?(Onchain) do
-      raise ArgumentError, """
-      MPP.Methods.EVM requires the `onchain` package.
-
-      Add it to your mix.exs dependencies:
-
-          {:onchain, "~> 0.4"}
-      """
-    end
-  end
 end
