@@ -83,6 +83,7 @@ MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (o
 MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
+MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32043, meta keys), server/client helpers
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```

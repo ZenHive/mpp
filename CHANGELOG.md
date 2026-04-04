@@ -6,6 +6,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 32: MCP Types and Constants
+
+MCP (Model Context Protocol) transport helpers for embedding MPP payment flows in JSON-RPC messages.
+
+**What was built:**
+- `MPP.Mcp` module with 4 spec constants (`-32042`, `-32043`, `org.paymentauth/credential`, `org.paymentauth/receipt`)
+- Server helpers: `extract_credential/1`, `payment_required_error/1`, `verification_failed_error/2`, `attach_receipt/3`
+- Client helpers: `payment_required?/1`, `extract_challenges/1`, `attach_credential/2`
+- Full round-trip test: challenge → error → extract → credential → attach → receipt
+
+**Key decisions:**
+- Single `MPP.Mcp` module (not split into sub-modules) — matches mpp-rs single `mcp.rs` pattern, surface is small
+- No new structs — reuses existing `Challenge`, `Credential`, `Receipt` types; MCP-specific shapes are plain maps matching JSON-RPC wire format
+- MCP credentials are plain JSON maps in `_meta` (not base64url-encoded like HTTP transport) — helpers handle this difference transparently
+- Challenge `to_map`/`from_map` kept private in this module — can be promoted to `MPP.Challenge` when Task 34 (Verifier extraction) creates a shared need
+
+### Fix: MCP request field serialization and defensive parsing
+
+Fixed two issues found via code review:
+
+**MCP `request` field format** — The MCP transport spec requires `request` as a native JSON object, not base64url-encoded. `challenge_to_map` now decodes base64url→JSON on output, `challenge_from_map` re-encodes JSON→base64url on input. The internal `Challenge.request` remains base64url (needed for HMAC binding); the MCP module handles translation at the transport boundary.
+
+**Defensive error handling** — `challenge_from_map` now validates required fields and returns `{:ok, challenge} | {:error, :invalid_challenge}` instead of raising `FunctionClauseError` on malformed input. Callers (`extract_challenges`, `credential_from_map`) propagate errors via `with`.
+
+**Known limitation:** `encode_request` uses `Jason.encode!/1` (not JCS/RFC 8785) for the native JSON → base64url path. Safe for same-server round-trips but cross-implementation interop depends on Task 34 (JCS). Documented with TODO.
+
+### Fix: MCP malformed input crash paths and spec accuracy (Codex review)
+
+Four issues found via Codex code review, all verified and fixed:
+
+**Crash on non-map/non-binary request** (High) — `encode_request/1` only handled maps and binaries. A peer-controlled MCP message with `"request": []` caused `FunctionClauseError`. Added catch-all clause returning `:invalid` sentinel, checked in `challenge_from_map`.
+
+**Optional fields not type-validated** (Medium) — `description`, `digest`, `expires`, `opaque` were copied through without type checks. A malformed `"expires": {}` would be accepted then crash HMAC verification downstream. Added `validate_optional_strings/1` rejecting non-binary values.
+
+**Inaccurate public specs** (Medium) — `extract_credential/1` and `extract_challenges/1` could return `{:error, :invalid_challenge}` but specs/docs only advertised narrower error sets. Updated `@spec`, `errors:`, and descriptions on both functions.
+
+**Missing from Discoverable registry** (Low) — `MPP.Mcp` was documented in `lib/mpp.ex` moduledoc but not in the `Discoverable` modules list. `MPP.describe(:mcp)` now works.
+
 ### Proxy/Gateway Scoped to Separate Package (2026-04-04)
 
 Reviewed proxy/gateway functionality in both reference SDKs (mppx `src/proxy/`, mpp-rs `src/proxy/`). Both ship proxy as a core module with pre-built service adapters (OpenAI, Anthropic, Stripe) and agent discovery (llms.txt, OpenAPI).

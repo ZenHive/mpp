@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Next: Task 32 first, then parallelize Phase 9 utilities and verifier extraction.
+**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Next: parallelize Phase 9 utilities and verifier extraction.
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -42,7 +42,7 @@
 
 | Task | Phase | Status | Score | Notes |
 |------|-------|--------|-------|-------|
-| Task 32: MCP types + constants | 11 | ⬜ | [D:2/B:7/U:8 → Eff:3.75] | Error codes, meta keys, helpers |
+| ~~Task 32: MCP types + constants~~ | 11 | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Error codes, meta keys, helpers. Codex review fixes: crash paths, type validation, spec accuracy, Discoverable wiring |
 | Task 26: Amount/decimals helpers `[P]` | 9 | ⬜ | [D:2/B:6/U:6 → Eff:3.0] | parse_units, with_base_units |
 | Task 28: Session error types | 10 | ⬜ | [D:2/B:5/U:7 → Eff:3.0] | 7 channel problem types |
 | Task 33a: PaymentProvider behaviour | 12 | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
@@ -53,7 +53,7 @@
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
 | Task 33d: MCP client transport | 12 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Transport.MCP for JSON-RPC |
-| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:8/U:9 → Eff:2.13] | Transport-neutral verify + RFC 8785 canonical JSON |
+| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON. Blocks cross-impl MCP interop (encode_request TODO) |
 | Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
 | Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct |
 | Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
@@ -273,17 +273,9 @@ Success criteria:
 
 > MCP (Model Context Protocol) support enables payments over JSON-RPC — critical for AI agent economy. Independent of sessions, can be built in parallel with Phase 10. Types alone are not enough here; both reference SDKs also expose concrete server/client MCP integration points.
 
-### Task 32: MCP Types and Constants
+### Task 32: MCP Types and Constants ✅
 
-[D:2/B:7/U:8 → Eff:3.75] 🎯
-
-Add `MPP.Mcp` module with constants and types for JSON-RPC payment integration. Constants: `payment_required_code` (-32042), `payment_verification_failed_code` (-32043), `credential_meta_key` ("org.paymentauth/credential"), `receipt_meta_key` ("org.paymentauth/receipt"). Server helpers: `extract_credential/1` (from `_meta` map), `payment_required_error/1` (build error from challenge), `attach_receipt/3` (add receipt to result `_meta`). Client helpers: `is_payment_required?/1`, `extract_challenges/1`, `attach_credential/2`. Match the mpp-rs `mcp.rs` API surface.
-
-Success criteria:
-- [ ] All 4 constants match spec values
-- [ ] Server helpers: extract_credential, payment_required_error, attach_receipt
-- [ ] Client helpers: is_payment_required?, extract_challenges, attach_credential
-- [ ] Round-trip test: challenge → error → extract → credential → attach → receipt
+[D:2/B:7/U:8 → Eff:3.75] — Completed 2026-04-04. See [CHANGELOG.md](CHANGELOG.md#task-32-mcp-types-and-constants).
 
 ### Task 32b: MCP Server Transport
 

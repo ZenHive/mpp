@@ -1,0 +1,395 @@
+defmodule MPP.Mcp do
+  @moduledoc """
+  MCP (Model Context Protocol) payment transport helpers.
+
+  Provides constants and helper functions for embedding MPP payment flows
+  in JSON-RPC messages. Where `MPP.Plug` handles HTTP 402 challenges via
+  headers, this module handles the equivalent over MCP's `_meta` convention.
+
+  ## Constants
+
+  Four constants defined by the MPP transport spec for MCP:
+
+    * `payment_required_code/0` — JSON-RPC error code `-32042`
+    * `verification_failed_code/0` — JSON-RPC error code `-32043`
+    * `credential_meta_key/0` — `"org.paymentauth/credential"`
+    * `receipt_meta_key/0` — `"org.paymentauth/receipt"`
+
+  ## Server Helpers
+
+  Build JSON-RPC error responses and extract/attach payment data:
+
+    * `extract_credential/1` — pull credential from `params._meta`
+    * `payment_required_error/1` — build `-32042` error with challenges
+    * `verification_failed_error/2` — build `-32043` error with problem details
+    * `attach_receipt/3` — add receipt + challengeId to `result._meta`
+
+  ## Client Helpers
+
+  Detect payment-required errors and manage credentials:
+
+    * `payment_required?/1` — check if error is `-32042`
+    * `extract_challenges/1` — parse challenges from error data
+    * `attach_credential/2` — insert credential into `params._meta`
+  """
+
+  use Descripex, namespace: "/mcp"
+
+  alias MPP.Challenge
+  alias MPP.Credential
+  alias MPP.Errors
+  alias MPP.Receipt
+
+  # JSON-RPC error code: payment required (no credential provided)
+  @payment_required_code -32_042
+
+  # JSON-RPC error code: credential verification failed
+  @verification_failed_code -32_043
+
+  # Metadata key for credentials in params._meta
+  @credential_meta_key "org.paymentauth/credential"
+
+  # Metadata key for receipts in result._meta
+  @receipt_meta_key "org.paymentauth/receipt"
+
+  # -------------------------------------------------------------------
+  # Constants
+  # -------------------------------------------------------------------
+
+  api(:payment_required_code, "JSON-RPC error code for payment required (`-32042`).",
+    returns: %{type: :integer, description: "Error code `-32042`"}
+  )
+
+  @spec payment_required_code :: integer()
+  def payment_required_code, do: @payment_required_code
+
+  api(:verification_failed_code, "JSON-RPC error code for verification failed (`-32043`).",
+    returns: %{type: :integer, description: "Error code `-32043`"}
+  )
+
+  @spec verification_failed_code :: integer()
+  def verification_failed_code, do: @verification_failed_code
+
+  api(:credential_meta_key, "Metadata key for credentials in `params._meta`.",
+    returns: %{type: :string, description: ~s(Key `"org.paymentauth/credential"`)}
+  )
+
+  @spec credential_meta_key :: String.t()
+  def credential_meta_key, do: @credential_meta_key
+
+  api(:receipt_meta_key, "Metadata key for receipts in `result._meta`.",
+    returns: %{type: :string, description: ~s(Key `"org.paymentauth/receipt"`)}
+  )
+
+  @spec receipt_meta_key :: String.t()
+  def receipt_meta_key, do: @receipt_meta_key
+
+  # -------------------------------------------------------------------
+  # Server Helpers
+  # -------------------------------------------------------------------
+
+  api(
+    :extract_credential,
+    "Extract a payment credential from JSON-RPC request params `_meta`.",
+    params: [
+      params: [
+        kind: :value,
+        description: "JSON-RPC request params map with optional `_meta` containing a credential"
+      ]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description: "`{:ok, credential}` or `{:error, :no_credential | :invalid_credential | :invalid_challenge}`"
+    },
+    errors: [:no_credential, :invalid_credential, :invalid_challenge],
+    composes_with: [:attach_credential, :attach_receipt]
+  )
+
+  @spec extract_credential(map()) ::
+          {:ok, Credential.t()} | {:error, :no_credential | :invalid_credential | :invalid_challenge}
+  def extract_credential(%{"_meta" => %{@credential_meta_key => cred_map}}) when is_map(cred_map) do
+    credential_from_map(cred_map)
+  end
+
+  def extract_credential(%{}), do: {:error, :no_credential}
+
+  api(
+    :payment_required_error,
+    "Build a JSON-RPC error map for payment required (`-32042`) with one or more challenges.",
+    params: [
+      challenges: [
+        kind: :value,
+        description: "A single `MPP.Challenge` struct or a list of challenges"
+      ]
+    ],
+    returns: %{
+      type: :map,
+      description:
+        "JSON-RPC error map with `code`, `message`, and `data` containing `httpStatus`, `challenges`, and `problem`"
+    },
+    composes_with: [:extract_challenges, :verification_failed_error]
+  )
+
+  @spec payment_required_error(Challenge.t() | [Challenge.t()]) :: map()
+  def payment_required_error(%Challenge{} = challenge) do
+    payment_required_error([challenge])
+  end
+
+  def payment_required_error(challenges) when is_list(challenges) do
+    %{
+      "code" => @payment_required_code,
+      "message" => "Payment Required",
+      "data" => %{
+        "httpStatus" => 402,
+        "challenges" => Enum.map(challenges, &challenge_to_map/1),
+        "problem" => nil
+      }
+    }
+  end
+
+  api(
+    :verification_failed_error,
+    "Build a JSON-RPC error map for verification failed (`-32043`) with problem details.",
+    params: [
+      challenges: [
+        kind: :value,
+        description: "A single `MPP.Challenge` struct or a list of challenges"
+      ],
+      problem: [
+        kind: :value,
+        description: "An `MPP.Errors.t()` struct with RFC 9457 problem details"
+      ]
+    ],
+    returns: %{
+      type: :map,
+      description: "JSON-RPC error map with `code`, `message`, and `data` including problem details"
+    },
+    composes_with: [:payment_required_error, :extract_challenges]
+  )
+
+  @spec verification_failed_error(Challenge.t() | [Challenge.t()], Errors.t()) :: map()
+  def verification_failed_error(%Challenge{} = challenge, %Errors{} = problem) do
+    verification_failed_error([challenge], problem)
+  end
+
+  def verification_failed_error(challenges, %Errors{} = problem) when is_list(challenges) do
+    %{
+      "code" => @verification_failed_code,
+      "message" => "Payment Verification Failed",
+      "data" => %{
+        "httpStatus" => problem.status,
+        "challenges" => Enum.map(challenges, &challenge_to_map/1),
+        "problem" => Errors.to_map(problem)
+      }
+    }
+  end
+
+  api(
+    :attach_receipt,
+    "Attach a payment receipt to a JSON-RPC result map via `_meta`.",
+    params: [
+      result: [kind: :value, description: "JSON-RPC result map"],
+      receipt: [kind: :value, description: "An `MPP.Receipt.t()` struct"],
+      challenge_id: [kind: :value, description: "The challenge ID this receipt fulfills"]
+    ],
+    returns: %{
+      type: :map,
+      description: "Result map with `_meta` containing the receipt and `challengeId`"
+    },
+    composes_with: [:extract_credential, :payment_required_error]
+  )
+
+  @spec attach_receipt(map(), Receipt.t(), String.t()) :: map()
+  def attach_receipt(result, %Receipt{} = receipt, challenge_id) when is_map(result) and is_binary(challenge_id) do
+    mcp_receipt = receipt_to_mcp_map(receipt, challenge_id)
+    existing_meta = Map.get(result, "_meta", %{})
+    Map.put(result, "_meta", Map.put(existing_meta, @receipt_meta_key, mcp_receipt))
+  end
+
+  # -------------------------------------------------------------------
+  # Client Helpers
+  # -------------------------------------------------------------------
+
+  api(
+    :payment_required?,
+    "Check whether a JSON-RPC error map indicates payment is required.",
+    params: [
+      error: [kind: :value, description: "JSON-RPC error map with `code` field"]
+    ],
+    returns: %{type: :boolean, description: "`true` if error code is `-32042`"}
+  )
+
+  @spec payment_required?(map()) :: boolean()
+  def payment_required?(%{"code" => @payment_required_code}), do: true
+  def payment_required?(%{}), do: false
+
+  api(
+    :extract_challenges,
+    "Extract and parse payment challenges from a JSON-RPC error map.",
+    params: [
+      error: [kind: :value, description: "JSON-RPC error map with `data.challenges`"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description: "`{:ok, [challenge]}` or `{:error, :no_challenges | :invalid_challenge}`"
+    },
+    errors: [:no_challenges, :invalid_challenge],
+    composes_with: [:payment_required?, :payment_required_error]
+  )
+
+  @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
+  def extract_challenges(%{"data" => %{"challenges" => challenges}}) when is_list(challenges) and challenges != [] do
+    results = Enum.map(challenges, &challenge_from_map/1)
+
+    case Enum.split_with(results, &match?({:ok, _}, &1)) do
+      {oks, []} -> {:ok, Enum.map(oks, fn {:ok, c} -> c end)}
+      {_, [{:error, reason} | _]} -> {:error, reason}
+    end
+  end
+
+  def extract_challenges(%{}), do: {:error, :no_challenges}
+
+  api(
+    :attach_credential,
+    "Attach a payment credential to JSON-RPC request params via `_meta`.",
+    params: [
+      params: [kind: :value, description: "JSON-RPC request params map"],
+      credential: [kind: :value, description: "An `MPP.Credential.t()` struct"]
+    ],
+    returns: %{
+      type: :map,
+      description: "Params map with `_meta` containing the credential"
+    },
+    composes_with: [:extract_credential, :extract_challenges]
+  )
+
+  @spec attach_credential(map(), Credential.t()) :: map()
+  def attach_credential(params, %Credential{} = credential) when is_map(params) do
+    cred_map = credential_to_map(credential)
+    existing_meta = Map.get(params, "_meta", %{})
+    Map.put(params, "_meta", Map.put(existing_meta, @credential_meta_key, cred_map))
+  end
+
+  # -------------------------------------------------------------------
+  # Private Helpers
+  # -------------------------------------------------------------------
+
+  # Converts a Challenge struct to a string-keyed map for MCP wire format.
+  # Decodes `request` from base64url to a native JSON object per the MCP transport spec:
+  # "Servers MUST NOT base64url-encode the request when using JSON-RPC transport."
+  defp challenge_to_map(%Challenge{} = challenge) do
+    %{
+      "id" => challenge.id,
+      "realm" => challenge.realm,
+      "method" => challenge.method,
+      "intent" => challenge.intent,
+      "request" => decode_request(challenge.request)
+    }
+    |> maybe_put("description", challenge.description)
+    |> maybe_put("digest", challenge.digest)
+    |> maybe_put("expires", challenge.expires)
+    |> maybe_put("opaque", challenge.opaque)
+  end
+
+  # Converts a string-keyed MCP challenge map to a Challenge struct.
+  # Encodes `request` from native JSON object back to base64url for internal use.
+  defp challenge_from_map(
+         %{"id" => id, "realm" => realm, "method" => method, "intent" => intent, "request" => request} = map
+       )
+       when is_binary(id) and is_binary(realm) and is_binary(method) and is_binary(intent) do
+    encoded = encode_request(request)
+
+    with :ok <- if(encoded == :invalid, do: {:error, :invalid_challenge}, else: :ok),
+         :ok <- validate_optional_strings(map) do
+      {:ok,
+       %Challenge{
+         id: id,
+         realm: realm,
+         method: method,
+         intent: intent,
+         request: encoded,
+         description: Map.get(map, "description"),
+         digest: Map.get(map, "digest"),
+         expires: Map.get(map, "expires"),
+         opaque: Map.get(map, "opaque")
+       }}
+    end
+  end
+
+  defp challenge_from_map(_), do: {:error, :invalid_challenge}
+
+  # Validates that optional challenge fields, when present, are strings.
+  # Rejects malformed values (e.g., "expires": %{}) that would crash HMAC verification.
+  @optional_string_fields ~w(description digest expires opaque)
+  defp validate_optional_strings(map) do
+    Enum.find_value(@optional_string_fields, :ok, fn field ->
+      case Map.get(map, field) do
+        nil -> nil
+        value when is_binary(value) -> nil
+        _bad -> {:error, :invalid_challenge}
+      end
+    end)
+  end
+
+  # Converts a Credential struct to a string-keyed map for _meta embedding.
+  defp credential_to_map(%Credential{} = credential) do
+    map = %{
+      "challenge" => challenge_to_map(credential.challenge),
+      "payload" => credential.payload
+    }
+
+    maybe_put(map, "source", credential.source)
+  end
+
+  # Converts a string-keyed credential map from _meta into a Credential struct.
+  defp credential_from_map(%{"challenge" => challenge_map, "payload" => payload} = map)
+       when is_map(challenge_map) and is_map(payload) do
+    with {:ok, challenge} <- challenge_from_map(challenge_map) do
+      {:ok,
+       %Credential{
+         challenge: challenge,
+         payload: payload,
+         source: Map.get(map, "source")
+       }}
+    end
+  end
+
+  defp credential_from_map(_), do: {:error, :invalid_credential}
+
+  # Converts a Receipt struct + challenge_id to an MCP receipt map (adds challengeId).
+  defp receipt_to_mcp_map(%Receipt{} = receipt, challenge_id) do
+    map = %{
+      "status" => receipt.status,
+      "method" => receipt.method,
+      "timestamp" => receipt.timestamp,
+      "reference" => receipt.reference,
+      "challengeId" => challenge_id
+    }
+
+    maybe_put(map, "externalId", receipt.external_id)
+  end
+
+  # Decodes base64url-encoded request to a native JSON map for MCP wire format.
+  defp decode_request(request) when is_binary(request) do
+    with {:ok, json} <- Base.url_decode64(request, padding: false),
+         {:ok, map} <- Jason.decode(json) do
+      map
+    else
+      _ -> request
+    end
+  end
+
+  # TODO: Task 34 — encode_request uses Jason.encode!/1 which is NOT JCS (RFC 8785).
+  # Safe for same-server round-trips (Jason ordering is deterministic per map), but
+  # cross-implementation interop (e.g., mppx client → our server) may produce different
+  # base64url bytes, breaking HMAC verification. Replace with JCS when Task 34 lands.
+  defp encode_request(request) when is_map(request) do
+    request |> Jason.encode!() |> Base.url_encode64(padding: false)
+  end
+
+  defp encode_request(request) when is_binary(request), do: request
+  defp encode_request(_request), do: :invalid
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+end

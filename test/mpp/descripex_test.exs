@@ -15,7 +15,8 @@ defmodule MPP.DescripexTest do
     Charge,
     Stripe,
     Tempo,
-    EVM
+    EVM,
+    MPP.Mcp
   ]
 
   describe "api() annotations" do
