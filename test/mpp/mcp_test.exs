@@ -167,6 +167,11 @@ defmodule MPP.McpTest do
       assert {:error, :invalid_credential} = Mcp.extract_credential(params)
     end
 
+    test "returns invalid_credential when credential value is not a map" do
+      params = %{"_meta" => %{"org.paymentauth/credential" => "not-a-map"}}
+      assert {:error, :invalid_credential} = Mcp.extract_credential(params)
+    end
+
     test "returns error when credential has malformed challenge" do
       params = %{
         "_meta" => %{
@@ -312,6 +317,11 @@ defmodule MPP.McpTest do
         }
       }
 
+      assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
+    end
+
+    test "returns invalid_challenge when challenges value is not a list" do
+      error = %{"data" => %{"challenges" => "not-a-list"}}
       assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
     end
 

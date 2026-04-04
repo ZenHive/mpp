@@ -111,6 +111,8 @@ defmodule MPP.Mcp do
     credential_from_map(cred_map)
   end
 
+  def extract_credential(%{"_meta" => %{@credential_meta_key => _}}), do: {:error, :invalid_credential}
+
   def extract_credential(%{}), do: {:error, :no_credential}
 
   api(
@@ -246,6 +248,9 @@ defmodule MPP.Mcp do
       {_, [{:error, reason} | _]} -> {:error, reason}
     end
   end
+
+  def extract_challenges(%{"data" => %{"challenges" => []}}), do: {:error, :no_challenges}
+  def extract_challenges(%{"data" => %{"challenges" => _}}), do: {:error, :invalid_challenge}
 
   def extract_challenges(%{}), do: {:error, :no_challenges}
 
