@@ -6,6 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Proxy/Gateway Scoped to Separate Package (2026-04-04)
+
+Reviewed proxy/gateway functionality in both reference SDKs (mppx `src/proxy/`, mpp-rs `src/proxy/`). Both ship proxy as a core module with pre-built service adapters (OpenAI, Anthropic, Stripe) and agent discovery (llms.txt, OpenAPI).
+
+**Decision:** Proxy is a **product** (payment gateway), not a library feature. Scoped out to a separate `mpp_proxy` hex package that depends on `mpp`. This keeps `mpp` focused on protocol correctness (Phases 9-12) while `mpp_proxy` targets the "wrap any API → monetize it" use case. The BEAM is uniquely suited for a payment proxy — lightweight processes, per-connection fault isolation, hot code upgrades, built-in observability.
+
+### Cross-SDK Gap Analysis (2026-04-04)
+
+Audited mppx (TypeScript) and mpp-rs (Rust) reference implementations against our Elixir library. Expanded `ROADMAP.md` with new phases for protocol utilities, sessions, MCP, and client SDK, and renumbered payment method phases (Lightning, Solana, Card) from 9-11 to 13-15.
+
+**Key gaps found:**
+- No client-side SDK (server-only — can charge but not pay)
+- No session/streaming payment intent (only charge)
+- No MCP transport support (HTTP only)
+- Missing protocol utilities: body digest, multi-challenge parsing, amount helpers, expiration/DID helpers
+- Missing 8 session-specific RFC 9457 error types
+
+**Key decision:** Protocol completeness (Phases 9-12) prioritized over new payment methods (Phases 13-15). Both mppx and mpp-rs have explicit transport-neutral core architecture — confirmed this pattern as the target for our client SDK design.
+
 ### EVM Integration Tests
 
 Added integration tests for `MPP.Methods.EVM` against Sepolia testnet — validates real RPC round-trips that unit stubs can't catch.

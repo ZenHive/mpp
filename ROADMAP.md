@@ -10,44 +10,59 @@
 
 ## Current Focus
 
-**Task 14 complete** (2026-04-03) — Generic EVM on-chain payment method + Sepolia integration tests (2026-04-04). Next: Task 19 (Lightning charge, Eff:1.4) or Task 21 (Solana charge, Eff:0.92).
+**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Next: Task 32 first, then parallelize Phase 9 utilities and verifier extraction.
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
-### Summary
+### ✅ Completed (Phases 1-8)
 
-| Task | Status | Score | Notes |
-|------|--------|-------|-------|
-| Task 1: Challenge module | ✅ | [D:4/B:10/U:10 → Eff:2.5] | HMAC-SHA256 binding |
-| Task 2: Credential module | ✅ | [D:3/B:9/U:9 → Eff:3.0] | base64url JSON decode/encode |
-| Task 3: Receipt module | ✅ | [D:2/B:8/U:8 → Eff:4.0] | base64url JSON encode/decode |
-| Task 4: Headers module | ✅ | [D:3/B:9/U:9 → Eff:3.0] | Auth-param parser + format |
-| Task 5: Errors module | ✅ | [D:2/B:7/U:7 → Eff:3.5] | 9 RFC 9457 problem types |
-| Task 6: ChargeRequest | ✅ | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
-| Task 7: Method behaviour | ✅ | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
-| Task 8: Plug middleware | ✅ | [D:5/B:10/U:10 → Eff:2.0] | Phase 1 complete |
-| Task 9: Stripe method | ✅ | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
-| Task 10: Stripe integration test | ✅ | [D:3/B:7/U:6 → Eff:2.17] | Full 402 handshake against Stripe test API |
-| Task 11: Descripex Annotations | ✅ | [D:3/B:7/U:8 → Eff:2.5] | api() on 7 modules + Discoverable |
-| Task 12: mix mpp.manifest | ✅ | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
-| Task 13a: Tempo skeleton | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Method module + challenge details |
-| Task 13b: Tempo hash verify | ✅ | [D:4/B:8/U:8 → Eff:2.0] | type="hash" via Req + onchain parsing |
-| Task 13c: Tempo tx verify | ✅ | [D:6/B:6/U:5 → Eff:0.92] | type="transaction" + 0x76 transaction verification |
-| Task 13d: Tempo fee payer | ✅ | [D:7/B:4/U:3 → Eff:0.5] | Server-side fee sponsorship |
-| Task 13e: Tempo integration | ✅ | [D:3/B:6/U:5 → Eff:1.83] | Moderato testnet tests |
-| Task 13f: Tx dedup store | ✅ | [D:4/B:5/U:4 → Eff:1.13] | Optional replay protection for transaction credentials |
-| Task 13g: Optimistic broadcast | ✅ | [D:3/B:4/U:3 → Eff:1.17] | waitForConfirmation: false mode |
-| Task 13h: Tx integration test | ✅ | [D:4/B:5/U:5 → Eff:1.25] | Testnet test for type="transaction" path |
-| Task 15: Multi-Method 402 | ✅ | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
-| Task 16: v0.1.0 Release | ✅ | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
-| Task 23: onchain_tempo extraction | ✅ | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
-| Task 17: mix mpp.demo | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Interactive demo server on port 4402 |
-| Task 18: Live integration tests | ✅ | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
-| Task 14: Generic EVM method | ✅ | [D:6/B:7/U:6 → Eff:1.08] | Any EVM chain on-chain verification |
-| Task 19: Lightning charge | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage verification |
-| Task 20: Lightning session | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming (deposit/topUp/close) |
-| Task 21: Solana charge | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes, fee payer, splits |
-| Task 22: Card charge | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | JWE encrypted network tokens, intermediaries |
+| Task | Score | Notes |
+|------|-------|-------|
+| Task 1: Challenge module | [D:4/B:10/U:10 → Eff:2.5] | HMAC-SHA256 binding |
+| Task 2: Credential module | [D:3/B:9/U:9 → Eff:3.0] | base64url JSON decode/encode |
+| Task 3: Receipt module | [D:2/B:8/U:8 → Eff:4.0] | base64url JSON encode/decode |
+| Task 4: Headers module | [D:3/B:9/U:9 → Eff:3.0] | Auth-param parser + format |
+| Task 5: Errors module | [D:2/B:7/U:7 → Eff:3.5] | 9 RFC 9457 problem types |
+| Task 6: ChargeRequest | [D:2/B:8/U:8 → Eff:4.0] | Intent schema with validation |
+| Task 7: Method behaviour | [D:3/B:10/U:10 → Eff:3.33] | Behaviour + __using__ macro |
+| Task 8: Plug middleware | [D:5/B:10/U:10 → Eff:2.0] | Full 402 handshake |
+| Task 9: Stripe method | [D:4/B:9/U:8 → Eff:2.13] | SPT → PaymentIntent verification |
+| Task 10: Stripe integration test | [D:3/B:7/U:6 → Eff:2.17] | Full 402 handshake against Stripe test API |
+| Task 11: Descripex Annotations | [D:3/B:7/U:8 → Eff:2.5] | api() on 7 modules + local discovery |
+| Task 12: mix mpp.manifest | [D:2/B:6/U:7 → Eff:3.25] | Static JSON manifest generation |
+| Task 13a-h: Tempo method | [D:2-7/B:4-8/U:3-8] | Hash + tx verify, fee payer, dedup, optimistic, integration |
+| Task 15: Multi-Method 402 | [D:3/B:6/U:7 → Eff:2.17] | Multiple payment methods per endpoint |
+| Task 16: v0.1.0 Release | [D:2/B:8/U:8 → Eff:4.0] | First Hex publish |
+| Task 23: onchain_tempo extraction | [D:5/B:6/U:7 → Eff:1.3] | Extract Tempo chain primitives to onchain_tempo package |
+| Task 17: mix mpp.demo | [D:3/B:8/U:9 → Eff:2.83] | Interactive demo server on port 4402 |
+| Task 18: Live integration tests | [D:4/B:7/U:8 → Eff:1.88] | Tests against mpp.dev/api/ping/paid |
+| Task 14: Generic EVM method | [D:6/B:7/U:6 → Eff:1.08] | Any EVM chain on-chain verification |
+
+### 📋 Upcoming (by efficiency)
+
+| Task | Phase | Status | Score | Notes |
+|------|-------|--------|-------|-------|
+| Task 32: MCP types + constants | 11 | ⬜ | [D:2/B:7/U:8 → Eff:3.75] | Error codes, meta keys, helpers |
+| Task 26: Amount/decimals helpers `[P]` | 9 | ⬜ | [D:2/B:6/U:6 → Eff:3.0] | parse_units, with_base_units |
+| Task 28: Session error types | 10 | ⬜ | [D:2/B:5/U:7 → Eff:3.0] | 7 channel problem types |
+| Task 33a: PaymentProvider behaviour | 12 | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
+| Task 25: Body digest `[P]` | 9 | ⬜ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify |
+| Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP |
+| Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter |
+| Task 24: Multi-challenge parsing `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
+| Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
+| Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
+| Task 33d: MCP client transport | 12 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Transport.MCP for JSON-RPC |
+| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:8/U:9 → Eff:2.13] | Transport-neutral verify + RFC 8785 canonical JSON |
+| Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
+| Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct |
+| Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
+| Task 19: Lightning charge | 13 | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage |
+| Task 30: Channel state + voucher | 10 | ⬜ | [D:5/B:6/U:7 → Eff:1.3] | EIP-712, channel ID, store |
+| Task 31: Session credential actions | 10 | ⬜ | [D:5/B:6/U:6 → Eff:1.2] | open/bearer/topUp/close |
+| Task 21: Solana charge | 14 | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes |
+| Task 20: Lightning session | 13 | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming |
+| Task 22: Card charge | 15 | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | JWE network tokens |
 
 ---
 
@@ -63,9 +78,9 @@
 
 ---
 
-## Phase 3: Descripex + Discovery ✅
+## Phase 3: Descripex + Local Discovery ✅
 
-> 2 tasks complete (v0.1.0). `api()` annotations on all public functions, `MPP.describe/0-2`, `mix mpp.manifest`.
+> 2 tasks complete (v0.1.0). `api()` annotations on all public functions, `MPP.describe/0-2`, and `mix mpp.manifest` for local discovery/manifest generation.
 
 ---
 
@@ -111,9 +126,253 @@
 
 ---
 
-## Phase 9: Lightning Payment Method
+## Phase 9: Protocol Utilities
 
-> Lightning has two specs: charge (one-time BOLT11 invoice) and session (prepaid streaming with deposit/topUp/close). Verification is simple: SHA256(preimage) == payment_hash. Neither mppx nor mpp-rs implement Lightning — we'd be first movers.
+> Cross-SDK gap analysis (2026-04-04) identified missing protocol features in mppx and mpp-rs that our library lacks. These are small, independent modules — all `[P]` parallelizable.
+
+### Task 24: Multi-Challenge Parsing `[P]`
+
+[D:3/B:7/U:7 → Eff:2.33] 🎯
+
+Add `parse_challenges/1` to `MPP.Headers` that splits comma-separated `WWW-Authenticate` values into a list of challenges. A single header value may contain multiple `Payment` challenges (e.g., `Payment id="a"..., Payment id="b"...`). The existing `parse_challenge/1` handles one; the new function should call it repeatedly after splitting on scheme boundaries. Handle edge cases: quoted strings containing commas, mixed schemes (ignore non-Payment), empty segments. Return `{:ok, [challenge]}` or collect errors. Cross-validate against mppx `deserializeList` behavior.
+
+Success criteria:
+- [ ] `parse_challenges/1` returns list of challenges from multi-challenge header
+- [ ] Correctly handles commas inside quoted auth-param values
+- [ ] Skips non-Payment schemes gracefully
+- [ ] Unit tests with 1, 2, and 3 challenges in one header value
+
+### Task 25: Body Digest `[P]`
+
+[D:2/B:6/U:5 → Eff:2.75] 🎯
+
+Add `MPP.BodyDigest` module with `compute/1` and `verify/2`. `compute/1` takes a string or map body, returns `"sha-256=<base64>"` digest. `verify/2` takes a digest string and body, recomputes and does constant-time comparison. Maps are JSON-encoded before hashing. Uses `:crypto.hash(:sha256, ...)` and `Base.encode64/1`. Enables request body binding in challenges (the `digest` field on `MPP.Challenge`). Cross-validate against mppx `BodyDigest.compute()` output for same input.
+
+Success criteria:
+- [ ] `compute/1` matches mppx output for same input
+- [ ] `verify/2` uses constant-time comparison
+- [ ] Handles both string and map inputs
+- [ ] Unit tests with known digest vectors
+
+### Task 26: Amount and Decimals Helpers `[P]`
+
+[D:2/B:6/U:6 → Eff:3.0] 🎯
+
+Add `MPP.Amount` module with `parse_units/2` (human-readable amount + decimals → base units string), `with_base_units/2` (applies `parse_units` to a charge/session request struct), and `parse_dollar_amount/1` (string like `"$1.50"` → `{"150", "usd", 2}`). `parse_units("1.5", 6)` should return `"1500000"`. Handle edge cases: too many decimal places (error), zero, empty string, no decimal point. Match mpp-rs `parse_units` behavior exactly.
+
+Success criteria:
+- [ ] `parse_units/2` matches mpp-rs output for all test vectors
+- [ ] `with_base_units/2` transforms charge request structs
+- [ ] `parse_dollar_amount/1` parses dollar notation
+- [ ] Error tuples for invalid inputs (not exceptions)
+
+### Task 27: Expiration and DID Helpers `[P]`
+
+[D:2/B:4/U:5 → Eff:2.25] 🎯
+
+Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1`, `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases). Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `"did:pkh:eip155:<chain_id>:<address>"`.
+
+Success criteria:
+- [ ] `MPP.Expires.minutes(5)` returns valid ISO 8601 ~5 minutes from now
+- [ ] `MPP.Expires.assert!/1` raises on expired/nil/malformed timestamps
+- [ ] `MPP.DID.evm_did/2` returns correctly formatted DID string
+- [ ] Unit tests for each helper
+
+### Task 34: Verifier Extraction + JCS `[P]`
+
+[D:4/B:8/U:9 → Eff:2.13] 🎯
+
+Extract the verification pipeline from `MPP.Plug` into a transport-neutral `MPP.Verifier` module. Currently, credential verification (HMAC check, realm match, expiration check, request match, method.verify/2) is embedded in `MPP.Plug.call/2` — tightly coupled to HTTP/Plug. The client SDK (Phase 12) and MCP transport (Phase 11) both need this logic without the Plug dependency. `MPP.Verifier.verify/3` should take a credential, a config, and return `{:ok, receipt}` or `{:error, error}`. `MPP.Plug` then becomes a thin HTTP adapter calling `MPP.Verifier`. This mirrors the mppx/mpp-rs architecture where protocol core is transport-neutral.
+
+Also add `MPP.JCS` implementing RFC 8785 JSON Canonicalization Scheme. Both reference SDKs mandate JCS for HMAC reproducibility: mppx uses `Json.canonicalize()` in `PaymentRequest.ts:106`, mpp-rs uses `serde_json_canonicalizer` crate (`Cargo.toml:50`, mandated in [PR #56](https://github.com/tempoxyz/mpp-rs/pull/56)). Without JCS, challenges created by our library won't verify against other SDKs if JSON key ordering differs. Currently we sidestep this by preserving raw base64url strings, but cross-SDK interop for challenge *creation* requires canonical serialization. The verifier should accept a `:request_serializer` option (defaulting to JCS) so both HTTP and MCP transports share the same HMAC computation.
+
+Success criteria:
+- [ ] `MPP.JCS` module implementing RFC 8785 canonical JSON serialization
+- [ ] Cross-validated against mppx/mpp-rs: same input → same canonical output
+- [ ] `MPP.Verifier` module with `verify/3` containing the full verification pipeline
+- [ ] Verifier accepts `:request_serializer` option (default: JCS)
+- [ ] `MPP.Plug` refactored to delegate to `MPP.Verifier`
+- [ ] All existing Plug tests pass unchanged (behavior-preserving refactor)
+- [ ] `MPP.Verifier` has no Plug dependency (pure protocol logic)
+- [ ] Unit tests for `MPP.Verifier` directly (without Plug/Conn)
+
+### Task 35: Generic Dedup at Plug Level `[P]`
+
+[D:3/B:7/U:7 → Eff:2.33] 🎯
+
+Lift replay protection from Tempo-only to all payment methods. Currently `MPP.Tempo.Store` provides dedup for Tempo credentials, but EVM and Stripe accept the same payment proof twice within the challenge window. Add optional `:store` to `MPP.Plug.Config` (shared across all methods). Before calling `method.verify/2`, check if the credential has been seen (keyed on challenge_id + payload hash). After successful verification, mark as used. Methods that already have their own dedup (Tempo) can skip the plug-level check. The `MPP.Tempo.Store` behaviour is already the right interface — reuse it at the Plug level.
+
+Success criteria:
+- [ ] Optional `:store` option in `MPP.Plug` config (shared across methods)
+- [ ] Dedup check before `method.verify/2`, mark after success
+- [ ] Tempo skips plug-level dedup when it has its own store configured
+- [ ] EVM and Stripe benefit from replay protection when store is configured
+- [ ] Unit test: same credential rejected on second use
+- [ ] Backward compatible — no store = current behavior (no dedup)
+
+---
+
+## Phase 10: Session Support
+
+> The session intent is the second major intent type (alongside charge). It enables streaming/metered payments via payment channels — clients open a channel with a deposit, present signed vouchers for ongoing access, and either party can close. Both mppx and mpp-rs have full session support.
+
+### Task 28: Session Error Types
+
+[D:2/B:5/U:7 → Eff:3.0] 🎯
+
+Extend `MPP.Errors` with 7 session-specific RFC 9457 problem types matching mppx: `:insufficient_balance` (402, `session/insufficient-balance`), `:invalid_signature` (402, `session/invalid-signature`), `:signer_mismatch` (402, `session/signer-mismatch`), `:amount_exceeds_deposit` (402, `session/amount-exceeds-deposit`), `:delta_too_small` (402, `session/delta-too-small`), `:channel_not_found` (410, `session/channel-not-found`), `:channel_closed` (410, `session/channel-finalized`). Also add `:payment_action_required` (402, `payment-action-required`) for 3DS flows. Update Descripex annotations.
+
+Success criteria:
+- [ ] All 8 new problem types produce correct URIs and status codes
+- [ ] `MPP.Errors.types/0` includes all new atoms
+- [ ] `to_map/1` and `to_json/1` work for all new types
+- [ ] Cross-validated against mppx `Errors.ts` URIs
+
+### Task 29: Session Intent Schema
+
+[D:4/B:7/U:8 → Eff:1.88] 🚀 — Depends on Task 26
+
+Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. "second", "minute", "request"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.
+
+Success criteria:
+- [ ] `MPP.Intents.Session` struct with all fields
+- [ ] `new/1` validates required fields, returns `{:ok, session}` or `{:error, reason}`
+- [ ] Serializes to same JSON shape as mpp-rs `SessionRequest`
+- [ ] Descripex annotations
+- [ ] `MPP.Method` behaviour updated to support `intent: "session"` alongside `"charge"`
+
+### Task 30: Channel State and Voucher Types
+
+[D:5/B:6/U:7 → Eff:1.3] 📋 — Depends on Tasks 28, 29
+
+Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence.
+
+Success criteria:
+- [ ] Channel ID computation matches mppx/mpp-rs for same inputs
+- [ ] EIP-712 voucher signature verification
+- [ ] Channel state transitions: open → active → closed
+- [ ] Store behaviour with ETS-backed default implementation
+- [ ] Cross-validated channel IDs against mppx `Channel.ts`
+
+### Task 31: Session Credential Actions
+
+[D:5/B:6/U:6 → Eff:1.2] 📋 — Depends on Task 30
+
+Implement the four session credential actions: `open` (client deposits, opens channel), `bearer` (client presents voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.
+
+Success criteria:
+- [ ] Four action handlers: open, bearer, topUp, close
+- [ ] Correct payload schema per action
+- [ ] Plug integration for session endpoints
+- [ ] Balance tracking per channel
+- [ ] Unit tests for each action lifecycle
+
+---
+
+## Phase 11: MCP Transport
+
+> MCP (Model Context Protocol) support enables payments over JSON-RPC — critical for AI agent economy. Independent of sessions, can be built in parallel with Phase 10. Types alone are not enough here; both reference SDKs also expose concrete server/client MCP integration points.
+
+### Task 32: MCP Types and Constants
+
+[D:2/B:7/U:8 → Eff:3.75] 🎯
+
+Add `MPP.Mcp` module with constants and types for JSON-RPC payment integration. Constants: `payment_required_code` (-32042), `payment_verification_failed_code` (-32043), `credential_meta_key` ("org.paymentauth/credential"), `receipt_meta_key` ("org.paymentauth/receipt"). Server helpers: `extract_credential/1` (from `_meta` map), `payment_required_error/1` (build error from challenge), `attach_receipt/3` (add receipt to result `_meta`). Client helpers: `is_payment_required?/1`, `extract_challenges/1`, `attach_credential/2`. Match the mpp-rs `mcp.rs` API surface.
+
+Success criteria:
+- [ ] All 4 constants match spec values
+- [ ] Server helpers: extract_credential, payment_required_error, attach_receipt
+- [ ] Client helpers: is_payment_required?, extract_challenges, attach_credential
+- [ ] Round-trip test: challenge → error → extract → credential → attach → receipt
+
+### Task 32b: MCP Server Transport
+
+[D:3/B:7/U:8 → Eff:2.5] 🎯 — Depends on Tasks 32, 34
+
+Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta["org.paymentauth/credential"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta["org.paymentauth/receipt"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.
+
+Success criteria:
+- [ ] Server-side MCP transport/adapter for JSON-RPC handler inputs and outputs
+- [ ] Reads credentials from request `_meta`
+- [ ] Emits payment-required errors with challenges and RFC 9457 problem details
+- [ ] Attaches receipts to successful result `_meta`
+- [ ] Unit tests with mock MCP handler exchanges
+
+---
+
+## Phase 12: Client SDK
+
+> Currently we're server-only — `MPP.Plug` lets you charge for endpoints, but there's no way to make MPP-authenticated requests as a client. This phase adds the client-side SDK foundation plus built-in providers so the package is usable out of the box. mppx has `Mppx.create()` + `Fetch.from()` + built-in methods, mpp-rs has `PaymentProvider` + `PaymentExt` plus concrete providers.
+
+### Task 33a: PaymentProvider Behaviour
+
+[D:3/B:8/U:9 → Eff:2.83] 🎯
+
+Define `MPP.Client.PaymentProvider` behaviour with two callbacks: `supports?(method, intent)` returns boolean, `pay(challenge)` returns `{:ok, credential}` or `{:error, reason}`. This is the client-side counterpart to `MPP.Method` (server-side). Add `MPP.Client.MultiProvider` that wraps multiple providers and dispatches to the first that supports the challenge's method+intent. Pure protocol layer — no HTTP client dependency.
+
+Success criteria:
+- [ ] `PaymentProvider` behaviour with `supports?/2` and `pay/1` callbacks
+- [ ] `MultiProvider` struct wrapping a list of providers
+- [ ] `MultiProvider.pay/1` dispatches to first matching provider
+- [ ] Error when no provider supports the challenge
+- [ ] Unit tests with mock providers
+
+### Task 33b: HTTP Client Transport
+
+[D:3/B:7/U:8 → Eff:2.5] 🎯 — Depends on Task 24
+
+Add `MPP.Client.Transport` behaviour and `MPP.Client.Transport.HTTP` implementation. Transport callbacks: `payment_required?/1` (check if response needs payment), `get_challenges/1` (extract challenges from response), `set_credential/2` (attach credential to request). HTTP implementation: checks status 402, parses `WWW-Authenticate` header using `MPP.Headers.parse_challenges/1`, sets `Authorization` header.
+
+Success criteria:
+- [ ] `Transport` behaviour with 3 callbacks
+- [ ] HTTP transport using existing `MPP.Headers` functions
+- [ ] Handles multi-challenge responses (picks supported method)
+- [ ] Unit tests with mock responses
+
+### Task 33c: Payment-Aware Req Plugin
+
+[D:4/B:8/U:8 → Eff:2.0] 🎯 — Depends on Tasks 33a, 33b
+
+Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.
+
+Success criteria:
+- [ ] Req plugin with `attach/2` for pipeline integration
+- [ ] Automatic 402 detection and retry
+- [ ] Provider selection from multi-challenge responses
+- [ ] Non-402 passthrough
+- [ ] Integration test against `mix mpp.demo` server
+
+### Task 33d: MCP Client Transport
+
+[D:3/B:6/U:7 → Eff:2.17] 🎯 — Depends on Task 32
+
+Add `MPP.Client.Transport.MCP` implementing the Transport behaviour for JSON-RPC messages. `payment_required?/1` checks error code -32042. `get_challenges/1` extracts from `error.data.challenges`. `set_credential/2` inserts into `params._meta["org.paymentauth/credential"]`. Uses types from Task 32 (`MPP.Mcp`).
+
+Success criteria:
+- [ ] Implements `Transport` behaviour for JSON-RPC messages
+- [ ] Uses `MPP.Mcp` constants and types
+- [ ] Handles payment-required error detection
+- [ ] Credential attachment to request params
+- [ ] Unit tests with mock JSON-RPC exchanges
+
+### Task 33e: Built-in Charge Providers
+
+[D:6/B:8/U:9 → Eff:1.42] 📋 — Depends on Tasks 33a, 33b
+
+Add built-in client providers so the SDK is useful without every consumer writing their own provider first. Ship `MPP.Client.Providers.Tempo` and `MPP.Client.Providers.Stripe` for charge intent, mirroring the concrete client offerings in the reference SDKs. Each provider should parse the challenge request, execute payment with explicit config, and return a credential for the generic transport/plugin layer. Session-capable providers can layer on after Phase 10 lands.
+
+Success criteria:
+- [ ] Built-in Tempo charge provider implementing `PaymentProvider`
+- [ ] Built-in Stripe charge provider implementing `PaymentProvider`
+- [ ] Public API/docs show end-to-end client usage with the Req plugin or transport layer
+- [ ] One integration path per provider against a real or protocol-faithful challenge flow
+- [ ] Provider selection works cleanly through `MPP.Client.MultiProvider`
+
+---
+
+## Phase 13: Lightning Payment Method
+
+> Lightning has two specs: charge (one-time BOLT11 invoice) and session (prepaid streaming with deposit/topUp/close). Verification is simple: SHA256(preimage) == payment_hash. Neither mppx nor mpp-rs implement Lightning — we'd be first movers. Lightning session (Task 20) depends on session infrastructure from Phase 10.
 >
 > Specs: `refs/mpp-specs/specs/methods/lightning/draft-lightning-charge-00.md`, `draft-lightning-session-00.md`
 
@@ -145,7 +404,7 @@ Success criteria:
 
 ---
 
-## Phase 10: Solana Payment Method
+## Phase 14: Solana Payment Method
 
 > Solana supports two modes: pull (client signs tx, server broadcasts — default) and push (client broadcasts, sends confirmed signature). Supports native SOL and SPL tokens, fee payer option, and payment splits (up to 8 recipients). Similar pattern to Tempo's on-chain verification. Neither mppx nor mpp-rs implement Solana.
 >
@@ -168,7 +427,7 @@ Success criteria:
 
 ---
 
-## Phase 11: Card Payment Method
+## Phase 15: Card Payment Method
 
 > Card is the most complex method — uses JWE-encrypted network tokens with RSA-OAEP-256 + AES-256-GCM. Requires "Client Enabler" (token provisioning) and "Server Enabler" (decryption + processing) intermediaries. Least aligned with machine-to-machine payments. Neither mppx nor mpp-rs implement Card. Defer until ecosystem demand.
 >
@@ -187,6 +446,20 @@ Success criteria:
 - [ ] Network token validation (PAN, expiry, network)
 - [ ] Server Enabler integration pattern
 - [ ] Unit tests with crafted JWE tokens
+
+---
+
+## Deferred
+
+Items identified in cross-SDK gap analysis but not worth phasing yet:
+
+- **SSE support** — Server-Sent Events for streaming payments (receipt + need-voucher events). Blocked on Phase 10 session infrastructure. [D:4/B:5/U:5 → Eff:1.25]
+- **Store backends** — Redis adapter, file store. ConCache + behaviour is sufficient for now. [D:3/B:3/U:3 → Eff:1.0]
+- **HTML/UI** — Browser payment helper UI and hosted-form config (mostly mppx-specific). Not relevant for library. [D:5/B:3/U:2 → Eff:0.5]
+
+## Separate Package: mpp_proxy
+
+Proxy/gateway functionality scoped out to a standalone `mpp_proxy` hex package (not part of this library). Both mppx and mpp-rs ship proxy as core modules — but the proxy is a **product** (payment gateway), not a library feature. Separate package keeps `mpp` focused on protocol correctness while `mpp_proxy` targets the "wrap any API → monetize it" use case. See `mpp_proxy` repo for roadmap once created.
 
 ---
 
