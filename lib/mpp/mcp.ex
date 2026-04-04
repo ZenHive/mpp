@@ -375,13 +375,12 @@ defmodule MPP.Mcp do
   end
 
   # Decodes base64url-encoded request to a native JSON map for MCP wire format.
+  # Challenge.request is always base64url-encoded JSON (enforced at creation).
+  # Both decode failures indicate data corruption — raise instead of silently
+  # passing a raw string where the MCP spec requires a JSON object.
   defp decode_request(request) when is_binary(request) do
-    with {:ok, json} <- Base.url_decode64(request, padding: false),
-         {:ok, map} <- Jason.decode(json) do
-      map
-    else
-      _ -> request
-    end
+    {:ok, json} = Base.url_decode64(request, padding: false)
+    Jason.decode!(json)
   end
 
   # TODO: Task 34 — encode_request uses Jason.encode!/1 which is NOT JCS (RFC 8785).
