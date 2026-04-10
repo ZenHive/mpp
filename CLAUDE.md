@@ -86,6 +86,8 @@ MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Pl
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
 MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32043, meta keys), server/client helpers
+MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)
+MPP.Client.MultiProvider   — Multi-provider dispatch: wraps [{module, config}], routes to first match
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```

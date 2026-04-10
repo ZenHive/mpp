@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 33a: Client PaymentProvider Behaviour
+
+Client-side counterpart to server-side `MPP.Method` — where methods *verify* payment proof, providers *create* it.
+
+**What was built:**
+- `MPP.Client.PaymentProvider` behaviour with `supports?/3` and `pay/2` callbacks
+- `MPP.Client.MultiProvider` struct wrapping `[{module, config}]` tuples with first-match dispatch
+- Convenience functions on `PaymentProvider` for direct module delegation
+- Descripex annotations on both modules, registered in `MPP.describe/0-2`
+
+**Key decisions:**
+- Config is explicit on every callback (no global state) — matches library design principle and enables multi-tenant usage
+- `MultiProvider` is a concrete struct with its own API, not a behaviour implementation — avoids awkward arity clashes between behaviour callbacks and struct-based dispatch
+- Provider ordering matters: first `supports?/3` match wins, matching mpp-rs `MultiProvider` semantics
+- Error atom `:unsupported_payment_method` when no provider matches (mirrors mpp-rs `UnsupportedPaymentMethod`)
+
 ### Breaking: `parse_dollar_amount/1` → `parse_dollar_amount/2`
 
 **`MPP.Amount.parse_dollar_amount` now requires explicit `decimals` parameter.**

@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Three Phase 9 quick wins completed (body digest, amount helpers, session errors). Next: Verifier+JCS extraction (Task 34), multi-challenge parsing (Task 24), or client SDK (Task 33a).
+**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Client SDK foundation landed (Task 33a: PaymentProvider behaviour). Next: HTTP transport (Task 33b, needs Task 24), multi-challenge parsing (Task 24), or Verifier+JCS extraction (Task 34).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -46,7 +46,7 @@
 | ~~Task 26: Amount/decimals helpers~~ | 9 | ✅ | [D:2/B:6/U:6 → Eff:3.0] | parse_units, with_base_units, parse_dollar_amount |
 | ~~Task 28: Session error types~~ | 10 | ✅ | [D:2/B:5/U:7 → Eff:3.0] | 8 new problem types (7 session + payment_action_required) |
 | ~~Task 25: Body digest~~ | 9 | ✅ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify with constant-time comparison |
-| Task 33a: PaymentProvider behaviour | 12 | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
+| ~~Task 33a: PaymentProvider behaviour~~ | 12 | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
 | Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP |
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter |
 | Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON. Blocks cross-impl MCP interop (encode_request TODO) |
@@ -272,18 +272,9 @@ Success criteria:
 
 > Currently we're server-only — `MPP.Plug` lets you charge for endpoints, but there's no way to make MPP-authenticated requests as a client. This phase adds the client-side SDK foundation plus built-in providers so the package is usable out of the box. mppx has `Mppx.create()` + `Fetch.from()` + built-in methods, mpp-rs has `PaymentProvider` + `PaymentExt` plus concrete providers.
 
-### Task 33a: PaymentProvider Behaviour
+### Task 33a: PaymentProvider Behaviour ✅
 
-[D:3/B:8/U:9 → Eff:2.83] 🎯
-
-Define `MPP.Client.PaymentProvider` behaviour with two callbacks: `supports?(method, intent)` returns boolean, `pay(challenge)` returns `{:ok, credential}` or `{:error, reason}`. This is the client-side counterpart to `MPP.Method` (server-side). Add `MPP.Client.MultiProvider` that wraps multiple providers and dispatches to the first that supports the challenge's method+intent. Pure protocol layer — no HTTP client dependency.
-
-Success criteria:
-- [ ] `PaymentProvider` behaviour with `supports?/2` and `pay/1` callbacks
-- [ ] `MultiProvider` struct wrapping a list of providers
-- [ ] `MultiProvider.pay/1` dispatches to first matching provider
-- [ ] Error when no provider supports the challenge
-- [ ] Unit tests with mock providers
+[D:3/B:8/U:9 → Eff:2.83] — Completed 2026-04-10. See [CHANGELOG.md](CHANGELOG.md#task-33a-client-paymentprovider-behaviour).
 
 ### Task 33b: HTTP Client Transport
 

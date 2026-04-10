@@ -37,6 +37,8 @@ defmodule MPP do
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
+    * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
+    * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
 
   ## Discovery
 
@@ -60,6 +62,8 @@ defmodule MPP do
       MPP.Methods.EVM,
       MPP.BodyDigest,
       MPP.Amount,
-      MPP.Mcp
+      MPP.Mcp,
+      MPP.Client.PaymentProvider,
+      MPP.Client.MultiProvider
     ]
 end

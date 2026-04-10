@@ -18,7 +18,9 @@ defmodule MPP.DescripexTest do
     EVM,
     MPP.BodyDigest,
     MPP.Amount,
-    MPP.Mcp
+    MPP.Mcp,
+    MPP.Client.PaymentProvider,
+    MPP.Client.MultiProvider
   ]
 
   describe "api() annotations" do
@@ -49,7 +51,16 @@ defmodule MPP.DescripexTest do
           :exports
           |> mod.module_info()
           |> Enum.split_with(fn {name, _} ->
-            name in [:module_info, :__info__, :__api__, :__struct__, :describe, :__descripex_modules__, :behaviour_info]
+            name in [
+              :module_info,
+              :__info__,
+              :__api__,
+              :__struct__,
+              :describe,
+              :__descripex_modules__,
+              :behaviour_info,
+              :"MACRO-__using__"
+            ]
           end)
 
         for {func_name, _arity} <- exported do
