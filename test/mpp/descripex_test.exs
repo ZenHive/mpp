@@ -18,6 +18,8 @@ defmodule MPP.DescripexTest do
     EVM,
     MPP.BodyDigest,
     MPP.Amount,
+    MPP.JCS,
+    MPP.Verifier,
     MPP.Mcp,
     MPP.Client.PaymentProvider,
     MPP.Client.MultiProvider

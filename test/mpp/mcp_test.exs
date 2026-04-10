@@ -185,6 +185,25 @@ defmodule MPP.McpTest do
       assert {:error, :invalid_challenge} = Mcp.extract_credential(params)
     end
 
+    test "returns error when credential challenge request contains floats" do
+      params = %{
+        "_meta" => %{
+          "org.paymentauth/credential" => %{
+            "challenge" => %{
+              "id" => "ch_1",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{"amount" => 1.5}
+            },
+            "payload" => %{"txHash" => "0xabc"}
+          }
+        }
+      }
+
+      assert {:error, :invalid_challenge} = Mcp.extract_credential(params)
+    end
+
     test "handles credential without optional source field" do
       credential = %{sample_credential() | source: nil}
       params = Mcp.attach_credential(%{}, credential)
@@ -322,6 +341,42 @@ defmodule MPP.McpTest do
 
     test "returns invalid_challenge when challenges value is not a list" do
       error = %{"data" => %{"challenges" => "not-a-list"}}
+      assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
+    end
+
+    test "returns error when request map contains floats" do
+      error = %{
+        "data" => %{
+          "challenges" => [
+            %{
+              "id" => "ch_1",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{"amount" => 1.5}
+            }
+          ]
+        }
+      }
+
+      assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
+    end
+
+    test "returns error when nested request value contains floats" do
+      error = %{
+        "data" => %{
+          "challenges" => [
+            %{
+              "id" => "ch_1",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{"amount" => "100", "details" => %{"rate" => 0.05}}
+            }
+          ]
+        }
+      }
+
       assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
     end
 

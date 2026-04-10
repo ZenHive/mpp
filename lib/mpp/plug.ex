@@ -65,6 +65,8 @@ defmodule MPP.Plug do
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
+  alias MPP.JCS
+  alias MPP.Verifier
 
   defmodule MethodEntry do
     @moduledoc """
@@ -168,7 +170,7 @@ defmodule MPP.Plug do
     request =
       charge
       |> Charge.to_request()
-      |> Jason.encode!()
+      |> JCS.canonicalize()
       |> Base.url_encode64(padding: false)
 
     %MethodEntry{
@@ -233,97 +235,28 @@ defmodule MPP.Plug do
     end)
   end
 
-  # Runs the full verification pipeline on a parsed credential.
+  # Delegates verification to the transport-neutral MPP.Verifier, then handles
+  # the Plug-specific result (conn assigns, headers, error responses).
   defp verify_credential(conn, config, credential, entry) do
-    # Merge server-only method_config into charge.method_details for verify/2.
-    # Public method_details (from challenge_method_details) stay in the serialized
-    # challenge; method_config adds server-only fields (e.g., stripe_secret_key).
-    # Also inject challenge_id and realm for analytics metadata.
-    runtime_config =
-      entry.method_config
-      |> Map.put("challenge_id", credential.challenge.id)
-      |> Map.put("realm", config.realm)
+    opts = [
+      secret_key: config.secret_key,
+      realm: config.realm,
+      method: entry.method,
+      charge: entry.charge,
+      method_config: entry.method_config
+    ]
 
-    charge_for_verify = merge_method_config(entry.charge, runtime_config)
-
-    with :ok <- Challenge.verify(credential.challenge, config.secret_key),
-         :ok <- check_realm_match(credential.challenge, config),
-         :ok <- check_expiration(credential.challenge),
-         :ok <- check_request_match(credential.challenge, entry),
-         {:ok, receipt} <- entry.method.verify(credential.payload, charge_for_verify) do
-      conn
-      |> Plug.Conn.assign(:mpp_receipt, receipt)
-      |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
-      |> Plug.Conn.put_resp_header("cache-control", "private")
-    else
-      {:error, :invalid_challenge} ->
-        respond_error(conn, config, Errors.new(:invalid_challenge, "Challenge verification failed"))
-
-      {:error, :payment_expired} ->
-        respond_error(conn, config, Errors.new(:payment_expired, "Challenge has expired"))
-
-      {:error, :request_mismatch} ->
-        respond_error(conn, config, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint"))
+    case Verifier.verify(credential, opts) do
+      {:ok, receipt} ->
+        conn
+        |> Plug.Conn.assign(:mpp_receipt, receipt)
+        |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
+        |> Plug.Conn.put_resp_header("cache-control", "private")
 
       {:error, %Errors{} = error} ->
         respond_error(conn, config, error)
-
-      {:error, reason} ->
-        respond_error(conn, config, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}"))
     end
   end
-
-  # Verifies the credential's realm matches this endpoint's realm.
-  # Defense-in-depth: HMAC binding covers realm when secrets are unique per realm,
-  # but an explicit check prevents cross-realm replay in shared-secret deployments.
-  defp check_realm_match(%Challenge{realm: realm}, %Config{realm: realm}), do: :ok
-  defp check_realm_match(_challenge, _config), do: {:error, :request_mismatch}
-
-  # Checks whether a challenge has expired based on its `expires` field.
-  defp check_expiration(%Challenge{expires: nil}), do: :ok
-
-  defp check_expiration(%Challenge{expires: expires}) do
-    case DateTime.from_iso8601(expires) do
-      {:ok, expires_dt, _offset} ->
-        if DateTime.before?(DateTime.utc_now(), expires_dt) do
-          :ok
-        else
-          {:error, :payment_expired}
-        end
-
-      {:error, _} ->
-        {:error, :payment_expired}
-    end
-  end
-
-  # Compares the credential's request parameters against this method entry's charge.
-  # Prevents cross-route replay: a credential for one endpoint can't be used on another.
-  # Checks amount, currency, and recipient to match the reference implementation.
-  defp check_request_match(%Challenge{request: request}, entry) do
-    with {:ok, json} <- Base.url_decode64(request, padding: false),
-         {:ok, req_map} <- Jason.decode(json) do
-      cond do
-        req_map["amount"] != entry.charge.amount ->
-          {:error, :request_mismatch}
-
-        req_map["currency"] != entry.charge.currency ->
-          {:error, :request_mismatch}
-
-        !recipient_matches?(req_map["recipient"], entry.charge.recipient) ->
-          {:error, :request_mismatch}
-
-        true ->
-          :ok
-      end
-    else
-      _ -> {:error, :request_mismatch}
-    end
-  end
-
-  # Compares recipient values, treating nil as "not configured" (matches anything).
-  # When the endpoint has a recipient configured, the credential must match it.
-  defp recipient_matches?(_credential_recipient, nil), do: true
-  defp recipient_matches?(credential_recipient, endpoint_recipient), do: credential_recipient == endpoint_recipient
 
   # Sends an error response with RFC 9457 error body.
   # Only 402 responses include WWW-Authenticate challenge headers.
@@ -370,12 +303,6 @@ defmodule MPP.Plug do
     DateTime.utc_now()
     |> DateTime.add(seconds, :second)
     |> DateTime.to_iso8601()
-  end
-
-  # Merges server-only method_config into charge.method_details for verify/2.
-  defp merge_method_config(charge, runtime_config) do
-    merged = Map.merge(charge.method_details || %{}, runtime_config)
-    %{charge | method_details: merged}
   end
 
   # Appends a keyword pair only if the value is non-nil.

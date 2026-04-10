@@ -38,6 +38,7 @@ defmodule MPP.Mcp do
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Errors
+  alias MPP.JCS
   alias MPP.Receipt
 
   # JSON-RPC error code: payment required (no credential provided)
@@ -383,16 +384,29 @@ defmodule MPP.Mcp do
     Jason.decode!(json)
   end
 
-  # TODO: Task 34 — encode_request uses Jason.encode!/1 which is NOT JCS (RFC 8785).
-  # Safe for same-server round-trips (Jason ordering is deterministic per map), but
-  # cross-implementation interop (e.g., mppx client → our server) may produce different
-  # base64url bytes, breaking HMAC verification. Replace with JCS when Task 34 lands.
+  # RFC 8785 JCS ensures cross-SDK HMAC interop (matching mppx/mpp-rs canonicalization).
+  # Rejects maps containing floats — MPP amounts are strings in base units, floats are
+  # a protocol violation. Returns :invalid (same as non-map/non-binary clause below).
   defp encode_request(request) when is_map(request) do
-    request |> Jason.encode!() |> Base.url_encode64(padding: false)
+    if jcs_compatible?(request) do
+      request |> JCS.canonicalize() |> Base.url_encode64(padding: false)
+    else
+      :invalid
+    end
   end
 
   defp encode_request(request) when is_binary(request), do: request
   defp encode_request(_request), do: :invalid
+
+  # Checks that a term contains only JCS-supported types (no floats).
+  # Mirrors JCS.canonicalize/1 clause coverage: map, list, binary, integer, boolean, nil.
+  defp jcs_compatible?(term) when is_map(term), do: term |> Map.values() |> Enum.all?(&jcs_compatible?/1)
+  defp jcs_compatible?(term) when is_list(term), do: Enum.all?(term, &jcs_compatible?/1)
+  defp jcs_compatible?(term) when is_binary(term), do: true
+  defp jcs_compatible?(term) when is_integer(term), do: true
+  defp jcs_compatible?(term) when is_boolean(term), do: true
+  defp jcs_compatible?(nil), do: true
+  defp jcs_compatible?(_), do: false
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

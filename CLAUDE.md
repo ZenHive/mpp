@@ -76,13 +76,15 @@ MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding
 MPP.Amount                 — Amount/decimals helpers: parse_units, with_base_units, parse_dollar_amount
+MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset: ASCII keys, no floats) for cross-SDK HMAC interop
+MPP.Verifier               — Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify)
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (optional dep)
-MPP.Plug                   — The main Plug middleware (mount in any Phoenix/Plug router)
+MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
 MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32043, meta keys), server/client helpers

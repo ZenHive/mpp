@@ -6,6 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 34: Verifier Extraction + JCS
+
+Extracted the verification pipeline from `MPP.Plug` into a transport-neutral `MPP.Verifier` module. Added `MPP.JCS` for RFC 8785 JSON Canonicalization Scheme.
+
+**What was built:**
+- `MPP.JCS` — RFC 8785 canonical JSON (MPP subset: ASCII keys, string/integer/boolean/nil values). Floats rejected with `FunctionClauseError`. Matches mppx/mpp-rs output for all MPP protocol data
+- `MPP.Verifier` — transport-neutral `verify/2` with the full verification pipeline: HMAC challenge binding, realm match, expiration, request match, method.verify. No Plug dependency
+- `MPP.Plug` refactored to a thin HTTP adapter delegating to `MPP.Verifier`
+- MCP `encode_request` updated from `Jason.encode!` to `JCS.canonicalize` (cross-SDK HMAC interop)
+
+**Key decisions:**
+- Verifier accepts keyword opts (`:secret_key`, `:realm`, `:method`, `:charge`, `:method_config`) rather than Plug types — zero coupling to HTTP transport
+- Verifier always returns `{:ok, Receipt.t()} | {:error, Errors.t()}` with structured errors — callers never map error atoms to Errors themselves
+- JCS implemented inline (~30 lines) rather than adding a dependency — the subset needed for MPP (ASCII keys, string/integer values) is trivial
+- Dropped the `:request_serializer` option from the plan — JCS is mandatory per spec, not configurable. Both mppx and mpp-rs hardcode JCS canonicalization
+
+**Unblocks:**
+- Task 32b (MCP server transport) — can now use `MPP.Verifier` for JSON-RPC handler integration
+- Task 33b (HTTP client transport) — transport-neutral verification pattern established
+
 ### Task 33a: Client PaymentProvider Behaviour
 
 Client-side counterpart to server-side `MPP.Method` — where methods *verify* payment proof, providers *create* it.

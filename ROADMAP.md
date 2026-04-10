@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Client SDK foundation landed (Task 33a: PaymentProvider behaviour). Next: HTTP transport (Task 33b, needs Task 24), multi-challenge parsing (Task 24), or Verifier+JCS extraction (Task 34).
+**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Verifier extracted from Plug + JCS landed (Task 34), unblocking MCP server transport (Task 32b). Next: multi-challenge parsing (Task 24, unblocks 33b), MCP server transport (Task 32b), or quick utility wins (Task 27).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -48,8 +48,8 @@
 | ~~Task 25: Body digest~~ | 9 | ✅ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify with constant-time comparison |
 | ~~Task 33a: PaymentProvider behaviour~~ | 12 | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
 | Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP |
-| Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter |
-| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON. Blocks cross-impl MCP interop (encode_request TODO) |
+| Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter (unblocked) |
+| ~~Task 34: Verifier + JCS~~ | 9 | ✅ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON |
 | Task 24: Multi-challenge parsing `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
@@ -162,23 +162,9 @@ Success criteria:
 - [ ] `MPP.DID.evm_did/2` returns correctly formatted DID string
 - [ ] Unit tests for each helper
 
-### Task 34: Verifier Extraction + JCS `[P]`
+### Task 34: Verifier Extraction + JCS ✅
 
-[D:4/B:8/U:9 → Eff:2.13] 🎯
-
-Extract the verification pipeline from `MPP.Plug` into a transport-neutral `MPP.Verifier` module. Currently, credential verification (HMAC check, realm match, expiration check, request match, method.verify/2) is embedded in `MPP.Plug.call/2` — tightly coupled to HTTP/Plug. The client SDK (Phase 12) and MCP transport (Phase 11) both need this logic without the Plug dependency. `MPP.Verifier.verify/3` should take a credential, a config, and return `{:ok, receipt}` or `{:error, error}`. `MPP.Plug` then becomes a thin HTTP adapter calling `MPP.Verifier`. This mirrors the mppx/mpp-rs architecture where protocol core is transport-neutral.
-
-Also add `MPP.JCS` implementing RFC 8785 JSON Canonicalization Scheme. Both reference SDKs mandate JCS for HMAC reproducibility: mppx uses `Json.canonicalize()` in `PaymentRequest.ts:106`, mpp-rs uses `serde_json_canonicalizer` crate (`Cargo.toml:50`, mandated in [PR #56](https://github.com/tempoxyz/mpp-rs/pull/56)). Without JCS, challenges created by our library won't verify against other SDKs if JSON key ordering differs. Currently we sidestep this by preserving raw base64url strings, but cross-SDK interop for challenge *creation* requires canonical serialization. The verifier should accept a `:request_serializer` option (defaulting to JCS) so both HTTP and MCP transports share the same HMAC computation.
-
-Success criteria:
-- [ ] `MPP.JCS` module implementing RFC 8785 canonical JSON serialization
-- [ ] Cross-validated against mppx/mpp-rs: same input → same canonical output
-- [ ] `MPP.Verifier` module with `verify/3` containing the full verification pipeline
-- [ ] Verifier accepts `:request_serializer` option (default: JCS)
-- [ ] `MPP.Plug` refactored to delegate to `MPP.Verifier`
-- [ ] All existing Plug tests pass unchanged (behavior-preserving refactor)
-- [ ] `MPP.Verifier` has no Plug dependency (pure protocol logic)
-- [ ] Unit tests for `MPP.Verifier` directly (without Plug/Conn)
+[D:4/B:9/U:10 → Eff:2.38] — Completed 2026-04-10. See [CHANGELOG.md](CHANGELOG.md#task-34-verifier-extraction--jcs).
 
 ### Task 35: Generic Dedup at Plug Level `[P]`
 
@@ -255,7 +241,7 @@ Success criteria:
 
 ### Task 32b: MCP Server Transport
 
-[D:3/B:7/U:8 → Eff:2.5] 🎯 — Depends on Tasks 32, 34
+[D:3/B:7/U:8 → Eff:2.5] 🎯 — Dependencies met (Tasks 32, 34 complete)
 
 Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta["org.paymentauth/credential"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta["org.paymentauth/receipt"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.
 
