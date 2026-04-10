@@ -4,6 +4,7 @@ defmodule MPP.ErrorsTest do
   alias MPP.Errors
 
   @all_types [
+    # Core / charge
     {:payment_required, 402, "Payment Required"},
     {:payment_insufficient, 402, "Payment Insufficient"},
     {:payment_expired, 402, "Payment Expired"},
@@ -12,7 +13,16 @@ defmodule MPP.ErrorsTest do
     {:malformed_credential, 402, "Malformed Credential"},
     {:invalid_challenge, 402, "Invalid Challenge"},
     {:invalid_payload, 402, "Invalid Payload"},
-    {:bad_request, 400, "Bad Request"}
+    {:bad_request, 400, "Bad Request"},
+    {:payment_action_required, 402, "Payment Action Required"},
+    # Session
+    {:insufficient_balance, 402, "Insufficient Balance"},
+    {:invalid_signature, 402, "Invalid Signature"},
+    {:signer_mismatch, 402, "Signer Mismatch"},
+    {:amount_exceeds_deposit, 402, "Amount Exceeds Deposit"},
+    {:delta_too_small, 402, "Delta Too Small"},
+    {:channel_not_found, 410, "Channel Not Found"},
+    {:channel_closed, 410, "Channel Closed"}
   ]
 
   describe "new/2" do
@@ -62,12 +72,41 @@ defmodule MPP.ErrorsTest do
   end
 
   describe "types/0" do
-    test "returns all 9 problem types" do
+    test "session errors use session/ URI prefix" do
+      session_types = [
+        :insufficient_balance,
+        :invalid_signature,
+        :signer_mismatch,
+        :amount_exceeds_deposit,
+        :delta_too_small,
+        :channel_not_found,
+        :channel_closed
+      ]
+
+      for type <- session_types do
+        error = Errors.new(type, "test")
+        assert String.contains?(error.type, "/session/"), "#{type} should have session/ in URI"
+      end
+    end
+
+    test "channel errors use 410 status (Gone)" do
+      for type <- [:channel_not_found, :channel_closed] do
+        error = Errors.new(type, "test")
+        assert error.status == 410, "#{type} should be 410, got #{error.status}"
+      end
+    end
+
+    test "returns all 17 problem types" do
       types = Errors.types()
 
-      assert length(types) == 9
+      assert length(types) == 17
       assert :payment_required in types
       assert :malformed_credential in types
+      # Session types
+      assert :insufficient_balance in types
+      assert :channel_closed in types
+      # 3DS flow
+      assert :payment_action_required in types
     end
   end
 end

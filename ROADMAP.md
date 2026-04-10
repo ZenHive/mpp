@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Next: parallelize Phase 9 utilities and verifier extraction.
+**Protocol completeness** (2026-04-04) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Three Phase 9 quick wins completed (body digest, amount helpers, session errors). Next: Verifier+JCS extraction (Task 34), multi-challenge parsing (Task 24), or client SDK (Task 33a).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -43,17 +43,17 @@
 | Task | Phase | Status | Score | Notes |
 |------|-------|--------|-------|-------|
 | ~~Task 32: MCP types + constants~~ | 11 | ✅ | [D:2/B:7/U:8 → Eff:3.75] | Error codes, meta keys, helpers. Codex review fixes: crash paths, type validation, spec accuracy, Discoverable wiring |
-| Task 26: Amount/decimals helpers `[P]` | 9 | ⬜ | [D:2/B:6/U:6 → Eff:3.0] | parse_units, with_base_units |
-| Task 28: Session error types | 10 | ⬜ | [D:2/B:5/U:7 → Eff:3.0] | 7 channel problem types |
+| ~~Task 26: Amount/decimals helpers~~ | 9 | ✅ | [D:2/B:6/U:6 → Eff:3.0] | parse_units, with_base_units, parse_dollar_amount |
+| ~~Task 28: Session error types~~ | 10 | ✅ | [D:2/B:5/U:7 → Eff:3.0] | 8 new problem types (7 session + payment_action_required) |
+| ~~Task 25: Body digest~~ | 9 | ✅ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify with constant-time comparison |
 | Task 33a: PaymentProvider behaviour | 12 | ⬜ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
-| Task 25: Body digest `[P]` | 9 | ⬜ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify |
 | Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP |
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter |
+| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON. Blocks cross-impl MCP interop (encode_request TODO) |
 | Task 24: Multi-challenge parsing `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
 | Task 33d: MCP client transport | 12 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Transport.MCP for JSON-RPC |
-| Task 34: Verifier + JCS `[P]` | 9 | ⬜ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON. Blocks cross-impl MCP interop (encode_request TODO) |
 | Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
 | Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct |
 | Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
@@ -130,6 +130,14 @@
 
 > Cross-SDK gap analysis (2026-04-04) identified missing protocol features in mppx and mpp-rs that our library lacks. These are small, independent modules — all `[P]` parallelizable.
 
+### Task 25: Body Digest ✅
+
+[D:2/B:6/U:5 → Eff:2.75] — Completed 2026-04-04. See [CHANGELOG.md](CHANGELOG.md#task-25-body-digest).
+
+### Task 26: Amount and Decimals Helpers ✅
+
+[D:2/B:6/U:6 → Eff:3.0] — Completed 2026-04-04. See [CHANGELOG.md](CHANGELOG.md#task-26-amount-and-decimals-helpers).
+
 ### Task 24: Multi-Challenge Parsing `[P]`
 
 [D:3/B:7/U:7 → Eff:2.33] 🎯
@@ -141,30 +149,6 @@ Success criteria:
 - [ ] Correctly handles commas inside quoted auth-param values
 - [ ] Skips non-Payment schemes gracefully
 - [ ] Unit tests with 1, 2, and 3 challenges in one header value
-
-### Task 25: Body Digest `[P]`
-
-[D:2/B:6/U:5 → Eff:2.75] 🎯
-
-Add `MPP.BodyDigest` module with `compute/1` and `verify/2`. `compute/1` takes a string or map body, returns `"sha-256=<base64>"` digest. `verify/2` takes a digest string and body, recomputes and does constant-time comparison. Maps are JSON-encoded before hashing. Uses `:crypto.hash(:sha256, ...)` and `Base.encode64/1`. Enables request body binding in challenges (the `digest` field on `MPP.Challenge`). Cross-validate against mppx `BodyDigest.compute()` output for same input.
-
-Success criteria:
-- [ ] `compute/1` matches mppx output for same input
-- [ ] `verify/2` uses constant-time comparison
-- [ ] Handles both string and map inputs
-- [ ] Unit tests with known digest vectors
-
-### Task 26: Amount and Decimals Helpers `[P]`
-
-[D:2/B:6/U:6 → Eff:3.0] 🎯
-
-Add `MPP.Amount` module with `parse_units/2` (human-readable amount + decimals → base units string), `with_base_units/2` (applies `parse_units` to a charge/session request struct), and `parse_dollar_amount/1` (string like `"$1.50"` → `{"150", "usd", 2}`). `parse_units("1.5", 6)` should return `"1500000"`. Handle edge cases: too many decimal places (error), zero, empty string, no decimal point. Match mpp-rs `parse_units` behavior exactly.
-
-Success criteria:
-- [ ] `parse_units/2` matches mpp-rs output for all test vectors
-- [ ] `with_base_units/2` transforms charge request structs
-- [ ] `parse_dollar_amount/1` parses dollar notation
-- [ ] Error tuples for invalid inputs (not exceptions)
 
 ### Task 27: Expiration and DID Helpers `[P]`
 
@@ -216,17 +200,9 @@ Success criteria:
 
 > The session intent is the second major intent type (alongside charge). It enables streaming/metered payments via payment channels — clients open a channel with a deposit, present signed vouchers for ongoing access, and either party can close. Both mppx and mpp-rs have full session support.
 
-### Task 28: Session Error Types
+### Task 28: Session Error Types ✅
 
-[D:2/B:5/U:7 → Eff:3.0] 🎯
-
-Extend `MPP.Errors` with 7 session-specific RFC 9457 problem types matching mppx: `:insufficient_balance` (402, `session/insufficient-balance`), `:invalid_signature` (402, `session/invalid-signature`), `:signer_mismatch` (402, `session/signer-mismatch`), `:amount_exceeds_deposit` (402, `session/amount-exceeds-deposit`), `:delta_too_small` (402, `session/delta-too-small`), `:channel_not_found` (410, `session/channel-not-found`), `:channel_closed` (410, `session/channel-finalized`). Also add `:payment_action_required` (402, `payment-action-required`) for 3DS flows. Update Descripex annotations.
-
-Success criteria:
-- [ ] All 8 new problem types produce correct URIs and status codes
-- [ ] `MPP.Errors.types/0` includes all new atoms
-- [ ] `to_map/1` and `to_json/1` work for all new types
-- [ ] Cross-validated against mppx `Errors.ts` URIs
+[D:2/B:5/U:7 → Eff:3.0] — Completed 2026-04-04. See [CHANGELOG.md](CHANGELOG.md#task-28-session-error-types).
 
 ### Task 29: Session Intent Schema
 

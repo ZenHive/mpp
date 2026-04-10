@@ -34,6 +34,8 @@ defmodule MPP do
     * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Intents.Charge` — Charge intent request schema
+    * `MPP.BodyDigest` — SHA-256 body digest computation and verification
+    * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
 
   ## Discovery
@@ -56,6 +58,8 @@ defmodule MPP do
       MPP.Methods.Stripe,
       MPP.Methods.Tempo,
       MPP.Methods.EVM,
+      MPP.BodyDigest,
+      MPP.Amount,
       MPP.Mcp
     ]
 end

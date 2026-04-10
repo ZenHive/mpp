@@ -6,6 +6,60 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking: `parse_dollar_amount/1` → `parse_dollar_amount/2`
+
+**`MPP.Amount.parse_dollar_amount` now requires explicit `decimals` parameter.**
+
+Before: `parse_dollar_amount("$1.50")` — inferred decimals from currency code via internal ISO 4217 table.
+After: `parse_dollar_amount("$1.50", 2)` — caller supplies decimals explicitly.
+
+**Why:** Neither mppx (TypeScript) nor mpp-rs (Rust) reference implementations maintain a currency-to-decimals table. Both require the caller/server configuration to supply decimals explicitly. Our implicit inference created correctness risks (HUF/TWD classification is debatable) and diverged from the spec's "explicit configuration" philosophy. Flagged by Codex review.
+
+### Codex Review Fixes (Tasks 25 & 26)
+
+**Fixes:**
+- `with_base_units/2` now accepts any intent struct with an `:amount` field, not just `Charge` — partially unblocks Task 29 (Session's `suggested_deposit` transform deferred to Task 29)
+- BodyDigest `@moduledoc` clarifies map-path key-ordering caveat (matches mppx, no code change needed)
+
+### Task 28: Session Error Types
+
+Extended `MPP.Errors` with 8 new RFC 9457 problem types, cross-validated against mppx `Errors.ts`.
+
+**What was built:**
+- 7 session error types under `session/` URI prefix: `:insufficient_balance`, `:invalid_signature`, `:signer_mismatch`, `:amount_exceeds_deposit`, `:delta_too_small`, `:channel_not_found` (410), `:channel_closed` (410)
+- 1 core error type: `:payment_action_required` for 3DS flows (402)
+
+**Key decisions:**
+- Channel errors (`:channel_not_found`, `:channel_closed`) use HTTP 410 Gone (not 402) matching mppx
+- `:channel_closed` maps to URI suffix `session/channel-finalized` (matching mppx's `ChannelClosedError` which uses the "finalized" term in the URI)
+
+### Task 25: Body Digest
+
+`MPP.BodyDigest` — SHA-256 body digest computation and verification for request body binding.
+
+**What was built:**
+- `compute/1` — hashes string or map body, returns `"sha-256=<base64>"` (standard base64, no padding)
+- `verify/2` — constant-time comparison via `Plug.Crypto.secure_compare/2`
+- Maps are JSON-encoded before hashing (matching mppx behavior)
+
+**Key decisions:**
+- Standard base64 (not base64url) without padding — matches mppx `BodyDigest.compute()` output format
+- Registered in `MPP.describe(:body_digest)` via Discoverable
+
+### Task 26: Amount and Decimals Helpers
+
+`MPP.Amount` — pure integer/string arithmetic for converting human-readable amounts to base units.
+
+**What was built:**
+- `parse_units/2` — "1.5" + 6 decimals → "1500000" (cross-validated against mpp-rs test vectors)
+- `with_base_units/2` — applies `parse_units` to any intent struct's amount field
+- `parse_dollar_amount/2` — "$1.50" + decimals → `{"150", "usd", 2}` with currency symbol detection ($, €, £, ¥) and suffix codes ("1.50 USD")
+
+**Key decisions:**
+- Caller supplies decimals explicitly (no currency-to-decimals inference) — matches mppx and mpp-rs design
+- Zero allowed by both `parse_units/2` and `parse_dollar_amount/2` — zero-amount charges are valid for identity/proof flows (matches mpp-rs)
+- No floating point anywhere — all arithmetic via string splitting and padding
+
 ### Task 32: MCP Types and Constants
 
 MCP (Model Context Protocol) transport helpers for embedding MPP payment flows in JSON-RPC messages.

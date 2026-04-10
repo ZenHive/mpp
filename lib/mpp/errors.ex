@@ -8,6 +8,8 @@ defmodule MPP.Errors do
 
   ## Problem Types
 
+  ### Charge / Core
+
     * `:payment_required` — no payment credential provided (402)
     * `:payment_insufficient` — payment amount too low (402)
     * `:payment_expired` — challenge has expired (402)
@@ -17,6 +19,17 @@ defmodule MPP.Errors do
     * `:invalid_challenge` — challenge ID doesn't match or is unknown (402)
     * `:invalid_payload` — credential payload doesn't match schema (402)
     * `:bad_request` — malformed request (400)
+    * `:payment_action_required` — payment requires additional action, e.g. 3DS (402)
+
+  ### Session
+
+    * `:insufficient_balance` — insufficient balance in the payment channel (402)
+    * `:invalid_signature` — voucher or close request signature is invalid (402)
+    * `:signer_mismatch` — recovered signer is not authorized for this channel (402)
+    * `:amount_exceeds_deposit` — voucher cumulative amount exceeds the channel deposit (402)
+    * `:delta_too_small` — voucher amount increase is below the minimum delta (402)
+    * `:channel_not_found` — no channel with this ID exists (410)
+    * `:channel_closed` — channel is closed or finalized (410)
   """
 
   use Descripex, namespace: "/protocol"
@@ -32,7 +45,36 @@ defmodule MPP.Errors do
     malformed_credential: %{suffix: "malformed-credential", title: "Malformed Credential", status: 402},
     invalid_challenge: %{suffix: "invalid-challenge", title: "Invalid Challenge", status: 402},
     invalid_payload: %{suffix: "invalid-payload", title: "Invalid Payload", status: 402},
-    bad_request: %{suffix: "bad-request", title: "Bad Request", status: 400}
+    bad_request: %{suffix: "bad-request", title: "Bad Request", status: 400},
+    payment_action_required: %{
+      suffix: "payment-action-required",
+      title: "Payment Action Required",
+      status: 402
+    },
+    # Session error types (Phase 10)
+    insufficient_balance: %{
+      suffix: "session/insufficient-balance",
+      title: "Insufficient Balance",
+      status: 402
+    },
+    invalid_signature: %{
+      suffix: "session/invalid-signature",
+      title: "Invalid Signature",
+      status: 402
+    },
+    signer_mismatch: %{suffix: "session/signer-mismatch", title: "Signer Mismatch", status: 402},
+    amount_exceeds_deposit: %{
+      suffix: "session/amount-exceeds-deposit",
+      title: "Amount Exceeds Deposit",
+      status: 402
+    },
+    delta_too_small: %{suffix: "session/delta-too-small", title: "Delta Too Small", status: 402},
+    channel_not_found: %{
+      suffix: "session/channel-not-found",
+      title: "Channel Not Found",
+      status: 410
+    },
+    channel_closed: %{suffix: "session/channel-finalized", title: "Channel Closed", status: 410}
   }
 
   @type problem_type ::
@@ -45,6 +87,14 @@ defmodule MPP.Errors do
           | :invalid_challenge
           | :invalid_payload
           | :bad_request
+          | :payment_action_required
+          | :insufficient_balance
+          | :invalid_signature
+          | :signer_mismatch
+          | :amount_exceeds_deposit
+          | :delta_too_small
+          | :channel_not_found
+          | :channel_closed
 
   @type t :: %__MODULE__{
           type: String.t(),

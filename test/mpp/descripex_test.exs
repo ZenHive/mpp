@@ -16,6 +16,8 @@ defmodule MPP.DescripexTest do
     Stripe,
     Tempo,
     EVM,
+    MPP.BodyDigest,
+    MPP.Amount,
     MPP.Mcp
   ]
 

@@ -72,8 +72,10 @@ MPP.Challenge              — Challenge struct, HMAC-SHA256 ID binding, create/
 MPP.Credential             — Credential parsing, challenge echo validation, payload extraction
 MPP.Receipt                — Receipt struct, base64url JSON serialization
 MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Payment-Receipt
-MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*)
+MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
+MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding
+MPP.Amount                 — Amount/decimals helpers: parse_units, with_base_units, parse_dollar_amount
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
