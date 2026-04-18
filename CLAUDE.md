@@ -234,6 +234,8 @@ refs/mpp-rs/      — Rust SDK. Key files in src/: protocol/, client/, server/
 Also available:
 - IETF spec: https://paymentauth.org/
 - Developer docs: https://mpp.dev/ (llms-full.txt for complete docs)
+- SDK index: https://mpp.dev/sdk — lists four official SDKs (TypeScript `mppx`, Python `pympp`, Rust `mpp-rs`, Go `mpp-go`) plus community SDKs (Elixir/ZenHive, Go/cp0x-org)
+- Non-cloned SDKs (`pympp`, `mpp-go`, community `cp0x-org/mppx`) — fetch on demand via `gh repo view` / MCP / WebFetch when cross-referencing
 - MCP server at `.mcp.json` — `mcp__mpp__*` tools for cross-referencing SDK source code:
   - `search_source` / `read_source_file` / `get_file_tree` — work for **mppx**, **mpp-rs**, **pympp**, **tempo**
   - `list_pages` / `search_docs` — not functional (docs not indexed); use WebFetch for mpp.dev content
@@ -241,7 +243,7 @@ Also available:
 
 ### Upstream docs (mpp.dev)
 
-The mpp.dev docs site ([tempoxyz/mpp](https://github.com/tempoxyz/mpp)) lists official and community SDKs. Our Elixir SDK docs are added via [PR #473](https://github.com/tempoxyz/mpp/pull/473) — three pages (overview, core types, server) under `/sdk/elixir`. When releasing new versions with API changes, update the docs in the `e-fu/mpp` fork and open a follow-up PR.
+The mpp.dev docs site ([tempoxyz/mpp](https://github.com/tempoxyz/mpp)) lists SDKs at https://mpp.dev/sdk in two tables: **Official** (mppx, pympp, mpp-rs, mpp-go) and **Community-Maintained** (our Elixir `mpp` via ZenHive, plus Go `mppx` by cp0x-org). Community entries were added via upstream [PR #502](https://github.com/tempoxyz/mpp/pull/502) on 2026-03-31. Our earlier [PR #473](https://github.com/tempoxyz/mpp/pull/473) (richer per-SDK pages under `/sdk/elixir`) was closed in favor of the community-table approach. If upstream opens the door to per-SDK pages again, revive from the `e-fu/mpp` fork.
 
 ### Conventions
 
