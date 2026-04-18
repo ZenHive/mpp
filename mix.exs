@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.3.2"
+  @version "0.4.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -47,9 +47,7 @@ defmodule MPP.MixProject do
       # Dev/test tooling
       {:ex_doc, "~> 0.39", only: :dev, runtime: false},
       {:styler, "~> 1.4", only: [:dev, :test], runtime: false},
-      # TODO: Using git branch as workaround for Credo 1.7.x crash on Elixir 1.20-rc multi-line sigils.
-      # Switch back to hex {:credo, "~> 1.8"} when a compatible release is published.
-      {:credo, github: "rrrene/credo", branch: "release/1.7", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.22", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -63,8 +61,8 @@ defmodule MPP.MixProject do
       {:ex_ast, "~> 0.2", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
-      {:quickbeam, "~> 0.5", only: [:dev, :test], runtime: false},
-      {:oxc, "~> 0.5", only: [:dev, :test], runtime: false},
+      {:quickbeam, "~> 0.10", only: [:dev, :test], runtime: false},
+      {:oxc, "~> 0.7", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)

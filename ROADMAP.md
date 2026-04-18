@@ -110,7 +110,7 @@
 
 ## Phase 7: Hex Publish ✅
 
-> v0.1.0 published to Hex (2026-03-25). v0.2.0 published (2026-03-28).
+> v0.1.0 published to Hex (2026-03-25). v0.2.0 published (2026-03-28). v0.3.0 published (2026-04-03). v0.4.0 published (2026-04-18) — Phase 9 utilities (BodyDigest, Amount, JCS, Verifier, multi-challenge), Phase 10 session error types, Phase 11 MCP types, Phase 12 PaymentProvider behaviour.
 
 ---
 

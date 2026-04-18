@@ -181,50 +181,34 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Challenge` | HMAC-SHA256 bound challenge creation/verification |
 | `MPP.Credential` | Payment credential encoding/decoding |
 | `MPP.Receipt` | Proof-of-payment receipt serialization |
-| `MPP.Headers` | WWW-Authenticate, Authorization, Payment-Receipt headers |
-| `MPP.Errors` | RFC 9457 Problem Detail error types |
+| `MPP.Headers` | WWW-Authenticate (incl. multi-challenge), Authorization, Payment-Receipt headers |
+| `MPP.Errors` | RFC 9457 Problem Detail error types (incl. session error types) |
+| `MPP.Verifier` | Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify) |
+| `MPP.JCS` | RFC 8785 JSON Canonicalization (MPP subset) for cross-SDK HMAC interop |
+| `MPP.BodyDigest` | SHA-256 body digest compute/verify for request body binding |
+| `MPP.Amount` | Amount/decimals helpers: `parse_units`, `with_base_units`, `parse_dollar_amount` |
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
-| `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache (optional) |
+| `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
+| `MPP.Mcp` | MCP (JSON-RPC) transport: error codes, meta keys, server/client helpers |
+| `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
+| `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
 
 ## Installation
 
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.3.0"}
+    {:mpp, "~> 0.4.0"}
   ]
 end
 ```
 
-If you use `MPP.Methods.EVM`, add the optional chain dependency:
-
-```elixir
-def deps do
-  [
-    {:mpp, "~> 0.3.0"},
-    {:onchain, "~> 0.4"}
-  ]
-end
-```
-
-If you use `MPP.Methods.Tempo`, also add the Tempo chain primitives:
-
-```elixir
-def deps do
-  [
-    {:mpp, "~> 0.3.0"},
-    {:onchain, "~> 0.4"},
-    {:onchain_tempo, "~> 0.1"}
-  ]
-end
-```
-
-Add `{:con_cache, "~> 1.1"}` too if you want the built-in `MPP.Tempo.ConCacheStore`.
+`onchain`, `onchain_tempo`, and `con_cache` are pulled in automatically — no extra setup for EVM, Tempo, or the built-in `MPP.Tempo.ConCacheStore` dedup store.
 
 ## Live Example
 

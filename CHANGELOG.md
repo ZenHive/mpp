@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.4.0] - 2026-04-18
+
+### Dependency bumps
+
+- `quickbeam` 0.8.1 → 0.10.0 (dev/test)
+- `oxc` 0.5.4 → 0.7.2 (dev/test, unblocked by quickbeam 0.10's `~> 0.7` requirement — breaking: AST `:type`/`:kind` values are now snake_case atoms; no in-repo usage yet, so no code changes)
+- `ex_dna` 1.2.2 → 1.3.0 (dev/test)
+- `npm` 0.5.1 → 0.5.3 (dev/test, pulled in by quickbeam 0.10's `~> 0.5.2`)
+- `credo` git `release/1.7` branch → hex `~> 1.7` (1.7.18) — upstream released the Elixir 1.20-rc multi-line sigil fix, so the git pin is no longer needed
 
 ### Task 24: Multi-Challenge Parsing
 
