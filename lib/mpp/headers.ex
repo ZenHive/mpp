@@ -97,6 +97,46 @@ defmodule MPP.Headers do
     end
   end
 
+  api(
+    :parse_challenges,
+    "Parse a `WWW-Authenticate` header containing one or more `Payment` challenges. Splits on scheme boundaries, skips non-Payment schemes. Partial failures are tolerated: if some challenges parse and others fail, only the successful ones are returned (matching mppx `deserializeList` semantics).",
+    params: [
+      header: [kind: :value, description: "Raw WWW-Authenticate header value, possibly containing multiple challenges"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description:
+        "`{:ok, [challenge]}` on success, `{:error, reason}` if no Payment challenges found or all fail to parse"
+    },
+    errors: [:no_payment_challenges, :invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params],
+    composes_with: [:parse_challenge, :format_challenge]
+  )
+
+  @spec parse_challenges(String.t()) :: {:ok, [Challenge.t()]} | {:error, atom()}
+  def parse_challenges(header) when is_binary(header) do
+    segments = split_payment_challenges(header)
+
+    case segments do
+      [] ->
+        {:error, :no_payment_challenges}
+
+      segments ->
+        # Partial failures are intentional: a multi-challenge header may contain
+        # challenges for methods the client doesn't support or that have malformed
+        # optional fields. We return all successfully parsed challenges and only
+        # error if every segment fails. This matches mppx deserializeList behavior.
+        results = Enum.map(segments, &parse_challenge/1)
+        challenges = for {:ok, c} <- results, do: c
+
+        if challenges == [] do
+          # All segments failed — return the first error for diagnostics
+          Enum.find(results, &match?({:error, _}, &1))
+        else
+          {:ok, challenges}
+        end
+    end
+  end
+
   # --- Credential (Authorization: Payment) ---
 
   api(:format_credential, "Format a credential as an `Authorization: Payment` header value.",
@@ -155,6 +195,112 @@ defmodule MPP.Headers do
   @spec parse_receipt(String.t()) :: {:ok, Receipt.t()} | {:error, atom()}
   def parse_receipt(header) when is_binary(header) do
     Receipt.decode(String.trim(header))
+  end
+
+  # --- Private: Multi-challenge splitting ---
+
+  # Splits a WWW-Authenticate header into individual "Payment ..." segments.
+  # Uses a character-by-character state machine to find scheme boundaries while
+  # correctly ignoring content inside quoted auth-param values. Then extracts
+  # only the Payment segments using boundary positions.
+  defp split_payment_challenges(header) do
+    all_starts = find_scheme_boundaries(header)
+
+    # Identify which boundaries are Payment schemes (exact match, not prefix)
+    all_starts
+    |> Enum.with_index()
+    |> Enum.filter(fn {pos, _i} -> payment_scheme_at?(header, pos) end)
+    |> Enum.map(fn {start, i} ->
+      # Segment ends at the next scheme boundary (any scheme, not just Payment)
+      next_boundary = Enum.at(all_starts, i + 1)
+      segment_end = next_boundary || byte_size(header)
+
+      header
+      |> binary_part(start, segment_end - start)
+      |> String.trim_trailing()
+      |> String.trim_trailing(",")
+      |> String.trim_trailing()
+    end)
+  end
+
+  # Walks the header byte-by-byte, tracking quoted-string state to find scheme
+  # boundary positions. A boundary is a token followed by whitespace, occurring
+  # at position 0 or immediately after a comma (outside quotes).
+  defp find_scheme_boundaries(header), do: find_boundaries(header, 0, false, true, [])
+
+  # Base case: end of input
+  defp find_boundaries(<<>>, _pos, _in_q, _after_sep, acc), do: Enum.reverse(acc)
+
+  # Inside a quoted string: handle escapes, closing quote
+  defp find_boundaries(<<"\\", _, rest::binary>>, pos, true, after_sep, acc),
+    do: find_boundaries(rest, pos + 2, true, after_sep, acc)
+
+  defp find_boundaries(<<"\"", rest::binary>>, pos, true, _after_sep, acc),
+    do: find_boundaries(rest, pos + 1, false, false, acc)
+
+  defp find_boundaries(<<_, rest::binary>>, pos, true, after_sep, acc),
+    do: find_boundaries(rest, pos + 1, true, after_sep, acc)
+
+  # Outside quotes: opening quote
+  defp find_boundaries(<<"\"", rest::binary>>, pos, false, _after_sep, acc),
+    do: find_boundaries(rest, pos + 1, true, false, acc)
+
+  # Comma sets the "after separator" flag
+  defp find_boundaries(<<",", rest::binary>>, pos, false, _after_sep, acc),
+    do: find_boundaries(rest, pos + 1, false, true, acc)
+
+  # Whitespace after separator is still "after separator"
+  defp find_boundaries(<<c, rest::binary>>, pos, false, true, acc) when c in [?\s, ?\t],
+    do: find_boundaries(rest, pos + 1, false, true, acc)
+
+  # Non-whitespace after separator (or at start): potential scheme boundary
+  defp find_boundaries(<<c, _::binary>> = bin, pos, false, true, acc) when c in ?A..?Z or c in ?a..?z do
+    case extract_scheme_token(bin) do
+      {:ok, _token, len} ->
+        find_boundaries(binary_part(bin, len, byte_size(bin) - len), pos + len, false, false, [pos | acc])
+
+      :not_scheme ->
+        find_boundaries(binary_part(bin, 1, byte_size(bin) - 1), pos + 1, false, false, acc)
+    end
+  end
+
+  # Any other character resets "after separator" flag
+  defp find_boundaries(<<_, rest::binary>>, pos, false, _after_sep, acc),
+    do: find_boundaries(rest, pos + 1, false, false, acc)
+
+  # Extracts a scheme token (RFC 9110: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ))
+  # followed by at least one whitespace character. Returns {:ok, token, total_len}
+  # where total_len includes the token + first whitespace char.
+  defp extract_scheme_token(bin), do: extract_scheme_token(bin, 0)
+
+  defp extract_scheme_token(bin, len) when len < byte_size(bin) do
+    c = :binary.at(bin, len)
+
+    cond do
+      c in ?A..?Z or c in ?a..?z or c in ?0..?9 or c in [?+, ?-, ?.] ->
+        extract_scheme_token(bin, len + 1)
+
+      len > 0 and c in [?\s, ?\t] ->
+        {:ok, binary_part(bin, 0, len), len + 1}
+
+      true ->
+        :not_scheme
+    end
+  end
+
+  defp extract_scheme_token(_bin, _len), do: :not_scheme
+
+  # Checks if the scheme token at `pos` is exactly "Payment" (case-insensitive).
+  # Requires that the character after "Payment" is whitespace, preventing prefix
+  # matches like "Payments" or "PaymentX".
+  defp payment_scheme_at?(header, pos) do
+    case binary_part(header, pos, min(8, byte_size(header) - pos)) do
+      <<token::binary-size(7), c>> when c in [?\s, ?\t] ->
+        String.downcase(token) == "payment"
+
+      _ ->
+        false
+    end
   end
 
   # --- Private: Scheme handling ---

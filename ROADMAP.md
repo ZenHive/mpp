@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Verifier extracted from Plug + JCS landed (Task 34), unblocking MCP server transport (Task 32b). Next: multi-challenge parsing (Task 24, unblocks 33b), MCP server transport (Task 32b), or quick utility wins (Task 27).
+**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Next: MCP server transport (Task 32b), HTTP client transport (Task 33b), or quick utility wins (Task 27).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -47,10 +47,10 @@
 | ~~Task 28: Session error types~~ | 10 | ✅ | [D:2/B:5/U:7 → Eff:3.0] | 8 new problem types (7 session + payment_action_required) |
 | ~~Task 25: Body digest~~ | 9 | ✅ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify with constant-time comparison |
 | ~~Task 33a: PaymentProvider behaviour~~ | 12 | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
-| Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP |
+| Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP (unblocked) |
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter (unblocked) |
 | ~~Task 34: Verifier + JCS~~ | 9 | ✅ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON |
-| Task 24: Multi-challenge parsing `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
+| ~~Task 24: Multi-challenge parsing~~ | 9 | ✅ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
 | Task 33d: MCP client transport | 12 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Transport.MCP for JSON-RPC |
@@ -138,17 +138,9 @@
 
 [D:2/B:6/U:6 → Eff:3.0] — Completed 2026-04-04. See [CHANGELOG.md](CHANGELOG.md#task-26-amount-and-decimals-helpers).
 
-### Task 24: Multi-Challenge Parsing `[P]`
+### Task 24: Multi-Challenge Parsing ✅
 
-[D:3/B:7/U:7 → Eff:2.33] 🎯
-
-Add `parse_challenges/1` to `MPP.Headers` that splits comma-separated `WWW-Authenticate` values into a list of challenges. A single header value may contain multiple `Payment` challenges (e.g., `Payment id="a"..., Payment id="b"...`). The existing `parse_challenge/1` handles one; the new function should call it repeatedly after splitting on scheme boundaries. Handle edge cases: quoted strings containing commas, mixed schemes (ignore non-Payment), empty segments. Return `{:ok, [challenge]}` or collect errors. Cross-validate against mppx `deserializeList` behavior.
-
-Success criteria:
-- [ ] `parse_challenges/1` returns list of challenges from multi-challenge header
-- [ ] Correctly handles commas inside quoted auth-param values
-- [ ] Skips non-Payment schemes gracefully
-- [ ] Unit tests with 1, 2, and 3 challenges in one header value
+[D:3/B:7/U:7 → Eff:2.33] — Completed 2026-04-10. See [CHANGELOG.md](CHANGELOG.md#task-24-multi-challenge-parsing).
 
 ### Task 27: Expiration and DID Helpers `[P]`
 

@@ -295,6 +295,138 @@ defmodule MPP.HeadersTest do
     end
   end
 
+  describe "parse_challenges/1" do
+    test "parses a single challenge" do
+      challenge = make_challenge()
+      header = Headers.format_challenge(challenge)
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.realm == challenge.realm
+      assert parsed.method == challenge.method
+    end
+
+    test "parses two challenges" do
+      c1 = make_challenge(realm: "api.one.com")
+      c2 = make_challenge(realm: "api.two.com", method: "tempo")
+      header = Headers.format_challenge(c1) <> ", " <> Headers.format_challenge(c2)
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == "api.one.com"
+      assert p2.realm == "api.two.com"
+      assert p2.method == "tempo"
+    end
+
+    test "parses three challenges" do
+      c1 = make_challenge(realm: "a.com")
+      c2 = make_challenge(realm: "b.com", method: "tempo")
+      c3 = make_challenge(realm: "c.com", method: "evm")
+      header = Enum.map_join([c1, c2, c3], ", ", &Headers.format_challenge/1)
+      assert {:ok, parsed} = Headers.parse_challenges(header)
+      assert length(parsed) == 3
+      assert Enum.map(parsed, & &1.realm) == ["a.com", "b.com", "c.com"]
+    end
+
+    test "skips non-Payment schemes" do
+      challenge = make_challenge()
+      header = ~s(Bearer token123, ) <> Headers.format_challenge(challenge)
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.realm == challenge.realm
+    end
+
+    test "skips non-Payment schemes between Payment challenges" do
+      c1 = make_challenge(realm: "first.com")
+      c2 = make_challenge(realm: "second.com")
+      header = Headers.format_challenge(c1) <> ", Basic xyz, " <> Headers.format_challenge(c2)
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == "first.com"
+      assert p2.realm == "second.com"
+    end
+
+    test "case-insensitive scheme matching" do
+      c1 = make_challenge(realm: "upper.com")
+      c2 = make_challenge(realm: "lower.com")
+      h1 = c1 |> Headers.format_challenge() |> String.replace("Payment", "PAYMENT", global: false)
+      h2 = c2 |> Headers.format_challenge() |> String.replace("Payment", "payment", global: false)
+      header = h1 <> ", " <> h2
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == "upper.com"
+      assert p2.realm == "lower.com"
+    end
+
+    test "handles compact format (no space after comma)" do
+      c1 = make_challenge(realm: "one.com")
+      c2 = make_challenge(realm: "two.com")
+      header = Headers.format_challenge(c1) <> "," <> Headers.format_challenge(c2)
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == "one.com"
+      assert p2.realm == "two.com"
+    end
+
+    test "does not split on Payment inside quoted values" do
+      challenge = make_challenge(description: "Payment plan details")
+      header = Headers.format_challenge(challenge)
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.description == "Payment plan details"
+    end
+
+    test "does not split on comma + Payment inside quoted values" do
+      challenge = make_challenge(description: "Alpha, Payment plan")
+      header = Headers.format_challenge(challenge)
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.description == "Alpha, Payment plan"
+    end
+
+    test "does not split on comma + scheme token inside quoted values (multi-challenge)" do
+      c1 = make_challenge(realm: "first.com", description: "See terms, Payment required")
+      c2 = make_challenge(realm: "second.com")
+      header = Headers.format_challenge(c1) <> ", " <> Headers.format_challenge(c2)
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == "first.com"
+      assert p1.description == "See terms, Payment required"
+      assert p2.realm == "second.com"
+    end
+
+    test "does not match prefix schemes like Payments or PaymentX" do
+      challenge = make_challenge()
+      header = ~s(Payments token123, ) <> Headers.format_challenge(challenge)
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.realm == challenge.realm
+    end
+
+    test "returns no_payment_challenges for prefix-only schemes" do
+      assert {:error, :no_payment_challenges} = Headers.parse_challenges("Payments token123")
+      assert {:error, :no_payment_challenges} = Headers.parse_challenges("PaymentX stuff")
+    end
+
+    test "returns error when no Payment schemes found" do
+      assert {:error, :no_payment_challenges} = Headers.parse_challenges("Bearer token123")
+    end
+
+    test "returns error on empty string" do
+      assert {:error, :no_payment_challenges} = Headers.parse_challenges("")
+    end
+
+    test "roundtrip preserves HMAC verification" do
+      c1 = make_challenge(realm: "hmac.com")
+      c2 = make_challenge(realm: "hmac2.com", method: "tempo")
+      header = Headers.format_challenge(c1) <> ", " <> Headers.format_challenge(c2)
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert :ok = Challenge.verify(p1, @secret)
+      assert :ok = Challenge.verify(p2, @secret)
+    end
+
+    test "tolerates partial failures — returns only valid challenges" do
+      valid = make_challenge(realm: "good.com")
+      # A malformed Payment challenge (missing required params)
+      header = Headers.format_challenge(valid) <> ~s(, Payment id="x", realm="bad")
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.realm == "good.com"
+    end
+
+    test "errors when all challenges fail to parse" do
+      header = ~s(Payment id="x", Payment id="y")
+      assert {:error, :missing_required_params} = Headers.parse_challenges(header)
+    end
+  end
+
   describe "HMAC verification through headers" do
     test "parsed challenge verifies against original secret" do
       original = make_challenge()

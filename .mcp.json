@@ -3,6 +3,10 @@
     "mpp": {
       "type": "http",
       "url": "https://mpp.dev/api/mcp"
+    },
+    "tidewave": {
+      "type": "http",
+      "url": "http://localhost:4008/tidewave/mcp"
     }
   }
 }

@@ -6,6 +6,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 24: Multi-Challenge Parsing
+
+Added `parse_challenges/1` to `MPP.Headers` for parsing `WWW-Authenticate` headers containing multiple `Payment` challenges.
+
+**What was built:**
+- `MPP.Headers.parse_challenges/1` — splits multi-challenge header on scheme boundaries, returns `{:ok, [Challenge.t()]}` for all successfully parsed Payment challenges
+- Scheme boundary detection finds all auth scheme tokens (not just Payment) to correctly segment mixed-scheme headers like `Bearer token, Payment id="a"..., Basic xyz, Payment id="b"...`
+- Partial failure tolerance: if some Payment challenges parse and others fail, only successful ones are returned (matching mppx `deserializeList` semantics)
+
+**Key decisions:**
+- Boundary detection (not comma splitting) — commas inside quoted auth-param values are not splitters
+- All scheme boundaries used as segment endpoints, but only Payment segments extracted — prevents non-Payment scheme text (e.g., `Basic xyz`) from polluting adjacent Payment segments
+- `valid_scheme_start?` validates that a scheme match is at position 0 or preceded by a comma, preventing false matches inside quoted strings like `description="Payment plan"`
+- Returns `:no_payment_challenges` error when no Payment schemes are found (distinct from individual parse errors)
+
+**Unblocks:**
+- Task 33b (HTTP client transport) — `parse_challenges/1` needed for extracting challenges from 402 responses
+
 ### Task 34: Verifier Extraction + JCS
 
 Extracted the verification pipeline from `MPP.Plug` into a transport-neutral `MPP.Verifier` module. Added `MPP.JCS` for RFC 8785 JSON Canonicalization Scheme.
