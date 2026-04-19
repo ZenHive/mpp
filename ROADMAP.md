@@ -458,13 +458,13 @@ Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods
 
 ### Task 39: EVM Permit2 Credential Path
 
-[D:7/B:7/U:7 → Eff:1.0]
+[D:7/B:7/U:7 → Eff:1.0] 📋
 
 Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.
 
 ### Task 40: EVM EIP-3009 Authorization Credential
 
-[D:6/B:5/U:5 → Eff:0.83]
+[D:6/B:5/U:5 → Eff:0.83] ⚠️
 
 Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
 
