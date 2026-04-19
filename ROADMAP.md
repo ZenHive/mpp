@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-10) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Next: MCP server transport (Task 32b), HTTP client transport (Task 33b), or quick utility wins (Task 27).
+**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42 (Tempo SessionReceipt, Accept-Payment, EVM credentialTypes backfill, OpenAPI discovery, Stellar/Permit2/EIP-3009 in Phase 16). Next high-Eff: Task 41 (SessionReceipt), Task 35 (dedup), Task 37 (Accept-Payment).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -51,16 +51,23 @@
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter (unblocked) |
 | ~~Task 34: Verifier + JCS~~ | 9 | ✅ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON |
 | ~~Task 24: Multi-challenge parsing~~ | 9 | ✅ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
+| Task 41: Tempo SessionReceipt `[P]` | 10 | ⬜ | [D:2/B:5/U:6 → Eff:2.75] | to_header/from_header for session receipts |
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
+| Task 37: Accept-Payment header `[P]` | 9 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Parse/format + Plug negotiation |
 | Task 33d: MCP client transport | 12 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Transport.MCP for JSON-RPC |
 | Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
-| Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct |
+| Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct (incl. external_id) |
+| Task 38: EVM credentialTypes backfill `[P]` | 5 | ⬜ | [D:3/B:5/U:6 → Eff:1.83] | credentialTypes + permit2Address in challenge |
+| Task 42: OpenAPI discovery `[P]` | 3 | ⬜ | [D:4/B:6/U:7 → Eff:1.63] | mix mpp.openapi with x-payment-info |
 | Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
 | Task 19: Lightning charge | 13 | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage |
 | Task 30: Channel state + voucher | 10 | ⬜ | [D:5/B:6/U:7 → Eff:1.3] | EIP-712, channel ID, store |
-| Task 31: Session credential actions | 10 | ⬜ | [D:5/B:6/U:6 → Eff:1.2] | open/bearer/topUp/close |
+| Task 31: Session credential actions | 10 | ⬜ | [D:5/B:6/U:6 → Eff:1.2] | open/voucher/topUp/close |
+| Task 39: EVM Permit2 | 16 | ⬜ | [D:7/B:7/U:7 → Eff:1.0] | EIP-712 Permit2 credential path |
 | Task 21: Solana charge | 14 | ⬜ | [D:6/B:6/U:5 → Eff:0.92] | SOL/SPL pull+push modes |
+| Task 40: EVM EIP-3009 | 16 | ⬜ | [D:6/B:5/U:5 → Eff:0.83] | transferWithAuthorization credential |
+| Task 36: Stellar charge | 16 | ⬜ | [D:7/B:5/U:6 → Eff:0.79] | XDR pull+push, SEP-41 tokens |
 | Task 20: Lightning session | 13 | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | Prepaid streaming |
 | Task 22: Card charge | 15 | ⬜ | [D:8/B:5/U:4 → Eff:0.56] | JWE network tokens |
 
@@ -82,6 +89,19 @@
 
 > 2 tasks complete (v0.1.0). `api()` annotations on all public functions, `MPP.describe/0-2`, and `mix mpp.manifest` for local discovery/manifest generation.
 
+### Task 42: OpenAPI Discovery Document Generation `[P]`
+
+[D:4/B:6/U:7 → Eff:1.63] 🚀
+
+Add `mix mpp.openapi` (or `MPP.Discovery.OpenApi.generate/1`) producing OpenAPI 3.1.0 docs with `x-payment-info` per-operation extensions and `x-service-info` at the document level, matching `mppx/src/discovery/OpenApi.ts`. Input: list of `MPP.Plug.Config` structs or a manifest map. Output: JSON-serializable OpenAPI map. This complements (does not replace) `mix mpp.manifest` — OpenAPI is the emerging agent-discovery standard per `draft-payment-discovery-00.md`.
+
+Success criteria:
+- [ ] OpenAPI 3.1.0-valid output
+- [ ] `x-payment-info` on each protected operation (method, intent, amount, currency, recipient)
+- [ ] `x-service-info` at document level
+- [ ] Cross-validated against mppx output for equivalent config
+- [ ] Mix task + programmatic API
+
 ---
 
 ## Phase 4: Tempo Payment Method ✅
@@ -99,6 +119,17 @@
 ### Task 14: Generic EVM Method ✅
 
 [D:6/B:7/U:6 → Eff:1.08] — Completed 2026-04-03. See [CHANGELOG.md](CHANGELOG.md#task-14-generic-evm-method).
+
+### Task 38: EVM Credential-Type Negotiation (spec backfill) `[P]`
+
+[D:3/B:5/U:6 → Eff:1.83] 🚀
+
+Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
+
+Success criteria:
+- [ ] `challenge_method_details/1` includes `credentialTypes`
+- [ ] Default `permit2Address` = canonical; overridable via `method_config`
+- [ ] Unit tests cross-validate against spec examples
 
 ---
 
@@ -146,11 +177,13 @@
 
 [D:2/B:4/U:5 → Eff:2.25] 🎯
 
-Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1`, `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases). Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `"did:pkh:eip155:<chain_id>:<address>"`.
+Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1` (= `n × 30 × 86400s`, matching mppx convention), `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases), plus `assert!/2` overload taking an optional `challenge_id` for richer error context. Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `"did:pkh:eip155:<chain_id>:<address>"`.
 
 Success criteria:
 - [ ] `MPP.Expires.minutes(5)` returns valid ISO 8601 ~5 minutes from now
+- [ ] `MPP.Expires.months(1)` returns ~30 days from now (mppx-compatible)
 - [ ] `MPP.Expires.assert!/1` raises on expired/nil/malformed timestamps
+- [ ] `MPP.Expires.assert!/2` accepts optional `challenge_id` for error context
 - [ ] `MPP.DID.evm_did/2` returns correctly formatted DID string
 - [ ] Unit tests for each helper
 
@@ -172,6 +205,19 @@ Success criteria:
 - [ ] Unit test: same credential rejected on second use
 - [ ] Backward compatible — no store = current behavior (no dedup)
 
+### Task 37: Accept-Payment Header Support `[P]`
+
+[D:3/B:6/U:7 → Eff:2.17] 🎯
+
+Add `MPP.Headers.parse_accept_payment/1` parsing spec §7.4 `Accept-Payment` into a ranked `[{method, intent, q}]` list. Add `format_accept_payment/1` for client-side generation. Update `MPP.Plug` to filter/reorder `WWW-Authenticate` challenges based on client's `Accept-Payment` (no-op when absent, per spec). Update `MPP.Client.Transport.HTTP` (Task 33b) to optionally set `Accept-Payment` from a provider list.
+
+Success criteria:
+- [ ] `parse_accept_payment/1` handles q-values, wildcards (`tempo/*`, `*/session`), and malformed input (returns empty list per spec MAY-ignore)
+- [ ] `format_accept_payment/1` builds header from `[{method, intent, q}]`
+- [ ] `MPP.Plug` filters challenges when `Accept-Payment` present (q=0 skips)
+- [ ] Unit tests: wildcard matching, q-value ordering, malformed input
+- [ ] Descripex annotations
+
 ---
 
 ## Phase 10: Session Support
@@ -186,7 +232,7 @@ Success criteria:
 
 [D:4/B:7/U:8 → Eff:1.88] 🚀 — Depends on Task 26
 
-Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. "second", "minute", "request"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.
+Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. "second", "minute", "request"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `external_id` (optional string, per mpp-rs `SessionRequest`), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.
 
 Success criteria:
 - [ ] `MPP.Intents.Session` struct with all fields
@@ -195,11 +241,25 @@ Success criteria:
 - [ ] Descripex annotations
 - [ ] `MPP.Method` behaviour updated to support `intent: "session"` alongside `"charge"`
 
+### Task 41: Tempo SessionReceipt Type `[P]`
+
+[D:2/B:5/U:6 → Eff:2.75] 🎯 — Parallelizable with Task 29
+
+Add `MPP.Methods.Tempo.SessionReceipt` with fields: `method` (`"tempo"`), `intent` (`"session"`), `status` (`"success"`), `timestamp`, `reference` (= `channel_id`), `challenge_id`, `channel_id`, `accepted_cumulative`, `spent`, `units?`, `tx_hash?`. Implement `to_header/1` and `from_header/1` matching the base64url-JSON pattern of `MPP.Receipt`. Cross-validate JSON keys (camelCase: `channelId`, `acceptedCumulative`, `txHash`) against `mpp-rs/src/protocol/methods/tempo/session_receipt.rs`.
+
+Success criteria:
+- [ ] Struct with required + optional fields
+- [ ] `to_header/1` → base64url JSON, camelCase keys
+- [ ] `from_header/1` parses/validates; `{:ok, receipt} | {:error, reason}`
+- [ ] Optional fields (`units`, `tx_hash` / `txHash`) omitted when nil
+- [ ] Cross-validated against mpp-rs test vectors
+- [ ] Descripex annotations
+
 ### Task 30: Channel State and Voucher Types
 
 [D:5/B:6/U:7 → Eff:1.3] 📋 — Depends on Tasks 28, 29
 
-Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence.
+Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. **Note:** action values are camelCase in JSON (`"open"` / `"topUp"` / `"voucher"` / `"close"`); use snake_case only for Elixir atoms.
 
 Success criteria:
 - [ ] Channel ID computation matches mppx/mpp-rs for same inputs
@@ -212,11 +272,11 @@ Success criteria:
 
 [D:5/B:6/U:6 → Eff:1.2] 📋 — Depends on Task 30
 
-Implement the four session credential actions: `open` (client deposits, opens channel), `bearer` (client presents voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.
+Implement the four session credential actions: `open` (client deposits, opens channel), `voucher` (client presents signed cumulative-amount voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.
 
 Success criteria:
-- [ ] Four action handlers: open, bearer, topUp, close
-- [ ] Correct payload schema per action
+- [ ] Four action handlers: open, voucher, topUp, close
+- [ ] Correct payload schema per action (JSON: `"action": "open"` / `"voucher"` / `"topUp"` / `"close"`; Elixir atoms snake_case)
 - [ ] Plug integration for session endpoints
 - [ ] Balance tracking per channel
 - [ ] Unit tests for each action lifecycle
@@ -330,7 +390,7 @@ Success criteria:
 
 [D:8/B:5/U:4 → Eff:0.56] ⚠️
 
-Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close. Defer until charge method proven and demand exists.
+Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Defer until charge method proven and demand exists.
 
 Success criteria:
 - [ ] Session lifecycle: open → bearer → topUp → close
@@ -386,11 +446,35 @@ Success criteria:
 
 ---
 
+## Phase 16: Additional Payment Methods
+
+> Methods with spec support but limited ecosystem pull. Deferred until demand or partnership surfaces.
+
+### Task 36: Stellar Charge Method
+
+[D:7/B:5/U:6 → Eff:0.79] ⚠️
+
+Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.
+
+### Task 39: EVM Permit2 Credential Path
+
+[D:7/B:7/U:7 → Eff:1.0]
+
+Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.
+
+### Task 40: EVM EIP-3009 Authorization Credential
+
+[D:6/B:5/U:5 → Eff:0.83]
+
+Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
+
+---
+
 ## Deferred
 
 Items identified in cross-SDK gap analysis but not worth phasing yet:
 
-- **SSE support** — Server-Sent Events for streaming payments (receipt + need-voucher events). Blocked on Phase 10 session infrastructure. [D:4/B:5/U:5 → Eff:1.25]
+- **SSE support** — Server-Sent Events for streaming payments (`payment-receipt` + `payment-need-voucher` events). **Canonical session transport in mpp-rs and mppx** (not optional). Blocked on Tasks 30-31; escalate priority when Phase 10 work begins. [D:4/B:6/U:6 → Eff:1.5]
 - **Store backends** — Redis adapter, file store. ConCache + behaviour is sufficient for now. [D:3/B:3/U:3 → Eff:1.0]
 - **HTML/UI** — Browser payment helper UI and hosted-form config (mostly mppx-specific). Not relevant for library. [D:5/B:3/U:2 → Eff:0.5]
 

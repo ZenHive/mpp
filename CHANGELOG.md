@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Roadmap: Cross-SDK Gap Pass (2026-04-19)
+
+Second cross-SDK gap analysis since 2026-04-04. Inspected `refs/mppx/`, `refs/mpp-rs/`, `refs/mpp-specs/` for upstream changes shipped between passes.
+
+**New tasks added to ROADMAP.md:**
+- Task 36 (Stellar Charge, Phase 16) — `draft-stellar-charge-00.md` shipped 2026-04-17
+- Task 37 (Accept-Payment header, Phase 9) — spec §7.4 + mppx full impl
+- Task 38 (EVM credentialTypes backfill, Phase 5) — `credentialTypes` + `permit2Address` now required by unified EVM spec
+- Task 39 (EVM Permit2, Phase 16) — RECOMMENDED credential type per draft-evm-charge-00
+- Task 40 (EVM EIP-3009, Phase 16) — `transferWithAuthorization` credential
+- Task 41 (Tempo SessionReceipt, Phase 10) — mpp-rs commit 337de5d (2026-04-18)
+- Task 42 (OpenAPI discovery, Phase 3 extension) — mppx `OpenApi.ts` with `x-payment-info`
+
+**Existing-task revisions:**
+- Task 31: `bearer` → `voucher` action name (both SDKs use `voucher` for Tempo session)
+- Task 27: clarified `months/1 = n × 30 × 86400s` (mppx convention); added `assert!/2` overload with optional `challenge_id`
+- Task 29: added `external_id` (optional) to session intent schema, per mpp-rs `SessionRequest`
+- Task 30: noted action camelCase JSON / snake_case Elixir atom convention
+- Deferred SSE entry: rescored 1.25 → 1.5 — both reference SDKs treat SSE as canonical session transport, not optional
+
+**Note:** Task 20 (Lightning session) retains `bearer` terminology — Lightning session spec genuinely uses bearer-token model, distinct from Tempo's cumulative-voucher model.
+
+---
+
 ## [0.4.0] - 2026-04-18
 
 ### Dependency bumps
