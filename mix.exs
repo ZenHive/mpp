@@ -66,10 +66,10 @@ defmodule MPP.MixProject do
       {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
-      {:onchain, "~> 0.4"},
+      {:onchain, "~> 0.5"},
 
       # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.1"},
+      {:onchain_tempo, "~> 0.1.1"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1"},

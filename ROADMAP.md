@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 41 (Tempo SessionReceipt) and Task 33b (HTTP client transport) landed 2026-04-19 — 33b unblocks Task 33c (Req plugin). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42. Next high-Eff: Task 32b (MCP server transport), Task 35 (dedup), Task 37 (Accept-Payment), Task 33c (Req plugin).
+**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 41 (Tempo SessionReceipt), Task 33b (HTTP client transport), and Task 43 (onchain + onchain_tempo dep bump) landed 2026-04-19. Cross-SDK gap pass on 2026-04-19 added Tasks 36-42. Next high-Eff: Task 32b (MCP server transport), Task 35 (dedup), Task 37 (Accept-Payment), Task 33c (Req plugin).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -59,6 +59,8 @@
 | Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
 | Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct (incl. external_id) |
 | Task 38: EVM credentialTypes backfill `[P]` | 5 | ⬜ | [D:3/B:5/U:6 → Eff:1.83] | credentialTypes + permit2Address in challenge |
+| Task 44: Tempo integration tests → onchain_tempo.Faucet `[P]` | 4 | ⬜ | [D:2/B:4/U:4 → Eff:2.0] | Delete hand-rolled fund helper + fresh keys per test |
+| ~~Task 43: Bump onchain + onchain_tempo deps~~ | 4 | ✅ | [D:2/B:5/U:6 → Eff:2.75] | onchain ~> 0.5, onchain_tempo ~> 0.1.1 |
 | Task 42: OpenAPI discovery `[P]` | 3 | ⬜ | [D:4/B:6/U:7 → Eff:1.63] | mix mpp.openapi with x-payment-info |
 | Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
 | Task 19: Lightning charge | 13 | ⬜ | [D:5/B:7/U:7 → Eff:1.4] | BOLT11 invoice + preimage |
@@ -111,6 +113,25 @@ Success criteria:
 ### Task 23: Extract onchain_tempo Package ✅
 
 [D:5/B:6/U:7 → Eff:1.3] — Completed 2026-03-28. See [CHANGELOG.md](CHANGELOG.md#task-23-onchain_tempo-extraction).
+
+### Task 43: Bump onchain + onchain_tempo Deps ✅
+
+[D:2/B:5/U:6 → Eff:2.75] — Completed 2026-04-19. See [CHANGELOG.md](CHANGELOG.md#task-43-bump-onchain--onchain_tempo-deps).
+
+Scope shrank at execution time: onchain_tempo shipped the coordinated dep bump as `0.1.1` rather than the `0.2.0` originally anticipated, so only constraint tightening + `mix deps.update` were needed — no code migration.
+
+### Task 44: Tempo Integration Tests → onchain_tempo.Faucet `[P]`
+
+[D:2/B:4/U:4 → Eff:2.0] 🚀 — Discovered during Task 43
+
+`onchain_tempo` 0.2.0 promoted `Onchain.Tempo.Faucet` to public — the same `tempo_fundAddress` helper MPP hand-rolls as `defp fund_test_address/2` inside `test/mpp/methods/tempo_integration_test.exs` (~50 lines, 1229-1278). Replace with `Onchain.Tempo.Faucet.fund_address/2`. Also consider switching from hardcoded `@sender_key` / `@fee_payer_key` (Hardhat account #1 / #2, reused across every test) to `Onchain.Tempo.Faucet.fresh_funded_wallet/1` per test — onchain_tempo's own integration suite cites the hardcoded-keys pattern as the reason for nonce races under concurrent CI. Requires bumping the `mix.exs` constraint from `~> 0.1.1` to `~> 0.2`.
+
+Success criteria:
+- [ ] `mix.exs` constraint: `{:onchain_tempo, "~> 0.2"}`
+- [ ] Delete `defp fund_test_address/2` in `test/mpp/methods/tempo_integration_test.exs`
+- [ ] All fund-sender / fund-fee-payer call sites route through `Onchain.Tempo.Faucet.fund_address/2`
+- [ ] (Stretch) Fresh keypair per test via `fresh_funded_wallet/1` instead of reusing `@sender_key` — removes nonce-race risk if tests ever go concurrent
+- [ ] Integration suite passes against Moderato
 
 ---
 

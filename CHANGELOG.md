@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 43: Bump onchain + onchain_tempo Deps
+
+**Completed** 2026-04-19 | [D:2/B:5/U:6 → Eff:2.75]
+
+**What was done:**
+- `{:onchain, "~> 0.4"}` → `{:onchain, "~> 0.5"}` and `{:onchain_tempo, "~> 0.1"}` → `{:onchain_tempo, "~> 0.1.1"}` in `mix.exs`.
+- `mix deps.update onchain_tempo` refreshed the lock: onchain `0.5.0 → 0.5.1`, onchain_tempo `0.1.0 → 0.1.1`.
+- Full test suite and dialyzer pass unchanged. No code changes required in MPP.
+
+**Key decisions:**
+- Scope reduced from the original roadmap note: onchain_tempo shipped the coordinated dep bump as `0.1.1` (not `0.2.0` as the task anticipated), so no major-version migration was needed.
+- Constraint tightened from `~> 0.1` to `~> 0.1.1` to express the actual floor — onchain_tempo 0.1.1 requires `onchain ~> 0.5`, so the previous pair `onchain ~> 0.4` + `onchain_tempo ~> 0.1` could have resolved to an inconsistent combination on a fresh install.
+- onchain 0.5 extracted `parse_log/1`, `parse_hex_integer/1`, `parse_address/1` from `Onchain.RPC` to `Onchain.RPC.Helpers`, but MPP never called those — the only surface we use (`Onchain.Address.equal?/2`, `Onchain.Transfer.parse_logs/1`, `Onchain.Tempo.{RPC, Transaction, Transfer}`) is unchanged.
+
+---
+
 ### Task 33b: HTTP Client Transport
 
 **Completed** 2026-04-19 | [D:3/B:7/U:8 → Eff:2.5]
