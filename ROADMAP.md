@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42 (Tempo SessionReceipt, Accept-Payment, EVM credentialTypes backfill, OpenAPI discovery, Stellar/Permit2/EIP-3009 in Phase 16). Next high-Eff: Task 41 (SessionReceipt), Task 35 (dedup), Task 37 (Accept-Payment).
+**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42. Task 41 (Tempo SessionReceipt) landed 2026-04-19. Next high-Eff: Task 33b (HTTP client transport), Task 32b (MCP server transport), Task 35 (dedup), Task 37 (Accept-Payment).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -51,7 +51,7 @@
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter (unblocked) |
 | ~~Task 34: Verifier + JCS~~ | 9 | ✅ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON |
 | ~~Task 24: Multi-challenge parsing~~ | 9 | ✅ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
-| Task 41: Tempo SessionReceipt `[P]` | 10 | ⬜ | [D:2/B:5/U:6 → Eff:2.75] | to_header/from_header for session receipts |
+| ~~Task 41: Tempo SessionReceipt~~ | 10 | ✅ | [D:2/B:5/U:6 → Eff:2.75] | to_header/from_header cross-validated against mpp-rs |
 | Task 35: Generic dedup at Plug level `[P]` | 9 | ⬜ | [D:3/B:7/U:7 → Eff:2.33] | Replay protection for all methods |
 | Task 27: Expiration + DID helpers `[P]` | 9 | ⬜ | [D:2/B:4/U:5 → Eff:2.25] | Time helpers + DID format |
 | Task 37: Accept-Payment header `[P]` | 9 | ⬜ | [D:3/B:6/U:7 → Eff:2.17] | Parse/format + Plug negotiation |
@@ -241,19 +241,9 @@ Success criteria:
 - [ ] Descripex annotations
 - [ ] `MPP.Method` behaviour updated to support `intent: "session"` alongside `"charge"`
 
-### Task 41: Tempo SessionReceipt Type `[P]`
+### Task 41: Tempo SessionReceipt Type ✅
 
-[D:2/B:5/U:6 → Eff:2.75] 🎯 — Parallelizable with Task 29
-
-Add `MPP.Methods.Tempo.SessionReceipt` with fields: `method` (`"tempo"`), `intent` (`"session"`), `status` (`"success"`), `timestamp`, `reference` (= `channel_id`), `challenge_id`, `channel_id`, `accepted_cumulative`, `spent`, `units?`, `tx_hash?`. Implement `to_header/1` and `from_header/1` matching the base64url-JSON pattern of `MPP.Receipt`. Cross-validate JSON keys (camelCase: `channelId`, `acceptedCumulative`, `txHash`) against `mpp-rs/src/protocol/methods/tempo/session_receipt.rs`.
-
-Success criteria:
-- [ ] Struct with required + optional fields
-- [ ] `to_header/1` → base64url JSON, camelCase keys
-- [ ] `from_header/1` parses/validates; `{:ok, receipt} | {:error, reason}`
-- [ ] Optional fields (`units`, `tx_hash` / `txHash`) omitted when nil
-- [ ] Cross-validated against mpp-rs test vectors
-- [ ] Descripex annotations
+[D:2/B:5/U:6 → Eff:2.75] — Completed 2026-04-19. See [CHANGELOG.md](CHANGELOG.md#task-41-tempo-sessionreceipt).
 
 ### Task 30: Channel State and Voucher Types
 

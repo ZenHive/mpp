@@ -75,6 +75,7 @@ MPP.Method                 — Behaviour for pluggable payment methods (verify/2
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
+MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Tempo.Store            — Behaviour for optional tx dedup stores (get/put + optional atomic check_and_mark)
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache (optional dep)
 MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier

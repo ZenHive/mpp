@@ -6,6 +6,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 41: Tempo SessionReceipt
+
+**Completed** 2026-04-19 | [D:2/B:5/U:6 → Eff:2.75]
+
+**What was done:**
+- Added `MPP.Methods.Tempo.SessionReceipt` — session-intent receipt type paralleling `MPP.Receipt` (charge-intent).
+- `new/1` sets method/intent/status defaults, auto-fills timestamp, and defaults `reference` to `channel_id`.
+- `to_header/1` / `from_header/1` follow the base64url-JSON pattern with camelCase wire keys (`challengeId`, `channelId`, `acceptedCumulative`, `txHash`). Optional `units` / `tx_hash` are omitted when nil rather than serialized as `null`.
+- `from_header/1` returns `{:error, :invalid_base64 | :invalid_json | :missing_required_fields}` on malformed input.
+- Cross-validated against `refs/mpp-rs/src/protocol/methods/tempo/session_receipt.rs` test vectors and `refs/mppx/src/tempo/session/Receipt.ts` wire format.
+- Descripex annotations under `/methods/tempo` namespace for progressive API discovery.
+
+**Key decisions:**
+- Function names `to_header`/`from_header` (per roadmap spec) diverge from `MPP.Receipt`'s `encode`/`decode` — session receipts have no other entry points, so header-oriented naming is clearer.
+- `MPP.Headers` helpers left untouched (typed to `Receipt.t()`); revisit when Task 31 wires session receipts into the Plug response path.
+
+---
+
 ### Roadmap: Cross-SDK Gap Pass (2026-04-19)
 
 Second cross-SDK gap analysis since 2026-04-04. Inspected `refs/mppx/`, `refs/mpp-rs/`, `refs/mpp-specs/` for upstream changes shipped between passes.
