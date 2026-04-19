@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Task 33b: HTTP Client Transport
+
+**Completed** 2026-04-19 | [D:3/B:7/U:8 → Eff:2.5]
+
+**What was done:**
+- Added `MPP.Client.Transport` behaviour with three callbacks (`payment_required?/1`, `get_challenges/1`, `set_credential/2`) — transport-agnostic so Task 33d (MCP) implements the same shape.
+- Added `MPP.Client.Transport.HTTP` implementing the behaviour over `Req.Request` / `Req.Response`. Joins repeated `WWW-Authenticate` values before delegating to `MPP.Headers.parse_challenges/1`, and attaches credentials via `MPP.Headers.format_credential/1` (`Authorization: Payment <base64url>`).
+- Added `MPP.Client.Transport.select_challenge/2` — a small pure helper (not a callback) that picks the first challenge supported by a `MultiProvider`, matching mpp-rs's "first-supported-in-offer-order" baseline. Ranking via `Accept-Payment` (Task 37) will wrap this later.
+
+**Key decisions:**
+- `set_credential/2` takes a decoded `MPP.Credential.t()` rather than a formatted string — each transport owns its wire format (HTTP header for HTTP; `_meta` injection for the eventual MCP transport).
+- `select_challenge/2` lives on the behaviour module rather than on the HTTP impl, so Task 33c (Req plugin) and Task 33d (MCP) can reuse it without duplicating the `Enum.find`.
+- No Req client construction in the transport — callers pass in `Req.Request`/`Req.Response` structs. This mirrors how the server-side methods accept `req_options` rather than building clients themselves.
+
+---
+
 ### Task 41: Tempo SessionReceipt
 
 **Completed** 2026-04-19 | [D:2/B:5/U:6 → Eff:2.75]

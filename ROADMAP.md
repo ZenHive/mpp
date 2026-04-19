@@ -10,7 +10,7 @@
 
 ## Current Focus
 
-**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 24 (multi-challenge parsing) landed, unblocking Task 33b (HTTP client transport). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42. Task 41 (Tempo SessionReceipt) landed 2026-04-19. Next high-Eff: Task 33b (HTTP client transport), Task 32b (MCP server transport), Task 35 (dedup), Task 37 (Accept-Payment).
+**Protocol completeness + client SDK** (2026-04-19) — Prioritizing Phases 9-12 (protocol utilities, sessions, MCP, client SDK) over new payment methods (Phases 13-15, 16). Proxy/gateway scoped out to separate `mpp_proxy` package. Task 41 (Tempo SessionReceipt) and Task 33b (HTTP client transport) landed 2026-04-19 — 33b unblocks Task 33c (Req plugin). Cross-SDK gap pass on 2026-04-19 added Tasks 36-42. Next high-Eff: Task 32b (MCP server transport), Task 35 (dedup), Task 37 (Accept-Payment), Task 33c (Req plugin).
 
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
@@ -47,7 +47,7 @@
 | ~~Task 28: Session error types~~ | 10 | ✅ | [D:2/B:5/U:7 → Eff:3.0] | 8 new problem types (7 session + payment_action_required) |
 | ~~Task 25: Body digest~~ | 9 | ✅ | [D:2/B:6/U:5 → Eff:2.75] | SHA-256 compute/verify with constant-time comparison |
 | ~~Task 33a: PaymentProvider behaviour~~ | 12 | ✅ | [D:3/B:8/U:9 → Eff:2.83] | Client-side method abstraction |
-| Task 33b: HTTP transport | 12 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | Client transport behaviour + HTTP (unblocked) |
+| ~~Task 33b: HTTP transport~~ | 12 | ✅ | [D:3/B:7/U:8 → Eff:2.5] | Transport behaviour + HTTP impl + select_challenge helper |
 | Task 32b: MCP server transport | 11 | ⬜ | [D:3/B:7/U:8 → Eff:2.5] | JSON-RPC handler adapter (unblocked) |
 | ~~Task 34: Verifier + JCS~~ | 9 | ✅ | [D:4/B:9/U:10 → Eff:2.38] | Transport-neutral verify + RFC 8785 canonical JSON |
 | ~~Task 24: Multi-challenge parsing~~ | 9 | ✅ | [D:3/B:7/U:7 → Eff:2.33] | parse_challenges/1 in Headers |
@@ -304,17 +304,9 @@ Success criteria:
 
 [D:3/B:8/U:9 → Eff:2.83] — Completed 2026-04-10. See [CHANGELOG.md](CHANGELOG.md#task-33a-client-paymentprovider-behaviour).
 
-### Task 33b: HTTP Client Transport
+### Task 33b: HTTP Client Transport ✅
 
-[D:3/B:7/U:8 → Eff:2.5] 🎯 — Depends on Task 24
-
-Add `MPP.Client.Transport` behaviour and `MPP.Client.Transport.HTTP` implementation. Transport callbacks: `payment_required?/1` (check if response needs payment), `get_challenges/1` (extract challenges from response), `set_credential/2` (attach credential to request). HTTP implementation: checks status 402, parses `WWW-Authenticate` header using `MPP.Headers.parse_challenges/1`, sets `Authorization` header.
-
-Success criteria:
-- [ ] `Transport` behaviour with 3 callbacks
-- [ ] HTTP transport using existing `MPP.Headers` functions
-- [ ] Handles multi-challenge responses (picks supported method)
-- [ ] Unit tests with mock responses
+[D:3/B:7/U:8 → Eff:2.5] — Completed 2026-04-19. See [CHANGELOG.md](CHANGELOG.md#task-33b-http-client-transport).
 
 ### Task 33c: Payment-Aware Req Plugin
 
