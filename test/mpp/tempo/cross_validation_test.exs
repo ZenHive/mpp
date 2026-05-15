@@ -21,10 +21,10 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   use ExUnit.Case, async: true
 
+  alias Cartouche.Signer.Curvy
   alias MPP.Test.OxTempoBundle
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
-  alias Signet.Signer.Curvy
 
   # Our hardcoded values (must match canonical viem/tempo source).
   @stablecoin_dex_hex "0xdec0000000000000000000000000000000000000"
@@ -762,7 +762,7 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   # Computes the 4-byte function selector (hex) from a Solidity function signature.
   defp keccak_selector(signature) do
-    <<selector::binary-size(4), _::binary>> = Signet.Hash.keccak(signature)
+    <<selector::binary-size(4), _::binary>> = Cartouche.Hash.keccak(signature)
     Base.encode16(selector, case: :lower)
   end
 

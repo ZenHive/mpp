@@ -208,7 +208,7 @@ defmodule MPP.Methods.EVM do
   end
 
   # --- RPC helpers ---
-  # Uses Req directly because Onchain.RPC delegates to Signet.RPC → Finch,
+  # Uses Req directly because Onchain.RPC delegates to Cartouche → Finch,
   # bypassing Req entirely. Req.Test stubs only intercept Req.request/2 calls.
 
   defp rpc_get_receipt(hash, rpc_url, config) do

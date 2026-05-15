@@ -6,6 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-15
+
+### Task 44: Tempo Integration Tests → onchain_tempo.Faucet
+
+**Completed** 2026-04-20 | [D:2/B:4/U:4 → Eff:2.0]
+
+**What was done:**
+- Bumped `{:onchain_tempo, "~> 0.1.1"}` → `{:onchain_tempo, "~> 0.2"}` in `mix.exs`; `mix deps.update onchain_tempo` refreshed the lock to 0.2.0.
+- Deleted the hand-rolled `defp fund_test_address/2` in `test/mpp/methods/tempo_integration_test.exs` (custom `tempo_fundAddress` JSON-RPC wrapper) and replaced every call site with a new `defp fresh_wallet!/1` helper that delegates to `Onchain.Tempo.Faucet.fresh_funded_wallet/1`.
+- Removed the hardcoded `@sender_key` and `@fee_payer_key` module attrs. Each broadcasting test now mints a fresh, funded keypair per test; fee-payer tests mint a fresh fee-payer keypair alongside the sender.
+- Dropped the `__MODULE__.NonceAgent` Agent and `checkout_nonce/0` helper — with per-test fresh wallets, each test starts at nonce 0, so the shared counter is unnecessary.
+- `setup_all` now mints one "fixture" wallet to seed the shared `tx_hash` / `memo_tx_hash` fixtures used by hash-credential tests, then returns; no more shared broadcaster.
+- `fee_payer_config/3` test helper now takes a `fee_payer_key_hex` arg instead of reading a module attr, so each test passes its own freshly-minted fee-payer hex key.
+- Incidentally bumped `ex_ast` (dev/test only) and tightened `mix.exs` constraint to `~> 0.11` to match; `ex_ast 0.11` adds pipe-awareness and ancestor-context filters to `mix ex_ast.search` / `mix ex_ast.replace`.
+
+**Key decisions:**
+- **Per-test fresh wallet, not per-session.** `onchain_tempo`'s own integration suite calls out the hardcoded-keys pattern as the reason for nonce races when tests ever go concurrent. Even though we keep `async: false` for now, per-test keypairs remove the coupling so a future move to `async: true` is safe.
+- **Inline `fresh_wallet!/1` calls instead of a global `setup` block.** A global `setup` would faucet every test, including the ~7 that only use fixture hashes — wasted Moderato faucet calls. Inline is more explicit about which tests broadcast.
+- **Bumped `gas_limit` to 400_000 for the fixture-wallet seed transfer.** A cold-storage TIP-20 transfer from a brand-new Moderato address estimates at ~272k gas — above `Onchain.ERC20.transfer`'s 100k default. The old hardcoded sender worked by luck (warm storage slots from prior runs); fresh wallets make the underlying cost visible.
+- **`fee_payer_private_key` method_config stays hex-encoded.** `MPP.Methods.Tempo.decode_hex_key/1` expects a hex string, so `Faucet.fresh_funded_wallet/1`'s binary `:private_key` is converted via `Base.encode16(_, case: :lower)` at the call site.
+
+---
+
 ### Task 43: Bump onchain + onchain_tempo Deps
 
 **Completed** 2026-04-19 | [D:2/B:5/U:6 → Eff:2.75]

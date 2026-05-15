@@ -22,6 +22,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
+  alias Onchain.Tempo.Faucet
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @moduletag :integration
@@ -31,10 +32,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
   @chain_id 42_431
   @path_usd "0x20c0000000000000000000000000000000000000"
 
-  # Deterministic testnet-only private keys (no value on mainnet)
-  @sender_key "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  # Deterministic testnet-only recipient key (no value on mainnet) — used only
+  # to derive a stable recipient address. Sender and fee-payer wallets are
+  # minted fresh per test via `Onchain.Tempo.Faucet.fresh_funded_wallet/1`.
   @recipient_key "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-  @fee_payer_key "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 
   # 1 pathUSD (6 decimals)
   @transfer_amount 1_000_000
@@ -47,13 +48,6 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Polling config for tx confirmation
   @confirmation_poll_interval_ms 2_000
   @confirmation_max_attempts 30
-
-  # Atomically returns the current sender nonce and increments the counter.
-  # Only used by tests that actually broadcast transactions.
-  # Requires async: false — tests must run sequentially.
-  defp checkout_nonce do
-    Agent.get_and_update(__MODULE__.NonceAgent, fn n -> {n, n + 1} end)
-  end
 
   setup_all do
     if !Code.ensure_loaded?(Onchain) do
@@ -70,36 +64,35 @@ defmodule MPP.Methods.TempoIntegrationTest do
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
     rpc_opts = [rpc_url: rpc_url]
 
-    # Derive addresses from test keys
-    {:ok, sender_address} = Onchain.Signer.address_from_key(@sender_key)
+    # Recipient is a fixed address (never broadcasts), so we derive once from a
+    # known key for stability across tests.
     {:ok, recipient_address} = Onchain.Signer.address_from_key(@recipient_key)
 
-    # Fund sender via Tempo's custom faucet RPC
-    :ok = fund_test_address(sender_address, rpc_url)
+    # Mint a fresh, funded fixture wallet used only to seed the shared
+    # `tx_hash` and `memo_tx_hash` fixtures below. Fresh per suite run → nonce
+    # starts at 0, no persistent address to collide with other runs.
+    fixture_wallet = fresh_wallet!(rpc_url)
 
-    # Wait for faucet funding to confirm. Moderato has sub-second finality,
-    # but the faucet tx needs to be included in a block before we can spend.
-    Process.sleep(@confirmation_poll_interval_ms)
-
-    # Get nonce and transfer pathUSD from sender to recipient
-    {:ok, nonce} = Onchain.RPC.get_transaction_count(sender_address, rpc_opts)
-
+    # Seed tx 1: pathUSD transfer from fixture wallet → recipient (nonce 0).
+    # Bump gas_limit past the 100_000 default: a cold-storage TIP-20 transfer
+    # from a brand-new address on Moderato estimates at ~272_000.
     tx_opts =
       Keyword.merge(rpc_opts,
-        private_key: @sender_key,
+        private_key: fixture_wallet.private_key,
         chain_id: @chain_id,
-        nonce: nonce
+        nonce: 0,
+        gas_limit: 400_000
       )
 
     {:ok, tx_hash} = Onchain.ERC20.transfer(@path_usd, recipient_address, @transfer_amount, tx_opts)
 
-    # Wait for transaction confirmation
     receipt = wait_for_receipt!(tx_hash, rpc_opts)
 
     if receipt.status != 1 do
       flunk("Test setup: pathUSD transfer reverted (tx: #{tx_hash})")
     end
 
+    # Seed tx 2: transferWithMemo from fixture wallet → recipient (nonce 1).
     memo_call =
       TempoTestHelpers.build_call(
         @path_usd,
@@ -108,19 +101,15 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     {:ok, memo_tx} =
       TempoTxBuilder.build_signed_multicall(
-        private_key: @sender_key,
+        private_key: fixture_wallet.private_key,
         calls: [memo_call],
         chain_id: @chain_id,
         rpc_url: rpc_url,
         fee_token: @path_usd,
-        nonce: nonce + 1
+        nonce: 1
       )
 
     memo_tx_hash = broadcast_raw_transaction_sync!(memo_tx, rpc_url)
-
-    # Track sender nonce across tests. ERC20 transfer used `nonce`,
-    # memo tx used `nonce + 1`, so next available is `nonce + 2`.
-    {:ok, _} = Agent.start_link(fn -> nonce + 2 end, name: __MODULE__.NonceAgent)
 
     # Build Plug config for 402 handshake tests
     plug_opts = [
@@ -139,13 +128,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     config = MPP.Plug.init(plug_opts)
 
-    {:ok,
-     config: config,
-     tx_hash: tx_hash,
-     memo_tx_hash: memo_tx_hash,
-     sender: sender_address,
-     recipient: recipient_address,
-     rpc_url: rpc_url}
+    {:ok, config: config, tx_hash: tx_hash, memo_tx_hash: memo_tx_hash, recipient: recipient_address, rpc_url: rpc_url}
   end
 
   describe "full 402 handshake" do
@@ -299,6 +282,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
 
       memo_call =
@@ -309,12 +293,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_multicall(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           calls: [memo_call],
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       challenge = request_challenge!(memo_config)
@@ -415,6 +399,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       # Build optimistic config — same as standard but with wait_for_confirmation: false
       optimistic_config =
         MPP.Plug.init(
@@ -435,14 +420,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
       # Build and sign a valid 0x76 transaction
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       # Get challenge and submit credential
@@ -487,6 +472,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       # Use an absurdly large amount that the sender cannot cover.
       # The eth_call simulation should detect insufficient balance and return
       # verification-failed WITHOUT broadcasting.
@@ -512,7 +498,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       # (find_payment_call matches) but should fail simulation on Moderato
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: impossible_amount,
@@ -534,6 +520,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       impossible_amount = 999_999_999_999_999
 
       optimistic_config =
@@ -558,7 +545,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_multicall(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           calls: [harmless_call, payment_call],
           chain_id: @chain_id,
           rpc_url: rpc_url,
@@ -581,17 +568,18 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       # Build and sign a 0x76 Tempo Transaction with a matching TIP-20 transfer
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       # Step 1: Get a 402 challenge
@@ -632,12 +620,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
       config: config,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       # Build tx transferring to a different address than the challenge expects
       wrong_recipient = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: wrong_recipient,
           amount: @transfer_amount,
@@ -656,12 +645,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       # Build tx with a different amount than the challenge expects
       wrong_amount = @transfer_amount + 1
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: wrong_amount,
@@ -679,20 +669,21 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       challenge = request_challenge!(config)
@@ -722,13 +713,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      # Fee payer key — Hardhat account #2 (testnet only, no security concern)
-      fee_payer_key = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-
-      # Fund fee payer so it can pay gas
-      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> fee_payer_key)
-      :ok = fund_test_address(fee_payer_address, rpc_url)
-      Process.sleep(@confirmation_poll_interval_ms)
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       fee_payer_config =
         MPP.Plug.init(
@@ -742,7 +728,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "rpc_url" => rpc_url,
             "chain_id" => @chain_id,
             "fee_payer" => true,
-            "fee_payer_private_key" => fee_payer_key,
+            "fee_payer_private_key" => fee_payer_key_hex,
             "fee_token" => @path_usd
           }
         )
@@ -750,13 +736,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
       # Build a fee-payer transfer (placeholder sig, empty fee_token)
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       # 402 → credential → server co-signs → broadcasts → receipt
@@ -790,7 +776,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
     } do
       import TempoTestHelpers, only: [build_call: 2, transfer_calldata: 2]
 
-      fee_payer_key = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       fee_payer_config =
         MPP.Plug.init(
@@ -804,7 +791,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "rpc_url" => rpc_url,
             "chain_id" => @chain_id,
             "fee_payer" => true,
-            "fee_payer_private_key" => fee_payer_key,
+            "fee_payer_private_key" => fee_payer_key_hex,
             "fee_token" => @path_usd
           }
         )
@@ -816,7 +803,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_multicall(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           calls: [valid_call, rogue_call],
           chain_id: @chain_id,
           rpc_url: rpc_url
@@ -829,14 +816,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   describe "fee-payer validation" do
-    defp fee_payer_config(recipient_address, rpc_url, extra \\ %{}) do
+    defp fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex, extra \\ %{}) do
       tempo_config(
         recipient_address,
         rpc_url,
         Map.merge(
           %{
             "fee_payer" => true,
-            "fee_payer_private_key" => @fee_payer_key,
+            "fee_payer_private_key" => fee_payer_key_hex,
             "fee_token" => @path_usd
           },
           extra
@@ -849,7 +836,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url,
       tx_hash: tx_hash
     } do
-      config = fee_payer_config(recipient_address, rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
       body = submit_credential!(config, %{"type" => "hash", "hash" => tx_hash})
       assert body["type"] =~ "invalid-payload"
@@ -860,12 +848,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      config = fee_payer_config(recipient_address, rpc_url)
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
       # build_signed_transfer sets fee_payer_signature = <<>> (absent), NOT <<0x00>> (placeholder)
       {:ok, non_fp_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
@@ -883,7 +873,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      config = fee_payer_config(recipient_address, rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
       # Build raw 0x76 with placeholder sig but non-empty fee_token
       token_bytes = TempoTestHelpers.decode_address(@path_usd)
@@ -921,11 +912,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      start_supervised!(TempoMemoryStore)
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
-      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> @fee_payer_key)
-      :ok = fund_test_address(fee_payer_address, rpc_url)
-      Process.sleep(@confirmation_poll_interval_ms)
+      start_supervised!(TempoMemoryStore)
 
       config =
         tempo_config(
@@ -933,7 +923,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
           rpc_url,
           %{
             "fee_payer" => true,
-            "fee_payer_private_key" => @fee_payer_key,
+            "fee_payer_private_key" => fee_payer_key_hex,
             "fee_token" => @path_usd,
             "store" => TempoMemoryStore
           }
@@ -941,13 +931,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       # First: co-signed and broadcast succeeds
@@ -981,11 +971,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      start_supervised!(TempoMemoryStore)
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
-      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> @fee_payer_key)
-      :ok = fund_test_address(fee_payer_address, rpc_url)
-      Process.sleep(@confirmation_poll_interval_ms)
+      start_supervised!(TempoMemoryStore)
 
       config =
         tempo_config(
@@ -993,7 +982,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
           rpc_url,
           %{
             "fee_payer" => true,
-            "fee_payer_private_key" => @fee_payer_key,
+            "fee_payer_private_key" => fee_payer_key_hex,
             "fee_token" => @path_usd,
             "wait_for_confirmation" => false,
             "store" => TempoMemoryStore
@@ -1002,13 +991,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       challenge = request_challenge!(config)
@@ -1043,6 +1032,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
+      sender = fresh_wallet!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       config =
@@ -1057,14 +1047,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_transfer(
-          private_key: @sender_key,
+          private_key: sender.private_key,
           token: @path_usd,
           recipient: recipient_address,
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
-          nonce: checkout_nonce()
+          nonce: 0
         )
 
       # First submission: optimistic pass-through
@@ -1226,55 +1216,32 @@ defmodule MPP.Methods.TempoIntegrationTest do
     )
   end
 
-  # Funds a test address via Tempo's custom `tempo_fundAddress` JSON-RPC method.
-  defp fund_test_address(address, rpc_url) do
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => "tempo_fundAddress",
-        "params" => [address],
-        "id" => 1
-      })
+  # Mints a fresh, funded wallet on Moderato via onchain_tempo's Faucet helper.
+  # Returns %{private_key: <32 bytes>, address_hex: "0x...", address_bin: <20 bytes>}.
+  # Flunks loudly if the faucet is unavailable so "0 failures / 0 tests run" can't hide.
+  defp fresh_wallet!(rpc_url) do
+    case Faucet.fresh_funded_wallet(rpc_url: rpc_url) do
+      {:ok, wallet} ->
+        wallet
 
-    case Req.post(rpc_url, headers: [{"content-type", "application/json"}], body: body) do
-      {:ok, %Req.Response{status: status, body: %{"error" => %{"message" => msg}}}}
-      when status in 200..299 ->
+      {:error, msg} ->
         flunk("""
-        tempo_fundAddress RPC returned error.
+        Tempo Moderato faucet failed to fund a fresh test wallet.
 
-        Message: #{msg}
-        Address: #{address}
+        Error: #{msg}
         RPC URL: #{rpc_url}
 
         The Tempo Moderato testnet faucet may be down or rate-limited.
-        """)
-
-      {:ok, %Req.Response{status: status}} when status in 200..299 ->
-        :ok
-
-      {:ok, %Req.Response{status: status, body: resp_body}} ->
-        flunk("""
-        Failed to fund test address via tempo_fundAddress.
-
-        Status: #{status}
-        Body: #{inspect(resp_body)}
-        Address: #{address}
-        RPC URL: #{rpc_url}
-
-        The Tempo Moderato testnet faucet may be down or rate-limited.
-        """)
-
-      {:error, exception} ->
-        flunk("""
-        Failed to connect to Tempo Moderato testnet.
-
-        Error: #{Exception.message(exception)}
-        RPC URL: #{rpc_url}
-
-        Check network connectivity and that the RPC URL is correct.
         Set TEMPO_RPC_URL to override: export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
         """)
     end
+  end
+
+  # Mints a fresh, funded wallet and returns its private key as lowercase hex
+  # (the format `MPP.Methods.Tempo`'s `fee_payer_private_key` method_config expects).
+  defp fresh_fee_payer_hex!(rpc_url) do
+    wallet = fresh_wallet!(rpc_url)
+    Base.encode16(wallet.private_key, case: :lower)
   end
 
   # Broadcasts a prebuilt signed Tempo transaction via the sync RPC and returns its tx hash.

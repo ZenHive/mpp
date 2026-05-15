@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -58,18 +58,18 @@ defmodule MPP.MixProject do
 
       # Code analysis tools
       {:ex_dna, "~> 1.1", only: [:dev, :test], runtime: false},
-      {:ex_ast, "~> 0.2", only: [:dev, :test], runtime: false},
+      {:ex_ast, "~> 0.11", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
       {:quickbeam, "~> 0.10", only: [:dev, :test], runtime: false},
-      {:oxc, "~> 0.7", only: [:dev, :test], runtime: false},
+      {:oxc, "~> 0.13.0", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
       {:onchain, "~> 0.5"},
 
       # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.1.1"},
+      {:onchain_tempo, "~> 0.2"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1"},
@@ -109,7 +109,8 @@ defmodule MPP.MixProject do
         :descripex,
         :onchain,
         :onchain_tempo,
-        :signet,
+        :cartouche,
+        :hieroglyph,
         :curvy,
         :ex_rlp,
         :con_cache

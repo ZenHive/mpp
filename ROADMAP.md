@@ -59,7 +59,7 @@
 | Task 33c: Req plugin | 12 | ⬜ | [D:4/B:8/U:8 → Eff:2.0] | Auto-retry on 402 |
 | Task 29: Session intent schema | 10 | ⬜ | [D:4/B:7/U:8 → Eff:1.88] | MPP.Intents.Session struct (incl. external_id) |
 | Task 38: EVM credentialTypes backfill `[P]` | 5 | ⬜ | [D:3/B:5/U:6 → Eff:1.83] | credentialTypes + permit2Address in challenge |
-| Task 44: Tempo integration tests → onchain_tempo.Faucet `[P]` | 4 | ⬜ | [D:2/B:4/U:4 → Eff:2.0] | Delete hand-rolled fund helper + fresh keys per test |
+| ~~Task 44: Tempo integration tests → onchain_tempo.Faucet~~ | 4 | ✅ | [D:2/B:4/U:4 → Eff:2.0] | Delete hand-rolled fund helper + fresh keys per test |
 | ~~Task 43: Bump onchain + onchain_tempo deps~~ | 4 | ✅ | [D:2/B:5/U:6 → Eff:2.75] | onchain ~> 0.5, onchain_tempo ~> 0.1.1 |
 | Task 42: OpenAPI discovery `[P]` | 3 | ⬜ | [D:4/B:6/U:7 → Eff:1.63] | mix mpp.openapi with x-payment-info |
 | Task 33e: Built-in charge providers | 12 | ⬜ | [D:6/B:8/U:9 → Eff:1.42] | Tempo + Stripe client providers |
@@ -120,18 +120,9 @@ Success criteria:
 
 Scope shrank at execution time: onchain_tempo shipped the coordinated dep bump as `0.1.1` rather than the `0.2.0` originally anticipated, so only constraint tightening + `mix deps.update` were needed — no code migration.
 
-### Task 44: Tempo Integration Tests → onchain_tempo.Faucet `[P]`
+### Task 44: Tempo Integration Tests → onchain_tempo.Faucet ✅
 
-[D:2/B:4/U:4 → Eff:2.0] 🚀 — Discovered during Task 43
-
-`onchain_tempo` 0.2.0 promoted `Onchain.Tempo.Faucet` to public — the same `tempo_fundAddress` helper MPP hand-rolls as `defp fund_test_address/2` inside `test/mpp/methods/tempo_integration_test.exs` (~50 lines, 1229-1278). Replace with `Onchain.Tempo.Faucet.fund_address/2`. Also consider switching from hardcoded `@sender_key` / `@fee_payer_key` (Hardhat account #1 / #2, reused across every test) to `Onchain.Tempo.Faucet.fresh_funded_wallet/1` per test — onchain_tempo's own integration suite cites the hardcoded-keys pattern as the reason for nonce races under concurrent CI. Requires bumping the `mix.exs` constraint from `~> 0.1.1` to `~> 0.2`.
-
-Success criteria:
-- [ ] `mix.exs` constraint: `{:onchain_tempo, "~> 0.2"}`
-- [ ] Delete `defp fund_test_address/2` in `test/mpp/methods/tempo_integration_test.exs`
-- [ ] All fund-sender / fund-fee-payer call sites route through `Onchain.Tempo.Faucet.fund_address/2`
-- [ ] (Stretch) Fresh keypair per test via `fresh_funded_wallet/1` instead of reusing `@sender_key` — removes nonce-race risk if tests ever go concurrent
-- [ ] Integration suite passes against Moderato
+[D:2/B:4/U:4 → Eff:2.0] — Completed 2026-04-20. See [CHANGELOG.md](CHANGELOG.md#task-44-tempo-integration-tests--onchain_tempofaucet).
 
 ---
 
