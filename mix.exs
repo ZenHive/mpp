@@ -40,42 +40,45 @@ defmodule MPP.MixProject do
 
   defp deps do
     [
-      {:plug, "~> 1.16"},
-      {:jason, "~> 1.4"},
-      {:req, "~> 0.5"},
+      {:plug, "~> 1.19.2"},
+      {:jason, "~> 1.4.5"},
+      {:req, "~> 0.5.17"},
 
       # Dev/test tooling
-      {:ex_doc, "~> 0.39", only: :dev, runtime: false},
-      {:styler, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:doctor, "~> 0.22", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
-      {:ex_unit_json, "~> 0.4", only: [:dev, :test], runtime: false},
-      {:dialyzer_json, "~> 0.1", only: [:dev, :test], runtime: false},
-      {:tidewave, "~> 0.5", only: :dev},
-      {:bandit, "~> 1.10", only: :dev},
+      {:ex_doc, "~> 0.40.2", only: :dev, runtime: false},
+      {:styler, "~> 1.11.0", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4.7", only: [:dev, :test], runtime: false},
+      # TODO: bump doctor to 0.23.0 once onchain (and transitive decimal ~> 2.0) catches up to decimal ~> 3.1
+      {:doctor, "~> 0.22.0", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
+      {:ex_unit_json, "~> 0.4.3", only: [:dev, :test], runtime: false},
+      {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
+      {:tidewave, "~> 0.5.6", only: :dev},
+      {:bandit, "~> 1.11.1", only: :dev},
 
       # Code analysis tools
-      {:ex_dna, "~> 1.1", only: [:dev, :test], runtime: false},
-      {:ex_ast, "~> 0.11", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.5.1", only: [:dev, :test], runtime: false},
+      {:ex_ast, "~> 0.12.0", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
-      {:quickbeam, "~> 0.10", only: [:dev, :test], runtime: false},
+      # TODO: bump quickbeam to 0.10.12 (and npm to 0.7.x) once upstream relaxes its oxc ~> 0.12.1 constraint
+      # quickbeam 0.10.5 pins npm ~> 0.6.0, so npm stays on 0.6.x until quickbeam moves
+      {:quickbeam, "~> 0.10.5", only: [:dev, :test], runtime: false},
       {:oxc, "~> 0.13.0", only: [:dev, :test], runtime: false},
-      {:npm, "~> 0.5", only: [:dev, :test], runtime: false},
+      {:npm, "~> 0.6.1", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
-      {:onchain, "~> 0.5"},
+      {:onchain, "~> 0.5.4"},
 
       # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.2"},
+      {:onchain_tempo, "~> 0.2.1"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
-      {:con_cache, "~> 1.1"},
+      {:con_cache, "~> 1.1.1"},
 
       # Self-describing APIs
-      {:descripex, "~> 0.6"}
+      {:descripex, "~> 0.6.0"}
     ]
   end
 

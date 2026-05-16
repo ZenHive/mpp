@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @~/.claude/includes/quickbeam.md
 @~/.claude/includes/oxc.md
 @~/.claude/includes/ethereum-rpc.md
+@~/.claude/includes/upstream-pr-workflow.md
 
 ## Project
 
