@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": "mpp",
   "default_branch": "development",
   "vision": "First Elixir implementation of the Machine Payments Protocol — HTTP 402 payment middleware that turns any Phoenix API into an agent-billable service. No accounts, no API keys. Payment is authentication.",
@@ -45,6 +45,11 @@
     "16": {
       "name": "Additional Payment Methods",
       "order": 16,
+      "status": "pending"
+    },
+    "17": {
+      "name": "Transport Bindings",
+      "order": 17,
       "status": "pending"
     },
     "2": {
@@ -169,12 +174,23 @@
       "order": 1,
       "description": "Tempo on-chain TIP-20 verification + integration tests + dep bumps"
     },
+    "transport-jsonrpc": {
+      "phase": 17,
+      "order": 2,
+      "description": "Bare JSON-RPC transport (non-MCP) — deferred"
+    },
+    "transport-ws": {
+      "phase": 17,
+      "order": 1,
+      "description": "WebSocket transport binding for JSON-RPC + payment challenges on subscription handshakes"
+    },
     "utilities": {
       "phase": 9,
       "order": 1,
       "description": "Protocol utility modules (BodyDigest, Amount, JCS, Verifier, multi-challenge, Expires, dedup, Accept-Payment)"
     }
   },
+  "milestones": {},
   "task": [
     {
       "id": 1,
@@ -188,10 +204,12 @@
         "u": 10
       },
       "eff": 2.5,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "Challenge struct with HMAC-SHA256 binding. Challenge ID = base64url(HMAC-SHA256(secret, realm|method|intent|request|expires|digest|opaque)). Stateless — no challenge store needed; server recomputes and constant-time-compares on verification.",
+      "implemented": "Shipped the Challenge struct with stateless HMAC-SHA256 binding — the challenge ID is base64url(HMAC-SHA256(secret, realm|method|intent|request|expires|digest|opaque)), recomputed and constant-time-compared on verification with no server-side store.",
       "cross_repo": []
     },
     {
@@ -206,10 +224,12 @@
         "u": 9
       },
       "eff": 3.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "Credential parsing, challenge echo validation, payload extraction. base64url JSON decode/encode preserving original bytes for HMAC verification.",
+      "implemented": "Shipped the Credential module with parsing, challenge-echo validation, and payload extraction, using base64url JSON decode/encode that preserves the original bytes for HMAC verification.",
       "cross_repo": []
     },
     {
@@ -224,10 +244,12 @@
         "u": 8
       },
       "eff": 4.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "Receipt struct with base64url JSON serialization. Encoded into the Payment-Receipt response header on successful verification.",
+      "implemented": "Shipped the Receipt struct with base64url JSON serialization, encoded into the Payment-Receipt response header on successful verification.",
       "cross_repo": []
     },
     {
@@ -242,10 +264,12 @@
         "u": 9
       },
       "eff": 3.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "Parse/format WWW-Authenticate, Authorization, Payment-Receipt headers. Auth-param parser handles quoted strings, embedded commas, and escapes.",
+      "implemented": "Shipped the Headers module that parses and formats WWW-Authenticate, Authorization, and Payment-Receipt headers, with an auth-param parser handling quoted strings, embedded commas, and escapes.",
       "cross_repo": []
     },
     {
@@ -260,10 +284,12 @@
         "u": 7
       },
       "eff": 3.5,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "9 RFC 9457 problem types under https://paymentauth.org/problems/ base URI.",
+      "implemented": "Shipped the Errors module defining 9 RFC 9457 problem types under the https://paymentauth.org/problems/ base URI.",
       "cross_repo": []
     },
     {
@@ -278,10 +304,12 @@
         "u": 8
       },
       "eff": 4.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "MPP.Intents.Charge — shared intent schema (amount, currency, recipient, optional fields). Struct with new/1 validation, to_request/1 and from_request/1 serialization.",
+      "implemented": "Shipped MPP.Intents.Charge as the shared charge intent schema (amount, currency, recipient, optional fields) — a struct with new/1 validation and to_request/1 / from_request/1 serialization.",
       "cross_repo": []
     },
     {
@@ -296,10 +324,12 @@
         "u": 10
       },
       "eff": 3.33,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "MPP.Method behaviour with __using__ macro. Pluggable payment methods implement verify/2; intent is the schema (Charge), method is the implementation (Stripe/Tempo/EVM/...).",
+      "implemented": "Shipped the MPP.Method behaviour with a __using__ macro, letting pluggable payment methods implement verify/2 — the intent is the schema (Charge) and the method is the implementation (Stripe/Tempo/EVM/...).",
       "cross_repo": []
     },
     {
@@ -314,10 +344,12 @@
         "u": 10
       },
       "eff": 2.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "MPP.Plug — full 402 handshake. Mount in any Phoenix/Plug router with per-route pricing and explicit credential configuration. No global config, no Application.get_env.",
+      "implemented": "Shipped MPP.Plug implementing the full 402 handshake, mountable in any Phoenix/Plug router with per-route pricing and explicit credential configuration — no global config or Application.get_env.",
       "cross_repo": []
     },
     {
@@ -332,10 +364,12 @@
         "u": 8
       },
       "eff": 2.13,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "MPP.Methods.Stripe — SPT → PaymentIntent verification via Req (no Stripe SDK). Idempotency, analytics metadata, Req.Test mockability.",
+      "implemented": "Shipped MPP.Methods.Stripe verifying SPT → PaymentIntent via Req with no Stripe SDK, including idempotency, analytics metadata, and Req.Test mockability.",
       "cross_repo": []
     },
     {
@@ -350,10 +384,12 @@
         "u": 6
       },
       "eff": 2.17,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "Real Stripe test mode API with full 402 handshake. Validates the wire format and round-trip behavior that unit stubs can't catch.",
+      "implemented": "Shipped an integration test exercising the real Stripe test-mode API through the full 402 handshake, validating wire format and round-trip behavior that unit stubs can't catch.",
       "cross_repo": []
     },
     {
@@ -368,10 +404,12 @@
         "u": 8
       },
       "eff": 2.5,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
       "body": "api() macros on all public functions across 7 modules. MPP.describe/0-2 progressive discovery. Generates @doc, hints metadata, JSON Schema, and runtime introspection from a single declaration.",
+      "implemented": "Added api() macros to all public functions across 7 modules with MPP.describe/0-2 progressive discovery, generating @doc, hints metadata, JSON Schema, and runtime introspection from a single declaration.",
       "cross_repo": []
     },
     {
@@ -386,10 +424,12 @@
         "u": 7
       },
       "eff": 3.25,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
       "body": "Static JSON manifest generation for AI-agent consumers. Builds Descripex.Manifest from the configured module list and writes a JSON-serializable map of the full API surface.",
+      "implemented": "Shipped the mix mpp.manifest task generating a static JSON manifest for AI-agent consumers — it builds Descripex.Manifest from the configured module list and writes a JSON-serializable map of the full API surface.",
       "cross_repo": []
     },
     {
@@ -400,22 +440,23 @@
       "title": "OpenAPI discovery document generation",
       "scores": {
         "d": 4,
-        "b": 6,
-        "u": 7
+        "b": 7,
+        "u": 8
       },
-      "eff": 1.63,
+      "eff": 1.88,
+      "dep_layer": 0,
       "markers": [
         "parallel"
       ],
       "depends_on": [],
       "acceptance_criteria": [
         "OpenAPI 3.1.0-valid output",
-        "x-payment-info on each protected operation (method, intent, amount, currency, recipient)",
-        "x-service-info at document level",
+        "x-payment-info / x-service-info follow the latest discovery extension",
+        "Emits multi-offer `offers` array form; accepts single-offer shorthand on parse",
         "Cross-validated against mppx output for equivalent config",
         "Mix task + programmatic API"
       ],
-      "body": "Add `mix mpp.openapi` (or `MPP.Discovery.OpenApi.generate/1`) producing OpenAPI 3.1.0 docs with `x-payment-info` per-operation extensions and `x-service-info` at the document level, matching `mppx/src/discovery/OpenApi.ts`. Input: list of `MPP.Plug.Config` structs or a manifest map. Output: JSON-serializable OpenAPI map. Complements (does not replace) `mix mpp.manifest` — OpenAPI is the emerging agent-discovery standard per `draft-payment-discovery-00.md`.\n",
+      "body": "Add `mix mpp.openapi` (and `MPP.Discovery.OpenApi.generate/1`) emitting OpenAPI 3.1.0 documents with `x-payment-info` per-operation and `x-service-info` at the document level. Read the latest discovery extension at `paymentauth.org` and in `refs/mpp-specs/specs/extensions/draft-payment-discovery-*.md` at implementation time to confirm the current shape — the spec now uses a multi-offer `offers` array with single-offer shorthand on parse. Cross-check the generated document against mppx's OpenAPI output for an equivalent endpoint config. Complements (does not replace) `mix mpp.manifest`.\n",
       "cross_repo": []
     },
     {
@@ -430,10 +471,12 @@
         "u": 6
       },
       "eff": 1.3,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
       "body": "On-chain TIP-20 transfer verification via Tempo's JSON-RPC. Implements MPP.Methods.Tempo supporting both `type=\"hash\"` (client-broadcast) and `type=\"transaction\"` (server-broadcast) credential paths.\n\nShipped:\n- TransferWithMemo support — memo matching for `transferWithMemo(address,uint256,bytes32)` calls, enforced per spec when `methodDetails.memo` is configured. Discovered via real Moderato receipts that the `memo` parameter is `indexed` (topic, not data field).\n- Fee payer co-signing — server-side fee sponsorship for `feePayer: true` with 0x78 domain signing and call scope validation (whitelist of 4 allowed selector patterns matching mppx `callScopes`).\n- Optimistic broadcast mode — `wait_for_confirmation: false` simulates payment call via `eth_call` then broadcasts asynchronously, returning an optimistic receipt without waiting for block inclusion.\n- Transaction dedup store (MPP.Tempo.Store behaviour) — pluggable replay protection with get/1, put/2, and optional atomic check_and_mark/2 callbacks; different dedup semantics per credential path (hash: post-verification mark; transaction: pre-broadcast reservation).\n- Built-in ConCacheStore (MPP.Tempo.ConCacheStore) — ETS-based dedup store with automatic TTL via ConCache.\n- v-value normalization in recover_sender/2 (legacy 27/28 → recid 0/1) for ox/tempo SDK interop.\n- ox/tempo cross-validation of 0x76 RLP encoding via QuickBEAM + esbuild bundle against the ox/tempo TypeScript SDK.\n",
+      "implemented": "Shipped MPP.Methods.Tempo for on-chain TIP-20 transfer verification over Tempo's JSON-RPC, supporting both client-broadcast (type=hash) and server-broadcast (type=transaction) credential paths — including TransferWithMemo matching (indexed memo topic), fee-payer co-signing with 0x78 domain signing and call-scope validation, optimistic broadcast mode, a pluggable dedup store behaviour with a built-in ConCacheStore, v-value normalization in recover_sender/2, and ox/tempo cross-validation of 0x76 RLP encoding.",
       "cross_repo": []
     },
     {
@@ -448,10 +491,12 @@
         "u": 7
       },
       "eff": 1.3,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
       "body": "Extracted Tempo chain primitives from mpp into the standalone `onchain_tempo` package; MPP now depends on `onchain_tempo` (Hex.pm) and delegates chain operations.\n\nMoved out:\n- `MPP.Tempo.Transaction` → `Onchain.Tempo.Transaction` (deserialize, payment matching, fee payer co-signing)\n- `MPP.Test.TempoTxBuilder` → `Onchain.Tempo.Transaction.Builder`\n- TempoTestHelpers calldata fns → `Onchain.Tempo.TIP20`\n- Broadcast fns → `Onchain.Tempo.RPC`\n- `parse_transfer_with_memo_logs/1` → `Onchain.Tempo.Transfer`\n\nStayed in mpp:\n- `MPP.Methods.Tempo` (verify/2, challenge_method_details/1, dedup store, Plug error wrapping)\n- `MPP.Tempo.Store` behaviour + `MPP.Tempo.ConCacheStore` (payment-protocol replay protection)\n- `simulate_payment_call` (MPP-specific eth_call simulation)\n\nRPC adapter functions bridge onchain_tempo's `{:error, string}` to MPP's `{:error, Errors.t()}` RFC 9457 format.\n",
+      "implemented": "Extracted Tempo chain primitives (Transaction, TIP20 calldata, RPC broadcast, transfer-log parsing, tx builder) out of mpp into the standalone onchain_tempo Hex package; MPP now depends on onchain_tempo and delegates chain operations, keeping the payment-protocol layer (MPP.Methods.Tempo, dedup store, simulate_payment_call) in mpp with RPC adapters bridging onchain_tempo error strings to RFC 9457 errors.",
       "cross_repo": []
     },
     {
@@ -466,10 +511,12 @@
         "u": 6
       },
       "eff": 2.75,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
       "body": "Bumped `{:onchain, \"~> 0.4\"}` → `~> 0.5` and `{:onchain_tempo, \"~> 0.1\"}` → `~> 0.1.1`. Full test suite and dialyzer passed unchanged — no code changes required in MPP.\n\nScope shrank: onchain_tempo shipped the coordinated dep bump as 0.1.1 (not 0.2.0 as originally anticipated), so no major-version migration was needed. Constraint tightened to `~> 0.1.1` to express the actual floor — onchain_tempo 0.1.1 requires `onchain ~> 0.5`, so the previous pair could have resolved to an inconsistent combination on a fresh install.\n",
+      "implemented": "Bumped onchain ~> 0.4 → ~> 0.5 and onchain_tempo ~> 0.1 → ~> 0.1.1, tightening the constraint to express the actual floor — the full test suite and dialyzer passed unchanged with no code changes required in MPP.",
       "cross_repo": []
     },
     {
@@ -484,10 +531,12 @@
         "u": 4
       },
       "eff": 2.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
       "body": "Bumped `{:onchain_tempo, \"~> 0.1.1\"}` → `~> 0.2`. Deleted the hand-rolled `defp fund_test_address/2` (custom `tempo_fundAddress` JSON-RPC wrapper) and replaced every call site with `defp fresh_wallet!/1` delegating to `Onchain.Tempo.Faucet.fresh_funded_wallet/1`.\n\nRemoved hardcoded `@sender_key` / `@fee_payer_key` module attrs — each broadcasting test now mints a fresh, funded keypair per test. Dropped the `__MODULE__.NonceAgent` shared counter (per-test fresh wallets start at nonce 0). `setup_all` now mints one fixture wallet to seed shared tx_hash fixtures, then returns.\n\nPer-test fresh wallet (not per-session) removes the nonce-race coupling so a future move to `async: true` is safe. Inline `fresh_wallet!/1` calls (not a global setup block) avoid wasting Moderato faucet calls on the ~7 tests that only use fixture hashes.\n",
+      "implemented": "Migrated the Tempo integration tests to Onchain.Tempo.Faucet (bumping onchain_tempo to ~> 0.2), replacing the hand-rolled fund_test_address/2 with a fresh_wallet!/1 helper that mints a fresh, funded keypair per broadcasting test — removing hardcoded sender/fee-payer keys and the shared NonceAgent counter so a future move to async: true is safe.",
       "cross_repo": []
     },
     {
@@ -502,10 +551,12 @@
         "u": 6
       },
       "eff": 1.08,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
       "body": "On-chain payment verification for any EVM chain (Ethereum, Base, Polygon, Arbitrum, etc.). `MPP.Methods.EVM` implements the `MPP.Method` behaviour.\n\n- Hash-only credential path: client broadcasts tx, sends hash, server verifies receipt.\n- ERC-20 transfers verified via Transfer event log parsing (`Onchain.Transfer.parse_logs/1`).\n- Native ETH transfers verified via transaction value + recipient matching.\n- Currency convention: ERC-20 tokens use contract address; native ETH uses \"ETH\" or zero address.\n- Sepolia integration tests added: ERC-20 via WETH (wraps ETH → deposit() → transfer), native ETH, error cases, full 402 flow.\n\nHash-only verification (no signed-tx broadcast path) — simpler, universally works across all EVM chains without chain-specific transaction types. RPC calls via Req directly (Onchain.RPC uses Signet → Finch and bypasses Req entirely; Req enables Req.Test stubbing).\n",
+      "implemented": "Shipped MPP.Methods.EVM implementing on-chain payment verification for any EVM chain via a hash-only credential path — ERC-20 transfers verified through Transfer event log parsing and native ETH via transaction value/recipient matching, with RPC calls over Req (for Req.Test stubbing) and Sepolia integration tests covering ERC-20 (WETH), native ETH, error cases, and the full 402 flow.",
       "cross_repo": []
     },
     {
@@ -520,6 +571,7 @@
         "u": 6
       },
       "eff": 1.83,
+      "dep_layer": 0,
       "markers": [
         "parallel"
       ],
@@ -544,10 +596,12 @@
         "u": 7
       },
       "eff": 2.17,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
       "body": "MPP.Plug `:methods` option — multiple payment methods per route with per-method pricing, credential routing via echoed challenge method field. Backwards-compatible with single-method config.",
+      "implemented": "Shipped the MPP.Plug :methods option enabling multiple payment methods per route with per-method pricing and credential routing via the echoed challenge method field, backward-compatible with single-method config.",
       "cross_repo": []
     },
     {
@@ -562,10 +616,12 @@
         "u": 8
       },
       "eff": 4.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
       "body": "First Hex publish (2026-03-25). Subsequent releases v0.2.0 (2026-03-28), v0.3.0 (2026-04-03), v0.4.0 (2026-04-18), v0.5.0 (2026-05-15) shipped without dedicated release tasks — the work landing in each version is captured by the relevant per-task `shipped_in` field.",
+      "implemented": "Published the first Hex.pm release (v0.1.0, 2026-03-25); subsequent versions v0.2.0 through v0.5.0 shipped without dedicated release tasks, with each version's contents tracked via per-task shipped_in fields.",
       "cross_repo": []
     },
     {
@@ -580,10 +636,12 @@
         "u": 9
       },
       "eff": 2.83,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
       "body": "Interactive demo server for exploring the 402 payment flow without real payment credentials.\n\n- `MPP.Demo.Method` — toy payment method accepting `\"demo-token\"` as magic payload\n- `MPP.Demo.Router` — Plug.Router with protected `/resource`, welcome page, healthcheck\n- `mix mpp.demo` starts Bandit on port 4402 (configurable via `--port`), prints copy-paste curl commands with a pre-computed valid credential\n\nFixed HMAC secret key enables the pre-computed credential — zero-friction first experience. Port 4402 chosen as memorable (HTTP 402 is the protocol's status code).\n",
+      "implemented": "Shipped the mix mpp.demo interactive demo server — a toy MPP.Demo.Method accepting a magic demo-token payload behind MPP.Demo.Router, started on Bandit (port 4402, configurable) and printing copy-paste curl commands with a pre-computed valid credential for a zero-friction first experience.",
       "cross_repo": []
     },
     {
@@ -598,10 +656,12 @@
         "u": 8
       },
       "eff": 1.88,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
       "body": "Read-only integration tests against the live `mpp.dev/api/ping/paid` endpoint, validating protocol compatibility with the reference MPP server. Verifies client-side parsing against a real 402 Tempo challenge: 402 response structure, challenge parsing, field validation, charge request decoding, RFC 9457 error body format, and challengeId cross-validation between body and header.\n\nRead-only only (no wallet/payment required). Each test fetches a fresh 402 to avoid challenge expiration. Validates protocol invariants rather than deployment-specific values.\n",
+      "implemented": "Shipped read-only live integration tests against the mpp.dev/api/ping/paid endpoint that validate client-side protocol compatibility with the reference MPP server — checking 402 structure, challenge parsing, field validation, charge-request decoding, RFC 9457 error bodies, and challengeId cross-validation, with each test fetching a fresh 402 to avoid expiration.",
       "cross_repo": []
     },
     {
@@ -616,10 +676,12 @@
         "u": 7
       },
       "eff": 2.33,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "Added `MPP.Headers.parse_challenges/1` for parsing `WWW-Authenticate` headers containing multiple `Payment` challenges. Splits on scheme boundaries, returns `{:ok, [Challenge.t()]}` for successfully parsed Payment challenges. Partial-failure tolerance matches mppx `deserializeList` semantics.\n\nBoundary detection (not comma splitting) — commas inside quoted auth-param values are not splitters. `valid_scheme_start?` validates that a scheme match is at position 0 or preceded by a comma, preventing false matches inside quoted strings like `description=\"Payment plan\"`. Returns `:no_payment_challenges` error when no Payment schemes are found.\n\nUnblocked Task 33b (HTTP client transport).\n",
+      "implemented": "Added MPP.Headers.parse_challenges/1, parsing WWW-Authenticate headers carrying multiple Payment challenges by scheme-boundary detection (not comma splitting, so commas in quoted auth-params don't split), with partial-failure tolerance matching mppx deserializeList and a :no_payment_challenges error when none are found.",
       "cross_repo": []
     },
     {
@@ -634,10 +696,12 @@
         "u": 5
       },
       "eff": 2.75,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "`MPP.BodyDigest` — SHA-256 body digest computation and verification for request body binding.\n\n- `compute/1` hashes string or map body, returns `\"sha-256=<base64>\"` (standard base64, no padding — matches mppx)\n- `verify/2` does constant-time comparison via `Plug.Crypto.secure_compare/2`\n- Maps are JSON-encoded before hashing\n- Registered in `MPP.describe(:body_digest)` via Discoverable\n",
+      "implemented": "Shipped MPP.BodyDigest for SHA-256 request-body binding — compute/1 hashes a string or JSON-encoded map into \"sha-256=<base64>\" (unpadded, mppx-compatible) and verify/2 does constant-time comparison via Plug.Crypto.secure_compare/2, registered for discovery via MPP.describe(:body_digest).",
       "cross_repo": []
     },
     {
@@ -652,10 +716,12 @@
         "u": 6
       },
       "eff": 3.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "`MPP.Amount` — pure integer/string arithmetic for converting human-readable amounts to base units.\n\n- `parse_units/2` — \"1.5\" + 6 decimals → \"1500000\" (cross-validated against mpp-rs test vectors)\n- `with_base_units/2` — applies parse_units to any intent struct's amount field\n- `parse_dollar_amount/2` — \"$1.50\" + decimals → `{\"150\", \"usd\", 2}` with currency symbol detection ($, €, £, ¥) and suffix codes (\"1.50 USD\")\n\nCaller supplies decimals explicitly (no currency-to-decimals inference) — matches mppx and mpp-rs design. Zero allowed (zero-amount charges valid for identity/proof flows). No floating point anywhere — all arithmetic via string splitting and padding.\n\nBREAKING in v0.4.0: `parse_dollar_amount/1` → `parse_dollar_amount/2` (caller supplies decimals explicitly). Implicit inference created correctness risks (HUF/TWD classification is debatable) and diverged from spec's \"explicit configuration\" philosophy.\n",
+      "implemented": "Shipped MPP.Amount for pure integer/string base-unit conversion with no floating point — parse_units/2 (cross-validated against mpp-rs vectors), with_base_units/2 over intent structs, and parse_dollar_amount/2 with currency-symbol/suffix detection; caller supplies decimals explicitly (BREAKING in v0.4.0: parse_dollar_amount/1 → /2).",
       "cross_repo": []
     },
     {
@@ -670,6 +736,7 @@
         "u": 5
       },
       "eff": 2.25,
+      "dep_layer": 0,
       "markers": [
         "parallel"
       ],
@@ -697,10 +764,12 @@
         "u": 10
       },
       "eff": 2.38,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "Extracted the verification pipeline from `MPP.Plug` into a transport-neutral `MPP.Verifier` module. Added `MPP.JCS` for RFC 8785 JSON Canonicalization Scheme.\n\n- `MPP.JCS` — RFC 8785 canonical JSON (MPP subset: ASCII keys, string/integer/boolean/nil values). Floats rejected with FunctionClauseError. Matches mppx/mpp-rs output for all MPP protocol data.\n- `MPP.Verifier` — transport-neutral `verify/2` with the full verification pipeline: HMAC challenge binding, realm match, expiration, request match, method.verify. No Plug dependency.\n- `MPP.Plug` refactored to a thin HTTP adapter delegating to `MPP.Verifier`.\n- MCP `encode_request` updated from `Jason.encode!` to `JCS.canonicalize` (cross-SDK HMAC interop).\n\nVerifier accepts keyword opts (`:secret_key`, `:realm`, `:method`, `:charge`, `:method_config`) rather than Plug types — zero coupling to HTTP transport. Always returns `{:ok, Receipt.t()} | {:error, Errors.t()}` with structured errors. JCS implemented inline (~30 lines) rather than adding a dependency. Dropped the `:request_serializer` option — JCS is mandatory per spec, not configurable.\n\nUnblocked Tasks 32b (MCP server transport) and 33b (HTTP client transport).\n",
+      "implemented": "Extracted the verification pipeline from MPP.Plug into a transport-neutral MPP.Verifier (verify/2 over keyword opts, returning {:ok, Receipt.t()} | {:error, Errors.t()}) and added MPP.JCS for RFC 8785 JSON canonicalization (MPP subset, floats rejected) — refactoring MPP.Plug into a thin HTTP adapter and switching MCP encode_request to JCS for cross-SDK HMAC interop.",
       "cross_repo": []
     },
     {
@@ -715,6 +784,7 @@
         "u": 7
       },
       "eff": 2.33,
+      "dep_layer": 0,
       "markers": [
         "parallel"
       ],
@@ -742,6 +812,7 @@
         "u": 7
       },
       "eff": 2.17,
+      "dep_layer": 0,
       "markers": [
         "parallel"
       ],
@@ -750,10 +821,11 @@
         "parse_accept_payment/1 handles q-values, wildcards (tempo/*, */session), and malformed input (returns empty list per spec MAY-ignore)",
         "format_accept_payment/1 builds header from [{method, intent, q}]",
         "MPP.Plug filters challenges when Accept-Payment present (q=0 skips)",
+        "Client-side `MPP.Client.AcceptPolicy` honoring server-advertised methods (parallels mpp-rs AcceptPaymentPolicy)",
         "Unit tests: wildcard matching, q-value ordering, malformed input",
         "Descripex annotations"
       ],
-      "body": "Add `MPP.Headers.parse_accept_payment/1` parsing spec §7.4 `Accept-Payment` into a ranked `[{method, intent, q}]` list. Add `format_accept_payment/1` for client-side generation. Update `MPP.Plug` to filter/reorder `WWW-Authenticate` challenges based on client's `Accept-Payment` (no-op when absent, per spec). Update `MPP.Client.Transport.HTTP` (Task 33b) to optionally set `Accept-Payment` from a provider list.\n",
+      "body": "Add `MPP.Headers.parse_accept_payment/1` parsing spec §7.4 `Accept-Payment` into a ranked `[{method, intent, q}]` list. Add `format_accept_payment/1` for client-side generation. Update `MPP.Plug` to filter/reorder `WWW-Authenticate` challenges based on client's `Accept-Payment` (no-op when absent, per spec). Update `MPP.Client.Transport.HTTP` (Task 33b) to optionally set `Accept-Payment` from a provider list. Add a client-side `MPP.Client.AcceptPolicy` that honors server-advertised methods on the response path — parallel to mpp-rs `AcceptPaymentPolicy` (read `refs/mpp-rs/src/client/accept_payment_policy.rs` at pickup time to confirm policy shape and filter/order semantics).\n",
       "cross_repo": []
     },
     {
@@ -768,10 +840,12 @@
         "u": 7
       },
       "eff": 3.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "Extended `MPP.Errors` with 8 new RFC 9457 problem types, cross-validated against mppx `Errors.ts`.\n\n- 7 session error types under `session/` URI prefix: `:insufficient_balance`, `:invalid_signature`, `:signer_mismatch`, `:amount_exceeds_deposit`, `:delta_too_small`, `:channel_not_found` (410), `:channel_closed` (410)\n- 1 core error type: `:payment_action_required` for 3DS flows (402)\n\nChannel errors use HTTP 410 Gone (not 402) matching mppx. `:channel_closed` maps to URI suffix `session/channel-finalized` (matching mppx's `ChannelClosedError` which uses the \"finalized\" term in the URI).\n",
+      "implemented": "Extended MPP.Errors with 8 new RFC 9457 problem types cross-validated against mppx Errors.ts — 7 session error types under the session/ URI prefix (channel errors using HTTP 410 Gone) plus a core :payment_action_required (402) for 3DS flows.",
       "cross_repo": []
     },
     {
@@ -786,6 +860,7 @@
         "u": 8
       },
       "eff": 1.88,
+      "dep_layer": 1,
       "markers": [],
       "depends_on": [
         26
@@ -812,10 +887,12 @@
         "u": 6
       },
       "eff": 2.75,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
       "body": "Added `MPP.Methods.Tempo.SessionReceipt` — session-intent receipt type paralleling `MPP.Receipt` (charge-intent).\n\n- `new/1` sets method/intent/status defaults, auto-fills timestamp, defaults `reference` to `channel_id`.\n- `to_header/1` / `from_header/1` follow the base64url-JSON pattern with camelCase wire keys (`challengeId`, `channelId`, `acceptedCumulative`, `txHash`). Optional `units` / `tx_hash` omitted when nil rather than serialized as `null`.\n- `from_header/1` returns `{:error, :invalid_base64 | :invalid_json | :missing_required_fields}` on malformed input.\n- Cross-validated against `refs/mpp-rs/src/protocol/methods/tempo/session_receipt.rs` test vectors and `refs/mppx/src/tempo/session/Receipt.ts` wire format.\n- Descripex annotations under `/methods/tempo` namespace.\n\nFunction names `to_header`/`from_header` diverge from `MPP.Receipt`'s `encode`/`decode` — session receipts have no other entry points, so header-oriented naming is clearer. `MPP.Headers` helpers left untouched (typed to `Receipt.t()`); revisit when Task 31 wires session receipts into the Plug response path.\n",
+      "implemented": "Added MPP.Methods.Tempo.SessionReceipt — a session-intent receipt type paralleling MPP.Receipt with new/1 defaulting, to_header/1 and from_header/1 following the base64url-JSON pattern with camelCase wire keys (omitting nil optionals) and typed error returns, cross-validated against mpp-rs and mppx vectors with Descripex annotations.",
       "cross_repo": []
     },
     {
@@ -830,6 +907,7 @@
         "u": 7
       },
       "eff": 1.3,
+      "dep_layer": 2,
       "markers": [],
       "depends_on": [
         28,
@@ -857,6 +935,7 @@
         "u": 6
       },
       "eff": 1.2,
+      "dep_layer": 3,
       "markers": [],
       "depends_on": [
         30
@@ -883,10 +962,12 @@
         "u": 8
       },
       "eff": 3.75,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "MCP (Model Context Protocol) transport helpers for embedding MPP payment flows in JSON-RPC messages.\n\n- `MPP.Mcp` module with 4 spec constants (`-32042`, `-32043`, `org.paymentauth/credential`, `org.paymentauth/receipt`).\n- Server helpers: `extract_credential/1`, `payment_required_error/1`, `verification_failed_error/2`, `attach_receipt/3`.\n- Client helpers: `payment_required?/1`, `extract_challenges/1`, `attach_credential/2`.\n- Full round-trip test: challenge → error → extract → credential → attach → receipt.\n\nSingle `MPP.Mcp` module (matches mpp-rs single `mcp.rs` pattern). No new structs — reuses existing Challenge/Credential/Receipt; MCP-specific shapes are plain maps matching JSON-RPC wire format. MCP credentials are plain JSON maps in `_meta` (not base64url-encoded like HTTP transport).\n\nCodex review fixes (v0.4.0):\n- Crash on non-map/non-binary request (`encode_request/1` catch-all returning `:invalid` sentinel, checked in `challenge_from_map`).\n- Optional fields type-validated (`validate_optional_strings/1` rejects non-binary `description`, `digest`, `expires`, `opaque`).\n- Inaccurate public specs corrected on `extract_credential/1` and `extract_challenges/1`.\n- `MPP.Mcp` added to Discoverable registry; `MPP.describe(:mcp)` now works.\n- MCP `request` field format — decoded base64url→JSON on output, re-encoded JSON→base64url on input (internal Challenge.request stays base64url for HMAC binding).\n- Defensive `challenge_from_map` returns `{:error, :invalid_challenge}` instead of raising on malformed input.\n\nKnown limitation: `encode_request` uses `Jason.encode!/1` for the native JSON → base64url path. Safe for same-server round-trips; cross-implementation interop depends on Task 34's JCS (now resolved in v0.4.0 as a follow-up).\n",
+      "implemented": "Shipped the MPP.Mcp module with MCP/JSON-RPC transport helpers — the 4 spec constants plus server-side (extract_credential, payment_required_error, verification_failed_error, attach_receipt) and client-side (payment_required?, extract_challenges, attach_credential) helpers reusing existing Challenge/Credential/Receipt types, with full round-trip tests and Codex-review hardening for malformed input.",
       "cross_repo": []
     },
     {
@@ -901,6 +982,7 @@
         "u": 8
       },
       "eff": 2.5,
+      "dep_layer": 1,
       "markers": [],
       "depends_on": [
         32,
@@ -928,10 +1010,12 @@
         "u": 9
       },
       "eff": 2.83,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
       "body": "Client-side counterpart to server-side `MPP.Method` — where methods *verify* payment proof, providers *create* it.\n\n- `MPP.Client.PaymentProvider` behaviour with `supports?/3` and `pay/2` callbacks.\n- `MPP.Client.MultiProvider` struct wrapping `[{module, config}]` tuples with first-match dispatch.\n- Convenience functions on `PaymentProvider` for direct module delegation.\n- Descripex annotations on both modules, registered in `MPP.describe/0-2`.\n\nConfig is explicit on every callback (no global state) — matches library design principle and enables multi-tenant usage. `MultiProvider` is a concrete struct, not a behaviour implementation — avoids awkward arity clashes. Provider ordering matters: first `supports?/3` match wins (mirrors mpp-rs `MultiProvider` semantics). Error atom `:unsupported_payment_method` when no provider matches.\n",
+      "implemented": "Shipped the client-side MPP.Client.PaymentProvider behaviour (supports?/3, pay/2) — the create-payment counterpart to the server-side verify-payment MPP.Method — plus an MPP.Client.MultiProvider struct wrapping {module, config} tuples with first-match dispatch, explicit per-callback config (no global state), and Descripex annotations.",
       "cross_repo": []
     },
     {
@@ -946,10 +1030,12 @@
         "u": 8
       },
       "eff": 2.5,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
       "body": "Added `MPP.Client.Transport` behaviour with three callbacks (`payment_required?/1`, `get_challenges/1`, `set_credential/2`) — transport-agnostic so Task 33d (MCP) implements the same shape.\n\nAdded `MPP.Client.Transport.HTTP` implementing the behaviour over `Req.Request` / `Req.Response`. Joins repeated `WWW-Authenticate` values before delegating to `MPP.Headers.parse_challenges/1`. Attaches credentials via `MPP.Headers.format_credential/1` (`Authorization: Payment <base64url>`).\n\nAdded `MPP.Client.Transport.select_challenge/2` — a small pure helper (not a callback) that picks the first challenge supported by a `MultiProvider`, matching mpp-rs's \"first-supported-in-offer-order\" baseline. Ranking via `Accept-Payment` (Task 37) will wrap this later.\n\n`set_credential/2` takes a decoded `MPP.Credential.t()` rather than a formatted string — each transport owns its wire format. `select_challenge/2` lives on the behaviour module so Tasks 33c and 33d can reuse it without duplicating the `Enum.find`. No Req client construction in the transport — callers pass in `Req.Request`/`Req.Response` structs.\n",
+      "implemented": "Added the transport-agnostic MPP.Client.Transport behaviour (payment_required?/1, get_challenges/1, set_credential/2) and its HTTP implementation over Req.Request/Req.Response — joining repeated WWW-Authenticate values before parse_challenges/1 and attaching credentials as Authorization: Payment <base64url> — plus a pure select_challenge/2 helper picking the first MultiProvider-supported challenge in offer order.",
       "cross_repo": []
     },
     {
@@ -964,6 +1050,7 @@
         "u": 8
       },
       "eff": 2.0,
+      "dep_layer": 1,
       "markers": [],
       "depends_on": [
         "33a",
@@ -991,6 +1078,7 @@
         "u": 7
       },
       "eff": 2.17,
+      "dep_layer": 1,
       "markers": [],
       "depends_on": [
         32
@@ -1017,6 +1105,7 @@
         "u": 9
       },
       "eff": 1.42,
+      "dep_layer": 1,
       "markers": [],
       "depends_on": [
         "33a",
@@ -1044,6 +1133,7 @@
         "u": 7
       },
       "eff": 1.4,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1068,6 +1158,7 @@
         "u": 4
       },
       "eff": 0.56,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1092,6 +1183,7 @@
         "u": 5
       },
       "eff": 0.92,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1118,6 +1210,7 @@
         "u": 4
       },
       "eff": 0.56,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1143,6 +1236,7 @@
         "u": 6
       },
       "eff": 0.79,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.\n",
@@ -1160,6 +1254,7 @@
         "u": 7
       },
       "eff": 1.0,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.\n",
@@ -1177,9 +1272,297 @@
         "u": 5
       },
       "eff": 0.83,
+      "dep_layer": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.\n",
+      "cross_repo": []
+    },
+    {
+      "id": 45,
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Tier-2 pinned-field verification",
+      "scores": {
+        "d": 4,
+        "b": 8,
+        "u": 7
+      },
+      "eff": 1.88,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "All fields the spec / reference impl require to pin are pinned",
+        "Pinning mismatch returns a distinct error (vs. HMAC mismatch)",
+        "Cross-validated against mpp-rs test vectors for both pass and fail paths",
+        "Unit + property tests for field-by-field divergence"
+      ],
+      "body": "Extend `MPP.Verifier` with explicit field-by-field pinning of the credential's echoed challenge against the live request — re-asserting realm, method, request, expires, and digest agree. Catches cross-realm or replayed-with-different-request attacks that HMAC alone validates because the HMAC happens to match.\n\nRead the current Tier-2 pattern in `refs/mpp-rs` (server-side charge path) at implementation time — the latest reference impl defines which fields must pin and how to surface mismatch errors. Match its semantics; let the Elixir shape follow `MPP.Verifier` conventions. Distinguish the pinning-mismatch error from the HMAC-mismatch error so callers can tell replay-attacks from corrupt credentials.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 46,
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Tempo + session hardening audit vs. latest reference impls",
+      "scores": {
+        "d": 5,
+        "b": 8,
+        "u": 7
+      },
+      "eff": 1.5,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Delta report listing each upstream fix vs. our equivalent (parity / partial / missing)",
+        "Targeted patches for missing fixes",
+        "Integration tests against Moderato testnet for each newly covered case",
+        "No regression in existing Tempo / session integration tests"
+      ],
+      "body": "Audit `MPP.Methods.Tempo`, the `MPP.Tempo.*` modules, and (when Phase 10 lands) session billing against the latest Tempo + session-channel hardening in mppx and mpp-rs. Read `refs/mppx` and `refs/mpp-rs` git logs + relevant src/ at pickup time to identify which fixes are not yet reflected in our Elixir impl.\n\nLikely areas (illustrative — confirm against latest refs at pickup): challenge-bound memo validation on pull transactions, raw-opaque byte-exact preservation through round-trip, expired-challenge rejection on both server and client, fee-payer sponsorship hardening, post-channel-close charge rejection, session-channel scoping to the active challenge, replayed-voucher rejection, fresh-deposit state preservation, broadcast-transaction memo validation, channel-locking during close, fee-payer approve-target validation, proof-signature-to-wallet binding.\n\nProduce a delta report (parity / partial / missing per upstream fix), then patch the gaps with targeted commits. Integration tests against Moderato testnet (and Phase 10 session vectors where applicable) for each newly covered case.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 47,
+      "phase": 12,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Client challenge ordering hook",
+      "scores": {
+        "d": 2,
+        "b": 4,
+        "u": 5
+      },
+      "eff": 2.25,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Configurable ordering callback on the HTTP transport",
+        "Default behavior unchanged (server-advertised order)",
+        "Multi-provider dispatch honors the reordered list",
+        "Unit tests covering: identity, reverse, filter-then-reorder, empty"
+      ],
+      "body": "When a server returns a multi-method 402, our client should let the consumer reorder the offered challenges before selection (e.g. prefer known/cheap methods first). Read the current hook surface in `refs/mppx/src/client/Mppx.ts` at pickup time to confirm the contract shape. Implement as a configurable callback on `MPP.Client.Transport.HTTP` (and the multi-provider dispatch path) — defaulting to server order if no callback is provided.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 48,
+      "phase": 17,
+      "bundle": "transport-ws",
+      "status": "pending",
+      "title": "WebSocket transport binding",
+      "scores": {
+        "d": 5,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.1,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Server-side WS adapter for JSON-RPC + payment challenges",
+        "Client-side `MPP.Client.Transport` impl for WS",
+        "Payment-required detection and credential attachment match reference framing",
+        "Retry/backoff posture matches upstream (no amplification)",
+        "Integration test against a stub or real WS endpoint"
+      ],
+      "body": "Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS with payment challenges riding on subscription handshakes, and a client-side `MPP.Client.Transport` impl for WS. Read the current WS transport in `refs/mpp-rs` (server-side WS handler and the `alloy-transport-mpp` crate) at implementation time to confirm framing, error codes, challenge placement, and retry/backoff semantics (upstream has hardened against retry amplification — match that posture).\n\nIntegrate cleanly with the existing `MPP.Client.Transport` behaviour from Task 33b. The server adapter should be transport-agnostic w.r.t. the underlying WS library (consumers bring their own — Cowboy, Bandit, etc.).\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 49,
+      "phase": 17,
+      "bundle": "transport-jsonrpc",
+      "status": "pending",
+      "title": "JSON-RPC transport (non-MCP)",
+      "scores": {
+        "d": 4,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 1.0,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "JSON-RPC request/response with payment challenges on the same channel",
+        "Error code shape matches spec + reference impls",
+        "Client-side `MPP.Client.Transport` impl",
+        "Server-side adapter usable from Plug"
+      ],
+      "body": "Bare JSON-RPC transport binding (non-MCP-framed) per the spec's transport section. Most consumers reach for MCP — this is for spec completeness and the rare consumer that wants JSON-RPC without MCP's tool/meta layer. Defer-tier; pull forward when first downstream asks.\n\nAt pickup time, read the bare-JSON-RPC transport adapters in `refs/mpp-rs` and `refs/mppx` (the non-MCP paths) plus the spec's transport section at `paymentauth.org` to confirm error codes and challenge placement.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 50,
+      "phase": 10,
+      "bundle": "session",
+      "status": "pending",
+      "title": "Tempo subscriptions",
+      "scores": {
+        "d": 6,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 0.92,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Subscription intent / receipt types",
+        "wallet_authorizeAccessKey integration matches reference impl",
+        "Fee-payer sponsored subscription path",
+        "Integration test against Moderato testnet"
+      ],
+      "body": "Defer-tier. Extend Phase 10 session work with Tempo subscription mode (recurring access-key authorization beyond single-channel session billing). Read `refs/mppx` Tempo subscription PRs and supporting `wallet_authorizeAccessKey` shape at pickup time to confirm the wire format and fee-payer integration. Pull forward only when a downstream consumer needs recurring payments — until then this stays low-Eff in the queue.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 51,
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "Hedera charge method",
+      "scores": {
+        "d": 6,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 0.67,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "MPP.Methods.Hedera implementing Method behaviour",
+        "Charge intent verification against Hedera network",
+        "Integration test against Hedera testnet"
+      ],
+      "body": "Defer-tier. Implement Hedera as the 8th charge method per `paymentauth.org` + `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. No reference-impl integration upstream yet — when picked up, cross-check against whichever SDK has added it (mppx / mpp-rs / pympp / mpp-go) at that point. Pull forward only when first consumer asks.\n",
+      "created_at": "2026-05-16",
+      "scored_at": "2026-05-16",
+      "cross_repo": []
+    },
+    {
+      "id": 52,
+      "phase": 2,
+      "bundle": "stripe",
+      "status": "pending",
+      "title": "Stripe Connect settlement options",
+      "scores": {
+        "d": 3,
+        "b": 6,
+        "u": 6
+      },
+      "eff": 2.0,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Challenge `method_details` carries Connect settlement fields per the latest discovery + Stripe method spec",
+        "Charge verification honors Connect routing (destination charge / direct charge / application fee)",
+        "Cross-validated against mppx's Stripe Connect output for an equivalent config",
+        "Integration test against Stripe test API using a Connect account"
+      ],
+      "body": "Extend `MPP.Methods.Stripe` with Stripe Connect settlement options (destination charge / direct charge / application fee routing). Read `paymentauth.org` Stripe charge spec + `refs/mpp-specs/specs/methods/stripe/` + the latest Stripe Connect handling in `refs/mppx` (search for `connect` / `settlement` in `src/methods/stripe/`) at implementation time — the spec and reference impl define which fields land in `methodDetails` and how the server routes the resulting PaymentIntent. Wire the `method_config` knobs for server-side Connect credentials separately from public `method_details`.\n",
+      "created_at": "2026-05-27",
+      "scored_at": "2026-05-27",
+      "cross_repo": []
+    },
+    {
+      "id": 53,
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Payment event hooks (server-side observability surface)",
+      "scores": {
+        "d": 3,
+        "b": 5,
+        "u": 6
+      },
+      "eff": 1.83,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Telemetry events emitted at challenge / verify-start / verify-ok / verify-fail / receipt boundaries",
+        "Event shape carries enough context for metrics + tracing without leaking credentials",
+        "Event names + payload keys follow Elixir telemetry conventions (`[:mpp, :challenge | :verify | :receipt]`)",
+        "Cross-checked against the latest payment-event-hooks surface in reference SDKs",
+        "Unit test asserts each event fires exactly once on the happy and sad paths"
+      ],
+      "body": "Add a server-side observability surface — payment event hooks consumers can attach to for metrics, logging, and tracing. Read `refs/mpp-rs` (the payment event hooks extension) + the latest mppx event surface at pickup time to confirm which boundaries warrant events and what context they carry; mirror those semantics on top of standard Elixir `:telemetry`. Events must be safe to log — no raw credentials in payloads, only IDs and high-level outcomes. This is purely additive; no behavior change on the verify path.\n",
+      "created_at": "2026-05-27",
+      "scored_at": "2026-05-27",
+      "cross_repo": []
+    },
+    {
+      "id": 54,
+      "phase": 4,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Tempo store key prefixes (multi-tenant dedup)",
+      "scores": {
+        "d": 2,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 2.0,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "`MPP.Tempo.Store` behaviour (and `ConCacheStore` impl) accept a configurable key prefix",
+        "Default behavior unchanged when no prefix configured",
+        "Cross-tenant key collisions impossible when prefixes differ",
+        "Unit test: same tx hash under two prefixes treated as independent"
+      ],
+      "body": "Multi-tenant ergonomics for the Tempo dedup store — let consumers namespace dedup keys with a configurable prefix so two endpoints sharing a single store don't collide on identical tx hashes. Read the latest mppx Tempo store key-prefix pattern in `refs/mppx` (look in the proxy/tempo store code) at pickup time. Wire prefix through `MPP.Tempo.Store` behaviour and `MPP.Tempo.ConCacheStore` impl; default is no prefix (backward compatible).\n",
+      "created_at": "2026-05-27",
+      "scored_at": "2026-05-27",
+      "cross_repo": []
+    },
+    {
+      "id": 55,
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Hash credential type audit + spec backfill",
+      "scores": {
+        "d": 2,
+        "b": 5,
+        "u": 5
+      },
+      "eff": 2.5,
+      "dep_layer": 0,
+      "markers": [],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Audit confirms whether `MPP.Credential` already supports the `hash` credential type per latest spec",
+        "If missing: parse / serialize / verify path for `hash` credentials added",
+        "Cross-validated against mppx + mpp-rs `hash` credential test vectors",
+        "Negative tests cover malformed and method-incompatible hash credentials"
+      ],
+      "body": "Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a \"parity confirmed\" note; if not, add the parse / serialize / verify path.\n",
+      "created_at": "2026-05-27",
+      "scored_at": "2026-05-27",
       "cross_repo": []
     }
   ]

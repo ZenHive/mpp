@@ -6,15 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @~/.claude/includes/critical-rules.md
 @~/.claude/includes/worktree-workflow.md
 
-@~/.claude/includes/delegation.md
 @~/.claude/includes/task-prioritization.md
 @~/.claude/includes/task-writing.md
 @~/.claude/includes/rmap.md
 @~/.claude/includes/web-command.md
 @~/.claude/includes/code-style.md
 @~/.claude/includes/development-philosophy.md
-@~/.claude/includes/agent-economy.md
-@~/.claude/includes/elixir-setup.md
 @~/.claude/includes/development-commands.md
 @~/.claude/includes/ex-unit-json.md
 @~/.claude/includes/dialyzer-json.md

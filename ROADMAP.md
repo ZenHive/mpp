@@ -15,7 +15,7 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (4 of 7 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (4 of 10 done · 0 in progress)
 
 **Last shipped:** no recent shipments
 
@@ -29,7 +29,7 @@
 > 8 tasks complete (v0.1.0). Challenge, Credential, Receipt, Headers, Errors, Charge intent, Method behaviour, Plug middleware.
 
 <!-- TASKS:BEGIN phase=1 -->
-> 8 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-1-core-protocol).
+> 9 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-1-core-protocol).
 <!-- TASKS:END -->
 
 ---
@@ -39,7 +39,7 @@
 > 2 tasks complete (v0.1.0). Stripe SPT verification + integration tests against Stripe test API.
 
 <!-- TASKS:BEGIN phase=2 -->
-> 2 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-2-stripe-payment-method).
+> 3 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-2-stripe-payment-method).
 <!-- TASKS:END -->
 
 ---
@@ -53,7 +53,7 @@
 |------|--------|-------|
 | Task 11 | ✅ | 🎁 **descripex** · Descripex annotations [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
-| Task 42 `[P]` | ⬜ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:6/U:7 → Eff:1.62?] 🚀 |
+| Task 42 `[P]` | ⬜ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:7/U:8 → Eff:1.88?] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -63,7 +63,7 @@
 > 8 tasks complete (v0.2.0). Hash + transaction credential paths, fee payer co-signing, optimistic broadcast, dedup store, ConCacheStore, integration tests against Moderato testnet, ox/tempo cross-validation.
 
 <!-- TASKS:BEGIN phase=4 -->
-> 4 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-4-tempo-payment-method).
+> 5 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-4-tempo-payment-method).
 <!-- TASKS:END -->
 
 ---
@@ -121,6 +121,9 @@
 | Task 34 | ✅ | 🎁 **utilities** · Verifier extraction + JCS [D:4/B:9/U:10 → Eff:2.38?] 🎯 |
 | Task 35 `[P]` | ⬜ | 🎁 **utilities** · Generic dedup at Plug level [D:3/B:7/U:7 → Eff:2.33?] 🎯 |
 | Task 37 `[P]` | ⬜ | 🎁 **utilities** · Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
+| Task 45 | ⬜ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88] 🚀 |
+| Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5] 🚀 |
+| Task 53 | ⬜ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -137,6 +140,7 @@
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
 | Task 30 | ⬜ | 🎁 **session** · Channel state and voucher types [D:5/B:6/U:7 → Eff:1.3?] 📋 |
 | Task 31 | ⬜ | 🎁 **session** · Session credential actions [D:5/B:6/U:6 → Eff:1.2?] 📋 |
+| Task 50 | ⬜ | 🎁 **session** · Tempo subscriptions [D:6/B:6/U:5 → Eff:0.92] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -166,6 +170,7 @@
 | Task 33c | ⬜ | 🎁 **client-sdk** · Payment-aware Req plugin [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
 | Task 33d | ⬜ | 🎁 **client-sdk** · MCP client transport [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
 | Task 33e | ⬜ | 🎁 **client-sdk** · Built-in charge providers [D:6/B:8/U:9 → Eff:1.42?] 📋 |
+| Task 47 | ⬜ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -223,6 +228,7 @@
 | Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:5/U:6 → Eff:0.79?] ⚠️ |
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:7/U:7 → Eff:1.0?] 📋 |
 | Task 40 | ⬜ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:5/U:5 → Eff:0.83?] ⚠️ |
+| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67] ⚠️ |
 <!-- TASKS:END -->
 
 ---
