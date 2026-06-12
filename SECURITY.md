@@ -1,0 +1,38 @@
+# Security Policy
+
+## Supported Versions
+
+MPP is pre-1.0 and under active development. Security fixes are applied to the
+latest released `0.x` version on Hex and the `main` branch.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.5.x   | :white_check_mark: |
+| < 0.5   | :x:                |
+
+## Reporting a Vulnerability
+
+**Please do not report security vulnerabilities through public GitHub issues,
+discussions, or pull requests.**
+
+Report privately through **GitHub Private Vulnerability Reporting**: open the
+[Security tab](https://github.com/ZenHive/mpp/security) and click
+**"Report a vulnerability"**. This keeps the report private and lets us
+collaborate on a fix and a coordinated disclosure.
+
+Please include, where applicable:
+
+- The affected module, version, or commit.
+- A description of the vulnerability and its impact.
+- Steps to reproduce, a proof-of-concept, or a failing test.
+- Any suggested remediation.
+
+## What to Expect
+
+- **Acknowledgement** within 5 business days.
+- An assessment and, if confirmed, a target timeline for a fix.
+- Credit in the release notes / advisory once a fix ships, unless you prefer to
+  remain anonymous.
+
+We follow coordinated disclosure: please give us a reasonable window to release
+a fix before any public discussion.
