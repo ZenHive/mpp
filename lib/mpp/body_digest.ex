@@ -47,6 +47,7 @@ defmodule MPP.BodyDigest do
     @digest_prefix <> Base.encode64(hash, padding: false)
   end
 
+  @spec compute(map()) :: String.t()
   def compute(body) when is_map(body) do
     body
     |> Jason.encode!()

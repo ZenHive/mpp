@@ -145,6 +145,8 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
+  @impl MPP.Method
+  @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
     memo = config["memo"]
@@ -176,6 +178,8 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
+  @impl MPP.Method
+  @spec verify(map(), Charge.t()) :: {:error, Errors.t()}
   def verify(_payload, %Charge{}) do
     {:error, Errors.new(:invalid_payload, ~s(Missing or invalid 'type' field — expected "hash" or "transaction"))}
   end

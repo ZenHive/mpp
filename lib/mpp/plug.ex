@@ -107,6 +107,13 @@ defmodule MPP.Plug do
     defstruct [:secret_key, :realm, :method_entries, :expires_in, :opaque]
   end
 
+  @doc """
+  Builds validated plug configuration from options at init time.
+
+  Normalizes single- or multi-method opts into a `%Config{}` with one
+  `MethodEntry` per accepted payment method. Raises on missing required
+  options or duplicate method names.
+  """
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
@@ -191,6 +198,14 @@ defmodule MPP.Plug do
     end
   end
 
+  @doc """
+  Runs the MPP 402 payment handshake for the current request.
+
+  Returns `402` with fresh challenges when no valid credential is present;
+  halts with an RFC 9457 problem body on verification failure; otherwise
+  passes the connection through with `:mpp_receipt` assigned and a
+  `Payment-Receipt` response header.
+  """
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
   def call(conn, %Config{} = config) do

@@ -100,6 +100,7 @@ defmodule MPP.Intents.Charge do
     )
   end
 
+  @spec from_request(term()) :: {:error, :missing_required_fields}
   def from_request(_), do: {:error, :missing_required_fields}
 
   # Validates that amount is a non-empty string. Numeric validation is intentionally

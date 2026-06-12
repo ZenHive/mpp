@@ -51,7 +51,10 @@ defmodule MPP.Amount do
   end
 
   # Boundary validation: amount must be binary, decimals must be non-negative integer
+  @spec parse_units(term(), term()) :: {:error, :invalid_input}
   def parse_units(amount, _decimals) when not is_binary(amount), do: {:error, :invalid_input}
+
+  @spec parse_units(term(), term()) :: {:error, :invalid_input}
   def parse_units(_amount, decimals) when not is_integer(decimals) or decimals < 0, do: {:error, :invalid_input}
 
   api(:with_base_units, "Apply parse_units to any intent struct's amount field.",
@@ -112,6 +115,7 @@ defmodule MPP.Amount do
   end
 
   # Boundary validation: input must be binary, decimals must be non-negative integer
+  @spec parse_dollar_amount(term(), term()) :: {:error, :invalid_input}
   def parse_dollar_amount(_input, _decimals), do: {:error, :invalid_input}
 
   # Extracts currency symbol/code and amount from input — returns {amount_str, currency} only.

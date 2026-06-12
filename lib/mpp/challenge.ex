@@ -89,6 +89,7 @@ defmodule MPP.Challenge do
     end
   end
 
+  @spec verify(t(), String.t()) :: {:error, :invalid_challenge}
   def verify(%__MODULE__{id: nil}, _secret_key), do: {:error, :invalid_challenge}
 
   # Computes the HMAC-SHA256 challenge ID from 7 fixed positional slots.

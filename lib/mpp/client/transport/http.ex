@@ -34,6 +34,8 @@ defmodule MPP.Client.Transport.HTTP do
   @impl Transport
   @spec payment_required?(Req.Response.t()) :: boolean()
   def payment_required?(%Req.Response{status: 402}), do: true
+
+  @spec payment_required?(Req.Response.t()) :: false
   def payment_required?(%Req.Response{}), do: false
 
   api(:get_challenges, "Parse the Payment challenges from a 402 response's WWW-Authenticate headers.",

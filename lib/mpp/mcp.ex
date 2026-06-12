@@ -112,8 +112,10 @@ defmodule MPP.Mcp do
     credential_from_map(cred_map)
   end
 
+  @spec extract_credential(map()) :: {:error, :invalid_credential}
   def extract_credential(%{"_meta" => %{@credential_meta_key => _}}), do: {:error, :invalid_credential}
 
+  @spec extract_credential(map()) :: {:error, :no_credential}
   def extract_credential(%{}), do: {:error, :no_credential}
 
   api(
@@ -138,6 +140,7 @@ defmodule MPP.Mcp do
     payment_required_error([challenge])
   end
 
+  @spec payment_required_error([Challenge.t()]) :: map()
   def payment_required_error(challenges) when is_list(challenges) do
     %{
       "code" => @payment_required_code,
@@ -175,6 +178,7 @@ defmodule MPP.Mcp do
     verification_failed_error([challenge], problem)
   end
 
+  @spec verification_failed_error([Challenge.t()], Errors.t()) :: map()
   def verification_failed_error(challenges, %Errors{} = problem) when is_list(challenges) do
     %{
       "code" => @verification_failed_code,
@@ -224,6 +228,8 @@ defmodule MPP.Mcp do
 
   @spec payment_required?(map()) :: boolean()
   def payment_required?(%{"code" => @payment_required_code}), do: true
+
+  @spec payment_required?(map()) :: false
   def payment_required?(%{}), do: false
 
   api(
@@ -250,9 +256,13 @@ defmodule MPP.Mcp do
     end
   end
 
+  @spec extract_challenges(map()) :: {:error, :no_challenges}
   def extract_challenges(%{"data" => %{"challenges" => []}}), do: {:error, :no_challenges}
+
+  @spec extract_challenges(map()) :: {:error, :invalid_challenge}
   def extract_challenges(%{"data" => %{"challenges" => _}}), do: {:error, :invalid_challenge}
 
+  @spec extract_challenges(map()) :: {:error, :no_challenges}
   def extract_challenges(%{}), do: {:error, :no_challenges}
 
   api(

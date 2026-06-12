@@ -98,9 +98,11 @@ defmodule MPP.Method do
     quote do
       @behaviour MPP.Method
 
+      @spec challenge_method_details(MPP.Intents.Charge.t()) :: map() | nil
       @impl MPP.Method
       def challenge_method_details(_charge), do: nil
 
+      @spec validate_config!(map()) :: :ok
       @impl MPP.Method
       def validate_config!(_config), do: :ok
 

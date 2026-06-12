@@ -87,8 +87,17 @@ defmodule MPP.Tempo.ConCacheStore do
   end
 
   @impl Store
+  @doc """
+  Looks up a dedup key in the default ConCache.
+  """
+  @spec get(String.t()) :: {:ok, term()} | :not_found
   def get(key), do: get(key, [])
 
+  @doc """
+  Looks up a dedup key, optionally using a non-default ConCache name from opts.
+
+  Same as `get/1` when `opts` is `[]`.
+  """
   @spec get(String.t(), keyword()) :: {:ok, term()} | :not_found
   def get(key, opts) do
     case ConCache.get(cache_name(opts), key) do
@@ -98,8 +107,17 @@ defmodule MPP.Tempo.ConCacheStore do
   end
 
   @impl Store
+  @doc """
+  Stores a dedup key in the default ConCache.
+  """
+  @spec put(String.t(), term()) :: :ok
   def put(key, value), do: put(key, value, [])
 
+  @doc """
+  Stores a dedup key, optionally using a non-default ConCache name from opts.
+
+  Same as `put/2` when `opts` is `[]`.
+  """
   @spec put(String.t(), term(), keyword()) :: :ok
   def put(key, value, opts) do
     ConCache.put(cache_name(opts), key, value)
@@ -107,8 +125,17 @@ defmodule MPP.Tempo.ConCacheStore do
   end
 
   @impl Store
+  @doc """
+  Atomically reserves a dedup key in the default ConCache.
+  """
+  @spec check_and_mark(String.t(), term()) :: :ok | {:error, :already_exists}
   def check_and_mark(key, value), do: check_and_mark(key, value, [])
 
+  @doc """
+  Atomically reserves a dedup key, optionally using a non-default ConCache name from opts.
+
+  Same as `check_and_mark/2` when `opts` is `[]`.
+  """
   @spec check_and_mark(String.t(), term(), keyword()) :: :ok | {:error, :already_exists}
   def check_and_mark(key, value, opts) do
     cache_name = cache_name(opts)
