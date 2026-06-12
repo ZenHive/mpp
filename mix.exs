@@ -66,17 +66,16 @@ defmodule MPP.MixProject do
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
-      {:onchain, "~> 0.7.0"},
+      {:onchain, "~> 0.8"},
 
       # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.2.2"},
+      {:onchain_tempo, "~> 0.3"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
 
       # Self-describing APIs
-      # Pinned to 0.7.x: onchain ~> 0.7.0 requires descripex ~> 0.7.0; can't bump until onchain moves
-      {:descripex, "~> 0.7.0"}
+      {:descripex, "~> 0.9"}
     ]
   end
 

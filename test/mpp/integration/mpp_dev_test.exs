@@ -103,7 +103,7 @@ defmodule MPP.Integration.MppDevTest do
       {:ok, charge} = decode_charge_request(challenge)
 
       assert %Charge{} = charge
-      assert is_binary(charge.amount) and byte_size(charge.amount) > 0
+      assert byte_size(charge.amount) > 0
       assert is_binary(charge.currency) and byte_size(charge.currency) > 0
     end
 

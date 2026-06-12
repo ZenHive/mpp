@@ -8,7 +8,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
-Dependency updates. Runtime: `req ~> 0.5.17` → `~> 0.6.1` (cascades transitive `finch ~> 0.17` → `~> 0.21/0.22`; MPP uses only the stable `Req.request/2` + `Req.Response`/`Req.Request` surface, no code changes). Dev/test JS tooling moved as a set now that quickbeam relaxed its constraints: `quickbeam 0.10.5` → `0.10.15`, `oxc ~> 0.13.0` → `~> 0.15.1`, `npm ~> 0.6.1` → `~> 0.7.4`; `ex_unit_json ~> 0.4.3` → `~> 0.5.0`; dev-only `bandit ~> 1.11.1` → `~> 1.12.0`. `descripex` held at `~> 0.7.0` — `onchain 0.7.0` (latest) still requires `~> 0.7`, so 0.9 is blocked until onchain moves. Compile clean under `--warnings-as-errors`; 599 offline tests green, integration suite green.
+Dependency updates. Runtime: `req ~> 0.5.17` → `~> 0.6.1` (cascades transitive `finch ~> 0.17` → `~> 0.21/0.22`; MPP uses only the stable `Req.request/2` + `Req.Response`/`Req.Request` surface, no code changes). Dev/test JS tooling moved as a set now that quickbeam relaxed its constraints: `quickbeam 0.10.5` → `0.10.15`, `oxc ~> 0.13.0` → `~> 0.15.1`, `npm ~> 0.6.1` → `~> 0.7.4`; `ex_unit_json ~> 0.4.3` → `~> 0.5.0`; dev-only `bandit ~> 1.11.1` → `~> 1.12.0`.
+
+On-chain stack advanced to the descripex-0.9 line: `descripex ~> 0.7.0` → `~> 0.9`, `onchain ~> 0.7.0` → `~> 0.8`, `onchain_tempo ~> 0.2.2` → `~> 0.3`. This required moving the whole ZenHive on-chain family (descripex, cartouche, onchain, onchain_tempo) together — descripex 0.8/0.9 add spec-derived JSON Schema and are additive, but descripex **0.9.1** was cut alongside to fix a `safe_convert` crash (it only rescued `ArgumentError`, so real-world specs like Cartouche's `%{required(non_neg_integer()) => <<_::256>>}` aborted the manifest/`describe` build with an uncaught `CaseClauseError`); cartouche 0.3.0 and onchain 0.8.0 relaxed their own descripex/hieroglyph floors to match. Compile clean under `--warnings-as-errors`; 601 offline tests green against the full updated chain, integration suite green.
 
 ## [0.5.1] - 2026-06-09
 
