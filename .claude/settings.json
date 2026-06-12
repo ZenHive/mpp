@@ -1,12 +1,13 @@
 {
   "extraKnownMarketplaces": {
-    "deltahedge": {
-      "source": { "source": "github", "repo": "ZenHive/claude-marketplace-elixir" }
+    "zenhive": {
+      "source": { "source": "github", "repo": "ZenHive/claude-marketplace" }
     }
   },
   "enabledPlugins": {
-    "elixir@deltahedge": true,
-    "elixir-workflows@deltahedge": true
+    "elixir@zenhive": true,
+    "elixir-volt@zenhive": true,
+    "elixir-workflows@zenhive": true
   },
   "hooks": {
     "SessionStart": [

@@ -2,9 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-@~/.claude/includes/across-instances.md
 @~/.claude/includes/critical-rules.md
-@~/.claude/includes/worktree-workflow.md
+@~/.claude/includes/harness-workflow.md
 
 @~/.claude/includes/task-prioritization.md
 @~/.claude/includes/task-writing.md
@@ -47,6 +46,15 @@ mix mpp.demo               # start demo server on port 4402 (--port to override)
 mix format                 # auto-format (Styler runs as plugin)
 mix docs                   # generate ExDoc
 ```
+
+## Toolchain & check commands
+
+For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's Claude Code hooks or skills:
+
+- **Canonical gate:** `mix precommit.full` — runs format-check, compile (warnings-as-errors), credo `--strict`, doctor, the test+cover gate (95% — MPP is critical-tier: money, signing, wire-format encoding), sobelow, and dialyzer. `mix precommit` is the same minus dialyzer; `mix check.fast` is the seconds-long inner-loop (format + compile + credo).
+- **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
+- When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
+- Integration tests (`:integration` tag) are excluded from the gate — they need live testnet/Stripe credentials. Run explicitly with `mix test.json --include integration`.
 
 ## Architecture
 

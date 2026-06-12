@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.5.1"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -42,43 +42,41 @@ defmodule MPP.MixProject do
     [
       {:plug, "~> 1.19.2"},
       {:jason, "~> 1.4.5"},
-      {:req, "~> 0.5.17"},
+      {:req, "~> 0.6.1"},
 
       # Dev/test tooling
       {:ex_doc, "~> 0.40.2", only: :dev, runtime: false},
       {:styler, "~> 1.11.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4.7", only: [:dev, :test], runtime: false},
-      # TODO: bump doctor to 0.23.0 once onchain (and transitive decimal ~> 2.0) catches up to decimal ~> 3.1
-      {:doctor, "~> 0.22.0", only: [:dev, :test], runtime: false},
+      {:doctor, "~> 0.23.0", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
-      {:ex_unit_json, "~> 0.4.3", only: [:dev, :test], runtime: false},
+      {:ex_unit_json, "~> 0.5.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.5.6", only: :dev},
-      {:bandit, "~> 1.11.1", only: :dev},
+      {:bandit, "~> 1.12.0", only: :dev},
 
       # Code analysis tools
       {:ex_dna, "~> 1.5.1", only: [:dev, :test], runtime: false},
       {:ex_ast, "~> 0.12.0", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
-      # TODO: bump quickbeam to 0.10.12 (and npm to 0.7.x) once upstream relaxes its oxc ~> 0.12.1 constraint
-      # quickbeam 0.10.5 pins npm ~> 0.6.0, so npm stays on 0.6.x until quickbeam moves
-      {:quickbeam, "~> 0.10.5", only: [:dev, :test], runtime: false},
-      {:oxc, "~> 0.13.0", only: [:dev, :test], runtime: false},
-      {:npm, "~> 0.6.1", only: [:dev, :test], runtime: false},
+      {:quickbeam, "~> 0.10.15", only: [:dev, :test], runtime: false},
+      {:oxc, "~> 0.15.1", only: [:dev, :test], runtime: false},
+      {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
-      {:onchain, "~> 0.5.4"},
+      {:onchain, "~> 0.7.0"},
 
       # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.2.1"},
+      {:onchain_tempo, "~> 0.2.2"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
 
       # Self-describing APIs
-      {:descripex, "~> 0.6.0"}
+      # Pinned to 0.7.x: onchain ~> 0.7.0 requires descripex ~> 0.7.0; can't bump until onchain moves
+      {:descripex, "~> 0.7.0"}
     ]
   end
 
@@ -137,7 +135,27 @@ defmodule MPP.MixProject do
     [
       tidewave: [
         "run --no-halt -e 'Agent.start(fn -> Bandit.start_link(plug: Tidewave, port: 4008) end)'"
-      ]
+      ],
+      # Fast inner-loop gate — seconds. Run after meaningful edits.
+      "check.fast": [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "credo --strict --ignore TagTODO,TagFIXME"
+      ],
+      # Manual / pre-handoff gate (NOT run by the commit hook). 95% cover —
+      # MPP handles money, signing, and wire-format encoding (critical tier).
+      precommit: [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "credo --strict --ignore TagTODO,TagFIXME",
+        "doctor --raise",
+        # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV explicitly.
+        "cmd MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration",
+        # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
+        "sobelow --skip"
+      ],
+      # CI mirror — adds dialyzer.
+      "precommit.full": ["precommit", "dialyzer.json --quiet"]
     ]
   end
 

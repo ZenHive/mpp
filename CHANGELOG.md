@@ -8,6 +8,12 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+Dependency updates. Runtime: `req ~> 0.5.17` → `~> 0.6.1` (cascades transitive `finch ~> 0.17` → `~> 0.21/0.22`; MPP uses only the stable `Req.request/2` + `Req.Response`/`Req.Request` surface, no code changes). Dev/test JS tooling moved as a set now that quickbeam relaxed its constraints: `quickbeam 0.10.5` → `0.10.15`, `oxc ~> 0.13.0` → `~> 0.15.1`, `npm ~> 0.6.1` → `~> 0.7.4`; `ex_unit_json ~> 0.4.3` → `~> 0.5.0`; dev-only `bandit ~> 1.11.1` → `~> 1.12.0`. `descripex` held at `~> 0.7.0` — `onchain 0.7.0` (latest) still requires `~> 0.7`, so 0.9 is blocked until onchain moves. Compile clean under `--warnings-as-errors`; 599 offline tests green, integration suite green.
+
+## [0.5.1] - 2026-06-09
+
+Dependency updates. Bumped the onchain stack to the 0.7.0 line: `onchain ~> 0.5.4` → `~> 0.7.0`, `onchain_tempo ~> 0.2.1` → `~> 0.2.2`, `descripex ~> 0.6.0` → `~> 0.7.0`. onchain 0.7.0 cascades a major `decimal` `2.4.1` → `3.1.1` jump (transitive only — MPP has no direct `Decimal` use) and pulls `cartouche 0.2.2`. Dev-tool `doctor` advanced `~> 0.22` → `~> 0.23` (0.23 requires `decimal ~> 3.1`, unblocked by the jump). No library code changes — compile clean under `--warnings-as-errors`, 601 offline tests green.
+
 ## [0.5.0] - 2026-05-15
 
 Tempo session-receipt support and a client-side HTTP transport. Tempo integration tests now use `Onchain.Tempo.Faucet` for per-test fresh wallets instead of hardcoded keys, removing nonce coupling and unblocking a future move to async tests. `MPP.Client.Transport` behaviour with an HTTP implementation lands as the client-side counterpart to server-side `MPP.Method`, exposing a `select_challenge/2` helper that Task 33c (Req plugin) and Task 33d (MCP) will reuse. Dependency floors tightened: `onchain ~> 0.5`, `onchain_tempo ~> 0.2`. A second cross-SDK gap pass added Tasks 36–42 (Stellar Charge, Accept-Payment, EVM `credentialTypes`/Permit2/EIP-3009, Tempo SessionReceipt, OpenAPI discovery) to the roadmap.
