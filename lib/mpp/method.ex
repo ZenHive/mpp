@@ -94,6 +94,7 @@ defmodule MPP.Method do
   @optional_callbacks [challenge_method_details: 1, validate_config!: 1]
 
   @doc false
+  @spec __using__(term()) :: Macro.t()
   defmacro __using__(_opts) do
     quote do
       @behaviour MPP.Method

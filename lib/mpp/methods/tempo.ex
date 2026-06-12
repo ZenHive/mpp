@@ -400,8 +400,8 @@ defmodule MPP.Methods.Tempo do
   # The pre-broadcast reserve_hash_atomic is the critical gate; this is
   # supplementary protection against hash malleability.
   # Uses both rescue (exceptions) and catch (process exits from dead Agents/GenServers).
-  # TODO: Replace Logger.warning with :telemetry.execute/3 when adding telemetry
-  # events for the full verify lifecycle (e.g. [:mpp, :tempo, :store, :error]).
+  # Task 53 tracks replacing Logger.warning with :telemetry.execute/3 as part
+  # of full verify lifecycle telemetry, e.g. [:mpp, :tempo, :store, :error].
   defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
 
   defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
