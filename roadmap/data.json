@@ -920,7 +920,7 @@
         "Store behaviour with ETS-backed default implementation",
         "Cross-validated channel IDs against mppx Channel.ts"
       ],
-      "body": "Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. Action values are camelCase in JSON (`\"open\"` / `\"topUp\"` / `\"voucher\"` / `\"close\"`); use snake_case only for Elixir atoms.\n",
+      "body": "Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. Action values are camelCase in JSON (`\"open\"` / `\"topUp\"` / `\"voucher\"` / `\"close\"`); use snake_case only for Elixir atoms.\n\nNote 2026-06-12: mpp-rs landed TIP-1034 session client primitives including precompile-backed voucher support (#288, commit 0d57f96) — the production-path successor to the contract-backed v1 channel. At pickup, read `refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs` and `refs/mpp-rs/src/client/tempo/session/` to decide whether to model v1 (contract) and v2 (precompile) voucher types together or stage v2 as a follow-up.\n",
       "cross_repo": []
     },
     {
@@ -1088,6 +1088,7 @@
         "Uses MPP.Mcp constants and types",
         "Handles payment-required error detection",
         "Credential attachment to request params",
+        "Approval-callback hook invoked before paying (parallels mppx #522 McpClient approval callbacks; read refs/mppx/src/mcp-sdk/client/McpClient.ts at pickup)",
         "Unit tests with mock JSON-RPC exchanges"
       ],
       "body": "Add `MPP.Client.Transport.MCP` implementing the Transport behaviour for JSON-RPC messages. `payment_required?/1` checks error code -32042. `get_challenges/1` extracts from `error.data.challenges`. `set_credential/2` inserts into `params._meta[\"org.paymentauth/credential\"]`. Uses types from Task 32 (`MPP.Mcp`).\n",
@@ -1325,7 +1326,7 @@
         "Integration tests against Moderato testnet for each newly covered case",
         "No regression in existing Tempo / session integration tests"
       ],
-      "body": "Audit `MPP.Methods.Tempo`, the `MPP.Tempo.*` modules, and (when Phase 10 lands) session billing against the latest Tempo + session-channel hardening in mppx and mpp-rs. Read `refs/mppx` and `refs/mpp-rs` git logs + relevant src/ at pickup time to identify which fixes are not yet reflected in our Elixir impl.\n\nLikely areas (illustrative — confirm against latest refs at pickup): challenge-bound memo validation on pull transactions, raw-opaque byte-exact preservation through round-trip, expired-challenge rejection on both server and client, fee-payer sponsorship hardening, post-channel-close charge rejection, session-channel scoping to the active challenge, replayed-voucher rejection, fresh-deposit state preservation, broadcast-transaction memo validation, channel-locking during close, fee-payer approve-target validation, proof-signature-to-wallet binding.\n\nProduce a delta report (parity / partial / missing per upstream fix), then patch the gaps with targeted commits. Integration tests against Moderato testnet (and Phase 10 session vectors where applicable) for each newly covered case.\n",
+      "body": "Audit `MPP.Methods.Tempo`, the `MPP.Tempo.*` modules, and (when Phase 10 lands) session billing against the latest Tempo + session-channel hardening in mppx and mpp-rs. Read `refs/mppx` and `refs/mpp-rs` git logs + relevant src/ at pickup time to identify which fixes are not yet reflected in our Elixir impl.\n\nLikely areas (illustrative — confirm against latest refs at pickup): challenge-bound memo validation on pull transactions, raw-opaque byte-exact preservation through round-trip, expired-challenge rejection on both server and client, fee-payer sponsorship hardening, post-channel-close charge rejection, session-channel scoping to the active challenge, replayed-voucher rejection, fresh-deposit state preservation, broadcast-transaction memo validation, channel-locking during close, fee-payer approve-target validation, proof-signature-to-wallet binding.\n\nProduce a delta report (parity / partial / missing per upstream fix), then patch the gaps with targeted commits. Integration tests against Moderato testnet (and Phase 10 session vectors where applicable) for each newly covered case.\n\nConcrete upstream deltas found 2026-06-12 (confirm still-current at pickup): externalId explicitly added to PaymentWitness (mpp-specs #266 — verify our `MPP.Methods.Tempo.SessionReceipt` wire format includes it); fee-payer token allowlist (mpp-rs #286); client-side Tempo chain pinning (mpp-rs 8880cf7 — overlaps Task 45); `Store::put_if_absent` atomic-CAS semantics vs our `check_and_mark` (mpp-rs #280 — confirm our ConCacheStore atomicity matches); Stripe charge externalId binding fix (mppx #537 — also touches `MPP.Methods.Stripe`); hosted Tempo fee-payer fills (mppx #538).\n",
       "created_at": "2026-05-16",
       "scored_at": "2026-05-16",
       "cross_repo": []
@@ -1563,6 +1564,101 @@
       "body": "Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a \"parity confirmed\" note; if not, add the parse / serialize / verify path.\n",
       "created_at": "2026-05-27",
       "scored_at": "2026-05-27",
+      "cross_repo": []
+    },
+    {
+      "id": "56",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "GitHub Actions CI workflow",
+      "scores": {
+        "d": 3,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 2.33,
+      "dep_layer": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "claude",
+      "acceptance_criteria": [
+        "Green workflow run on push/PR to development and main",
+        "Runs format-check, warnings-as-errors compile, non-integration tests, credo strict, dialyzer, sobelow, doctor",
+        "Dependency and PLT caching keyed on mix.lock",
+        "Integration-tagged tests excluded by default"
+      ],
+      "out_of_scope": [
+        "Release/publish automation",
+        "Integration tests requiring live credentials in CI"
+      ],
+      "body": "Add a GitHub Actions workflow at .github/workflows/ci.yml running the project's check stack on push and PR to development and main: mix format --check-formatted, compile with --warnings-as-errors, mix test.json excluding :integration, credo --strict, dialyzer (with cached PLTs), sobelow, and doctor. Cache deps, _build, and the dialyzer PLTs keyed on mix.lock. The repo currently has no CI at all — this is the single largest automation gap. Integration tests stay excluded by default (they need Moderato/Stripe/Sepolia credentials); leave a commented opt-in job or note for a credentialed integration run.",
+      "created_at": "2026-06-12",
+      "scored_at": "2026-06-12",
+      "cross_repo": []
+    },
+    {
+      "id": "57",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Unit tests for MultiProvider and ConCacheStore",
+      "scores": {
+        "d": 2,
+        "b": 5,
+        "u": 6
+      },
+      "eff": 2.75,
+      "dep_layer": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "claude",
+      "acceptance_criteria": [
+        "multi_provider_test.exs covers first-match, no-match, and config pass-through",
+        "con_cache_store_test.exs covers get/put, TTL expiry, check_and_mark atomicity",
+        "Both modules reach the standard 80% coverage tier",
+        "Tests fail loudly on unexpected outcomes (no assert-true-on-error)"
+      ],
+      "body": "Close the two direct-unit-test gaps surfaced in the 2026-06-12 health review. Add test/mpp/client/multi_provider_test.exs covering MPP.Client.MultiProvider first-match routing across [{module, config}] entries, the no-match path, and config pass-through to the chosen provider. Add test/mpp/tempo/con_cache_store_test.exs covering MPP.Tempo.ConCacheStore get/put, TTL expiry, and check_and_mark atomicity (the atomic dedup path). Both modules currently have zero direct tests; adding them also satisfies the coverage-before-mutating gate for any future change to either.",
+      "created_at": "2026-06-12",
+      "scored_at": "2026-06-12",
+      "cross_repo": []
+    },
+    {
+      "id": "58",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Public API @doc + missing @spec pass",
+      "scores": {
+        "d": 3,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 1.33,
+      "dep_layer": 0,
+      "markers": [
+        "docs"
+      ],
+      "depends_on": [],
+      "assignee": "claude",
+      "acceptance_criteria": [
+        "@doc on all listed modules' public functions",
+        "All missing @spec annotations filled (def and defp per project mandate)",
+        "mix doctor passes with raised doc coverage",
+        "No IO in @doc examples"
+      ],
+      "out_of_scope": [
+        "Behavior changes",
+        "Refactoring beyond doc/spec additions"
+      ],
+      "body": "Documentation pass flagged by the 2026-06-12 health review: most public functions carry @moduledoc but no per-function @doc. Add @doc to public functions across amount.ex, body_digest.ex, challenge.ex, credential.ex, errors.ex, headers.ex, plug.ex, receipt.ex, verifier.ex, intents/charge.ex, methods/stripe.ex, methods/tempo.ex, methods/evm.ex, methods/tempo/session_receipt.ex, mcp.ex, and client/transport/http.ex. Fill the ~15 missing @spec annotations (mcp.ex has 8 missing; method.ex, amount.ex, intents/charge.ex, tempo.ex, transport/http.ex have the rest). Follow the no-IO-in-@doc-examples convention. Run mix doctor to confirm doc/spec coverage rises.",
+      "created_at": "2026-06-12",
+      "scored_at": "2026-06-12",
       "cross_repo": []
     }
   ]
