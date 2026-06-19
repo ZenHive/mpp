@@ -53,7 +53,7 @@ defmodule MPP.MixProject do
       {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
       {:ex_unit_json, "~> 0.5.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
-      {:tidewave, "~> 0.5.6", only: :dev},
+      {:tidewave, "~> 0.6", only: :dev},
       {:bandit, "~> 1.12.0", only: :dev},
 
       # Code analysis tools
@@ -61,8 +61,8 @@ defmodule MPP.MixProject do
       {:ex_ast, "~> 0.12.0", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
-      {:quickbeam, "~> 0.10.15", only: [:dev, :test], runtime: false},
-      {:oxc, "~> 0.15.1", only: [:dev, :test], runtime: false},
+      {:quickbeam, "~> 0.10.16", only: [:dev, :test], runtime: false},
+      {:oxc, "~> 0.16", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods)
