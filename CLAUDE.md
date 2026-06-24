@@ -291,6 +291,10 @@ gh api repos/ZenHive/mpp/secret-scanning/alerts                  # leaked secret
 
 Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Reporter, PoC, and affected-version detail are at `gh api repos/ZenHive/mpp/security-advisories/<GHSA-id>`.
 
+### Security-parity ledger + disclosure convention
+
+`docs/security-parity.md` is the standing record of every upstream-SDK security advisory / fix mapped to our parity status (✓ have / 📋 tracked-in-Task-N). It and the `sdk-delta-watch` routine keep upstream security work *tracked*, not silently assumed. **🚨 Disclosure rule — this repo is public, so `tasks.toml` / `ROADMAP.md` / `docs/` are all published.** Therefore: a parity *gap* that is unfixed and exploitable is NEVER filed as a public `security` rmap task or a public ledger row — that would hand attackers a checklist for a deployed money library. Unfixed-gap detail goes to a **private draft GitHub security advisory** (Security → Advisories, the same channel inbound PVRs use); the public ledger holds only ✓/📋 rows plus a generic open-item count. When a fix ships, the item moves to a ✓ row and the advisory is published with the patched release (coordinated disclosure, per `SECURITY.md`). The `sdk-delta-watch` routine follows the same split: parity-confirmed → ✓ row; genuine gap → private advisory, never a public row.
+
 ## Git Commit Configuration
 
 **Configured**: 2026-03-25
