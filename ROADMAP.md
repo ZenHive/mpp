@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (5 of 17 done · 4 in progress)
+**Focus phase:** 9 — Protocol Utilities (9 of 17 done · 0 in progress)
 
-**Last shipped:** no recent shipments
+**Last shipped:** Task 56 — GitHub Actions CI workflow, Task 60 — Credential-gated integration CI: nightly cron + pre-merge gate, Task 61 — GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope, Task 62 — Fix CI coverage gate to green (repair precommit alias + restore 95%) on 2026-06-24
 
 **Up next:** Task 57 — Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯
 <!-- FOCUS:END -->
@@ -124,13 +124,13 @@
 | Task 45 | ⬜ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
 | Task 53 | ⬜ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83] 🚀 |
-| Task 56 `[P]` | 🔄 | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
+| Task 56 `[P]` | ✅ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
 | Task 57 `[P]` | ⬜ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
 | Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 59 | ⬜ | 🎁 **tempo** · 🔒 Fee-payer pre-broadcast simulation (low-gas drain, GHSA-vj8p-hp9x-gh47) [D:6/B:8/U:7 → Eff:1.25] 📋 |
-| Task 60 | 🔄 | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
-| Task 61 | 🔄 | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
-| Task 62 | 🔄 | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
+| Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
+| Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
+| Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
 ---
