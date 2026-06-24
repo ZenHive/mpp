@@ -561,7 +561,9 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, "Pre-broadcast simulation rejected the transaction: #{detail}")}
 
       {:ok, :unsupported} ->
-        Logger.info("MPP.Methods.Tempo: node does not implement eth_simulateV1; skipping pre-broadcast simulation")
+        Logger.warning(
+          "MPP.Methods.Tempo: node does not implement eth_simulateV1; skipping pre-broadcast fee-payer simulation guard"
+        )
 
         :ok
 
