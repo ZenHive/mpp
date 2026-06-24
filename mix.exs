@@ -41,7 +41,7 @@ defmodule MPP.MixProject do
 
   defp deps do
     [
-      {:plug, "~> 1.19.2"},
+      {:plug, "~> 1.20.1"},
       {:jason, "~> 1.4.5"},
       {:req, "~> 0.6.1"},
 
