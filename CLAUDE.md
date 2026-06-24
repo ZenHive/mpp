@@ -238,6 +238,8 @@ Run scripts with: `MIX_ENV=dev mix run /tmp/script.exs`
 
 Three reference repos are cloned into `refs/` (gitignored, auto-updated on session start via hook). **Read these directly — do NOT WebFetch from GitHub.**
 
+A daily cloud routine (`sdk-delta-watch`, manage at https://claude.ai/code/routines) watches these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths, judges parity against our Elixir impl, and auto-files `security`-marked rmap tasks for genuine gaps (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). If it filed tasks but couldn't run `rmap render` in the cloud env, run `rmap render` locally to re-sync ROADMAP.md.
+
 ```
 refs/mpp-specs/   — IETF spec source (specs/, examples/)
 refs/mppx/        — TypeScript SDK (primary reference). Key files in src/:

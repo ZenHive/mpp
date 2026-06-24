@@ -1,0 +1,27 @@
+{
+  "_doc": "Watermark for the daily SDK-delta watch routine (see CLAUDE.md § Reference implementations). The routine clones each ref, runs `git log <last_seen>..HEAD` over the critical paths, triages new commits for parity gaps vs our Elixir lib, files/updates rmap tasks, then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
+  "checked_at": "2026-06-24",
+  "refs": {
+    "mppx": {
+      "url": "https://github.com/wevm/mppx.git",
+      "branch": "main",
+      "last_seen": "7ab4e001b5994c3ecad237e9a705df17a6f11857"
+    },
+    "mpp-rs": {
+      "url": "https://github.com/tempoxyz/mpp-rs.git",
+      "branch": "main",
+      "last_seen": "6540a5ac3c6f3848684eb619dda7d9720482ae3c"
+    },
+    "mpp-specs": {
+      "url": "https://github.com/tempoxyz/mpp-specs.git",
+      "branch": "main",
+      "last_seen": "ddeb95f28e90085f49ad0413c441b08e0bcfe4a8"
+    }
+  },
+  "critical_paths": {
+    "mppx": ["src/Challenge.ts", "src/Credential.ts", "src/Receipt.ts", "src/Errors.ts", "src/Method.ts", "src/PaymentRequest.ts", "src/tempo/", "src/stripe/", "src/x402/", ".changeset/"],
+    "mpp-rs": ["src/protocol/core/", "src/protocol/methods/", "src/client/", "src/server/", ".changelog/"],
+    "mpp-specs": ["specs/"]
+  },
+  "triage_keywords": ["security", "advisory", "GHSA", "CVE", "dos", "denial", "overflow", "cap", "limit", "bound", "exhaust", "panic", "wire", "canonical", "hmac", "digest", "replay", "drain", "fee-payer", "fee payer"]
+}
