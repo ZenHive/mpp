@@ -1981,6 +1981,7 @@
         "General property/fuzz coverage of the parsers — that is Task 63 (which will also exercise this cap)",
         "Changing the error atom/shape returned by the parsers"
       ],
+      "shipped_in": "c327c0f18e035180f9baf13d0198c3112adc9231",
       "body": "MPP is a published hex.pm money library with external consumers and inbound private security advisories, so an unbounded parse from an untrusted header is a live DoS surface, not a theoretical one. MPP.Headers currently applies NO length bound before base64url-decoding + JSON-parsing client-supplied header tokens at three parse sites, so a single oversized header forces unbounded allocation. Port the cap mpp-rs shipped as a patch-level security fix in #299 (commit 6540a5a, refs/mpp-rs/src/protocol/core/headers.rs): reject the token BEFORE decoding when it exceeds MAX_TOKEN_LEN (16 * 1024 bytes) at (1) parse_challenge / parse_challenges — the WWW-Authenticate `request` param specifically; (2) parse_credential — the Authorization: Payment token; (3) parse_receipt — the Payment-Receipt token. Return the existing {:error, _} shape (never raise). Confirm the exact 16KB bound and which params are capped against refs/mpp-rs at pickup, cross-check refs/mppx, and cite refs/...:line per the CLAUDE.md wire-format rule.",
       "created_at": "2026-06-24",
       "started_at": "2026-06-24",
