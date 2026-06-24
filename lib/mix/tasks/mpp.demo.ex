@@ -42,7 +42,10 @@ defmodule Mix.Tasks.Mpp.Demo do
     # Start required applications for HTTP serving
     Mix.Task.run("app.start")
 
-    {:ok, _} = Bandit.start_link(plug: Router, port: port)
+    case Bandit.start_link(plug: Router, port: port) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Mix.raise("mpp.demo: failed to start server on port #{port}: #{inspect(reason)}")
+    end
 
     print_banner(port)
     Process.sleep(:infinity)

@@ -320,7 +320,7 @@ defmodule MPP.HeadersTest do
       c3 = make_challenge(realm: "c.com", method: "evm")
       header = Enum.map_join([c1, c2, c3], ", ", &Headers.format_challenge/1)
       assert {:ok, parsed} = Headers.parse_challenges(header)
-      assert length(parsed) == 3
+      assert [_, _, _] = parsed
       assert Enum.map(parsed, & &1.realm) == ["a.com", "b.com", "c.com"]
     end
 

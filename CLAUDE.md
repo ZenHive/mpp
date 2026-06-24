@@ -2,24 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+<!-- Selective-load floor (Opus 4.8): critical-rules is the eager guardrail floor;
+     harness-workflow is the second eager include for this harness-registered repo;
+     ethereum-rpc is a host-specific exception (no skill mirror) — MPP's EVM integration
+     tests rely on the node/Sepolia env vars it documents. Everything else is reachable
+     on demand as a skill (task-prioritization, task-writing, rmap, web-command,
+     code-style, development-philosophy, development-commands, ex-unit-json, dialyzer-json,
+     workflow-philosophy, elixir-volt, quickbeam, oxc, upstream-pr-workflow). -->
 @~/.claude/includes/critical-rules.md
 @~/.claude/includes/harness-workflow.md
-
-@~/.claude/includes/task-prioritization.md
-@~/.claude/includes/task-writing.md
-@~/.claude/includes/rmap.md
-@~/.claude/includes/web-command.md
-@~/.claude/includes/code-style.md
-@~/.claude/includes/development-philosophy.md
-@~/.claude/includes/development-commands.md
-@~/.claude/includes/ex-unit-json.md
-@~/.claude/includes/dialyzer-json.md
-@~/.claude/includes/workflow-philosophy.md
-@~/.claude/includes/elixir-volt.md
-@~/.claude/includes/quickbeam.md
-@~/.claude/includes/oxc.md
 @~/.claude/includes/ethereum-rpc.md
-@~/.claude/includes/upstream-pr-workflow.md
 
 ## Project
 
@@ -45,13 +37,17 @@ mix doctor                 # docs/specs coverage
 mix mpp.demo               # start demo server on port 4402 (--port to override)
 mix format                 # auto-format (Styler runs as plugin)
 mix docs                   # generate ExDoc
+
+mix ex_dna --max-clones 0          # clone detection (folded into precommit.full)
+mix reach.check --arch --smells    # architecture/smell checks (folded into precommit.full)
+mix precommit.full                 # canonical gate (see "Toolchain & check commands")
 ```
 
 ## Toolchain & check commands
 
 For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's Claude Code hooks or skills:
 
-- **Canonical gate:** `mix precommit.full` — runs format-check, compile (warnings-as-errors), credo `--strict`, doctor, the test+cover gate (95% — MPP is critical-tier: money, signing, wire-format encoding), sobelow, and dialyzer. `mix precommit` is the same minus dialyzer; `mix check.fast` is the seconds-long inner-loop (format + compile + credo).
+- **Canonical gate:** `mix precommit.full` — runs format-check, compile (warnings-as-errors), credo `--strict` (with the `ex_slop` plugin via `.credo.exs`), doctor, the test+cover gate (95% — MPP is critical-tier: money, signing, wire-format encoding), sobelow, then the vibe_kit analyzer steps `ex_dna --max-clones 0` (zero-tolerance clone detection) and `reach.check --arch --smells` (architecture/smell checks, policy in `.reach.exs`), and finally dialyzer. `mix precommit` is the same minus those three trailing steps; `mix check.fast` is the seconds-long inner-loop (format + compile + credo).
 - **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
 - When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
 - Integration tests (`:integration` tag) are excluded from the gate — they need live testnet/Stripe credentials. Run explicitly with `mix test.json --include integration`.
@@ -142,6 +138,9 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
 - `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
 - `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
+
+Dev/test analysis stack (vibe_kit baseline, all `only: [:dev, :test], runtime: false`): `credo` (+ `ex_slop` plugin for AI-slop antipatterns, configured in `.credo.exs`), `dialyxir`, `ex_dna` (clone detection), `ex_ast` (structural search), `reach` (architecture/smell checks, policy in `.reach.exs`), plus `styler`, `sobelow`, `doctor`, `ex_unit_json`, `dialyzer_json`, `tidewave`.
+
 ### JS/TS cross-referencing (dev/test only)
 
 Three tools for verifying our implementation against the mppx TypeScript reference impl (`refs/mppx/`). **These are NEVER production dependencies.** MPP is a library — consumers must not pull in JS runtimes.

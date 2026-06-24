@@ -57,9 +57,11 @@ defmodule MPP.MixProject do
       {:tidewave, "~> 0.6", only: :dev},
       {:bandit, "~> 1.12.0", only: :dev},
 
-      # Code analysis tools
+      # Code analysis tools (vibe_kit baseline: credo + ex_slop, ex_dna, reach)
       {:ex_dna, "~> 1.5.1", only: [:dev, :test], runtime: false},
       {:ex_ast, "~> 0.12.0", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.7", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
       {:quickbeam, "~> 0.10.16", only: [:dev, :test], runtime: false},
@@ -166,8 +168,14 @@ defmodule MPP.MixProject do
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
         "sobelow --skip"
       ],
-      # CI mirror — adds dialyzer.
-      "precommit.full": ["precommit", "dialyzer.json --quiet"]
+      # CI mirror — folds the vibe_kit analyzer steps (clone detection + arch/smell
+      # checks) and dialyzer onto the precommit gate.
+      "precommit.full": [
+        "precommit",
+        "ex_dna --max-clones 0",
+        "reach.check --arch --smells",
+        "dialyzer.json --quiet"
+      ]
     ]
   end
 

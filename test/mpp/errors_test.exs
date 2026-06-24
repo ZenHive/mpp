@@ -99,7 +99,7 @@ defmodule MPP.ErrorsTest do
     test "returns all 17 problem types" do
       types = Errors.types()
 
-      assert length(types) == 17
+      assert Enum.count(types) == 17
       assert :payment_required in types
       assert :malformed_credential in types
       # Session types

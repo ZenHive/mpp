@@ -51,11 +51,9 @@ defmodule MPP.JCS do
       term
       |> Map.to_list()
       |> Enum.sort_by(fn {k, _v} -> k end)
-      |> Enum.map_join(",", fn {k, v} ->
-        Jason.encode!(k) <> ":" <> canonicalize(v)
-      end)
+      |> Enum.map_intersperse(",", fn {k, v} -> [Jason.encode!(k), ":", canonicalize(v)] end)
 
-    "{" <> pairs <> "}"
+    IO.iodata_to_binary(["{", pairs, "}"])
   end
 
   def canonicalize(term) when is_list(term) do

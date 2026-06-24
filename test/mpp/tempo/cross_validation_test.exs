@@ -128,7 +128,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       # Our Elixir parser
       {:ok, elixir_tx} = Transaction.deserialize(hex)
       assert elixir_tx.chain_id == 42_431
-      assert length(elixir_tx.calls) == 1
+      assert [_] = elixir_tx.calls
 
       # ox/tempo TypeScript parser
       js_tx = js_deserialize!(rt, hex)
@@ -136,7 +136,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       assert js_tx["type"] == "tempo"
       assert js_tx["gas"] == "200000"
       assert js_tx["nonce"] == "1"
-      assert length(js_tx["calls"]) == 1
+      assert [_] = js_tx["calls"]
 
       # Cross-validate: call targets match
       [elixir_call] = elixir_tx.calls
@@ -185,7 +185,7 @@ defmodule MPP.Tempo.CrossValidationTest do
 
       {:ok, elixir_tx} = Transaction.deserialize(hex)
       assert elixir_tx.chain_id == 42_431
-      assert length(elixir_tx.calls) == 1
+      assert [_] = elixir_tx.calls
     end
 
     test "Elixir->JS->Elixir: full round-trip preserves bytes", %{rt: rt} do
@@ -206,10 +206,10 @@ defmodule MPP.Tempo.CrossValidationTest do
       hex = build_multicall_hex(chain_id: 42_431, nonce: 10)
 
       {:ok, elixir_tx} = Transaction.deserialize(hex)
-      assert length(elixir_tx.calls) == 2
+      assert [_, _] = elixir_tx.calls
 
       js_tx = js_deserialize!(rt, hex)
-      assert length(js_tx["calls"]) == 2
+      assert [_, _] = js_tx["calls"]
 
       # Both parsers see same number of calls with same targets
       for {ex_call, js_call} <- Enum.zip(elixir_tx.calls, js_tx["calls"]) do
@@ -250,10 +250,10 @@ defmodule MPP.Tempo.CrossValidationTest do
       hex = build_unsigned_transfer_hex(chain_id: 1, nonce: 1, gas: 21_000, amount: large_amount)
 
       {:ok, elixir_tx} = Transaction.deserialize(hex)
-      assert length(elixir_tx.calls) == 1
+      assert [_] = elixir_tx.calls
 
       js_tx = js_deserialize!(rt, hex)
-      assert length(js_tx["calls"]) == 1
+      assert [_] = js_tx["calls"]
 
       assert_js_round_trip!(rt, hex)
     end
@@ -445,7 +445,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       # Elixir parser should accept it (14 fields)
       {:ok, elixir_tx} = Transaction.deserialize(hex)
       assert elixir_tx.chain_id == 42_431
-      assert length(elixir_tx.calls) == 1
+      assert [_] = elixir_tx.calls
 
       # ox/tempo rejects dummy keyAuthorization data (validates key type).
       # This documents the asymmetry: Elixir accepts any RLP at index 13,

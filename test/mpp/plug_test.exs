@@ -240,7 +240,7 @@ defmodule MPP.PlugTest do
         )
 
       assert %PaymentPlug.Config{} = config
-      assert length(config.method_entries) == 2
+      assert [_, _] = config.method_entries
 
       [entry_a, entry_b] = config.method_entries
       assert entry_a.method == MockMethod
@@ -735,7 +735,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       headers = get_all_resp_headers(conn, "www-authenticate")
-      assert length(headers) == 2
+      assert [_, _] = headers
     end
 
     test "each header has correct method name", %{config: config} do
@@ -787,7 +787,7 @@ defmodule MPP.PlugTest do
           c.id
         end)
 
-      assert length(Enum.uniq(ids)) == 2
+      assert [_, _] = Enum.uniq(ids)
     end
   end
 

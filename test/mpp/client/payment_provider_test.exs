@@ -116,7 +116,7 @@ defmodule MPP.Client.PaymentProviderTest do
 
     test "creates provider with list of entries" do
       multi = MultiProvider.new([{TempoProvider, %{}}, {StripeProvider, %{}}])
-      assert length(multi.providers) == 2
+      assert [_, _] = multi.providers
     end
   end
 

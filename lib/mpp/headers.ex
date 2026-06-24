@@ -248,11 +248,10 @@ defmodule MPP.Headers do
 
     # Identify which boundaries are Payment schemes (exact match, not prefix)
     all_starts
-    |> Enum.with_index()
-    |> Enum.filter(fn {pos, _i} -> payment_scheme_at?(header, pos) end)
-    |> Enum.map(fn {start, i} ->
+    |> Enum.chunk_every(2, 1, [nil])
+    |> Enum.filter(fn [pos, _next] -> payment_scheme_at?(header, pos) end)
+    |> Enum.map(fn [start, next_boundary] ->
       # Segment ends at the next scheme boundary (any scheme, not just Payment)
-      next_boundary = Enum.at(all_starts, i + 1)
       segment_end = next_boundary || byte_size(header)
 
       header

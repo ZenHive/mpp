@@ -410,7 +410,7 @@ defmodule MPP.Mcp do
 
   # Checks that a term contains only JCS-supported types (no floats).
   # Mirrors JCS.canonicalize/1 clause coverage: map, list, binary, integer, boolean, nil.
-  defp jcs_compatible?(term) when is_map(term), do: term |> Map.values() |> Enum.all?(&jcs_compatible?/1)
+  defp jcs_compatible?(term) when is_map(term), do: Enum.all?(term, fn {_k, v} -> jcs_compatible?(v) end)
   defp jcs_compatible?(term) when is_list(term), do: Enum.all?(term, &jcs_compatible?/1)
   defp jcs_compatible?(term) when is_binary(term), do: true
   defp jcs_compatible?(term) when is_integer(term), do: true

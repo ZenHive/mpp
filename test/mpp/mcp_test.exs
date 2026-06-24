@@ -92,7 +92,7 @@ defmodule MPP.McpTest do
 
       error = Mcp.payment_required_error([c1, c2])
 
-      assert length(error["data"]["challenges"]) == 2
+      assert [_, _] = error["data"]["challenges"]
       assert Enum.map(error["data"]["challenges"], & &1["method"]) == ["tempo", "stripe"]
     end
 
@@ -127,7 +127,7 @@ defmodule MPP.McpTest do
       assert error["data"]["httpStatus"] == 402
       assert error["data"]["problem"]["type"] == "https://paymentauth.org/problems/verification-failed"
       assert error["data"]["problem"]["detail"] == "Invalid transaction hash"
-      assert length(error["data"]["challenges"]) == 1
+      assert [_] = error["data"]["challenges"]
     end
 
     test "accepts list of challenges" do
@@ -137,7 +137,7 @@ defmodule MPP.McpTest do
       error = Mcp.verification_failed_error(challenges, problem)
 
       assert error["data"]["httpStatus"] == 402
-      assert length(error["data"]["challenges"]) == 2
+      assert [_, _] = error["data"]["challenges"]
     end
   end
 
@@ -295,7 +295,7 @@ defmodule MPP.McpTest do
       error = Mcp.payment_required_error([c1, c2])
 
       assert {:ok, parsed} = Mcp.extract_challenges(error)
-      assert length(parsed) == 2
+      assert [_, _] = parsed
       assert Enum.map(parsed, & &1.method) == ["tempo", "stripe"]
     end
 

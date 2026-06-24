@@ -436,6 +436,13 @@ defmodule MPP.Methods.Tempo do
 
     :ok
   rescue
+    # Deliberately broad: a custom MPP.Tempo.Store may raise ANY exception struct
+    # (e.g. %Redix.ConnectionError{} on a network partition — see the doc above).
+    # Payment already settled on-chain, so this supplementary write must never
+    # crash the response; narrowing to a fixed exception list would drop exactly
+    # the infra failures this guard exists to absorb. Suppress reach's bare_rescue
+    # smell at this one deliberate site rather than weaken the safety invariant.
+    # reach:disable-next-line bare_rescue
     exception ->
       Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store failed: #{Exception.message(exception)}")
       :ok
