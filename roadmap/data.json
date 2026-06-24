@@ -1770,6 +1770,7 @@
         "The broad multi-area audit in Task 46 (this is only the simulation slice)",
         "fee-token allowlist (separate hardening, tracked under Task 46 / mpp-rs #286)"
       ],
+      "shipped_in": "d84e3e5",
       "body": "Pre-simulate fee-payer sponsored Tempo transactions before the sponsor-paid broadcast so the sponsor never commits gas for a transaction that would fail on-chain. Static policy validation (MPP.Methods.Tempo.FeePayerPolicy — gas/fee/total-fee ceilings + empty-access-list) cannot catch this class; only executing the transaction reveals it. Both reference SDKs (mppx, mpp-rs) pre-simulate the co-signed transaction and fail closed. See the private security advisory for the threat detail.\n\nSimulate the full CO-SIGNED transaction (concrete fee payer + fee token), not the bare payment call, on BOTH the sync and optimistic paths. A JSON-RPC -32601 (method not found) degrades gracefully (skip + log + broadcast); any other RPC error fails closed. Mandatory live Moderato integration coverage.\n",
       "created_at": "2026-06-24",
       "started_at": "2026-06-24",
