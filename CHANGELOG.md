@@ -28,7 +28,7 @@ Tempo session-receipt support and a client-side HTTP transport. Tempo integratio
 
 The first cross-SDK gap pass with substance. `MPP.Verifier` extracts the verification pipeline (HMAC, realm, expiry, request match, method.verify) out of `MPP.Plug` into a transport-neutral module, so MCP and future transports share the same correctness gate. `MPP.JCS` implements the RFC 8785 subset MPP needs for cross-SDK HMAC interop. The MCP transport (`MPP.Mcp`) lands with -32042/-32043 error codes and the `org.paymentauth/credential` + `org.paymentauth/receipt` `_meta` keys. Client-side gets `MPP.Client.PaymentProvider` behaviour and `MultiProvider` first-match dispatch. Protocol utilities fill in: `MPP.Headers.parse_challenges/1` (multi-challenge `WWW-Authenticate` parsing), `MPP.BodyDigest`, `MPP.Amount` (parse_units / with_base_units / parse_dollar_amount). Eight new RFC 9457 session error types added under `paymentauth.org/problems/session/`. EVM integration tests against Sepolia validate real RPC round-trips for both ERC-20 and native-ETH paths.
 
-**Breaking:** `MPP.Amount.parse_dollar_amount/1` → `parse_dollar_amount/2` — callers now supply `decimals` explicitly. Neither mppx nor mpp-rs maintain a currency-to-decimals table; implicit inference was a correctness risk.
+**Breaking:** `MPP.Amount.parse_dollar_amount/2` now requires callers to supply `decimals` explicitly (previously a single-arg form inferred it from currency). Neither mppx nor mpp-rs maintain a currency-to-decimals table; implicit inference was a correctness risk.
 
 **Scope decision:** proxy/gateway functionality scoped out to a separate `mpp_proxy` package. The `mpp` library focuses on protocol correctness; the BEAM-native payment gateway is a separate product surface.
 
