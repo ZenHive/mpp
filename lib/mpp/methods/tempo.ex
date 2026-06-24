@@ -36,6 +36,14 @@ defmodule MPP.Methods.Tempo do
       secp256k1 private key for the fee payer account
     * `"fee_token"` — (required when `fee_payer: true`) hex address of a USD-denominated
       TIP-20 token to use for fee payment (e.g., pathUSD)
+    * `"fee_payer_policy"` — (optional, `fee_payer: true` only) map of sponsor
+      ceilings overriding the per-chain defaults: `"max_gas"`,
+      `"max_fee_per_gas"`, `"max_priority_fee_per_gas"`, `"max_total_fee"` (wei),
+      and `"max_validity_window_seconds"` (seconds). Bounds the client-supplied
+      gas fields and validity window before the server co-signs so a malicious
+      client cannot drain the fee-payer wallet via inflated gas price, total fee
+      budget, or a padded access list, nor hold a co-signed sponsorship
+      broadcastable far into the future. See `MPP.Methods.Tempo.FeePayerPolicy`.
     * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
@@ -64,6 +72,7 @@ defmodule MPP.Methods.Tempo do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias Onchain.Tempo.RPC
@@ -164,6 +173,7 @@ defmodule MPP.Methods.Tempo do
              memo: memo
            ),
          :ok <- maybe_validate_call_scope(tx, config),
+         :ok <- maybe_validate_fee_payer_economics(tx, config, expected_chain_id),
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
@@ -268,6 +278,18 @@ defmodule MPP.Methods.Tempo do
   defp maybe_validate_call_scope(tx, %{"fee_payer" => true}), do: Transaction.validate_call_scope(tx)
 
   defp maybe_validate_call_scope(_tx, _config), do: :ok
+
+  # Bounds client-supplied gas economics when fee_payer is enabled, so a
+  # malicious client cannot drain the server's wallet by embedding inflated
+  # gas price / total fee / access list in the signed envelope the server
+  # co-signs (GHSA-vv77-66rf-pm86, GHSA-qpxh-ff8m-c62v).
+  # No-op when fee_payer is falsy — the client pays its own gas.
+  defp maybe_validate_fee_payer_economics(tx, %{"fee_payer" => true} = config, chain_id) do
+    policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
+    FeePayerPolicy.validate(tx, policy)
+  end
+
+  defp maybe_validate_fee_payer_economics(_tx, _config, _chain_id), do: :ok
 
   # Co-signs transaction as fee payer when fee_payer is enabled.
   # No-op when fee_payer is falsy — passes transaction through unchanged.

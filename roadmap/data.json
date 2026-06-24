@@ -205,6 +205,7 @@
       },
       "eff": 2.5,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -225,6 +226,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -245,6 +247,7 @@
       },
       "eff": 4.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -265,6 +268,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -285,6 +289,7 @@
       },
       "eff": 3.5,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -305,6 +310,7 @@
       },
       "eff": 4.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -325,6 +331,7 @@
       },
       "eff": 3.33,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -345,6 +352,7 @@
       },
       "eff": 2.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -365,6 +373,7 @@
       },
       "eff": 2.13,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -385,6 +394,7 @@
       },
       "eff": 2.17,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -405,6 +415,7 @@
       },
       "eff": 2.5,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
@@ -425,6 +436,7 @@
       },
       "eff": 3.25,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
@@ -445,6 +457,7 @@
       },
       "eff": 1.88,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -472,6 +485,7 @@
       },
       "eff": 1.3,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
@@ -492,6 +506,7 @@
       },
       "eff": 1.3,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
@@ -512,6 +527,7 @@
       },
       "eff": 2.75,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
@@ -532,6 +548,7 @@
       },
       "eff": 2.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
@@ -552,6 +569,7 @@
       },
       "eff": 1.08,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
@@ -572,6 +590,7 @@
       },
       "eff": 1.83,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -597,6 +616,7 @@
       },
       "eff": 2.17,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.2.0",
@@ -617,6 +637,7 @@
       },
       "eff": 4.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.1.0",
@@ -637,6 +658,7 @@
       },
       "eff": 2.83,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
@@ -657,6 +679,7 @@
       },
       "eff": 1.88,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.3.0",
@@ -677,6 +700,7 @@
       },
       "eff": 2.33,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -697,6 +721,7 @@
       },
       "eff": 2.75,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -717,6 +742,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
+      "unlocks": 3,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -737,6 +763,7 @@
       },
       "eff": 2.25,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -765,6 +792,7 @@
       },
       "eff": 2.38,
       "dep_layer": 0,
+      "unlocks": 1,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -785,6 +813,7 @@
       },
       "eff": 2.33,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -813,6 +842,7 @@
       },
       "eff": 2.17,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -841,6 +871,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -861,6 +892,7 @@
       },
       "eff": 1.88,
       "dep_layer": 1,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [
         26
@@ -888,6 +920,7 @@
       },
       "eff": 2.75,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
@@ -908,6 +941,7 @@
       },
       "eff": 1.3,
       "dep_layer": 2,
+      "unlocks": 1,
       "markers": [],
       "depends_on": [
         28,
@@ -936,6 +970,7 @@
       },
       "eff": 1.2,
       "dep_layer": 3,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [
         30
@@ -963,6 +998,7 @@
       },
       "eff": 3.75,
       "dep_layer": 0,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -983,6 +1019,7 @@
       },
       "eff": 2.5,
       "dep_layer": 1,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [
         32,
@@ -1011,6 +1048,7 @@
       },
       "eff": 2.83,
       "dep_layer": 0,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -1031,6 +1069,7 @@
       },
       "eff": 2.5,
       "dep_layer": 0,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.5.0",
@@ -1051,6 +1090,7 @@
       },
       "eff": 2.0,
       "dep_layer": 1,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [
         "33a",
@@ -1079,6 +1119,7 @@
       },
       "eff": 2.17,
       "dep_layer": 1,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [
         32
@@ -1107,6 +1148,7 @@
       },
       "eff": 1.42,
       "dep_layer": 1,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [
         "33a",
@@ -1135,6 +1177,7 @@
       },
       "eff": 1.4,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1160,6 +1203,7 @@
       },
       "eff": 0.56,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1185,6 +1229,7 @@
       },
       "eff": 0.92,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1212,6 +1257,7 @@
       },
       "eff": 0.56,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1238,6 +1284,7 @@
       },
       "eff": 0.79,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.\n",
@@ -1256,6 +1303,7 @@
       },
       "eff": 1.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.\n",
@@ -1274,6 +1322,7 @@
       },
       "eff": 0.83,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "body": "Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.\n",
@@ -1292,6 +1341,7 @@
       },
       "eff": 1.88,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1318,6 +1368,7 @@
       },
       "eff": 1.5,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1344,6 +1395,7 @@
       },
       "eff": 2.25,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1370,6 +1422,7 @@
       },
       "eff": 1.1,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1397,6 +1450,7 @@
       },
       "eff": 1.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1423,6 +1477,7 @@
       },
       "eff": 0.92,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1449,6 +1504,7 @@
       },
       "eff": 0.67,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1474,6 +1530,7 @@
       },
       "eff": 2.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1500,6 +1557,7 @@
       },
       "eff": 1.83,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1527,6 +1585,7 @@
       },
       "eff": 2.0,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1553,6 +1612,7 @@
       },
       "eff": 2.5,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "acceptance_criteria": [
@@ -1579,6 +1639,7 @@
       },
       "eff": 2.33,
       "dep_layer": 0,
+      "unlocks": 1,
       "markers": [
         "parallel"
       ],
@@ -1613,6 +1674,7 @@
       },
       "eff": 2.75,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "parallel"
       ],
@@ -1643,6 +1705,7 @@
       },
       "eff": 1.33,
       "dep_layer": 0,
+      "unlocks": 0,
       "markers": [
         "docs"
       ],
@@ -1667,6 +1730,80 @@
       "scored_at": "2026-06-12",
       "implemented": "Added @doc to public functions across amount/body_digest/challenge/http transport/charge/mcp/method/tempo/plug/con_cache_store and filled missing @spec; reviewer tightened the doctor doc-coverage gate (.doctor.exs).",
       "verified": true,
+      "cross_repo": []
+    },
+    {
+      "id": "59",
+      "phase": 9,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Fee-payer pre-broadcast simulation (low-gas drain, GHSA-vj8p-hp9x-gh47)",
+      "scores": {
+        "d": 6,
+        "b": 8,
+        "u": 7
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Co-signed sponsored tx with too-low gas_limit is rejected before broadcast (no eth_sendRawTransaction issued, verified by absence of broadcast RPC call in a unit test stubbing the simulate response as reverting)",
+        "Simulation runs on BOTH wait_for_confirmation true and false paths for fee_payer transactions",
+        "Simulation targets the co-signed transaction (concrete fee payer + fee token), not the bare payment call",
+        "JSON-RPC -32601 (method not found) from the simulate RPC skips the check and still broadcasts (graceful degradation), logged",
+        "Any other simulate RPC error fails closed (no broadcast)",
+        "Integration test against Moderato: underfunded gas_limit rejected pre-broadcast; correctly-funded sponsored tx broadcasts and confirms",
+        "No regression in existing Tempo unit + integration tests"
+      ],
+      "out_of_scope": [
+        "Gas-price / total-fee / access-list bounds (already shipped as MPP.Methods.Tempo.FeePayerPolicy)",
+        "The broad multi-area audit in Task 46 (this is only the low-gas simulation slice)",
+        "fee-token allowlist (separate hardening, tracked under Task 46 / mpp-rs #286)"
+      ],
+      "body": "Close the remaining Tempo fee-payer gas-draining vector (GHSA-vj8p-hp9x-gh47): a malicious client sets `gas_limit` just below what the call needs (~51,299 for transferWithMemo on Moderato); the server co-signs and broadcasts, the tx reverts out-of-gas during EVM execution, and the fee-payer wallet is charged for gas used while the client pays nothing — a zero-cost DoS that drains the sponsor wallet.\n\nThe CRITICAL gas-price and MEDIUM access-list vectors are already closed by `MPP.Methods.Tempo.FeePayerPolicy` (gas/fee/total-fee ceilings + empty-access-list). Static policy validation CANNOT catch a too-low gas_limit — only executing the transaction reveals the OOG revert. Both reference SDKs solve this with pre-broadcast simulation of the *co-signed* transaction, failing closed (no broadcast) when it would revert.\n\nPort the reference design (cross-confirmed in mppx + mpp-rs):\n- mpp-rs `simulate_before_broadcast` / `build_simulate_payload` (refs/mpp-rs/src/protocol/methods/tempo/method.rs ~1040-1235): decode the co-signed 0x76 AA tx, recover the sender, extract keychain key metadata (keyId/keyType/keyData — the node sizes signature gas from these), fold the AA batch tail into inner.to/value/input, and call `tempo_simulateV1`. Read per-call status; if false → reject (\"would revert\"). Graceful degrade: a JSON-RPC -32601 (method not found) response SKIPS the check rather than failing the payment (log it). Any other RPC error fails closed.\n- mppx (refs/mppx/src/tempo/internal/fee-payer.ts + .changeset/sponsor-presimulate-cosigned.md): simulates the fully co-signed tx with concrete feePayer + feeToken via eth_call, fails closed.\n\nKey correctness points vs our current code (lib/mpp/methods/tempo.ex):\n1. Current `simulate_payment_call` simulates only the bare matched payment call ({to, data}) with eth_call, omits the `gas` param, and so cannot catch OOG. It must simulate the full CO-SIGNED transaction instead.\n2. Current simulation runs ONLY on the optimistic (`wait_for_confirmation: false`) path. The references ALWAYS pre-simulate sponsored txs before the sponsor-paid broadcast — wire it into the default (sync/`wait_for_confirmation: true`) path too, after co-signing, before broadcast.\n3. Decide the simulation RPC: prefer `tempo_simulateV1` (native to the sponsored envelope) with the -32601 fallback; eth_call is the fallback only if the node lacks it.\n\nThis likely needs onchain_tempo support to decode the co-signed AA envelope, recover the sender, and build the tempo_simulateV1 request shape (onchain_tempo currently exposes deserialize / find_payment_call / cosign_fee_payer but no sender-recovery + simulate-request builder). If so, extend onchain_tempo (cross-repo) and bump the dep.\n\nIntegration-test mandatory against Moderato testnet (CLAUDE.md: RPC features need live integration tests — wrong request shapes pass every stub test): assert an underfunded gas_limit is rejected pre-broadcast (no broadcast, no gas spent) and that a correctly-funded sponsored tx still broadcasts. Cross-reference Task 46 (broad Tempo hardening audit) — this is the focused, already-scoped slice of its 'fee-payer sponsorship hardening' line.\n",
+      "created_at": "2026-06-24",
+      "scored_at": "2026-06-24",
+      "cross_repo": []
+    },
+    {
+      "id": "60",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Credential-gated integration CI: nightly cron + pre-merge gate",
+      "scores": {
+        "d": 3,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.83,
+      "dep_layer": 1,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [
+        56
+      ],
+      "assignee": "cursor",
+      "model": "composer-2.5",
+      "acceptance_criteria": [
+        "A scheduled (cron) GitHub Actions job runs `mix test.json --include integration` nightly using credentials from repo secrets",
+        "The integration job is a required check on PR/merge to main and development",
+        "Repo secrets are documented (which vars: Moderato/Stripe/Sepolia) in the workflow or README",
+        "When integration credentials are absent the suite flunks loudly with setup instructions — never reports a green run with 0 integration tests executed",
+        "Per-commit `mix precommit` / the base CI gate (Task 56) still excludes :integration — this job is additive, not folded into the inner-loop gate"
+      ],
+      "out_of_scope": [
+        "The base CI workflow itself (Task 56)",
+        "The gas-estimation root fix (onchain #82, onchain_tempo #10)",
+        "Provisioning the actual secret values in GitHub (operator action, not code)"
+      ],
+      "body": "Wire the credentialed integration suite into CI — the piece Task 56 deliberately stubbed out (`mix test.json --include integration` needs live Moderato/Stripe/Sepolia access, so it stays out of the per-commit gate and out of `mix precommit`).\n\nLesson that motivated this: a Tempo gas constant went stale (cold TIP-20 transfer cost drifted from ~272k to ~560k once Moderato added a protocol fee) and OOG-reverted on-chain, while the entire unit/stub suite stayed green. This class — wrong gas limit, wrong request shape, on-chain accounting drift — is structurally invisible to unit tests; only a live round-trip catches it. Integration must therefore run at a real cadence, not purely manually.\n\nSeparate the gate from the cadence: keep integration OUT of per-commit `precommit` (fails-closed in credential-less environments — CI, sibling repos, harness reviewer worktrees — and is non-deterministic/slow), and add a dedicated integration run that executes only where secrets live:\n\n  * A nightly scheduled GitHub Actions job (cron) running `mix test.json --include integration` with Moderato/Stripe/Sepolia credentials supplied via repo secrets.\n  * The same job as a required check on PR / merge to `main` and `development`.\n  * Make missing credentials LOUD, never a silent green: when secrets are absent the integration suite must flunk with setup instructions (the exact env vars + how to obtain them), per the project's \"never skip integration silently\" rule — a 0-tests-ran \"pass\" is a lie.\n\nThis is the safety net; the actual root fix (gas estimation instead of a stale constant) is tracked cross-repo in onchain #82 and onchain_tempo #10.\n",
+      "created_at": "2026-06-24",
+      "scored_at": "2026-06-24",
       "cross_repo": []
     }
   ]

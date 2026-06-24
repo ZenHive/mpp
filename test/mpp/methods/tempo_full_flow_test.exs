@@ -160,9 +160,21 @@ defmodule MPP.Methods.TempoFullFlowTest do
     test "rejects transaction missing fee_payer_signature placeholder" do
       config = init_tempo_config(fee_payer_config())
 
-      # Build a normal tx (fee_payer: false → no placeholder)
+      # Build a normal tx (fee_payer: false → no placeholder) with otherwise-valid
+      # gas economics, so the placeholder check is what rejects it.
       call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
-      tx_hex = build_tempo_tx(calls: [call], chain_id: @chain_id, fee_payer: false)
+
+      tx_hex =
+        build_tempo_tx(
+          calls: [call],
+          chain_id: @chain_id,
+          fee_payer: false,
+          gas_limit: 51_299,
+          max_fee_per_gas: 1_000_000_000,
+          max_priority_fee_per_gas: 1_000_000_000,
+          nonce_key: expiring_nonce_key(),
+          valid_before: future_valid_before()
+        )
 
       body =
         submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
@@ -292,7 +304,9 @@ defmodule MPP.Methods.TempoFullFlowTest do
           amount: 1_000_000,
           chain_id: @chain_id,
           rpc_url: @rpc_url,
-          nonce: 0
+          nonce: 0,
+          nonce_key: expiring_nonce_key_int(),
+          valid_before: future_valid_before()
         )
 
       stub_broadcast_and_receipt(success_receipt())
@@ -517,12 +531,13 @@ defmodule MPP.Methods.TempoFullFlowTest do
       [[to_bin, value_bin, input]],
       # access_list
       [],
-      # nonce_key
-      <<>>,
+      # nonce_key (expiring — so the tx clears the validity check and the
+      # fee_token check is what rejects it)
+      expiring_nonce_key(),
       # nonce
       <<>>,
-      # valid_before
-      <<>>,
+      # valid_before (future — same reason)
+      :binary.encode_unsigned(future_valid_before()),
       # valid_after
       <<>>,
       # fee_token (NON-EMPTY — this is what we're testing)

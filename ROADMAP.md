@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (5 of 13 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (5 of 15 done · 0 in progress)
 
-**Last shipped:** Task 58 — Public API @doc + missing @spec pass on 2026-06-12
+**Last shipped:** no recent shipments
 
 **Up next:** Task 57 — Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯
 <!-- FOCUS:END -->
@@ -121,12 +121,14 @@
 | Task 34 | ✅ | 🎁 **utilities** · Verifier extraction + JCS [D:4/B:9/U:10 → Eff:2.38?] 🎯 |
 | Task 35 `[P]` | ⬜ | 🎁 **utilities** · Generic dedup at Plug level [D:3/B:7/U:7 → Eff:2.33?] 🎯 |
 | Task 37 `[P]` | ⬜ | 🎁 **utilities** · Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
-| Task 45 | ⬜ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88] 🚀 |
-| Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5] 🚀 |
+| Task 45 | ⬜ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
+| Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
 | Task 53 | ⬜ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83] 🚀 |
 | Task 56 `[P]` | ⬜ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
 | Task 57 `[P]` | ⬜ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
 | Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33] 📋 |
+| Task 59 | ⬜ | 🎁 **tempo** · 🔒 Fee-payer pre-broadcast simulation (low-gas drain, GHSA-vj8p-hp9x-gh47) [D:6/B:8/U:7 → Eff:1.25] 📋 |
+| Task 60 | ⬜ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -143,7 +145,7 @@
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
 | Task 30 | ⬜ | 🎁 **session** · Channel state and voucher types [D:5/B:6/U:7 → Eff:1.3?] 📋 |
 | Task 31 | ⬜ | 🎁 **session** · Session credential actions [D:5/B:6/U:6 → Eff:1.2?] 📋 |
-| Task 50 | ⬜ | 🎁 **session** · Tempo subscriptions [D:6/B:6/U:5 → Eff:0.92] ⚠️ |
+| Task 50 | ⬜ | 🎁 **session** · Tempo subscriptions [D:6/B:6/U:5 → Eff:0.92?] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -173,7 +175,7 @@
 | Task 33c | ⬜ | 🎁 **client-sdk** · Payment-aware Req plugin [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
 | Task 33d | ⬜ | 🎁 **client-sdk** · MCP client transport [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
 | Task 33e | ⬜ | 🎁 **client-sdk** · Built-in charge providers [D:6/B:8/U:9 → Eff:1.42?] 📋 |
-| Task 47 | ⬜ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25] 🎯 |
+| Task 47 | ⬜ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -231,7 +233,7 @@
 | Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:5/U:6 → Eff:0.79?] ⚠️ |
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:7/U:7 → Eff:1.0?] 📋 |
 | Task 40 | ⬜ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:5/U:5 → Eff:0.83?] ⚠️ |
-| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67] ⚠️ |
+| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67?] ⚠️ |
 <!-- TASKS:END -->
 
 ---

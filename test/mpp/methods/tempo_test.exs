@@ -1577,7 +1577,9 @@ defmodule MPP.Methods.TempoTest do
           amount: 1_000_000,
           chain_id: 42_431,
           rpc_url: @rpc_url,
-          nonce: 0
+          nonce: 0,
+          nonce_key: expiring_nonce_key_int(),
+          valid_before: future_valid_before()
         )
 
       # Stub broadcast — server will co-sign then broadcast the modified tx
@@ -1602,10 +1604,22 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "rejects transaction without fee_payer_signature placeholder", %{charge: charge} do
-      # Build a normal tx (no fee payer placeholder)
+      # Build a normal tx (no fee payer placeholder) with otherwise-valid gas
+      # economics, so the placeholder check is what rejects it.
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
-      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431, fee_payer: false)
+
+      tx_hex =
+        build_tempo_tx(
+          calls: [call],
+          chain_id: 42_431,
+          fee_payer: false,
+          gas_limit: 51_299,
+          max_fee_per_gas: 1_000_000_000,
+          max_priority_fee_per_gas: 1_000_000_000,
+          nonce_key: expiring_nonce_key(),
+          valid_before: future_valid_before()
+        )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -1622,14 +1636,14 @@ defmodule MPP.Methods.TempoTest do
 
       body = [
         :binary.encode_unsigned(42_431),
-        <<>>,
-        <<>>,
-        :binary.encode_unsigned(21_000),
+        :binary.encode_unsigned(1_000_000_000),
+        :binary.encode_unsigned(1_000_000_000),
+        :binary.encode_unsigned(51_299),
         [call_rlp],
         [],
+        expiring_nonce_key(),
         <<>>,
-        <<>>,
-        <<>>,
+        :binary.encode_unsigned(future_valid_before()),
         <<>>,
         token_bytes,
         <<0x00>>,
@@ -1658,6 +1672,80 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+  end
+
+  describe "verify/2 — fee payer gas economics (gas-draining defense)" do
+    @fee_payer_private_key_econ "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    @fee_token_address_econ "0x20C0000000000000000000000000000000000000"
+
+    setup %{charge: charge} do
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer" => true,
+              "fee_payer_private_key" => @fee_payer_private_key_econ,
+              "fee_token" => @fee_token_address_econ
+            })
+      }
+
+      {:ok, charge: charge}
+    end
+
+    # Builds a fee-payer tx carrying a valid payment call (so find_payment_call
+    # passes) plus attacker-chosen gas economics. No RPC stubs — economics
+    # validation must reject before any broadcast.
+    defp econ_tx(opts) do
+      call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+      build_tempo_tx([calls: [call], chain_id: 42_431, fee_payer: true] ++ opts)
+    end
+
+    test "rejects inflated max_fee_per_gas (GHSA-vv77-66rf-pm86)", %{charge: charge} do
+      # 1 ETH/gas — would drain the sponsor's wallet.
+      tx_hex = econ_tx(max_fee_per_gas: 1_000_000_000_000_000_000, gas_limit: 21_000)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "max_fee_per_gas"
+    end
+
+    test "rejects a total fee budget over the cap", %{charge: charge} do
+      # Each field in range, product over the 0.05 ETH cap.
+      tx_hex =
+        econ_tx(
+          gas_limit: 2_000_000,
+          max_fee_per_gas: 100_000_000_000,
+          max_priority_fee_per_gas: 50_000_000_000
+        )
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "total fee budget"
+    end
+
+    test "rejects a padded access list (GHSA-qpxh-ff8m-c62v)", %{charge: charge} do
+      access_list = for _ <- 1..137, do: [<<0::160>>, []]
+      tx_hex = econ_tx(access_list: access_list)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "access list"
+    end
+
+    test "honors a fee_payer_policy override", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "fee_payer_policy", %{"max_fee_per_gas" => 1})
+      }
+
+      # 2 Gwei now exceeds the lowered 1-wei ceiling.
+      tx_hex = econ_tx(max_fee_per_gas: 2_000_000_000, max_priority_fee_per_gas: 1, gas_limit: 21_000)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "max_fee_per_gas"
     end
   end
 
