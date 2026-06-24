@@ -464,6 +464,24 @@ defmodule MPP.PlugTest do
       assert body["type"] =~ "malformed-credential"
     end
 
+    # End-to-end through the plug: an over-16KiB Authorization token is rejected
+    # before any base64url decode (token-size DoS cap, mpp-rs #299) and surfaces
+    # as the standard malformed_credential 402, not a crash or unbounded alloc.
+    test "over-limit Authorization token returns 402 before decode", %{config: config} do
+      oversized = "Payment " <> String.duplicate("A", 16 * 1024 + 1)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", oversized)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "malformed-credential"
+      assert body["detail"] =~ "token_too_large"
+    end
+
     test "tampered challenge returns 402 with invalid_challenge", %{config: config} do
       entry = first_entry(config)
 

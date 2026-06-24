@@ -1446,12 +1446,15 @@ scored_at = "2026-06-24"
 id = "65"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "done"
 title = "Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299)"
 scores = { d = 2, b = 7, u = 6 }
 markers = ["security", "parallel"]
 acceptance_criteria = ["Over-MAX_TOKEN_LEN WWW-Authenticate request param is rejected with {:error, _} before any base64url decode", "Over-MAX_TOKEN_LEN Authorization: Payment token is rejected with {:error, _} before decode", "Over-MAX_TOKEN_LEN Payment-Receipt token is rejected with {:error, _} before decode", "Bound matches mpp-rs MAX_TOKEN_LEN (16 * 1024) — verified against refs/mpp-rs/src/protocol/core/headers.rs and cited", "At-limit input still parses; over-limit is the only rejection — boundary tested", "No raise on oversized input; existing parse error contract preserved", "Unit tests for each of the three sites (at-limit pass, over-limit reject)"]
 out_of_scope = ["General property/fuzz coverage of the parsers — that is Task 63 (which will also exercise this cap)", "Changing the error atom/shape returned by the parsers"]
 body = "MPP is a published hex.pm money library with external consumers and inbound private security advisories, so an unbounded parse from an untrusted header is a live DoS surface, not a theoretical one. MPP.Headers currently applies NO length bound before base64url-decoding + JSON-parsing client-supplied header tokens at three parse sites, so a single oversized header forces unbounded allocation. Port the cap mpp-rs shipped as a patch-level security fix in #299 (commit 6540a5a, refs/mpp-rs/src/protocol/core/headers.rs): reject the token BEFORE decoding when it exceeds MAX_TOKEN_LEN (16 * 1024 bytes) at (1) parse_challenge / parse_challenges — the WWW-Authenticate `request` param specifically; (2) parse_credential — the Authorization: Payment token; (3) parse_receipt — the Payment-Receipt token. Return the existing {:error, _} shape (never raise). Confirm the exact 16KB bound and which params are capped against refs/mpp-rs at pickup, cross-check refs/mppx, and cite refs/...:line per the CLAUDE.md wire-format rule."
+implemented = "Added @max_token_len (16*1024) cap in MPP.Headers, enforced before base64url decode at the three untrusted-input parse sites: parse_credential & parse_receipt reject over-limit tokens with {:error, :token_too_large}; parse_challenge/parse_challenges reject an over-limit WWW-Authenticate request param with {:error, :request_too_large}. Boundary is strictly-greater (at-limit parses), matching mppx. New errors flow through the plug's existing malformed_credential fallback (no MPP.Errors change). 7 boundary tests added; full offline suite 723 green, Headers 98.26% cover."
 created_at = "2026-06-24"
+started_at = "2026-06-24"
 scored_at = "2026-06-24"
+done_at = "2026-06-24"

@@ -43,6 +43,15 @@ defmodule MPP.Headers do
   @optional_params ~w(expires digest description opaque)
   @all_params @required_params ++ @optional_params
 
+  # 16 KiB cap on client-supplied header tokens, enforced BEFORE any base64url
+  # decode to prevent a memory-exhaustion DoS (an oversized token would force
+  # unbounded allocation in Base.url_decode64 + Jason.decode). Ported from the
+  # mpp-rs #299 security fix. Matches mpp-rs MAX_TOKEN_LEN
+  # (refs/mpp-rs/src/protocol/core/headers.rs:18) and mppx maxRequestParameterLength
+  # (refs/mppx/src/Challenge.ts:10) — both `16 * 1024`. At-limit input still parses;
+  # only over-limit is rejected.
+  @max_token_len 16 * 1024
+
   # --- Challenge (WWW-Authenticate: Payment) ---
 
   api(
@@ -84,7 +93,7 @@ defmodule MPP.Headers do
       header: [kind: :value, description: "Raw WWW-Authenticate header value string"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, challenge}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params],
+    errors: [:invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params, :request_too_large],
     composes_with: [:format_challenge]
   )
 
@@ -92,6 +101,7 @@ defmodule MPP.Headers do
   def parse_challenge(header) when is_binary(header) do
     with {:ok, rest} <- strip_scheme(header),
          {:ok, params} <- parse_auth_params(rest),
+         :ok <- check_request_size(params),
          :ok <- validate_required_params(params) do
       {:ok, params_to_challenge(params)}
     end
@@ -108,7 +118,14 @@ defmodule MPP.Headers do
       description:
         "`{:ok, [challenge]}` on success, `{:error, reason}` if no Payment challenges found or all fail to parse"
     },
-    errors: [:no_payment_challenges, :invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params],
+    errors: [
+      :no_payment_challenges,
+      :invalid_scheme,
+      :missing_required_params,
+      :duplicate_param,
+      :invalid_auth_params,
+      :request_too_large
+    ],
     composes_with: [:parse_challenge, :format_challenge]
   )
 
@@ -157,14 +174,16 @@ defmodule MPP.Headers do
       header: [kind: :value, description: "Raw Authorization header value string"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, credential}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_scheme, :invalid_base64, :invalid_json, :missing_required_fields],
+    errors: [:invalid_scheme, :invalid_base64, :invalid_json, :missing_required_fields, :token_too_large],
     composes_with: [:format_credential]
   )
 
   @spec parse_credential(String.t()) :: {:ok, Credential.t()} | {:error, atom()}
   def parse_credential(header) when is_binary(header) do
-    with {:ok, rest} <- strip_scheme(header) do
-      Credential.decode(String.trim(rest))
+    with {:ok, rest} <- strip_scheme(header),
+         token = String.trim(rest),
+         :ok <- check_token_size(token) do
+      Credential.decode(token)
     end
   end
 
@@ -188,14 +207,35 @@ defmodule MPP.Headers do
       header: [kind: :value, description: "Raw Payment-Receipt header value (bare base64url JSON)"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_base64, :invalid_json, :missing_required_fields],
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields, :token_too_large],
     composes_with: [:format_receipt]
   )
 
   @spec parse_receipt(String.t()) :: {:ok, Receipt.t()} | {:error, atom()}
   def parse_receipt(header) when is_binary(header) do
-    Receipt.decode(String.trim(header))
+    token = String.trim(header)
+
+    with :ok <- check_token_size(token) do
+      Receipt.decode(token)
+    end
   end
+
+  # --- Private: token-size DoS guards (mpp-rs #299) ---
+
+  # Rejects a base64url credential/receipt token that exceeds @max_token_len
+  # BEFORE it reaches Base.url_decode64 + Jason.decode. At-limit passes.
+  @spec check_token_size(binary()) :: :ok | {:error, :token_too_large}
+  defp check_token_size(token) when byte_size(token) > @max_token_len, do: {:error, :token_too_large}
+  defp check_token_size(_token), do: :ok
+
+  # Rejects an oversized WWW-Authenticate `request` auth-param before the
+  # challenge is built (the request payload is base64url/JCS-decoded downstream
+  # during verification). Other params are small by construction.
+  @spec check_request_size(%{optional(String.t()) => String.t()}) :: :ok | {:error, :request_too_large}
+  defp check_request_size(%{"request" => request}) when byte_size(request) > @max_token_len,
+    do: {:error, :request_too_large}
+
+  defp check_request_size(_params), do: :ok
 
   # --- Private: Multi-challenge splitting ---
 

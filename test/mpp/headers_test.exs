@@ -444,4 +444,51 @@ defmodule MPP.HeadersTest do
       assert {:error, :invalid_challenge} = Challenge.verify(parsed, "wrong-secret")
     end
   end
+
+  # Token-size DoS cap (mpp-rs #299). The literal mirrors @max_token_len in
+  # MPP.Headers; independently re-verified against
+  # refs/mpp-rs/src/protocol/core/headers.rs:18 (MAX_TOKEN_LEN = 16 * 1024) and
+  # refs/mppx/src/Challenge.ts:10 (maxRequestParameterLength = 16 * 1024).
+  @max_token_len 16 * 1024
+
+  describe "token-size cap before decode (DoS, mpp-rs #299)" do
+    test "rejects over-limit Authorization: Payment token before decode" do
+      token = String.duplicate("A", @max_token_len + 1)
+      assert {:error, :token_too_large} = Headers.parse_credential("Payment #{token}")
+    end
+
+    test "at-limit Authorization token passes the size gate and reaches decode" do
+      # 16384 valid base64url chars clear the gate, decode, then fail as non-JSON —
+      # proving the cap let an at-limit token through (it is NOT :token_too_large).
+      token = String.duplicate("A", @max_token_len)
+      assert {:error, :invalid_json} = Headers.parse_credential("Payment #{token}")
+    end
+
+    test "rejects over-limit Payment-Receipt token before decode" do
+      token = String.duplicate("A", @max_token_len + 1)
+      assert {:error, :token_too_large} = Headers.parse_receipt(token)
+    end
+
+    test "at-limit Payment-Receipt token passes the size gate and reaches decode" do
+      token = String.duplicate("A", @max_token_len)
+      assert {:error, :invalid_json} = Headers.parse_receipt(token)
+    end
+
+    test "rejects over-limit WWW-Authenticate request param before building challenge" do
+      header = Headers.format_challenge(make_challenge(request: String.duplicate("A", @max_token_len + 1)))
+      assert {:error, :request_too_large} = Headers.parse_challenge(header)
+    end
+
+    test "parse_challenges rejects over-limit request param" do
+      header = Headers.format_challenge(make_challenge(request: String.duplicate("A", @max_token_len + 1)))
+      assert {:error, :request_too_large} = Headers.parse_challenges(header)
+    end
+
+    test "at-limit WWW-Authenticate request param still parses" do
+      request = String.duplicate("A", @max_token_len)
+      header = Headers.format_challenge(make_challenge(request: request))
+
+      assert {:ok, %Challenge{request: ^request}} = Headers.parse_challenge(header)
+    end
+  end
 end
