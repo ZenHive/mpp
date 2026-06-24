@@ -13,7 +13,7 @@ defmodule MPP.Test.TempoTestHelpers do
   `:access_list`, the `:nonce_key` (raw binary at field 6), and `:valid_before`
   (unix seconds at field 8) are overridable. When `fee_payer: true`, they default
   to realistic sponsor values that pass `MPP.Methods.Tempo.FeePayerPolicy`
-  (expiring nonce key, `valid_before` 10 min out); pass explicit overrides to
+  (expiring nonce key, `valid_before` 20s out — inside Moderato's 30s window); pass explicit overrides to
   exercise the gas-draining / replay-window attack vectors. Non-fee-payer builds
   keep the historical zero gas-price / 21k gas-limit / empty-field defaults.
   """
@@ -34,7 +34,10 @@ defmodule MPP.Test.TempoTestHelpers do
     access_list = Keyword.get(opts, :access_list, [])
 
     nonce_key = Keyword.get(opts, :nonce_key, if(fee_payer?, do: @expiring_nonce_key, else: <<>>))
-    valid_before = Keyword.get(opts, :valid_before, if(fee_payer?, do: System.os_time(:second) + 600, else: 0))
+    # Moderato's nonce manager rejects an expiring `valid_before` more than 30s past the
+    # block timestamp ("max allowed is block_ts + 30"). +20s stays inside that window while
+    # leaving ~20s TTL for build → co-sign → broadcast. Override to exercise the replay-window vector.
+    valid_before = Keyword.get(opts, :valid_before, if(fee_payer?, do: System.os_time(:second) + 20, else: 0))
 
     body = [
       :binary.encode_unsigned(chain_id),
@@ -67,8 +70,8 @@ defmodule MPP.Test.TempoTestHelpers do
   @doc "The expiring nonce key (U256::MAX) as an integer — for builder `:nonce_key` opts."
   def expiring_nonce_key_int, do: :binary.decode_unsigned(@expiring_nonce_key)
 
-  @doc "A `valid_before` unix timestamp comfortably inside the default 15-min window."
-  def future_valid_before, do: System.os_time(:second) + 600
+  @doc "A `valid_before` unix timestamp inside Moderato's 30s-past-block-timestamp expiring-nonce window."
+  def future_valid_before, do: System.os_time(:second) + 20
 
   @doc "Builds a single call tuple [to, value, input] for RLP encoding."
   def build_call(to_hex, input), do: [TIP20.decode_address(to_hex), <<>>, input]

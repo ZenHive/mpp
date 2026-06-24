@@ -35,7 +35,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Deterministic testnet-only recipient key (no value on mainnet) — used only
   # to derive a stable recipient address. Sender and fee-payer wallets are
   # minted fresh per test via `Onchain.Tempo.Faucet.fresh_funded_wallet/1`.
-  @recipient_key "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  #
+  # NOT an Anvil/Hardhat well-known key: Moderato blocklists the standard test
+  # EOAs (e.g. Anvil acct #1, 0x70997970…), redirecting TIP-20 transfers to a
+  # block sentinel (0xB10C…0000) so no Transfer event reaches the intended
+  # recipient — which silently fails every `find_matching_transfer` assertion.
+  # This key derives to 0x19E7E376…, a plain address transfers land on cleanly.
+  @recipient_key "0x1111111111111111111111111111111111111111111111111111111111111111"
 
   # 1 pathUSD (6 decimals)
   @transfer_amount 1_000_000
@@ -507,7 +513,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: impossible_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          # Pin gas_limit: the builder auto-estimates via eth_estimateGas when
+          # omitted (onchain_tempo ≥ 0.4), which itself reverts on this
+          # deliberately-unaffordable transfer — failing the build before the tx
+          # can reach the simulation step this test asserts on.
+          gas_limit: 100_000,
+          nonce: 0
         )
 
       body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
@@ -552,7 +564,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
           calls: [harmless_call, payment_call],
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          # Pin gas_limit — the payment call is deliberately unaffordable, so
+          # auto-estimation (eth_estimateGas) would revert at build time before
+          # the tx reaches the simulation step under test. See sibling test above.
+          gas_limit: 100_000,
+          nonce: 0
         )
 
       body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
@@ -812,7 +829,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
           private_key: sender.private_key,
           calls: [valid_call, rogue_call],
           chain_id: @chain_id,
-          rpc_url: rpc_url
+          rpc_url: rpc_url,
+          # Pin gas_limit — the rogue (0xDEADBEEF) call reverts under
+          # eth_estimateGas, so auto-estimation would fail the build before the
+          # call-scope check (which is what rejects this tx) can run.
+          gas_limit: 200_000,
+          nonce: 0
         )
 
       body = submit_credential!(fee_payer_config, %{"type" => "transaction", "signature" => signed_tx})
@@ -1066,7 +1088,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: 0
+          nonce: 0,
+          # Fee-payer txs MUST carry the expiring nonce key + a valid_before
+          # window, or MPP.Methods.Tempo.FeePayerPolicy rejects them before
+          # co-signing (anti-replay). Every other fee-payer build below sets these.
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
         )
 
       challenge = request_challenge!(config)
