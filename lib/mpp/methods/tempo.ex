@@ -46,8 +46,10 @@ defmodule MPP.Methods.Tempo do
       broadcastable far into the future. See `MPP.Methods.Tempo.FeePayerPolicy`.
     * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
-      for on-chain confirmation. Simulates via `eth_call` first to catch obvious reverts,
-      then broadcasts async and returns an optimistic receipt. Default `true`.
+      for on-chain confirmation. Pre-simulates the full co-signed transaction via
+      `eth_simulateV1` first (same guard as the default path) to reject a tx that would
+      revert before broadcast, then broadcasts async and returns an optimistic receipt.
+      Default `true`.
     * `"store"` — (optional) module implementing `MPP.Tempo.Store` behaviour for
       transaction dedup, or `{MPP.Tempo.ConCacheStore, opts}` to configure the built-in
       ConCache store (for example a custom cache `:name`). Prevents replay by tracking

@@ -1776,7 +1776,7 @@
       "started_at": "2026-06-24",
       "done_at": "2026-06-24",
       "scored_at": "2026-06-24",
-      "implemented": "Wired Onchain.Tempo.RPC.simulate/3 (eth_simulateV1, AA-aware) into both broadcast_and_verify paths in lib/mpp/methods/tempo.ex: the full co-signed tx is simulated before broadcast — a reverting result (incl. the node's -38xxx execution errors) rejects, -32601 degrades gracefully (skip+log+broadcast), any other RPC error fails closed. Replaced the gas-blind eth_call simulate_payment_call. onchain_tempo bumped 0.6.0→0.7.0 for sender-recovery + simulate-request builder (Tempo deploys eth_simulateV1, not tempo_simulateV1 — both networks return -32601 for the latter). Unit + full-flow tests cover all four gate outcomes on both paths; 33/33 Moderato integration tests pass.",
+      "implemented": "Wired Onchain.Tempo.RPC.simulate/3 (eth_simulateV1, AA-aware) into both broadcast_and_verify paths in lib/mpp/methods/tempo.ex: the full co-signed tx is simulated before broadcast — a reverting result (incl. the node's -38xxx execution errors) rejects, -32601 degrades gracefully (skip+log+broadcast), any other RPC error fails closed. Replaced the gas-blind eth_call simulate_payment_call. onchain_tempo bumped 0.6.0→0.7.0 for sender-recovery + simulate-request builder (Tempo deploys eth_simulateV1, not tempo_simulateV1 — both networks return -32601 for the latter). Unit tests cover the four gate outcomes (success, revert-reject, -32601 graceful skip, error fail-closed), including a co-signed sponsored revert rejected before broadcast; the live Moderato revert integration tests exercise the non-sponsored path. 33/33 Moderato integration tests pass.",
       "verified": true,
       "cross_repo": []
     },

@@ -1730,6 +1730,56 @@ defmodule MPP.Methods.TempoTest do
       assert String.starts_with?(broadcast_hex, "0x76")
     end
 
+    test "rejects a reverting CO-SIGNED sponsored tx before the fee payer broadcasts", %{charge: charge} do
+      # The actual gas-drain threat: the server co-signs as fee payer, so the SPONSOR
+      # pays gas. Simulate the co-signed tx → it would revert (status 0x0) → reject
+      # before broadcast, so the sponsor never commits gas for a doomed transaction.
+      {:ok, tx_hex} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @client_private_key,
+          token: @token_address,
+          recipient: @recipient,
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: @rpc_url,
+          gas_limit: 1_000_000,
+          nonce: 0,
+          nonce_key: expiring_nonce_key_int(),
+          valid_before: future_valid_before()
+        )
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            # Co-signed tx would run out of gas / revert on-chain → status 0x0.
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+              "id" => 1
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+
+      # The co-signed tx was simulated, but the sponsor NEVER broadcast it.
+      assert_received {:rpc_call, "eth_simulateV1"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+      refute_received {:rpc_call, "eth_sendRawTransaction"}
+    end
+
     test "rejects transaction without fee_payer_signature placeholder", %{charge: charge} do
       # Build a normal tx (no fee payer placeholder) with otherwise-valid gas
       # economics, so the placeholder check is what rejects it.
