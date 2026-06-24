@@ -47,7 +47,7 @@ jobs:
       # _build holds the dialyzer PLT (plt_local_path/plt_core_path = _build/dialyzer),
       # so caching _build covers the slow cold-PLT build.
       - name: Cache deps & _build (covers dialyzer PLT)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             deps
