@@ -74,23 +74,29 @@ defmodule MPP.Methods.TempoIntegrationTest do
     fixture_wallet = fresh_wallet!(rpc_url)
 
     # Seed tx 1: pathUSD transfer from fixture wallet → recipient (nonce 0).
-    # Bump gas_limit past the 100_000 default: a cold-storage TIP-20 transfer
-    # from a brand-new address on Moderato estimates at ~272_000.
-    tx_opts =
-      Keyword.merge(rpc_opts,
+    # Use the 0x76 Tempo transaction builder (TIP-20 `transfer` call) rather than
+    # a generic type-2 EVM `ERC20.transfer`: a cold TIP-20 transfer on Moderato
+    # exceeds the raw-EVM-transfer gas budget (a 400_000-limit type-2 transfer
+    # runs out of gas), whereas the 0x76 path is what real MPP clients use and is
+    # exercised by every transaction-credential test below. `broadcast_..._sync!`
+    # asserts the receipt status is 0x1, so a revert surfaces loudly here.
+    # NOTE: explicit gas_limit — the builder's 500k default is stale; a cold
+    # TIP-20 transfer on Moderato costs ~560k (onchain_tempo Task 10). 1M is the
+    # interim ceiling until the builder auto-estimates (onchain Task 82).
+    {:ok, seed_tx} =
+      TempoTxBuilder.build_signed_transfer(
         private_key: fixture_wallet.private_key,
+        token: @path_usd,
+        recipient: recipient_address,
+        amount: @transfer_amount,
         chain_id: @chain_id,
+        rpc_url: rpc_url,
+        fee_token: @path_usd,
         nonce: 0,
-        gas_limit: 400_000
+        gas_limit: 1_000_000
       )
 
-    {:ok, tx_hash} = Onchain.ERC20.transfer(@path_usd, recipient_address, @transfer_amount, tx_opts)
-
-    receipt = wait_for_receipt!(tx_hash, rpc_opts)
-
-    if receipt.status != 1 do
-      flunk("Test setup: pathUSD transfer reverted (tx: #{tx_hash})")
-    end
+    tx_hash = broadcast_raw_transaction_sync!(seed_tx, rpc_url)
 
     # Seed tx 2: transferWithMemo from fixture wallet → recipient (nonce 1).
     memo_call =
@@ -733,7 +739,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
-      # Build a fee-payer transfer (placeholder sig, empty fee_token)
+      # Build a fee-payer transfer (placeholder sig, empty fee_token, expiring
+      # nonce + future valid_before so it satisfies the sponsor policy)
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_transfer(
           private_key: sender.private_key,
@@ -742,7 +749,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: 0
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
         )
 
       # 402 → credential → server co-signs → broadcasts → receipt
@@ -852,7 +861,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
-      # build_signed_transfer sets fee_payer_signature = <<>> (absent), NOT <<0x00>> (placeholder)
+      # build_signed_transfer sets fee_payer_signature = <<>> (absent), NOT <<0x00>> (placeholder).
+      # Expiring nonce + future valid_before so the tx clears the economics/validity
+      # gate and the missing-placeholder check is what rejects it.
       {:ok, non_fp_tx} =
         TempoTxBuilder.build_signed_transfer(
           private_key: sender.private_key,
@@ -861,7 +872,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          fee_token: @path_usd
+          fee_token: @path_usd,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
         )
 
       body = submit_credential!(config, %{"type" => "transaction", "signature" => non_fp_tx})
@@ -888,9 +901,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
         :binary.encode_unsigned(21_000),
         [call],
         [],
+        # nonce_key: expiring (so the validity gate passes and fee_token is the rejection)
+        TempoTestHelpers.expiring_nonce_key(),
         <<>>,
-        <<>>,
-        <<>>,
+        # valid_before: future (same reason)
+        :binary.encode_unsigned(TempoTestHelpers.future_valid_before()),
         <<>>,
         # fee_token: NON-EMPTY (this is what we're testing)
         token_bytes,
@@ -904,6 +919,61 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "fee_token"
+    end
+
+    test "rejects a sponsored tx with a non-expiring nonce key before broadcast", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
+
+      # nonce_key omitted → defaults to 0 (a fixed, non-expiring nonce). valid_before
+      # is in-window so the expiring-nonce check is the one that must fire.
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: sender.private_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          nonce: 0,
+          valid_before: TempoTestHelpers.future_valid_before()
+        )
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "expiring nonce key"
+    end
+
+    test "rejects a sponsored tx whose validity window exceeds the policy", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
+
+      # Expiring nonce but valid_before a full day out — far beyond the 15-min
+      # default window, so the server must refuse to co-sign a long-lived sponsorship.
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: sender.private_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: System.os_time(:second) + 86_400
+        )
+
+      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "validity window"
     end
   end
 
@@ -937,7 +1007,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
           amount: @transfer_amount,
           chain_id: @chain_id,
           rpc_url: rpc_url,
-          nonce: 0
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
         )
 
       # First: co-signed and broadcast succeeds

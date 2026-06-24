@@ -1,0 +1,83 @@
+# Credential-gated integration suite.
+#
+# `:integration` tests make live RPC/API calls (Moderato testnet, Stripe test
+# API, Sepolia) and catch the bug class unit tests are structurally blind to:
+# wrong gas limit, wrong request shape, on-chain accounting drift. (Motivating
+# incident: a Tempo cold TIP-20 transfer gas constant drifted ~272k -> ~560k
+# after Moderato added a protocol fee and OOG-reverted on-chain while the entire
+# unit/stub suite stayed green.) So it must run at a real cadence — nightly —
+# not purely manually.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions). When any
+# are absent the suite FLUNKS LOUDLY with setup instructions (the tests' own
+# setup_all flunks) — it never reports a green run with 0 integration tests:
+#
+#   TEMPO_RPC_URL           Moderato testnet RPC (https://rpc.moderato.tempo.xyz)
+#   STRIPE_SECRET_KEY       Stripe TEST-mode secret key (sk_test_...)
+#   ETH_SEPOLIA_RPC_URL     Sepolia JSON-RPC endpoint
+#   ETH_SEPOLIA_PRIVATE_KEY Funded Sepolia private key
+#   EVM_RPC_URL             Generic EVM RPC (falls back to Sepolia if unset in tests)
+#   EVM_PRIVATE_KEY         Generic EVM funded key (falls back to Sepolia if unset)
+#
+# OPERATOR ACTION (not code): to make this a required check, mark the
+# "Integration" check required in branch protection for `development` and `main`
+# (Settings -> Branches). Fork PRs cannot read secrets, so this job will flunk on
+# external forks — expected for a credential-gated suite; the nightly cron is the
+# real safety net.
+
+name: Integration
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # nightly 06:00 UTC
+  workflow_dispatch:
+  pull_request:
+    branches: [development, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      TEMPO_RPC_URL: ${{ secrets.TEMPO_RPC_URL }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      ETH_SEPOLIA_RPC_URL: ${{ secrets.ETH_SEPOLIA_RPC_URL }}
+      ETH_SEPOLIA_PRIVATE_KEY: ${{ secrets.ETH_SEPOLIA_PRIVATE_KEY }}
+      EVM_RPC_URL: ${{ secrets.EVM_RPC_URL }}
+      EVM_PRIVATE_KEY: ${{ secrets.EVM_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps & _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-
+
+      - run: mix deps.get
+
+      - name: Compile
+        run: mix compile
+
+      # --include integration overrides test_helper.exs's default exclusion.
+      # Missing secrets -> setup_all flunks loudly; never a silent 0-tests pass.
+      - name: Integration tests
+        run: mix test.json --include integration

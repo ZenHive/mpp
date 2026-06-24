@@ -299,6 +299,53 @@ defmodule MPP.McpTest do
       assert Enum.map(parsed, & &1.method) == ["tempo", "stripe"]
     end
 
+    test "encodes a native-object request with list, integer, boolean, and nil values" do
+      # Per the MCP transport spec, `request` arrives as a native JSON object; it is
+      # re-canonicalized (JCS) and base64url-encoded for internal HMAC use. This
+      # exercises every jcs_compatible?/1 value branch (list, integer, boolean, nil).
+      error = %{
+        "data" => %{
+          "challenges" => [
+            %{
+              "id" => "ch_obj",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{
+                "items" => ["a", "b"],
+                "count" => 5,
+                "active" => true,
+                "note" => nil,
+                "currency" => "usd"
+              }
+            }
+          ]
+        }
+      }
+
+      assert {:ok, [parsed]} = Mcp.extract_challenges(error)
+      assert is_binary(parsed.request)
+    end
+
+    test "accepts a request already encoded as a base64url binary string" do
+      error = %{
+        "data" => %{
+          "challenges" => [
+            %{
+              "id" => "ch_bin",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => "eyJ0ZXN0IjoxfQ"
+            }
+          ]
+        }
+      }
+
+      assert {:ok, [parsed]} = Mcp.extract_challenges(error)
+      assert parsed.request == "eyJ0ZXN0IjoxfQ"
+    end
+
     test "returns error for missing challenges" do
       assert {:error, :no_challenges} = Mcp.extract_challenges(%{"data" => %{}})
     end

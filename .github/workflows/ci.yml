@@ -1,0 +1,83 @@
+# Deterministic Elixir CI gate for pushes and PRs.
+# Mirrors the `mix precommit.full` alias so every push/PR gets format / compile /
+# credo / doctor / sobelow / test+cover / dialyzer evidence as PR checks, instead
+# of needing a local reviewer to fetch the branch and run the suite.
+#
+# Integration tests (`:integration` tag) are NOT run here — they need live
+# Moderato/Stripe/Sepolia credentials and run in integration.yml. The repo's
+# test/test_helper.exs already excludes `:integration` by default, so no
+# `--exclude` flag is needed below.
+#
+# Versions come from `.tool-versions` (asdf format) via setup-beam — the same
+# source the local toolchain reads — so CI and local never drift on `mix format`
+# (Styler plugin) output.
+
+name: CI
+
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+    branches: [development, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      # _build holds the dialyzer PLT (plt_local_path/plt_core_path = _build/dialyzer),
+      # so caching _build covers the slow cold-PLT build.
+      - name: Cache deps & _build (covers dialyzer PLT)
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-
+
+      - run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Format check
+        run: mix format --check-formatted
+
+      # TODO/FIXME tags are tracked-debt visibility, not regressions — exclude
+      # so CI only fails on real Credo issues (development-philosophy.md
+      # § "TODO Comment Requirements").
+      - name: Credo (strict, excluding TODO/FIXME design tags)
+        run: mix credo --strict --ignore TagTODO,TagFIXME
+
+      - name: Doctor (--raise gates CI on doc/spec coverage)
+        run: mix doctor --raise
+
+      # --skip honors inline `# sobelow_skip` annotations (MPP is Plug-facing).
+      - name: Sobelow (honors inline skips)
+        run: mix sobelow --skip
+
+      # 95% floor — MPP is critical tier (money, signing, wire-format encoding).
+      - name: Tests + coverage gate (>=95%)
+        run: mix test.json --cover --cover-threshold 95 --summary-only
+
+      - name: Dialyzer
+        run: mix dialyzer

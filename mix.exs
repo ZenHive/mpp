@@ -12,6 +12,7 @@ defmodule MPP.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      test_coverage: test_coverage(),
       dialyzer: dialyzer(),
       description: description(),
       package: package(),
@@ -98,6 +99,14 @@ defmodule MPP.MixProject do
     ]
   end
 
+  # Exclude inert/dev-only scaffolding from the 95% critical-tier coverage gate
+  # (money/signing/wire-format). `MPP.Application` is an unwired boot stub (`mod:`
+  # is commented out below); `Mix.Tasks.Mpp.Demo` is the dev demo-server launcher.
+  # Both are out of scope per SECURITY.md — they don't belong in the money-path signal.
+  defp test_coverage do
+    [ignore_modules: [MPP.Application, Mix.Tasks.Mpp.Demo]]
+  end
+
   defp dialyzer do
     [
       plt_add_apps: [
@@ -148,8 +157,9 @@ defmodule MPP.MixProject do
         "compile --warnings-as-errors",
         "credo --strict --ignore TagTODO,TagFIXME",
         "doctor --raise",
-        # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV explicitly.
-        "cmd MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration",
+        # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV via `env`
+        # (Elixir 1.20's `mix cmd` no longer parses a leading VAR=val prefix).
+        "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration",
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
         "sobelow --skip"
       ],

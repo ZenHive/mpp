@@ -1,5 +1,7 @@
 # MPP
 
+[![CI](https://github.com/ZenHive/mpp/actions/workflows/ci.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/ci.yml)
+[![Code Scanning](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml)
 [![GitHub](https://img.shields.io/github/license/ZenHive/mpp)](https://github.com/ZenHive/mpp/blob/development/LICENSE)
 
 Elixir implementation of the [Machine Payments Protocol](https://mpp.dev) (MPP) — HTTP 402 payment middleware for AI agents and machine-to-machine commerce.
@@ -231,6 +233,31 @@ curl https://strip0x.com/openapi.json
 **Observed latency:** ~2s end-to-end for a paid request (402 challenge + Tempo on-chain TIP-20 transfer + credential retry). Free endpoints respond in ~70ms (network only — business logic is sub-10μs on the BEAM).
 
 Try it and [open an issue](https://github.com/ZenHive/mpp/issues) if anything breaks.
+
+## Continuous Integration
+
+Two GitHub Actions workflows gate the repo (Elixir/OTP pinned via `.tool-versions`,
+so CI never drifts from local `mix format`):
+
+- **CI** (`.github/workflows/ci.yml`) — runs on every push/PR to `development` and
+  `main`: format check, `--warnings-as-errors` compile, Credo strict, Doctor,
+  Sobelow, tests with a 95% coverage gate, and Dialyzer. Mirrors `mix precommit.full`.
+- **Integration** (`.github/workflows/integration.yml`) — runs the credential-gated
+  `:integration` suite nightly (and on PR / manual dispatch). These live round-trips
+  catch the bug class unit tests are blind to (wrong gas limit, wrong request shape,
+  on-chain accounting drift). It requires the following repo secrets — when any are
+  absent the suite **flunks loudly** rather than reporting a green 0-test run:
+
+  | Secret | Purpose |
+  |--------|---------|
+  | `TEMPO_RPC_URL` | Moderato testnet RPC (`https://rpc.moderato.tempo.xyz`) |
+  | `STRIPE_SECRET_KEY` | Stripe **test-mode** secret key (`sk_test_…`) |
+  | `ETH_SEPOLIA_RPC_URL` / `ETH_SEPOLIA_PRIVATE_KEY` | Sepolia RPC + funded key |
+  | `EVM_RPC_URL` / `EVM_PRIVATE_KEY` | Generic EVM RPC + funded key (falls back to Sepolia) |
+
+A third workflow, **Code Scanning** (`.github/workflows/code-scanning.yml`), uploads
+Sobelow findings to the Security → Code scanning tab (CodeQL has no Elixir support).
+Security vulnerabilities should be reported privately — see [SECURITY.md](SECURITY.md).
 
 ## References
 

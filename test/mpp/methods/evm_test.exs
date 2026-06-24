@@ -428,6 +428,112 @@ defmodule MPP.Methods.EVMTest do
     end
   end
 
+  describe "verify/2 — RPC and parsing edge cases" do
+    setup %{charge: charge} do
+      {:ok, eth_charge} =
+        Charge.new(amount: "1000000000000000000", currency: "ETH", recipient: @recipient)
+
+      {:ok, eth_charge: %{eth_charge | method_details: charge.method_details}}
+    end
+
+    test "native path: error when transaction-by-hash is not found", %{eth_charge: charge} do
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => nil
+        })
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "Transaction not found"
+    end
+
+    test "native path: error when transaction-by-hash RPC returns an error", %{eth_charge: charge} do
+      Req.Test.stub(EVM, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => 1, "result" => native_receipt()})
+
+          "eth_getTransactionByHash" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "id" => 1,
+              "error" => %{"code" => -32_000, "message" => "boom"}
+            })
+        end
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "RPC error fetching transaction"
+    end
+
+    test "error when the RPC transport fails", %{charge: charge} do
+      Req.Test.stub(EVM, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "RPC request failed"
+    end
+
+    test "error on an unexpected RPC response shape (no result or error)", %{charge: charge} do
+      Req.Test.stub(EVM, fn conn -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => 1}) end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "Unexpected RPC response"
+    end
+
+    test "error when method_config is missing rpc_url", %{charge: charge} do
+      charge = %{charge | method_details: %{"req_options" => [plug: {Req.Test, EVM}]}}
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "missing required config: rpc_url"
+    end
+
+    test "error when the charge amount is not a valid integer", %{eth_charge: charge} do
+      {:ok, bad} = Charge.new(amount: "not-a-number", currency: "ETH", recipient: @recipient)
+      bad = %{bad | method_details: charge.method_details}
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => native_tx()
+        })
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, bad)
+      assert error.detail =~ "Invalid charge amount"
+    end
+
+    test "treats lowercase \"eth\" currency as native ETH", %{charge: charge} do
+      {:ok, eth} = Charge.new(amount: "1000000000000000000", currency: "eth", recipient: @recipient)
+      eth = %{eth | method_details: charge.method_details}
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => native_tx()
+        })
+      end)
+
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, eth)
+    end
+
+    test "tolerates a receipt with a missing blockNumber (nil hex value)", %{charge: charge} do
+      receipt = Map.delete(receipt_with_transfer(), "blockNumber")
+      Req.Test.stub(EVM, fn conn -> Req.Test.json(conn, %{"result" => receipt}) end)
+
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+    end
+
+    test "tolerates a receipt with an already-integer status field", %{charge: charge} do
+      receipt = Map.put(receipt_with_transfer(), "status", 1)
+      Req.Test.stub(EVM, fn conn -> Req.Test.json(conn, %{"result" => receipt}) end)
+
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+    end
+  end
+
   # --- Test helpers ---
 
   # Builds a valid receipt with an ERC-20 Transfer log matching the default charge.
@@ -464,4 +570,34 @@ defmodule MPP.Methods.EVMTest do
 
   defp strip_0x("0x" <> rest), do: rest
   defp strip_0x(hex), do: hex
+
+  # Dispatches a Req.Test stub by JSON-RPC method name, wrapping each value as a result.
+  defp rpc_dispatch(conn, results_by_method) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    method = Jason.decode!(body)["method"]
+    Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => 1, "result" => Map.fetch!(results_by_method, method)})
+  end
+
+  # A successful native-ETH transaction receipt to @recipient.
+  defp native_receipt do
+    %{
+      "transactionHash" => @tx_hash,
+      "blockNumber" => "0x1",
+      "status" => "0x1",
+      "from" => @sender,
+      "to" => @recipient,
+      "logs" => []
+    }
+  end
+
+  # A native-ETH transaction of exactly 1 ETH to @recipient.
+  defp native_tx do
+    %{
+      "hash" => @tx_hash,
+      "from" => @sender,
+      "to" => @recipient,
+      "value" => "0xde0b6b3a7640000",
+      "input" => "0x"
+    }
+  end
 end

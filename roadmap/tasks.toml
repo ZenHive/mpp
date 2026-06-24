@@ -1265,7 +1265,7 @@ scored_at = "2026-05-27"
 id = "56"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "GitHub Actions CI workflow"
 scores = { d = 3, b = 7, u = 7 }
 markers = ["parallel"]
@@ -1275,6 +1275,7 @@ assignee = "codex"
 model = "gpt-5.5"
 body = "Add a GitHub Actions workflow at .github/workflows/ci.yml running the project's check stack on push and PR to development and main: mix format --check-formatted, compile with --warnings-as-errors, mix test.json excluding :integration, credo --strict, dialyzer (with cached PLTs), sobelow, and doctor. Cache deps, _build, and the dialyzer PLTs keyed on mix.lock. The repo currently has no CI at all — this is the single largest automation gap. Integration tests stay excluded by default (they need Moderato/Stripe/Sepolia credentials); leave a commented opt-in job or note for a credentialed integration run."
 created_at = "2026-06-12"
+started_at = "2026-06-24"
 scored_at = "2026-06-12"
 
 [[task]]
@@ -1348,7 +1349,7 @@ scored_at = "2026-06-24"
 id = "60"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Credential-gated integration CI: nightly cron + pre-merge gate"
 scores = { d = 3, b = 6, u = 5 }
 depends_on = [56]
@@ -1370,4 +1371,33 @@ Separate the gate from the cadence: keep integration OUT of per-commit `precommi
 This is the safety net; the actual root fix (gas estimation instead of a stale constant) is tracked cross-repo in onchain #82 and onchain_tempo #10.
 """
 created_at = "2026-06-24"
+started_at = "2026-06-24"
+scored_at = "2026-06-24"
+
+[[task]]
+id = "61"
+phase = 9
+bundle = "utilities"
+status = "in_progress"
+title = "GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope"
+scores = { d = 2, b = 5, u = 4 }
+acceptance_criteria = ["code-scanning.yml uploads Sobelow SARIF to the Security tab", "dependabot.yml covers mix + github-actions weekly", "SECURITY.md lists in-scope/out-of-scope surfaces"]
+body = "Mirror onchain_tempo's security scaffolding into mpp. Add a code-scanning GitHub Actions workflow that runs Sobelow with --format sarif and uploads to GitHub code scanning (Security tab) — CodeQL has no Elixir support. Add a Dependabot config (weekly Hex + github-actions updates). Expand SECURITY.md with In-scope/Out-of-scope sections naming mpp's security-critical surface (HMAC challenge binding, credential parsing, payment-method verification, wire-format/JCS encoding, fee-payer policy). Ships in one PR alongside the base CI workflows."
+created_at = "2026-06-24"
+started_at = "2026-06-24"
+scored_at = "2026-06-24"
+
+[[task]]
+id = "62"
+phase = 9
+bundle = "utilities"
+status = "in_progress"
+title = "Fix CI coverage gate to green (repair precommit alias + restore 95%)"
+scores = { d = 3, b = 6, u = 6 }
+depends_on = [56]
+acceptance_criteria = ["ci.yml coverage step passes on a PR run", "mix precommit / precommit.full runs without the :enoent alias crash under Elixir 1.20+", "The 95% (or agreed) threshold is honestly met, not bypassed"]
+out_of_scope = ["The CI workflows themselves (shipped in Task 56)"]
+body = "The base CI workflow (Task 56) enforces a 95% coverage gate that is currently RED: actual whole-project coverage is 94.37%. Two coupled root causes: (1) the `precommit`/`precommit.full` mix alias is broken under Elixir 1.20.1 — its `cmd MIX_ENV=test mix test.json ...` step throws :enoent because `mix cmd` no longer parses a leading VAR=val prefix — so the 95% gate silently stopped running locally and coverage drifted below it unnoticed. (2) Whole-project coverage is dragged below 95% almost entirely by non-business-logic scaffolding: Mix.Tasks.Mpp.Demo (28%), MPP.Application boot (0%), MPP.Demo.* . Decide and apply one: exclude non-critical scaffolding via test_coverage: [ignore_modules: ...] (business-logic coverage is then ~97% and the critical-tier 95% gate measures only money/signing/wire-format) — recommended; OR raise coverage with real tests; OR lower the threshold. Also fix the broken alias (e.g. `cmd env MIX_ENV=test mix test.json ...`) so the local gate runs again. After the fix, the ci.yml coverage step goes green."
+created_at = "2026-06-24"
+started_at = "2026-06-24"
 scored_at = "2026-06-24"
