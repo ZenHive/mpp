@@ -31,8 +31,10 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
-    env:
-      MIX_ENV: test
+    # No job-level MIX_ENV: like `mix precommit.full`, format/compile/credo/doctor/
+    # sobelow run in :dev (so test/support/ — which lacks @spec on test helpers — is
+    # NOT compiled and graded by Doctor). The test step self-selects :test via cli/0
+    # preferred_envs (`"test.json": :test`), and `mix dialyzer` runs in :dev as local.
     steps:
       - uses: actions/checkout@v4
 
