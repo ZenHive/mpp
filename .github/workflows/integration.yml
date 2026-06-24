@@ -54,7 +54,7 @@ jobs:
       EVM_RPC_URL: ${{ secrets.EVM_RPC_URL }}
       EVM_PRIVATE_KEY: ${{ secrets.EVM_PRIVATE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: beam
         uses: erlef/setup-beam@v1
@@ -63,7 +63,7 @@ jobs:
           version-type: strict
 
       - name: Cache deps & _build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             deps
