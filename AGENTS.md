@@ -69,6 +69,15 @@ The Phoenix server is always already running. Never run `mix phx.server` via Bas
 
 Every feature MUST have tests, even if the spec doesn't mention them. Unit tests for context functions, integration tests for LiveViews, tests for all CRUD/validations/error cases/edge cases (nil, empty, boundary). A feature without tests is not complete.
 
+## 🚨 AGAINST AN API, INTEGRATION TESTS ARE GROUND TRUTH — KEEP IT REAL
+
+**When writing code against an external API or service, the live endpoint is the only source of truth — not the docs, not your memory of the response shape, not a mock. Hit reality FIRST: explore the live call via Tidewave, then pin the behavior with a tagged integration test. This is not optional.**
+
+- **Mocks encode your assumptions; the API encodes the truth.** A mock that matches your guess passes green while the real call 400s on a field you misremembered. Observe the real response *before* you mock it — mock only what you've already seen.
+- **Cheap, and a time *saver* — not expensive.** A real call plus one assertion costs less than a debug loop against a wrong mental model. The integration test surfaces the actual error envelope, field names, and edge shapes up front, so the code is right the first time.
+- **Tidewave to explore, integration test to pin.** Use `project_eval` to see the live shape (per "NEVER HIDE TEST FAILURES": don't know what error to expect → explore via Tidewave first), then write the `@moduletag :integration` test that asserts it — helper module, flunk-on-missing-creds, never skip silently (`integration-testing` skill).
+- **No real signal → don't fake one.** Can't reach the API (missing creds, market not live)? Say so and `flunk` loudly per the credentials rule — never paper over it with a mock that ratifies a guess.
+
 ## 🚨 RAISE COVERAGE BEFORE MUTATING
 
 **Before any code-changing task on an existing module, that module's `mix test.json --cover` percentage must be at the target tier:**
@@ -222,6 +231,19 @@ The only residual caution is the general one for any hard-to-reverse action: **r
 - **Untracked dirs/files you didn't create:** leave them — don't `-u`-stash or `add` them.
 
 The failure mode this guards: you path-scope your *commit* correctly but `git add -A` first, or you stash `-u` to clear a hook and bury another session's staged work. Both corrupt parallel work silently.
+
+## 🚨 NEVER BROADCAST AN UNPATCHED VULNERABILITY IN A COMMITTED FILE
+
+**A committed file is a public file** — `roadmap/tasks.toml`, `ROADMAP.md`, `CHANGELOG.md`, code comments, and commit messages all ride to a repo that is often public (and is permanent in git history even if the repo is private today). **Exploit-actionable detail for a vulnerability that is not yet BOTH fixed AND publicly disclosed must never go into one.** A roadmap task that names the attack mechanism, the precise trigger value, a "this drains the wallet / leaks the key" walkthrough, or an unpublished GHSA/CVE id is a zero-day tip sheet you published yourself — handing every reader a working exploit for the entire window between *filing* and *fixing*.
+
+The rule:
+
+- **Open + undisclosed vuln → the detail stays OUT of git.** Track it where the scanners and reporters already live: **GitHub Security Advisories (private draft)**, a private issue, or a local/encrypted note. Not the public roadmap, not a `TODO:`, not the commit body.
+- **Fixed AND advisory published → fine to reference** (the hole is already public knowledge; describing the fix helps consumers patch). The gate is *both*, not either.
+- **You still need to schedule the work?** File the rmap task with a **sanitized body** — only what's needed to prioritize and route it (`"harden Tempo fee-payer gas bounds — see private advisory <id>"`), never the mechanism, trigger values, or PoC. The exploit recipe lives in the private advisory the task references by id.
+- **During an embargo window**, commit messages and `CHANGELOG` describe the *shape of the fix*, not the hole it closes, until disclosure day.
+
+**Failure mode this prevents:** filing a detailed `"here's the CVE and exactly how to trigger it"` task into a committed public roadmap — the backlog becomes an attacker's to-do list, ranked by how long you've left each hole open. Adding this rule is prevention; a vuln already committed is **already leaked** — redact it now (and treat git history as compromised: rotate/patch on the assumption it was read), don't just delete it going forward.
 
 ## Shell Safety
 
@@ -3021,6 +3043,8 @@ Run scripts with: `MIX_ENV=dev mix run /tmp/script.exs`
 
 Three reference repos are cloned into `refs/` (gitignored, auto-updated on session start via hook). **Read these directly — do NOT WebFetch from GitHub.**
 
+A daily cloud routine (`sdk-delta-watch`, manage at https://claude.ai/code/routines) watches these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths, judges parity against our Elixir impl, and auto-files `security`-marked rmap tasks for genuine gaps (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). If it filed tasks but couldn't run `rmap render` in the cloud env, run `rmap render` locally to re-sync ROADMAP.md.
+
 ```
 refs/mpp-specs/   — IETF spec source (specs/, examples/)
 refs/mppx/        — TypeScript SDK (primary reference). Key files in src/:
@@ -3071,6 +3095,10 @@ gh api repos/ZenHive/mpp/secret-scanning/alerts                  # leaked secret
 **🚨 `security-advisories` is the one most easily missed and the highest-stakes.** Privately-reported vulnerabilities submitted through Private Vulnerability Reporting land **only** in the Security → Advisories tab — they do **NOT** appear as Dependabot alerts, code/secret-scanning alerts, or in the notifications inbox (advisory submissions email repo admins, they don't generate a `reason: security_alert` inbox item). The four scanning endpoints cover *automated* findings; `security-advisories` covers *human-reported* ones. **Always query it.** As of 2026-06, three reporter `kai-kka` gas-draining advisories (critical/high/medium) sat in `triage` for up to 12 days before being noticed precisely because earlier sweeps skipped this endpoint.
 
 Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Reporter, PoC, and affected-version detail are at `gh api repos/ZenHive/mpp/security-advisories/<GHSA-id>`.
+
+### Security-parity ledger + disclosure convention
+
+`docs/security-parity.md` is the standing record of every upstream-SDK security advisory / fix mapped to our parity status (✓ have / 📋 tracked-in-Task-N). It and the `sdk-delta-watch` routine keep upstream security work *tracked*, not silently assumed. **🚨 Disclosure rule — this repo is public, so `tasks.toml` / `ROADMAP.md` / `docs/` are all published.** Therefore: a parity *gap* that is unfixed and exploitable is NEVER filed as a public `security` rmap task or a public ledger row — that would hand attackers a checklist for a deployed money library. Unfixed-gap detail goes to a **private draft GitHub security advisory** (Security → Advisories, the same channel inbound PVRs use); the public ledger holds only ✓/📋 rows plus a generic open-item count. When a fix ships, the item moves to a ✓ row and the advisory is published with the patched release (coordinated disclosure, per `SECURITY.md`). The `sdk-delta-watch` routine follows the same split: parity-confirmed → ✓ row; genuine gap → private advisory, never a public row.
 
 ## Git Commit Configuration
 
