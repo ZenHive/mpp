@@ -63,6 +63,16 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
             units: nil,
             tx_hash: nil
 
+  # 16 KiB cap on client-supplied session-receipt tokens, enforced BEFORE any
+  # base64url decode to prevent a memory-exhaustion DoS (an oversized token would
+  # force unbounded allocation in Base.url_decode64 + Jason.decode). Mirrors the
+  # cap MPP.Headers applies at its three parse sites (mpp-rs #299): this is the
+  # Tempo-session sibling of MPP.Headers.parse_receipt and must match its posture.
+  # Matches mpp-rs MAX_TOKEN_LEN (refs/mpp-rs/src/protocol/core/headers.rs:18) and
+  # mppx maxRequestParameterLength (refs/mppx/src/Challenge.ts:10) — both `16 * 1024`.
+  # At-limit input still parses; only over-limit is rejected.
+  @max_token_len 16 * 1024
+
   api(:new, "Create a new Tempo session receipt with defaults for method/intent/status/timestamp.",
     params: [
       opts: [
@@ -120,13 +130,16 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
       type: :tagged_tuple,
       description: "`{:ok, receipt}` on success, `{:error, reason}` on failure"
     },
-    errors: [:invalid_base64, :invalid_json, :missing_required_fields, :invalid_field_type],
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields, :invalid_field_type, :token_too_large],
     composes_with: [:to_header]
   )
 
   @spec from_header(String.t()) :: {:ok, t()} | {:error, atom()}
   def from_header(encoded) when is_binary(encoded) do
-    with {:ok, json} <- Base.url_decode64(String.trim(encoded), padding: false),
+    token = String.trim(encoded)
+
+    with :ok <- check_token_size(token),
+         {:ok, json} <- Base.url_decode64(token, padding: false),
          {:ok, map} <- Jason.decode(json),
          {:ok, receipt} <- from_map(map) do
       {:ok, receipt}
@@ -136,6 +149,13 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  # Rejects a base64url session-receipt token that exceeds @max_token_len BEFORE
+  # it reaches Base.url_decode64 + Jason.decode (token-size DoS guard, mpp-rs #299).
+  # At-limit passes; only over-limit is rejected — boundary matches MPP.Headers.
+  @spec check_token_size(binary()) :: :ok | {:error, :token_too_large}
+  defp check_token_size(token) when byte_size(token) > @max_token_len, do: {:error, :token_too_large}
+  defp check_token_size(_token), do: :ok
 
   defp to_map(%__MODULE__{} = receipt) do
     base = %{

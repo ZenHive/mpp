@@ -272,4 +272,25 @@ defmodule MPP.Methods.Tempo.SessionReceiptTest do
       refute raw =~ ~s("txHash")
     end
   end
+
+  # Token-size DoS cap (mpp-rs #299) — the Tempo-session sibling of the
+  # MPP.Headers.parse_receipt cap. The literal mirrors @max_token_len in
+  # MPP.Methods.Tempo.SessionReceipt; re-verified against
+  # refs/mpp-rs/src/protocol/core/headers.rs:18 (MAX_TOKEN_LEN = 16 * 1024).
+  @max_token_len 16 * 1024
+
+  describe "from_header/1 token-size cap before decode (DoS, mpp-rs #299)" do
+    test "rejects over-limit token before any base64url decode" do
+      token = String.duplicate("A", @max_token_len + 1)
+      assert {:error, :token_too_large} = SessionReceipt.from_header(token)
+    end
+
+    test "at-limit token passes the size gate and reaches decode" do
+      # 16384 valid base64url chars clear the gate, decode, then fail downstream —
+      # proving the cap let an at-limit token through (it is NOT :token_too_large).
+      token = String.duplicate("A", @max_token_len)
+      assert {:error, reason} = SessionReceipt.from_header(token)
+      assert reason != :token_too_large
+    end
+  end
 end
