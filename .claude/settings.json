@@ -18,6 +18,12 @@
             "command": "git -C refs/mpp-specs pull --rebase --quiet && git -C refs/mppx pull --rebase --quiet && git -C refs/mpp-rs pull --rebase --quiet",
             "timeout": 30,
             "statusMessage": "Updating MPP reference repos..."
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/sdk-watch-reminder.sh",
+            "timeout": 10,
+            "statusMessage": "Checking SDK-delta watch freshness..."
           }
         ]
       }
