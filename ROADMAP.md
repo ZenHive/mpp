@@ -15,7 +15,7 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (9 of 17 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (9 of 18 done · 0 in progress)
 
 **Last shipped:** Task 56 — GitHub Actions CI workflow, Task 60 — Credential-gated integration CI: nightly cron + pre-merge gate, Task 61 — GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope, Task 62 — Fix CI coverage gate to green (repair precommit alias + restore 95%) on 2026-06-24
 
@@ -39,7 +39,7 @@
 > 2 tasks complete (v0.1.0). Stripe SPT verification + integration tests against Stripe test API.
 
 <!-- TASKS:BEGIN phase=2 -->
-> 3 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-2-stripe-payment-method).
+> 4 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-2-stripe-payment-method).
 <!-- TASKS:END -->
 
 ---
@@ -131,6 +131,7 @@
 | Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
 | Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
+| Task 63 `[P]` | ⬜ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 <!-- TASKS:END -->
 
 ---

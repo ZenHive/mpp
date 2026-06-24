@@ -1097,7 +1097,7 @@ bundle = "utilities"
 status = "pending"
 title = "Tempo + session hardening audit vs. latest reference impls"
 scores = { d = 5, b = 8, u = 7 }
-acceptance_criteria = ["Delta report listing each upstream fix vs. our equivalent (parity / partial / missing)", "Targeted patches for missing fixes", "Integration tests against Moderato testnet for each newly covered case", "No regression in existing Tempo / session integration tests"]
+acceptance_criteria = ["Delta report listing each upstream fix vs. our equivalent (parity / partial / missing)", "Targeted patches for missing fixes", "Integration tests against Moderato testnet for each newly covered case", "No regression in existing Tempo / session integration tests", "When the proof-signature-to-wallet binding work lands: pin the mppx EIP-712 proof v3 conformance vector (refs/mppx/src/tempo/Proof.conformance.test.ts — account 0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1, chainId 42431, challengeId kM9xPqWvT2nJrHsY4aDfEb -> digest 0x3860a700a55e02ad3c2dc047e92489feceecbdb0a801d948e1d9f0b61ea9bc3f, sig 0x53f5d64d9f995e841b4212639b2e17e508e96752e10316df3814a16443dcbdb626c082190a4c3ecc3148101eb443d15bd83b579380b1be735a9c99f0df36c9fe1b) as a deterministic conformance test"]
 body = """
 Audit `MPP.Methods.Tempo`, the `MPP.Tempo.*` modules, and (when Phase 10 lands) session billing against the latest Tempo + session-channel hardening in mppx and mpp-rs. Read `refs/mppx` and `refs/mpp-rs` git logs + relevant src/ at pickup time to identify which fixes are not yet reflected in our Elixir impl.
 
@@ -1163,7 +1163,7 @@ bundle = "session"
 status = "pending"
 title = "Tempo subscriptions"
 scores = { d = 6, b = 6, u = 5 }
-acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches reference impl", "Fee-payer sponsored subscription path", "Integration test against Moderato testnet"]
+acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches reference impl", "Fee-payer sponsored subscription path", "Integration test against Moderato testnet", "Pin the TIP-1034 voucher + TIP-20 channel-id golden vectors as deterministic conformance tests (refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs — channelId 0xb3946b996bd166db3b61fba0f6af2918b6687bc054e2f4bae979edffc7bd0b4d, voucher EIP-712 digest 0x41a23f1573d302acae1dcec60d237f78d2514768faf670ef27458931c38b5db3, chainId 42431) once escrow voucher/channel support exists"]
 body = """
 Defer-tier. Extend Phase 10 session work with Tempo subscription mode (recurring access-key authorization beyond single-channel session billing). Read `refs/mppx` Tempo subscription PRs and supporting `wallet_authorizeAccessKey` shape at pickup time to confirm the wire format and fee-payer integration. Pull forward only when a downstream consumer needs recurring payments — until then this stays low-Eff in the queue.
 """
@@ -1413,3 +1413,31 @@ started_at = "2026-06-24"
 scored_at = "2026-06-24"
 done_at = "2026-06-24"
 shipped_in = "e51dc9f"
+
+[[task]]
+id = "63"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Header parser property/fuzz tests"
+scores = { d = 3, b = 5, u = 5 }
+markers = ["parallel"]
+acceptance_criteria = ["stream_data added as a dev/test dep", "Round-trip property: format/1 then parse/1 is identity for WWW-Authenticate, Authorization, and Payment-Receipt headers", "Malformed-input property: arbitrary binaries and corrupt base64url return {:error, _} and never raise, for all three header types + credential decode", "Tests run in the default suite (no :integration tag)"]
+out_of_scope = ["Porting Rust's libFuzzer harness itself — StreamData property tests are the Elixir-idiomatic equivalent", "Parser behavior changes — this task only adds coverage; any divergence found is filed separately"]
+body = 'The Rust reference SDK fuzzes all four wire-format parsers (WWW-Authenticate: Payment, Authorization: Payment, Payment-Receipt, base64url-JSON) — refs/mpp-rs/fuzz/fuzz_targets/. We have zero property/fuzz coverage. Add {:stream_data, "~> 1.0", only: [:dev, :test]} and property tests for MPP.Headers: (1) round-trip identity — format then parse reproduces the input struct for WWW-Authenticate, Authorization, and Payment-Receipt; (2) malformed-input robustness — arbitrary/garbage binaries and truncated/over-padded base64url never raise, always return {:error, _}. Include the credential base64url(JSON) decode path used by MPP.Credential. First consumer: our own 402 endpoint parses arbitrary client-supplied headers — a parser panic on malformed input is a DoS surface for a money protocol.'
+created_at = "2026-06-24"
+scored_at = "2026-06-24"
+
+[[task]]
+id = "64"
+phase = 2
+bundle = "stripe"
+status = "pending"
+title = "Stripe stub-server scenario parity vs mpp-rs"
+scores = { d = 3, b = 5, u = 5 }
+markers = ["parallel"]
+acceptance_criteria = ["requires_action / non-succeeded PaymentIntent status maps to a 402 (not a pass-through)", "Replayed idempotent credential is rejected with 402", "Stripe 400 error body maps to 402", "externalId flows into challenge methodDetails and is echoed in the receipt", "All scenarios run via Req.Test stubs in the default suite — no STRIPE_SECRET_KEY required"]
+out_of_scope = ["Live-API tests — those stay in stripe_integration_test.exs behind :integration", "3DS browser flow (mppx Playwright territory)", "Stripe Connect settlement (Task 52)"]
+body = "Our Stripe integration test (test/mpp/methods/stripe_integration_test.exs) is live-creds-only, so the request-shape regressions it would catch only run when STRIPE_SECRET_KEY is set. The Rust reference SDK (refs/mpp-rs/tests/integration_stripe.rs) covers the same scenarios against a LOCAL MOCK Stripe endpoint, so they run in CI without creds. Extend test/mpp/methods/stripe_test.exs (already uses Req.Test stubs) with mock-backed parity for: (1) PaymentIntent status requires_action / any non-succeeded status -> 402; (2) idempotent-replayed credential (Stripe returns an idempotent-replayed marker) -> 402; (3) Stripe 400 error body -> 402; (4) externalId propagated into the challenge methodDetails AND echoed in the receipt. Catches wrong request/response shapes without needing the live API. Cross-ref: externalId binding is also an audit line in Task 46 (mppx #537) — this is the creds-free unit/stub slice of it."
+created_at = "2026-06-24"
+scored_at = "2026-06-24"
