@@ -1,3 +1,6 @@
+# The shared callback set IS a behaviour (`use MPP.Method`); reach's source frontend
+# can't see the macro-injected `@behaviour`, so the candidate smell false-positives.
+# reach:disable-next-line behaviour_candidate
 defmodule MPP.Methods.EVM do
   @moduledoc """
   Generic EVM payment method — verifies on-chain ERC-20 or native ETH transfers.
