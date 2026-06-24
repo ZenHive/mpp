@@ -1321,7 +1321,7 @@ shipped_in = "bf40c30f19406abdb00405f9ba0610e8a8a244a9"
 id = "59"
 phase = 9
 bundle = "tempo"
-status = "pending"
+status = "in_progress"
 title = "Fee-payer pre-broadcast simulation (low-gas drain, GHSA-vj8p-hp9x-gh47)"
 scores = { d = 6, b = 8, u = 7 }
 markers = ["security"]
@@ -1346,6 +1346,7 @@ This likely needs onchain_tempo support to decode the co-signed AA envelope, rec
 Integration-test mandatory against Moderato testnet (CLAUDE.md: RPC features need live integration tests — wrong request shapes pass every stub test): assert an underfunded gas_limit is rejected pre-broadcast (no broadcast, no gas spent) and that a correctly-funded sponsored tx still broadcasts. Cross-reference Task 46 (broad Tempo hardening audit) — this is the focused, already-scoped slice of its 'fee-payer sponsorship hardening' line.
 """
 created_at = "2026-06-24"
+started_at = "2026-06-24"
 scored_at = "2026-06-24"
 
 [[task]]
