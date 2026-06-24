@@ -54,7 +54,7 @@ jobs:
       EVM_RPC_URL: ${{ secrets.EVM_RPC_URL }}
       EVM_PRIVATE_KEY: ${{ secrets.EVM_PRIVATE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: beam
         uses: erlef/setup-beam@v1

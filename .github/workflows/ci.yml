@@ -36,7 +36,7 @@ jobs:
     # NOT compiled and graded by Doctor). The test step self-selects :test via cli/0
     # preferred_envs (`"test.json": :test`), and `mix dialyzer` runs in :dev as local.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: beam
         uses: erlef/setup-beam@v1
