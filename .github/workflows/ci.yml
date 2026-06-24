@@ -44,14 +44,6 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      # Node + JS deps for the ox/tempo wire-format cross-validation tests:
-      # test/support/ox_tempo_entry.mjs imports `ox` (a transitive dep of `viem`
-      # in package.json) and is bundled via `npx esbuild` at test time. Without
-      # node_modules these tests fail to resolve `ox` and the suite goes red.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       # _build holds the dialyzer PLT (plt_local_path/plt_core_path = _build/dialyzer),
       # so caching _build covers the slow cold-PLT build.
       - name: Cache deps & _build (covers dialyzer PLT)
@@ -65,11 +57,6 @@ jobs:
             mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-
 
       - run: mix deps.get
-
-      # Installs viem → pulls `ox` (+ subpath export ox/tempo) into node_modules;
-      # `npx esbuild` is fetched on demand by the cross-validation test bundler.
-      - name: Install JS deps (ox/tempo cross-validation)
-        run: npm install
 
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
@@ -92,7 +79,7 @@ jobs:
 
       # 95% floor — MPP is critical tier (money, signing, wire-format encoding).
       - name: Tests + coverage gate (>=95%)
-        run: mix test.json --cover --cover-threshold 95 --summary-only
+        run: mix test.json --cover --cover-threshold 95 --summary-only --exclude cross_validation
 
       - name: Dialyzer
         run: mix dialyzer

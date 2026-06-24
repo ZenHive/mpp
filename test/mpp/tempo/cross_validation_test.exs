@@ -21,10 +21,15 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   use ExUnit.Case, async: true
 
+  # Requires the gitignored JS toolchain (package.json / node_modules / npx esbuild),
+  # so it cannot run on a clean CI checkout — excluded there via `--exclude
+  # cross_validation` (same pattern as :integration). Runs by default locally.
   alias Cartouche.Signer.Curvy
   alias MPP.Test.OxTempoBundle
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
+
+  @moduletag :cross_validation
 
   # Our hardcoded values (must match canonical viem/tempo source).
   @stablecoin_dex_hex "0xdec0000000000000000000000000000000000000"
