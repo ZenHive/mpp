@@ -101,8 +101,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   Resolve the policy for `chain_id`, applying optional `overrides`.
 
   `overrides` is a string-keyed map (`"max_gas"`, `"max_fee_per_gas"`,
-  `"max_priority_fee_per_gas"`, `"max_total_fee"`); non-integer or negative
-  values are ignored in favor of the per-chain default.
+  `"max_priority_fee_per_gas"`, `"max_total_fee"`,
+  `"max_validity_window_seconds"`); non-integer or negative values are ignored
+  in favor of the per-chain default.
 
   ## Examples
 
@@ -251,11 +252,14 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @spec check_access_list(Transaction.t()) :: :ok | {:error, String.t()}
   defp check_access_list(%Transaction{fields: fields}) do
     case Enum.at(fields, @access_list_index) do
-      list when is_list(list) and list != [] ->
+      [] ->
+        :ok
+
+      list when is_list(list) ->
         {:error, "fee-payer transaction must not declare an access list (#{length(list)} entries)"}
 
       _ ->
-        :ok
+        {:error, "fee-payer transaction has a malformed access_list field"}
     end
   end
 

@@ -185,6 +185,16 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
       assert FeePayerPolicy.validate(valid_tx(access_list: []), policy) == :ok
     end
+
+    test "fails closed when the access-list field is malformed (non-list scalar)" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      # Access list lives at RLP index 5; a scalar there is a malformed envelope.
+      tx = valid_tx()
+      corrupted = %{tx | fields: List.replace_at(tx.fields, 5, <<1>>)}
+
+      assert {:error, reason} = FeePayerPolicy.validate(corrupted, policy)
+      assert reason =~ "malformed access_list"
+    end
   end
 
   describe "validate/3 — validity window + expiring nonce (held-sponsorship defense)" do
