@@ -483,8 +483,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
     } do
       sender = fresh_wallet!(rpc_url)
       # Use an absurdly large amount that the sender cannot cover.
-      # The eth_call simulation should detect insufficient balance and return
-      # verification-failed WITHOUT broadcasting.
+      # The eth_simulateV1 pre-broadcast simulation should detect the revert and
+      # return verification-failed WITHOUT broadcasting.
       impossible_amount = 999_999_999_999_999
 
       optimistic_config =
@@ -527,11 +527,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       detail = body["detail"]
 
-      assert detail =~ "Simulation failed" or detail =~ "Broadcast failed",
-             "Expected simulation or broadcast failure, got: #{inspect(detail)}"
+      assert detail =~ "Pre-broadcast simulation rejected" or detail =~ "Pre-broadcast simulation failed",
+             "Expected pre-broadcast simulation to reject the transaction, got: #{inspect(detail)}"
     end
 
-    test "multicall: matched payment call is simulated before broadcast", %{
+    test "multicall: full transaction is simulated before broadcast", %{
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
@@ -577,8 +577,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       detail = body["detail"]
 
-      assert detail =~ "Simulation failed" or detail =~ "Broadcast failed",
-             "Expected simulation or broadcast failure, got: #{inspect(detail)}"
+      assert detail =~ "Pre-broadcast simulation rejected" or detail =~ "Pre-broadcast simulation failed",
+             "Expected pre-broadcast simulation to reject the transaction, got: #{inspect(detail)}"
     end
   end
 

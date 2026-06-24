@@ -235,34 +235,32 @@ defmodule MPP.Methods.TempoFullFlowTest do
   end
 
   # ============================================================================
-  # Test 7: Optimistic multicall simulation targeting
+  # Test 7: Optimistic multicall pre-broadcast simulation
   # ============================================================================
 
-  describe "optimistic multicall targets payment call for simulation" do
-    test "eth_call targets the payment call contract, not the first call" do
+  describe "optimistic multicall simulates the full transaction before broadcast" do
+    test "simulates via eth_simulateV1, then broadcasts" do
       config =
         init_tempo_config(method_config: %{"wait_for_confirmation" => false})
 
-      # Build 3-call tx: [approve(dex), swap(dex), transfer(token)]
-      # Payment call (transfer) is at index 2, NOT index 0
+      # Build 3-call tx: [approve(dex), swap(dex), transfer(token)]. The full tx is
+      # simulated via eth_simulateV1 — there is no per-call eth_call to mis-target.
       dex = dex_address()
       approve_call = build_call(@token_address, approve_calldata(dex, 1_000_000))
       swap_call = build_call(dex, swap_calldata())
       transfer_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: @chain_id)
 
-      # Stub with spy to capture eth_call target
       test_pid = self()
 
       Req.Test.stub(TempoFullFlow, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
-          "eth_call" ->
-            [call_params, _block] = request["params"]
-            send(test_pid, {:eth_call_to, call_params["to"]})
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => @tx_hash, "id" => 1})
@@ -277,9 +275,9 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
       assert conn.assigns[:mpp_receipt].status == "success"
 
-      # Verify simulation targeted the token contract (payment call), not DEX (first call)
-      assert_received {:eth_call_to, simulated_to}
-      assert String.downcase(simulated_to) == String.downcase(@token_address)
+      # The full tx is simulated before broadcast.
+      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_sendRawTransaction"}
     end
   end
 
@@ -428,14 +426,17 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end)
   end
 
-  # Stubs eth_sendRawTransactionSync to return the given receipt.
-  # Dispatches by JSON-RPC method name.
+  # Stubs the confirmation flow: pre-broadcast eth_simulateV1 succeeds, then
+  # eth_sendRawTransactionSync returns the given receipt. Dispatches by method.
   defp stub_broadcast_and_receipt(receipt) do
     Req.Test.stub(TempoFullFlow, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       request = Jason.decode!(body)
 
       case request["method"] do
+        "eth_simulateV1" ->
+          Req.Test.json(conn, simulate_success_body())
+
         "eth_sendRawTransactionSync" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
 
@@ -443,6 +444,11 @@ defmodule MPP.Methods.TempoFullFlowTest do
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
       end
     end)
+  end
+
+  # eth_simulateV1 success response body: one block, one call with status 0x1.
+  defp simulate_success_body do
+    %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x1"}]}], "id" => 1}
   end
 
   # --- Receipt/log builders ---

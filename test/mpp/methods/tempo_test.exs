@@ -457,11 +457,20 @@ defmodule MPP.Methods.TempoTest do
 
     test "returns error on broadcast failure", %{charge: charge, tx_hex: tx_hex} do
       Req.Test.stub(Tempo, fn conn ->
-        Req.Test.json(conn, %{
-          "jsonrpc" => "2.0",
-          "error" => %{"code" => -32_000, "message" => "nonce too low"},
-          "id" => 1
-        })
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "nonce too low"},
+              "id" => 1
+            })
+        end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
@@ -498,8 +507,14 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
-        # eth_sendRawTransactionSync returns the full receipt directly
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          _ ->
+            # eth_sendRawTransactionSync returns the full receipt directly
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
@@ -531,7 +546,16 @@ defmodule MPP.Methods.TempoTest do
 
     test "returns error on broadcast network failure", %{charge: charge, tx_hex: tx_hex} do
       Req.Test.stub(Tempo, fn conn ->
-        Req.Test.transport_error(conn, :econnrefused)
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.transport_error(conn, :econnrefused)
+        end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
@@ -542,15 +566,100 @@ defmodule MPP.Methods.TempoTest do
 
     test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
       Req.Test.stub(Tempo, fn conn ->
-        conn
-        |> Plug.Conn.put_status(500)
-        |> Req.Test.json(%{"oops" => true})
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            conn
+            |> Plug.Conn.put_status(500)
+            |> Req.Test.json(%{"oops" => true})
+        end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Unexpected RPC response"
+    end
+  end
+
+  describe "verify/2 — pre-broadcast simulation gate (fee-payer DoS guard)" do
+    setup %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      {:ok, tx_hex: tx_hex, charge: charge}
+    end
+
+    test "confirmation path rejects a reverting transaction BEFORE broadcasting", %{charge: charge, tx_hex: tx_hex} do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            # Underfunded gas → the call runs out of gas on-chain → status 0x0.
+            # This is the drain vector: without this gate the fee payer broadcasts,
+            # pays the gas, and the client pays nothing.
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+              "id" => 1
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+
+      # The fee payer never commits gas — broadcast is never attempted.
+      assert_received {:rpc_call, "eth_simulateV1"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+      refute_received {:rpc_call, "eth_sendRawTransaction"}
+    end
+
+    test "degrades gracefully and broadcasts when the node lacks eth_simulateV1 (-32601)", %{
+      charge: charge,
+      tx_hex: tx_hex
+    } do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_601, "message" => "the method eth_simulateV1 does not exist"},
+              "id" => 1
+            })
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Simulation was attempted, degraded gracefully, then broadcast proceeded.
+      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync"}
     end
   end
 
@@ -598,10 +707,11 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
-          "eth_call" ->
+          "eth_simulateV1" ->
+            # Simulation reports the transaction would revert (the gas-drain DoS guard)
             Req.Test.json(conn, %{
               "jsonrpc" => "2.0",
-              "error" => %{"code" => -32_000, "message" => "execution reverted"},
+              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
               "id" => 1
             })
 
@@ -613,10 +723,10 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Simulation failed"
+      assert error.detail =~ "Pre-broadcast simulation rejected"
 
       # Verify simulation was called but broadcast was NOT
-      assert_received {:rpc_call, "eth_call"}
+      assert_received {:rpc_call, "eth_simulateV1"}
       refute_received {:rpc_call, "eth_sendRawTransaction"}
     end
 
@@ -626,8 +736,8 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
-          "eth_call" ->
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             Req.Test.json(conn, %{
@@ -644,7 +754,7 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "RPC error"
     end
 
-    test "calls eth_call then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
+    test "calls eth_simulateV1 then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
       test_pid = self()
 
       Req.Test.stub(Tempo, fn conn ->
@@ -653,8 +763,8 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
-          "eth_call" ->
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => @tx_hash, "id" => 1})
@@ -665,7 +775,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
 
       # Verify the correct RPC methods were called with the raw tx
-      assert_received {:rpc_call, "eth_call", _}
+      assert_received {:rpc_call, "eth_simulateV1", _}
       assert_received {:rpc_call, "eth_sendRawTransaction", [sent_hex]}
       assert sent_hex == tx_hex
 
@@ -681,7 +791,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Simulation request failed"
+      assert error.detail =~ "Pre-broadcast simulation failed"
     end
 
     test "async broadcast network failure returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -690,9 +800,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
-          "eth_call" ->
+          "eth_simulateV1" ->
             # Simulation succeeds
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             # Broadcast hits network error
@@ -712,8 +822,8 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
-          "eth_call" ->
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             # Return 503 with no error/result fields
@@ -729,18 +839,14 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "Unexpected RPC response"
     end
 
-    test "multicall: simulates the matched payment call, not the first call in batch", %{charge: charge} do
-      # Build a 3-call multicall: [approve(dex), swap(dex), transfer(token)]
-      # The payment call (transfer) is at index 2, NOT index 0.
+    test "multicall: simulates the full co-signed transaction before broadcast", %{charge: charge} do
+      # Build a 3-call multicall: [approve(dex), swap(dex), transfer(token)].
+      # The full transaction (all calls) is simulated via eth_simulateV1 — there is
+      # no longer a per-call eth_call that could target the wrong call in the batch.
       dex_address = dex_address()
-      approve_data = approve_calldata(dex_address, 1_000_000)
-      approve_call = build_call(@token_address, approve_data)
-
-      swap_data = swap_calldata()
-      swap_call = build_call(dex_address, swap_data)
-
-      transfer_data = transfer_calldata(@recipient, 1_000_000)
-      transfer_call = build_call(@token_address, transfer_data)
+      approve_call = build_call(@token_address, approve_calldata(dex_address, 1_000_000))
+      swap_call = build_call(dex_address, swap_calldata())
+      transfer_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
 
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: 42_431)
 
@@ -749,12 +855,11 @@ defmodule MPP.Methods.TempoTest do
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
-          "eth_call" ->
-            [call_params, _block] = request["params"]
-            send(test_pid, {:eth_call_to, call_params["to"]})
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
           "eth_sendRawTransaction" ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => @tx_hash, "id" => 1})
@@ -764,11 +869,9 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
 
-      # The eth_call must target the TOKEN contract (transfer's to), not the DEX (approve's to).
-      assert_received {:eth_call_to, simulated_to}
-
-      assert String.downcase(simulated_to) == String.downcase(@token_address),
-             "eth_call targeted #{simulated_to} (first call) instead of #{@token_address} (matched payment call)"
+      # The full tx is simulated once, then broadcast.
+      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_sendRawTransaction"}
     end
   end
 
@@ -853,9 +956,14 @@ defmodule MPP.Methods.TempoTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
 
-        "eth_sendRawTransactionSync" = request["method"]
-        receipt = %{success_receipt() | "transactionHash" => different_on_chain_hash}
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            receipt = %{success_receipt() | "transactionHash" => different_on_chain_hash}
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        end
       end)
 
       calldata = transfer_calldata(@recipient, 1_000_000)
@@ -969,9 +1077,14 @@ defmodule MPP.Methods.TempoTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
 
-        "eth_sendRawTransactionSync" = request["method"]
-        receipt = %{success_receipt() | "transactionHash" => different_hash}
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            receipt = %{success_receipt() | "transactionHash" => different_hash}
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        end
       end)
 
       calldata = transfer_calldata(@recipient, 1_000_000)
@@ -1028,14 +1141,18 @@ defmodule MPP.Methods.TempoTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
 
-        "eth_sendRawTransactionSync" = request["method"]
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
 
-        # Kill the store process AFTER broadcast succeeds but before post-broadcast dedup runs.
-        # We can't time it precisely, so we kill it here — the post-broadcast put will hit a dead process.
-        Agent.stop(DeadProcessStore)
+          "eth_sendRawTransactionSync" ->
+            # Kill the store process AFTER broadcast succeeds but before post-broadcast dedup runs.
+            # We can't time it precisely, so we kill it here — the post-broadcast put will hit a dead process.
+            Agent.stop(DeadProcessStore)
 
-        receipt = %{success_receipt() | "transactionHash" => different_hash}
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+            receipt = %{success_receipt() | "transactionHash" => different_hash}
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        end
       end)
 
       calldata = transfer_calldata(@recipient, 1_000_000)
@@ -1327,13 +1444,13 @@ defmodule MPP.Methods.TempoTest do
       call = build_call(@token_address, calldata)
       tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
 
-      # Stub eth_call (simulation) to return a malformed response
+      # Stub eth_simulateV1 (simulation) to return a malformed response
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
 
         case request["method"] do
-          "eth_call" ->
+          "eth_simulateV1" ->
             # Malformed: no "result" or "error" key
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "unexpected" => "field", "id" => 1})
 
@@ -1345,7 +1462,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected simulation response"
+      assert error.detail =~ "Pre-broadcast simulation failed"
     end
   end
 
@@ -1592,7 +1709,14 @@ defmodule MPP.Methods.TempoTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
         send(test_pid, {:rpc_call, request["method"], request["params"]})
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
@@ -1813,15 +1937,16 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
-  # Stubs the two-step optimistic flow: eth_call succeeds, eth_sendRawTransaction returns tx hash.
+  # Stubs the optimistic flow: pre-broadcast eth_simulateV1 succeeds, then
+  # eth_sendRawTransaction returns the tx hash.
   defp stub_optimistic_flow(tx_hash) do
     Req.Test.stub(Tempo, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       request = Jason.decode!(body)
 
       case request["method"] do
-        "eth_call" ->
-          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+        "eth_simulateV1" ->
+          Req.Test.json(conn, simulate_success_body())
 
         "eth_sendRawTransaction" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => tx_hash, "id" => 1})
@@ -1829,13 +1954,17 @@ defmodule MPP.Methods.TempoTest do
     end)
   end
 
-  # Stubs eth_sendRawTransactionSync to return a receipt directly (synchronous broadcast).
+  # Stubs the confirmation flow: pre-broadcast eth_simulateV1 succeeds, then
+  # eth_sendRawTransactionSync returns a receipt directly (synchronous broadcast).
   defp stub_broadcast_and_receipt(receipt) do
     Req.Test.stub(Tempo, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       request = Jason.decode!(body)
 
       case request["method"] do
+        "eth_simulateV1" ->
+          Req.Test.json(conn, simulate_success_body())
+
         "eth_sendRawTransactionSync" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
 
@@ -1843,5 +1972,10 @@ defmodule MPP.Methods.TempoTest do
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1, "_method" => other})
       end
     end)
+  end
+
+  # eth_simulateV1 success response body: one block, one call with status 0x1.
+  defp simulate_success_body do
+    %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x1"}]}], "id" => 1}
   end
 end

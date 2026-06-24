@@ -4,7 +4,19 @@
 defmodule MPP.Test.TempoTestHelpers do
   @moduledoc false
 
+  alias Cartouche.Recover
+  alias Cartouche.Signer.Curvy
   alias Onchain.Tempo.TIP20
+
+  # Fixed test sender key — fixtures are signed with it so the recovered sender is
+  # deterministic and pre-broadcast simulation (which recovers the sender) succeeds.
+  @test_sender_key Base.decode16!("800509fa3e80882ad0be77c27505bdc91380f800d51ed80897d22f9fcc75f4bf", case: :mixed)
+
+  @doc "The 20-byte address of the fixed test sender key, as a 0x-prefixed hex string."
+  def test_sender_address do
+    {:ok, addr} = Curvy.get_address(@test_sender_key)
+    "0x" <> Base.encode16(addr, case: :lower)
+  end
 
   @doc """
   Builds a hex-encoded 0x76 Tempo Transaction with the given calls and chain_id.
@@ -39,7 +51,7 @@ defmodule MPP.Test.TempoTestHelpers do
     # leaving ~20s TTL for build → co-sign → broadcast. Override to exercise the replay-window vector.
     valid_before = Keyword.get(opts, :valid_before, if(fee_payer?, do: System.os_time(:second) + 20, else: 0))
 
-    body = [
+    base_fields = [
       :binary.encode_unsigned(chain_id),
       rlp_uint(max_priority),
       rlp_uint(max_fee),
@@ -52,11 +64,20 @@ defmodule MPP.Test.TempoTestHelpers do
       <<>>,
       <<>>,
       fee_payer_sig,
-      [],
-      <<1::512>>
+      []
     ]
 
-    raw = <<0x76>> <> ExRLP.encode(body)
+    # Sign the base fields with the fixed test key (mirrors onchain_tempo's
+    # Builder.sign_and_encode) so the sender is recoverable. The fee-token and
+    # fee-payer-signature placeholders are exactly what cosign + sender recovery
+    # reset to, so the recovered sender is stable across the co-sign path.
+    signing_payload = <<0x76>> <> ExRLP.encode(base_fields)
+    {:ok, sender_address} = Curvy.get_address(@test_sender_key)
+    {:ok, sig} = Curvy.sign(signing_payload, @test_sender_key)
+    {:ok, recid} = Recover.find_recid(signing_payload, sig, sender_address)
+    sender_sig = <<sig.r::unsigned-big-size(256), sig.s::unsigned-big-size(256), recid + 27::8>>
+
+    raw = <<0x76>> <> ExRLP.encode(base_fields ++ [sender_sig])
     "0x" <> Base.encode16(raw, case: :lower)
   end
 

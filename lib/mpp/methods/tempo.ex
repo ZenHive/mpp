@@ -166,7 +166,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, signature} <- extract_signature(payload),
          {:ok, tx} <- Transaction.deserialize(signature),
          :ok <- verify_chain_id(tx, expected_chain_id),
-         {:ok, %{call: payment_call}} <-
+         {:ok, _payment} <-
            Transaction.find_payment_call(tx, charge.currency,
              amount: charge.amount,
              recipient: charge.recipient,
@@ -177,7 +177,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
-         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?, payment_call) do
+         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
       # Post-broadcast: record on-chain hash if it differs from input (malleable variants).
       # Best-effort — payment already succeeded, so store failures don't fail the request.
       safe_dedup_post_broadcast(store, tx_hash, tx.raw)
@@ -508,71 +508,63 @@ defmodule MPP.Methods.Tempo do
     {:error, "Chain ID mismatch: expected #{expected}, got #{actual}"}
   end
 
-  # Dispatches between confirmation and optimistic broadcast paths.
-  # Confirmation (default): broadcast sync → verify receipt logs.
-  # Optimistic: simulate via eth_call → broadcast async → return tx hash without receipt verification.
-  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?, _payment_call) do
+  # Dispatches between confirmation and optimistic broadcast paths. Both paths
+  # simulate the full co-signed transaction before broadcasting (see
+  # simulate_cosigned_tx/3) so a fee payer never pays gas for a transaction that
+  # would revert.
+  # Confirmation (default): simulate → broadcast sync → verify receipt logs.
+  # Optimistic: simulate → broadcast async → return tx hash without receipt verification.
+  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?) do
     rpc_opts = rpc_options(config)
 
-    with {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
+    with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config),
+         {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
          :ok <- check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
       {:ok, tx_hash}
     end
   end
 
-  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false = _wait?, payment_call) do
+  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false = _wait?) do
     rpc_opts = rpc_options(config)
 
-    with :ok <- simulate_payment_call(payment_call, rpc_url, config) do
+    with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config) do
       rpc_broadcast_async(raw_hex, rpc_url, rpc_opts)
     end
   end
 
-  # Simulates the matched payment call via eth_call to catch obvious reverts (insufficient
-  # balance, invalid state) before broadcasting. Uses the call's target contract and ABI
-  # calldata — NOT the raw serialized transaction. Matches mppx's viem_call approach
-  # (Charge.ts:257-262) which passes structured transaction fields to eth_call.
-  # Not a guarantee of on-chain success — blockchain state can change between simulation
-  # and inclusion.
-  defp simulate_payment_call(%{to: to, input: input}, rpc_url, config) do
-    req_options = config["req_options"] || []
-
-    # to is 20-byte binary, input is ABI-encoded calldata binary — hex-encode for JSON-RPC
-    to_hex = "0x" <> Base.encode16(to, case: :lower)
-    data_hex = "0x" <> Base.encode16(input, case: :lower)
-
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => "eth_call",
-        "params" => [%{"to" => to_hex, "data" => data_hex}, "latest"],
-        "id" => 1
-      })
-
-    result =
-      Req.request(
-        [
-          url: rpc_url,
-          method: :post,
-          headers: [{"content-type", "application/json"}],
-          body: body
-        ],
-        req_options
-      )
-
-    case result do
-      {:ok, %Req.Response{status: status, body: %{"result" => _}}} when status in 200..299 ->
+  # Simulates the FULL co-signed 0x76 transaction via eth_simulateV1 before
+  # broadcasting. This is the fee-payer gas-drain DoS guard: a malicious client
+  # can underfund gas_limit so the call runs out of gas on-chain — the sponsor's
+  # fee-payer wallet is still charged for the gas burned while the client pays
+  # nothing. Simulating the co-signed tx (recovered sender, folded AA call, gas
+  # included) catches that BEFORE the sponsor commits gas, which the prior bare
+  # eth_call on the payment call could not (it omitted gas entirely).
+  #
+  # onchain_tempo classifies the outcome (incl. folding eth_simulateV1's
+  # -38xxx execution errors like "intrinsic gas too low" into {:revert, _}):
+  #
+  #   * {:ok, :success}     → would succeed; proceed to broadcast
+  #   * {:ok, {:revert, _}} → would fail on-chain; reject before broadcast (the guard)
+  #   * {:ok, :unsupported} → node lacks eth_simulateV1 (-32601); skip + log,
+  #                           degrade gracefully, proceed
+  #   * {:error, reason}    → operational RPC failure; fail closed — never
+  #                           broadcast a transaction we could not validate
+  defp simulate_cosigned_tx(raw_hex, rpc_url, config) do
+    case RPC.simulate(raw_hex, rpc_url, rpc_options(config)) do
+      {:ok, :success} ->
         :ok
 
-      {:ok, %Req.Response{body: %{"error" => error}}} ->
-        {:error, Errors.new(:verification_failed, "Simulation failed: #{inspect(error)}")}
+      {:ok, {:revert, detail}} ->
+        {:error, Errors.new(:verification_failed, "Pre-broadcast simulation rejected the transaction: #{detail}")}
 
-      {:error, exception} ->
-        {:error, Errors.new(:verification_failed, "Simulation request failed: #{Exception.message(exception)}")}
+      {:ok, :unsupported} ->
+        Logger.info("MPP.Methods.Tempo: node does not implement eth_simulateV1; skipping pre-broadcast simulation")
 
-      {:ok, %Req.Response{} = response} ->
-        {:error, Errors.new(:verification_failed, "Unexpected simulation response (status #{response.status})")}
+        :ok
+
+      {:error, reason} ->
+        {:error, Errors.new(:verification_failed, "Pre-broadcast simulation failed: #{reason}")}
     end
   end
 

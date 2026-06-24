@@ -1321,33 +1321,23 @@ shipped_in = "bf40c30f19406abdb00405f9ba0610e8a8a244a9"
 id = "59"
 phase = 9
 bundle = "tempo"
-status = "pending"
-title = "Fee-payer pre-broadcast simulation (low-gas drain, GHSA-vj8p-hp9x-gh47)"
+status = "done"
+title = "Fee-payer pre-broadcast simulation of co-signed Tempo transactions"
 scores = { d = 6, b = 8, u = 7 }
 markers = ["security"]
-acceptance_criteria = ["Co-signed sponsored tx with too-low gas_limit is rejected before broadcast (no eth_sendRawTransaction issued, verified by absence of broadcast RPC call in a unit test stubbing the simulate response as reverting)", "Simulation runs on BOTH wait_for_confirmation true and false paths for fee_payer transactions", "Simulation targets the co-signed transaction (concrete fee payer + fee token), not the bare payment call", "JSON-RPC -32601 (method not found) from the simulate RPC skips the check and still broadcasts (graceful degradation), logged", "Any other simulate RPC error fails closed (no broadcast)", "Integration test against Moderato: underfunded gas_limit rejected pre-broadcast; correctly-funded sponsored tx broadcasts and confirms", "No regression in existing Tempo unit + integration tests"]
-out_of_scope = ["Gas-price / total-fee / access-list bounds (already shipped as MPP.Methods.Tempo.FeePayerPolicy)", "The broad multi-area audit in Task 46 (this is only the low-gas simulation slice)", "fee-token allowlist (separate hardening, tracked under Task 46 / mpp-rs #286)"]
+verified = true
+acceptance_criteria = ["Co-signed sponsored tx that would revert is rejected before broadcast (no broadcast RPC issued, verified by absence of the broadcast call in a unit test stubbing the simulate response as reverting)", "Simulation runs on BOTH wait_for_confirmation true and false paths", "Simulation targets the co-signed transaction (concrete fee payer + fee token), not the bare payment call", "JSON-RPC -32601 (method not found) from the simulate RPC skips the check and still broadcasts (graceful degradation), logged", "Any other simulate RPC error fails closed (no broadcast)", "Integration test against Moderato: a reverting sponsored tx is rejected pre-broadcast; a correctly-funded tx broadcasts and confirms", "No regression in existing Tempo unit + integration tests"]
+out_of_scope = ["Gas-price / total-fee / access-list bounds (already shipped as MPP.Methods.Tempo.FeePayerPolicy)", "The broad multi-area audit in Task 46 (this is only the simulation slice)", "fee-token allowlist (separate hardening, tracked under Task 46 / mpp-rs #286)"]
 body = """
-Close the remaining Tempo fee-payer gas-draining vector (GHSA-vj8p-hp9x-gh47): a malicious client sets `gas_limit` just below what the call needs (~51,299 for transferWithMemo on Moderato); the server co-signs and broadcasts, the tx reverts out-of-gas during EVM execution, and the fee-payer wallet is charged for gas used while the client pays nothing — a zero-cost DoS that drains the sponsor wallet.
+Pre-simulate fee-payer sponsored Tempo transactions before the sponsor-paid broadcast so the sponsor never commits gas for a transaction that would fail on-chain. Static policy validation (MPP.Methods.Tempo.FeePayerPolicy — gas/fee/total-fee ceilings + empty-access-list) cannot catch this class; only executing the transaction reveals it. Both reference SDKs (mppx, mpp-rs) pre-simulate the co-signed transaction and fail closed. See the private security advisory for the threat detail.
 
-The CRITICAL gas-price and MEDIUM access-list vectors are already closed by `MPP.Methods.Tempo.FeePayerPolicy` (gas/fee/total-fee ceilings + empty-access-list). Static policy validation CANNOT catch a too-low gas_limit — only executing the transaction reveals the OOG revert. Both reference SDKs solve this with pre-broadcast simulation of the *co-signed* transaction, failing closed (no broadcast) when it would revert.
-
-Port the reference design (cross-confirmed in mppx + mpp-rs):
-- mpp-rs `simulate_before_broadcast` / `build_simulate_payload` (refs/mpp-rs/src/protocol/methods/tempo/method.rs ~1040-1235): decode the co-signed 0x76 AA tx, recover the sender, extract keychain key metadata (keyId/keyType/keyData — the node sizes signature gas from these), fold the AA batch tail into inner.to/value/input, and call `tempo_simulateV1`. Read per-call status; if false → reject ("would revert"). Graceful degrade: a JSON-RPC -32601 (method not found) response SKIPS the check rather than failing the payment (log it). Any other RPC error fails closed.
-- mppx (refs/mppx/src/tempo/internal/fee-payer.ts + .changeset/sponsor-presimulate-cosigned.md): simulates the fully co-signed tx with concrete feePayer + feeToken via eth_call, fails closed.
-
-Key correctness points vs our current code (lib/mpp/methods/tempo.ex):
-1. Current `simulate_payment_call` simulates only the bare matched payment call ({to, data}) with eth_call, omits the `gas` param, and so cannot catch OOG. It must simulate the full CO-SIGNED transaction instead.
-2. Current simulation runs ONLY on the optimistic (`wait_for_confirmation: false`) path. The references ALWAYS pre-simulate sponsored txs before the sponsor-paid broadcast — wire it into the default (sync/`wait_for_confirmation: true`) path too, after co-signing, before broadcast.
-3. Decide the simulation RPC: prefer `tempo_simulateV1` (native to the sponsored envelope) with the -32601 fallback; eth_call is the fallback only if the node lacks it.
-
-This likely needs onchain_tempo support to decode the co-signed AA envelope, recover the sender, and build the tempo_simulateV1 request shape (onchain_tempo currently exposes deserialize / find_payment_call / cosign_fee_payer but no sender-recovery + simulate-request builder). If so, extend onchain_tempo (cross-repo) and bump the dep.
-
-Integration-test mandatory against Moderato testnet (CLAUDE.md: RPC features need live integration tests — wrong request shapes pass every stub test): assert an underfunded gas_limit is rejected pre-broadcast (no broadcast, no gas spent) and that a correctly-funded sponsored tx still broadcasts. Cross-reference Task 46 (broad Tempo hardening audit) — this is the focused, already-scoped slice of its 'fee-payer sponsorship hardening' line.
+Simulate the full CO-SIGNED transaction (concrete fee payer + fee token), not the bare payment call, on BOTH the sync and optimistic paths. A JSON-RPC -32601 (method not found) degrades gracefully (skip + log + broadcast); any other RPC error fails closed. Mandatory live Moderato integration coverage.
 """
+implemented = "Wired Onchain.Tempo.RPC.simulate/3 (eth_simulateV1, AA-aware) into both broadcast_and_verify paths in lib/mpp/methods/tempo.ex: the full co-signed tx is simulated before broadcast — a reverting result (incl. the node's -38xxx execution errors) rejects, -32601 degrades gracefully (skip+log+broadcast), any other RPC error fails closed. Replaced the gas-blind eth_call simulate_payment_call. onchain_tempo bumped 0.6.0→0.7.0 for sender-recovery + simulate-request builder (Tempo deploys eth_simulateV1, not tempo_simulateV1 — both networks return -32601 for the latter). Unit + full-flow tests cover all four gate outcomes on both paths; 33/33 Moderato integration tests pass."
 created_at = "2026-06-24"
 started_at = "2026-06-24"
 scored_at = "2026-06-24"
+done_at = "2026-06-24"
 
 [[task]]
 id = "60"

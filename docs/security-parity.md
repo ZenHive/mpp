@@ -41,6 +41,7 @@ mpp-specs: no advisories.
 | mppx #501 escape challenge quoted strings | Header / CRLF injection in `WWW-Authenticate` | `escape_quoted/1` raises on CR/LF — `headers.ex:369-377`; parser rejects CR/LF in values `headers.ex:478-479` |
 | mppx #497 require expiring nonce for fee payer | Fixed-nonce replay of sponsored tx | `@expiring_nonce_key` checked in `FeePayerPolicy` — `fee_payer_policy.ex:224-230` |
 | Inbound `GHSA-vv77-66rf-pm86` (no gas limit) + `GHSA-qpxh-ff8m-c62v` (access list) | Gas-price / total-fee / validity / access-list drain of sponsor wallet | `FeePayerPolicy` five ceilings + empty-access-list check — `fee_payer_policy.ex:76-81,191-263` |
+| mpp-rs #293 / mppx #534 (`e80feeb`) pre-broadcast simulation | Sponsor commits gas for a co-signed tx that would revert on-chain | `MPP.Methods.Tempo` simulates the full co-signed tx via `eth_simulateV1` before broadcast on both paths; reverting → reject, -32601 → graceful skip, other RPC error → fail closed — `tempo.ex` (Task 59, done) |
 | mpp-rs #219 prevent caching of 402 | Intermediary caches serving stale challenges | `cache-control: no-store` on all error responses — `plug.ex:293` |
 | mpp-specs #210 verify-before-extract-SPT ordering | Stripe API call triggered before challenge validity confirmed | Pipeline runs `Challenge.verify` + expiry + request-match *before* `method.verify` — `verifier.ex:81-87` |
 | mppx #450 reject forged credential metadata | Client `meta` overriding server-derived request | No client `meta` field exists; server re-derives request from its own charge and pins it — `verifier.ex:151-158` |
@@ -53,7 +54,6 @@ mpp-specs: no advisories.
 
 | Upstream fix | Where tracked |
 |---|---|
-| Simulate co-signed sponsored tx pre-broadcast (mpp-rs #293 / mppx #534 `e80feeb`) | **Task 59** (security) |
 | Fee-payer token allowlist (#286) · atomic `put_if_absent` CAS (#280) · proof-wallet-binding (#253) · proof-source DID validation (#267, `384c4fe`) | **Task 46** (Tempo hardening audit) |
 | Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
 | Generic EVM/Stripe replay incl. **Stripe `Idempotent-Replayed` CVE-2026-34210** | **Task 35** (plug-level dedup) + **Task 64** (Stripe stubs) |
