@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.5.1"
+  @version "0.6.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -66,11 +66,14 @@ defmodule MPP.MixProject do
       {:oxc, "~> 0.16", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
-      # On-chain verification (Tempo and EVM methods)
-      {:onchain, "~> 0.8"},
+      # On-chain verification (Tempo and EVM methods) — 0.10 for the
+      # Onchain.RPC surface the EVM method delegates to.
+      {:onchain, "~> 0.10"},
 
-      # Tempo chain primitives (Tempo method)
-      {:onchain_tempo, "~> 0.3"},
+      # Tempo chain primitives (Tempo method) — 0.7 for the sender-recovery +
+      # Onchain.Tempo.RPC.simulate/3 primitives the fee-payer pre-broadcast
+      # simulation (MPP.Methods.Tempo) calls directly.
+      {:onchain_tempo, "~> 0.7"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
