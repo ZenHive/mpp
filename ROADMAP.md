@@ -131,7 +131,7 @@
 | Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
 | Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
-| Task 63 `[P]` | ⬜ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
+| Task 63 `[P]` | ⬜ | 🎁 **utilities** · 🔒 Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 <!-- TASKS:END -->
 
 ---
