@@ -27,7 +27,8 @@ defmodule MPP.Methods.EVM do
     * `"rpc_url"` — (required) JSON-RPC endpoint URL for the target EVM chain
     * `"chain_id"` — (optional) network chain ID, included in challenge details
       so the client knows which chain to transact on
-    * `"req_options"` — (optional) passed to `Req.request/2` for testing stubs
+    * `"req_options"` — (optional) merged into the `Onchain.RPC` call as
+      `:req_options` (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
 
   ## Credential Payload
 
@@ -148,7 +149,7 @@ defmodule MPP.Methods.EVM do
 
   # Fetches the transaction receipt, parses Transfer logs, and finds a matching transfer.
   defp verify_erc20_transfer(hash, charge, rpc_url, config) do
-    with {:ok, receipt} <- rpc_get_receipt(hash, rpc_url, config),
+    with {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
          :ok <- check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge) do
       {:ok, Receipt.new(method: "evm", reference: hash, external_id: charge.external_id)}
@@ -159,9 +160,9 @@ defmodule MPP.Methods.EVM do
 
   # Fetches the transaction, checks value matches charge amount, and verifies recipient.
   defp verify_native_transfer(hash, charge, rpc_url, config) do
-    with {:ok, receipt} <- rpc_get_receipt(hash, rpc_url, config),
+    with {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
          :ok <- check_receipt_status(receipt),
-         {:ok, tx} <- rpc_get_transaction(hash, rpc_url, config),
+         {:ok, tx} <- fetch_transaction(hash, rpc_url, config),
          :ok <- check_native_transfer(tx, charge) do
       {:ok, Receipt.new(method: "evm", reference: hash, external_id: charge.external_id)}
     end
@@ -207,106 +208,32 @@ defmodule MPP.Methods.EVM do
     end
   end
 
-  # --- RPC helpers ---
-  # Uses Req directly because Onchain.RPC delegates to Cartouche → Finch,
-  # bypassing Req entirely. Req.Test stubs only intercept Req.request/2 calls.
+  # --- RPC (delegated to Onchain.RPC) ---
+  # Onchain.RPC returns atom-keyed, hex-decoded receipts/transactions and is
+  # Req-stubbable via the `:req_options` opt (e.g. `[plug: {Req.Test, EVM}]`).
 
-  defp rpc_get_receipt(hash, rpc_url, config) do
-    case rpc_request("eth_getTransactionReceipt", [hash], rpc_url, config) do
-      {:ok, nil} ->
-        {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
-
-      {:ok, receipt} when is_map(receipt) ->
-        {:ok, parse_receipt(receipt)}
-
-      {:error, reason} ->
-        {:error, Errors.new(:verification_failed, "RPC error fetching receipt: #{inspect(reason)}")}
+  defp fetch_receipt(hash, rpc_url, config) do
+    case Onchain.RPC.get_transaction_receipt(hash, rpc_opts(rpc_url, config)) do
+      {:ok, nil} -> {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
+      {:ok, receipt} -> {:ok, receipt}
+      {:error, reason} -> {:error, Errors.new(:verification_failed, "RPC error fetching receipt: #{inspect(reason)}")}
     end
   end
 
-  defp rpc_get_transaction(hash, rpc_url, config) do
-    case rpc_request("eth_getTransactionByHash", [hash], rpc_url, config) do
-      {:ok, nil} ->
-        {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
-
-      {:ok, tx} when is_map(tx) ->
-        {:ok, parse_transaction(tx)}
-
-      {:error, reason} ->
-        {:error, Errors.new(:verification_failed, "RPC error fetching transaction: #{inspect(reason)}")}
+  defp fetch_transaction(hash, rpc_url, config) do
+    case Onchain.RPC.get_transaction_by_hash(hash, rpc_opts(rpc_url, config)) do
+      {:ok, nil} -> {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
+      {:ok, tx} -> {:ok, tx}
+      {:error, reason} -> {:error, Errors.new(:verification_failed, "RPC error fetching transaction: #{inspect(reason)}")}
     end
   end
 
-  defp rpc_request(method, params, rpc_url, config) do
-    req_options = config["req_options"] || []
-
-    body =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "method" => method,
-        "params" => params,
-        "id" => 1
-      })
-
-    result =
-      Req.request(
-        [
-          url: rpc_url,
-          method: :post,
-          headers: [{"content-type", "application/json"}],
-          body: body
-        ],
-        req_options
-      )
-
-    case result do
-      {:ok, %Req.Response{status: status, body: %{"result" => value}}} when status in 200..299 ->
-        {:ok, value}
-
-      {:ok, %Req.Response{body: %{"error" => error}}} ->
-        {:error, "RPC error: #{inspect(error)}"}
-
-      {:error, exception} ->
-        {:error, "RPC request failed: #{Exception.message(exception)}"}
-
-      {:ok, %Req.Response{} = response} ->
-        {:error, "Unexpected RPC response (status #{response.status})"}
+  # Builds Onchain.RPC opts: the node URL plus optional Req overrides (test stubs).
+  defp rpc_opts(rpc_url, config) do
+    case config["req_options"] do
+      nil -> [rpc_url: rpc_url]
+      req_options -> [rpc_url: rpc_url, req_options: req_options]
     end
-  end
-
-  # Parses a raw JSON-RPC receipt map into atom-keyed format compatible with Onchain.Transfer.
-  defp parse_receipt(raw) do
-    %{
-      transaction_hash: raw["transactionHash"],
-      block_number: hex_to_integer(raw["blockNumber"]),
-      status: hex_to_integer(raw["status"]),
-      from: raw["from"],
-      to: raw["to"],
-      logs: Enum.map(raw["logs"] || [], &parse_log/1)
-    }
-  end
-
-  # Parses a raw JSON-RPC log entry into the atom-keyed format Onchain.Transfer expects.
-  defp parse_log(raw) do
-    %{
-      address: raw["address"],
-      topics: raw["topics"] || [],
-      data: raw["data"],
-      block_number: raw["blockNumber"],
-      transaction_hash: raw["transactionHash"],
-      log_index: raw["logIndex"]
-    }
-  end
-
-  # Parses a raw JSON-RPC transaction map into atom-keyed format.
-  defp parse_transaction(raw) do
-    %{
-      hash: raw["hash"],
-      from: raw["from"],
-      to: raw["to"],
-      value: hex_to_integer(raw["value"]),
-      input: raw["input"]
-    }
   end
 
   # --- Shared helpers ---
@@ -356,8 +283,4 @@ defmodule MPP.Methods.EVM do
   end
 
   defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
-
-  defp hex_to_integer(nil), do: nil
-  defp hex_to_integer("0x" <> hex), do: String.to_integer(hex, 16)
-  defp hex_to_integer(val) when is_integer(val), do: val
 end

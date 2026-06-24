@@ -304,6 +304,9 @@ defmodule MPP.Methods.TempoFullFlowTest do
           amount: 1_000_000,
           chain_id: @chain_id,
           rpc_url: @rpc_url,
+          # Pin gas so the builder skips eth_estimateGas — this suite is offline
+          # (stubbed RPC); an omitted gas_limit would make a real network call.
+          gas_limit: 1_000_000,
           nonce: 0,
           nonce_key: expiring_nonce_key_int(),
           valid_before: future_valid_before()

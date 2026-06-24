@@ -325,6 +325,9 @@ defmodule MPP.Tempo.CrossValidationTest do
           amount: 1_000_000,
           chain_id: 42_431,
           rpc_url: "unused",
+          # Pin gas so the builder skips eth_estimateGas — rpc_url is a dummy
+          # ("unused"); these are offline serialization-parity checks.
+          gas_limit: 1_000_000,
           nonce: 1
         )
 
@@ -350,6 +353,9 @@ defmodule MPP.Tempo.CrossValidationTest do
           amount: 1_000_000,
           chain_id: 42_431,
           rpc_url: "unused",
+          # Pin gas so the builder skips eth_estimateGas — rpc_url is a dummy
+          # ("unused"); these are offline serialization-parity checks.
+          gas_limit: 1_000_000,
           nonce: 1
         )
 
@@ -475,6 +481,9 @@ defmodule MPP.Tempo.CrossValidationTest do
           amount: 1_000_000,
           chain_id: 42_431,
           rpc_url: "unused",
+          # Pin gas so the builder skips eth_estimateGas — rpc_url is a dummy
+          # ("unused"); these are offline serialization-parity checks.
+          gas_limit: 1_000_000,
           nonce: 42
         )
 

@@ -55,14 +55,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
       Missing `onchain` dependency!
 
       Add it to your mix.exs:
-        {:onchain, "~> 0.4"}
+        {:onchain, "~> 0.10"}
 
       Then run: mix deps.get
       """)
     end
 
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
-    rpc_opts = [rpc_url: rpc_url]
 
     # Recipient is a fixed address (never broadcasts), so we derive once from a
     # known key for stability across tests.
@@ -74,15 +73,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
     fixture_wallet = fresh_wallet!(rpc_url)
 
     # Seed tx 1: pathUSD transfer from fixture wallet → recipient (nonce 0).
-    # Use the 0x76 Tempo transaction builder (TIP-20 `transfer` call) rather than
-    # a generic type-2 EVM `ERC20.transfer`: a cold TIP-20 transfer on Moderato
-    # exceeds the raw-EVM-transfer gas budget (a 400_000-limit type-2 transfer
-    # runs out of gas), whereas the 0x76 path is what real MPP clients use and is
-    # exercised by every transaction-credential test below. `broadcast_..._sync!`
-    # asserts the receipt status is 0x1, so a revert surfaces loudly here.
-    # NOTE: explicit gas_limit — the builder's 500k default is stale; a cold
-    # TIP-20 transfer on Moderato costs ~560k (onchain_tempo Task 10). 1M is the
-    # interim ceiling until the builder auto-estimates (onchain Task 82).
+    # Use the 0x76 Tempo transaction builder (TIP-20 `transfer` call) — the path
+    # real MPP clients use, exercised by every transaction-credential test below.
+    # `gas_limit` is omitted so the builder auto-estimates each call via
+    # `eth_estimateGas` (onchain_tempo ≥ 0.4.0, 1.25× headroom): a cold TIP-20
+    # transfer on Moderato costs ~560k–810k (the chain charges a protocol fee on
+    # the transfer path), which the old static 500k default OOG-reverted.
+    # `broadcast_..._sync!` asserts the receipt status is 0x1, so a revert
+    # surfaces loudly here.
     {:ok, seed_tx} =
       TempoTxBuilder.build_signed_transfer(
         private_key: fixture_wallet.private_key,
@@ -92,8 +90,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
         chain_id: @chain_id,
         rpc_url: rpc_url,
         fee_token: @path_usd,
-        nonce: 0,
-        gas_limit: 1_000_000
+        nonce: 0
       )
 
     tx_hash = broadcast_raw_transaction_sync!(seed_tx, rpc_url)
