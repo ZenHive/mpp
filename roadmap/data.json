@@ -1896,21 +1896,20 @@
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [
-        "parallel",
-        "security"
+        "parallel"
       ],
       "depends_on": [],
       "acceptance_criteria": [
         "stream_data added as a dev/test dep",
         "Round-trip property: format/1 then parse/1 is identity for WWW-Authenticate, Authorization, and Payment-Receipt headers",
         "Malformed-input property: arbitrary binaries and corrupt base64url return {:error, _} and never raise, for all three header types + credential decode",
-        "Tests run in the default suite (no :integration tag)",
-        "Memory-exhaustion cap: MPP.Headers rejects an over-long token before base64url-decoding at all three parse sites (WWW-Authenticate request param, Authorization credential token, Payment-Receipt token), returning {:error, _} not raising — matching mpp-rs #299 (MAX_TOKEN_LEN = 16 * 1024 bytes; confirm the exact bound against refs/mpp-rs/src/protocol/core/headers.rs at pickup)"
+        "Tests run in the default suite (no :integration tag)"
       ],
       "out_of_scope": [
-        "Porting Rust's libFuzzer harness itself — StreamData property tests are the Elixir-idiomatic equivalent"
+        "Porting Rust's libFuzzer harness itself — StreamData property tests are the Elixir-idiomatic equivalent",
+        "The request/token size cap (memory-exhaustion DoS hardening) — that is the security fix tracked in Task 65; these property tests will exercise the cap once it lands"
       ],
-      "body": "The Rust reference SDK fuzzes all four wire-format parsers (WWW-Authenticate: Payment, Authorization: Payment, Payment-Receipt, base64url-JSON) — refs/mpp-rs/fuzz/fuzz_targets/. We have zero property/fuzz coverage. Add {:stream_data, \"~> 1.0\", only: [:dev, :test]} and property tests for MPP.Headers: (1) round-trip identity — format then parse reproduces the input struct for WWW-Authenticate, Authorization, and Payment-Receipt; (2) malformed-input robustness — arbitrary/garbage binaries and truncated/over-padded base64url never raise, always return {:error, _}. Include the credential base64url(JSON) decode path used by MPP.Credential. First consumer: our own 402 endpoint parses arbitrary client-supplied headers — a parser panic on malformed input is a DoS surface for a money protocol. Also port the request/token size cap from mpp-rs #299 (commit 6540a5a, refs/mpp-rs/src/protocol/core/headers.rs): MAX_TOKEN_LEN = 16 * 1024, enforced before decoding at parse_www_authenticate (the request param), parse_authorization (the credential token), and parse_receipt — our MPP.Headers currently has no length bound at any of these sites, so an oversized header forces an unbounded base64url decode + JSON parse. The fuzz tests above will exercise this cap.",
+      "body": "The Rust reference SDK fuzzes all four wire-format parsers (WWW-Authenticate: Payment, Authorization: Payment, Payment-Receipt, base64url-JSON) — refs/mpp-rs/fuzz/fuzz_targets/. We have zero property/fuzz coverage. Add {:stream_data, \"~> 1.0\", only: [:dev, :test]} and property tests for MPP.Headers: (1) round-trip identity — format then parse reproduces the input struct for WWW-Authenticate, Authorization, and Payment-Receipt; (2) malformed-input robustness — arbitrary/garbage binaries and truncated/over-padded base64url never raise, always return {:error, _}. Include the credential base64url(JSON) decode path used by MPP.Credential. First consumer: our own 402 endpoint parses arbitrary client-supplied headers — a parser panic on malformed input is a DoS surface for a money protocol. The related memory-exhaustion size cap (mpp-rs #299) is tracked separately as the security fix in Task 65; these property tests will exercise that cap once it lands.",
       "created_at": "2026-06-24",
       "scored_at": "2026-06-24",
       "cross_repo": []
@@ -1946,6 +1945,43 @@
         "Stripe Connect settlement (Task 52)"
       ],
       "body": "Our Stripe integration test (test/mpp/methods/stripe_integration_test.exs) is live-creds-only, so the request-shape regressions it would catch only run when STRIPE_SECRET_KEY is set. The Rust reference SDK (refs/mpp-rs/tests/integration_stripe.rs) covers the same scenarios against a LOCAL MOCK Stripe endpoint, so they run in CI without creds. Extend test/mpp/methods/stripe_test.exs (already uses Req.Test stubs) with mock-backed parity for: (1) PaymentIntent status requires_action / any non-succeeded status -> 402; (2) idempotent-replayed credential (Stripe returns an idempotent-replayed marker) -> 402; (3) Stripe 400 error body -> 402; (4) externalId propagated into the challenge methodDetails AND echoed in the receipt. Catches wrong request/response shapes without needing the live API. Cross-ref: externalId binding is also an audit line in Task 46 (mppx #537) — this is the creds-free unit/stub slice of it.",
+      "created_at": "2026-06-24",
+      "scored_at": "2026-06-24",
+      "cross_repo": []
+    },
+    {
+      "id": "65",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299)",
+      "scores": {
+        "d": 2,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 3.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security",
+        "parallel"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "Over-MAX_TOKEN_LEN WWW-Authenticate request param is rejected with {:error, _} before any base64url decode",
+        "Over-MAX_TOKEN_LEN Authorization: Payment token is rejected with {:error, _} before decode",
+        "Over-MAX_TOKEN_LEN Payment-Receipt token is rejected with {:error, _} before decode",
+        "Bound matches mpp-rs MAX_TOKEN_LEN (16 * 1024) — verified against refs/mpp-rs/src/protocol/core/headers.rs and cited",
+        "At-limit input still parses; over-limit is the only rejection — boundary tested",
+        "No raise on oversized input; existing parse error contract preserved",
+        "Unit tests for each of the three sites (at-limit pass, over-limit reject)"
+      ],
+      "out_of_scope": [
+        "General property/fuzz coverage of the parsers — that is Task 63 (which will also exercise this cap)",
+        "Changing the error atom/shape returned by the parsers"
+      ],
+      "body": "MPP is a published hex.pm money library with external consumers and inbound private security advisories, so an unbounded parse from an untrusted header is a live DoS surface, not a theoretical one. MPP.Headers currently applies NO length bound before base64url-decoding + JSON-parsing client-supplied header tokens at three parse sites, so a single oversized header forces unbounded allocation. Port the cap mpp-rs shipped as a patch-level security fix in #299 (commit 6540a5a, refs/mpp-rs/src/protocol/core/headers.rs): reject the token BEFORE decoding when it exceeds MAX_TOKEN_LEN (16 * 1024 bytes) at (1) parse_challenge / parse_challenges — the WWW-Authenticate `request` param specifically; (2) parse_credential — the Authorization: Payment token; (3) parse_receipt — the Payment-Receipt token. Return the existing {:error, _} shape (never raise). Confirm the exact 16KB bound and which params are capped against refs/mpp-rs at pickup, cross-check refs/mppx, and cite refs/...:line per the CLAUDE.md wire-format rule.",
       "created_at": "2026-06-24",
       "scored_at": "2026-06-24",
       "cross_repo": []
