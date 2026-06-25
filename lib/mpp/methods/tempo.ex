@@ -349,8 +349,12 @@ defmodule MPP.Methods.Tempo do
   # read is a fast-path reject; the hash is committed via the store's atomic
   # check_and_mark AFTER successful verification, so concurrent requests carrying
   # the same confirmed hash collide at commit time (exactly one wins) while a
-  # transient RPC failure still doesn't burn legitimate retries. Matches mppx
-  # (Charge.ts:126-141) and mpp-rs Store::put_if_absent.
+  # transient RPC failure still doesn't burn legitimate retries. This matches
+  # mpp-rs verify_hash, which claims via atomic Store::put_if_absent only after
+  # verifying the receipt (method.rs:789-799). mppx reaches the same single-use +
+  # retriable guarantee the other way — reserve-before-verify with release-on-
+  # failure (Charge.ts:215-273); our mark-after-verify avoids the compensating
+  # release entirely.
   #
   # Transaction path (type="transaction"): atomic reserve → verify → broadcast.
   # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
@@ -383,11 +387,7 @@ defmodule MPP.Methods.Tempo do
     ts = System.system_time(:millisecond)
 
     if store_supports_atomic?(store) do
-      case store_check_and_mark(store, key, ts) do
-        :ok -> :ok
-        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
-      end
+      claim_atomic(store, key, ts)
     else
       case store_put(store, key, ts) do
         :ok -> :ok
@@ -405,13 +405,20 @@ defmodule MPP.Methods.Tempo do
     ts = System.system_time(:millisecond)
 
     if store_supports_atomic?(store) do
-      case store_check_and_mark(store, key, ts) do
-        :ok -> :ok
-        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
-      end
+      claim_atomic(store, key, ts)
     else
       reserve_hash_sequential(store, key, ts)
+    end
+  end
+
+  # Atomic single-use claim via the store's check_and_mark/2. Shared by the
+  # pre-broadcast reserve (transaction path) and the post-verification commit
+  # (hash path) — both treat :already_exists as a replay rejection.
+  defp claim_atomic(store, key, ts) do
+    case store_check_and_mark(store, key, ts) do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
     end
   end
 
