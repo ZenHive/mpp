@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (11 of 19 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (12 of 20 done · 0 in progress)
 
-**Last shipped:** Task 56 — GitHub Actions CI workflow, Task 59 — Fee-payer pre-broadcast simulation of co-signed Tempo transactions, Task 60 — Credential-gated integration CI: nightly cron + pre-merge gate, Task 61 — GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope, Task 62 — Fix CI coverage gate to green (repair precommit alias + restore 95%), Task 65 — Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) on 2026-06-24
+**Last shipped:** Task 66 — Harden Tempo hash-credential dedup to an atomic commit on 2026-06-25
 
 **Up next:** Task 57 — Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯
 <!-- FOCUS:END -->
@@ -133,6 +133,7 @@
 | Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 | Task 63 `[P]` | ⬜ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 | Task 65 `[P]` | ✅ | 🎁 **utilities** · 🔒 Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) [D:2/B:7/U:6 → Eff:3.25] 🎯 |
+| Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17] 🎯 |
 <!-- TASKS:END -->
 
 ---

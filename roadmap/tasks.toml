@@ -1451,3 +1451,33 @@ started_at = "2026-06-24"
 scored_at = "2026-06-24"
 done_at = "2026-06-24"
 shipped_in = "c327c0f18e035180f9baf13d0198c3112adc9231"
+
+[[task]]
+id = "66"
+phase = 9
+bundle = "tempo"
+status = "done"
+title = "Harden Tempo hash-credential dedup to an atomic commit"
+scores = { d = 3, b = 7, u = 6 }
+markers = ["security"]
+depends_on = [46]
+acceptance_criteria = ["The hash-credential path commits the dedup mark via the store's atomic check_and_mark (same primitive the transaction path uses), not a separate get-then-put", "Concurrency test against ConCacheStore: two simultaneous hash-credential verifications for the same confirmed on-chain hash settle with exactly one success and one already-used rejection", "Retriability preserved: a transient receipt-RPC failure does not consume the hash (a later valid retry still succeeds)", "Stores without check_and_mark/2 fall back to documented best-effort behavior", "mix precommit.full green; touched module at the 95% critical-tier coverage floor", "Commit message and CHANGELOG stay fix-shaped (atomic dedup commit / SDK parity) per SECURITY.md — no underlying-hole detail until the patched release"]
+out_of_scope = ["The transaction (co-signed / fee-payer) path — already atomic", "Plug-level generic dedup (Task 47/661)", "Fee-token allowlist and other Task 46 audit line items"]
+files_to_modify = ["lib/mpp/methods/tempo.ex"]
+touches = ["lib/mpp/methods/tempo.ex", "test/mpp/methods/tempo_test.exs", "lib/mpp/tempo/con_cache_store.ex"]
+assignee = "human"
+body = """
+Make the Tempo `type="hash"` credential dedup commit atomic, matching both reference SDKs (mpp-rs `Store::put_if_absent`, mppx atomic `markHashUsed`). The atomic primitive already exists in `MPP.Methods.Tempo` (`reserve_hash_atomic`/store `check_and_mark`) and is used by the `type="transaction"` path; the hash path does not yet route its commit through it.
+
+Keep the existing early read as a fast-path reject AND keep marking AFTER successful on-chain verification (the deliberate behavior that preserves retriability when the receipt RPC fails transiently) — i.e. make the final commit atomic, do not move to a reserve-before-verify model. Stores without `check_and_mark/2` keep the documented best-effort fallback.
+
+Full mechanism, trigger conditions, affected-version range, and fix detail are tracked in a private draft GitHub security advisory (Security → Advisories) — read it at pickup. Coordinated disclosure on the patched release per SECURITY.md; keep commit messages / CHANGELOG fix-shaped until then.
+
+Cross-ref: Task 46 line item "Store::put_if_absent atomic-CAS semantics (mpp-rs #280)" is the related store-level confirmation; this task is the concrete hash-path-commit slice. Assigned human because the exploit detail lives in a private advisory a dispatched cross-family reviewer cannot read.
+"""
+implemented = "Hash-credential dedup now commits via the store's atomic check_and_mark (post-verification), matching mpp-rs/mppx; added a concurrent-same-hash regression test against ConCacheStore asserting exactly-one-success. tempo.ex + tempo_test.exs."
+delivered_by = "claude (local hand-build, private-advisory seat)"
+created_at = "2026-06-24"
+scored_at = "2026-06-24"
+done_at = "2026-06-25"
+shipped_in = "46c5b0e1311da7d92190dc7d9ea89027a1d365e9"
