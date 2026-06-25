@@ -1003,6 +1003,49 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "Dedup store error"
     end
 
+    test "hash path falls back to best-effort put for a store without check_and_mark/2", %{
+      charge: charge
+    } do
+      # A store implementing only get/put — no atomic check_and_mark/2. The hash path
+      # must still commit via plain put after verification, and reject replay via the
+      # (non-atomic, best-effort) early read.
+      defmodule PutOnlyStore do
+        @moduledoc false
+        @behaviour Store
+
+        use Agent
+
+        def start_link(_opts \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+        @impl Store
+        def get(key) do
+          case Agent.get(__MODULE__, &Map.get(&1, key)) do
+            nil -> :not_found
+            value -> {:ok, value}
+          end
+        end
+
+        @impl Store
+        def put(key, value) do
+          Agent.update(__MODULE__, &Map.put(&1, key, value))
+          :ok
+        end
+      end
+
+      start_supervised!(PutOnlyStore)
+      charge = %{charge | method_details: Map.put(charge.method_details, "store", PutOnlyStore)}
+
+      stub_receipt(success_receipt())
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      # First call succeeds and marks via the put fallback
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # Replay rejected via the early read
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
     test "concurrent requests with same signed tx — only one succeeds", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
