@@ -1200,6 +1200,33 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "already used"
     end
 
+    test "concurrent hash-credential requests for same confirmed hash — exactly one succeeds", %{
+      charge: charge
+    } do
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      # Two concurrent verifications of the same confirmed on-chain hash both pass the
+      # early read and fetch the receipt, then collide at the atomic commit
+      # (check_and_mark) — exactly one wins, the other is rejected as already-used.
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn -> Tempo.verify(payload, charge) end)
+        end
+
+      results = Task.await_many(tasks)
+
+      ok_count = Enum.count(results, &match?({:ok, _}, &1))
+      error_count = Enum.count(results, &match?({:error, _}, &1))
+
+      assert ok_count == 1, "Expected exactly 1 success, got #{ok_count}: #{inspect(results)}"
+      assert error_count == 1, "Expected exactly 1 rejection, got #{error_count}: #{inspect(results)}"
+
+      [{:error, %Errors{} = error}] = Enum.filter(results, &match?({:error, _}, &1))
+      assert error.detail =~ "already used"
+    end
+
     test "transaction path stores and rejects replay", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)

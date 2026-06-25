@@ -6,6 +6,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+**Security (Tempo hash-credential dedup).** The `type="hash"` credential path now commits its dedup mark through the store's atomic `check_and_mark/2` — the same primitive the `type="transaction"` path already uses — matching the reference SDKs (mpp-rs `Store::put_if_absent`, mppx atomic `markHashUsed`). The mark still happens only after successful on-chain verification, so a transient receipt-RPC failure does not burn a legitimate hash; stores that do not implement `check_and_mark/2` keep the documented best-effort fallback.
+
 ## [0.6.0] - 2026-06-24
 
 **CI / security scaffolding.** The repo gains GitHub Actions CI — previously it had none. A base **CI** workflow gates every push/PR to `development`/`main` with the full check stack (format, `--warnings-as-errors` compile, Credo strict, Doctor, Sobelow, tests at a 95% coverage floor, Dialyzer), mirroring `mix precommit.full`; an **Integration** workflow runs the credential-gated `:integration` suite nightly (and on PR / manual dispatch), flunking loudly when secrets are absent rather than reporting a green 0-test run. A **Code Scanning** workflow uploads Sobelow findings to the Security tab as SARIF (CodeQL has no Elixir support), plus a Dependabot config (weekly Hex + Actions updates) and an expanded `SECURITY.md` scope. Elixir/OTP are pinned via `.tool-versions` so CI never drifts from local `mix format` output.

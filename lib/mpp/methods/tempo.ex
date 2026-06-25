@@ -150,7 +150,7 @@ defmodule MPP.Methods.Tempo do
            {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
            :ok <- check_receipt_status(receipt),
            {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
-           :ok <- mark_hash_used(store, hash) do
+           :ok <- commit_hash_used(store, hash) do
         {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
       end
     end
@@ -345,9 +345,12 @@ defmodule MPP.Methods.Tempo do
   # --- Dedup store helpers ---
   # No-op when store is nil (library stays stateless by default).
   #
-  # Hash path (type="hash"): check → verify on-chain → mark. The hash is only
-  # marked after successful verification so transient RPC failures don't burn
-  # legitimate retries. Matches mppx (Charge.ts:126-141).
+  # Hash path (type="hash"): check → verify on-chain → atomic commit. The early
+  # read is a fast-path reject; the hash is committed via the store's atomic
+  # check_and_mark AFTER successful verification, so concurrent requests carrying
+  # the same confirmed hash collide at commit time (exactly one wins) while a
+  # transient RPC failure still doesn't burn legitimate retries. Matches mppx
+  # (Charge.ts:126-141) and mpp-rs Store::put_if_absent.
   #
   # Transaction path (type="transaction"): atomic reserve → verify → broadcast.
   # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
@@ -368,16 +371,28 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Marks a hash as used after successful verification. Used by hash path after on-chain check.
-  defp mark_hash_used(nil, _hash), do: :ok
+  # Commits a hash as used AFTER successful on-chain verification. Atomic when the
+  # store supports check_and_mark/2: concurrent same-hash requests collide here, so
+  # exactly one wins and the loser gets "already used" — closing the check→mark race
+  # the plain get/put commit left open. Stores without check_and_mark/2 fall back to a
+  # best-effort put (the early read remains their only, non-atomic, guard).
+  defp commit_hash_used(nil, _hash), do: :ok
 
-  defp mark_hash_used(store, hash) do
+  defp commit_hash_used(store, hash) do
     key = store_key(hash)
     ts = System.system_time(:millisecond)
 
-    case store_put(store, key, ts) do
-      :ok -> :ok
-      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+    if store_supports_atomic?(store) do
+      case store_check_and_mark(store, key, ts) do
+        :ok -> :ok
+        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      end
+    else
+      case store_put(store, key, ts) do
+        :ok -> :ok
+        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      end
     end
   end
 
