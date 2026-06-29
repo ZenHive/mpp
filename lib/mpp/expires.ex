@@ -91,7 +91,7 @@ defmodule MPP.Expires do
     errors: [:invalid_challenge, :payment_expired]
   )
 
-  @spec assert!(String.t() | nil) :: :ok
+  @spec assert!(term()) :: :ok
   def assert!(expires), do: assert!(expires, nil)
 
   @doc """
@@ -99,7 +99,7 @@ defmodule MPP.Expires do
 
   When `challenge_id` is provided, it is included in invalid-challenge errors.
   """
-  @spec assert!(String.t() | nil, String.t() | nil) :: :ok
+  @spec assert!(term(), String.t() | nil) :: :ok
   def assert!(nil, challenge_id) do
     raise_invalid!(challenge_id, "missing required expires field")
   end
