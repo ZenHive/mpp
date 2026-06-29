@@ -570,4 +570,102 @@ defmodule MPP.HeadersTest do
       end
     end
   end
+
+  describe "parse_accept_payment/1" do
+    test "parses single and multiple entries with default q=1.0" do
+      assert [{"tempo", "charge", 1.0}] = Headers.parse_accept_payment("tempo/charge")
+
+      assert [{"tempo", "charge", 1.0}, {"stripe", "charge", 0.5}] =
+               Headers.parse_accept_payment("tempo/charge, stripe/charge;q=0.5")
+    end
+
+    test "parses wildcards and q=0" do
+      assert Headers.parse_accept_payment("tempo/*, */session;q=0") == [
+               {"tempo", "*", 1.0},
+               {"*", "session", 0.0}
+             ]
+    end
+
+    test "parses boundary q-values and duplicate q (last wins)" do
+      assert Headers.parse_accept_payment("a/b;q=0, c/d;q=1, e/f;q=0.001") == [
+               {"a", "b", 0.0},
+               {"c", "d", 1.0},
+               {"e", "f", 0.001}
+             ]
+
+      assert [{"tempo", "charge", 0.8}] =
+               Headers.parse_accept_payment("tempo/charge;q=0.5;q=0.8")
+    end
+
+    test "tolerates spaces around q equals" do
+      assert [{"tempo", "charge", 0.5}] = Headers.parse_accept_payment("tempo/charge;q = 0.5")
+      assert [{"tempo", "charge", 0.5}] = Headers.parse_accept_payment("tempo/charge; q=0.5")
+    end
+
+    test "returns empty list for malformed input" do
+      assert Headers.parse_accept_payment("") == []
+      assert Headers.parse_accept_payment("   ") == []
+      assert Headers.parse_accept_payment("tempo") == []
+      assert Headers.parse_accept_payment("Tempo/charge") == []
+      assert Headers.parse_accept_payment("tempo/charge;q=1.5") == []
+      assert Headers.parse_accept_payment("tempo/charge;q=-0.1") == []
+      assert Headers.parse_accept_payment("tempo/charge;q=0.1234") == []
+    end
+  end
+
+  describe "format_accept_payment/1" do
+    test "formats entries and round-trips" do
+      header = "tempo/charge, stripe/charge;q=0.5, */session;q=0"
+      entries = Headers.parse_accept_payment(header)
+      assert Headers.format_accept_payment(entries) == header
+    end
+
+    test "omits q=1 and strips trailing zeros" do
+      assert Headers.format_accept_payment([{"tempo", "charge", 1.0}]) == "tempo/charge"
+      assert Headers.format_accept_payment([{"a", "b", 0.1}]) == "a/b;q=0.1"
+    end
+  end
+
+  defp accept_payment_offer(method, intent),
+    do: %Challenge{method: method, intent: intent, id: method, realm: "api.example.com", request: "e30"}
+
+  describe "rank_by_accept_payment/2" do
+    test "orders by q and excludes q=0" do
+      offers = [accept_payment_offer("stripe", "charge"), accept_payment_offer("tempo", "charge")]
+      prefs = Headers.parse_accept_payment("tempo/charge, stripe/charge;q=0.5")
+
+      assert [%{method: "tempo"}, %{method: "stripe"}] =
+               Headers.rank_by_accept_payment(offers, prefs)
+
+      prefs = Headers.parse_accept_payment("tempo/charge;q=0, stripe/charge")
+      assert [%{method: "stripe"}] = Headers.rank_by_accept_payment(offers, prefs)
+    end
+
+    test "wildcard specificity beats lower q" do
+      offers = [accept_payment_offer("stripe", "charge"), accept_payment_offer("tempo", "charge")]
+      prefs = Headers.parse_accept_payment("*/charge;q=0.3, stripe/charge;q=0.8")
+
+      assert [%{method: "stripe"}, %{method: "tempo"}] =
+               Headers.rank_by_accept_payment(offers, prefs)
+    end
+
+    test "tempo/* at q=1 but tempo/charge;q=0 excludes charge intent" do
+      offers = [accept_payment_offer("tempo", "charge"), accept_payment_offer("tempo", "session")]
+      prefs = Headers.parse_accept_payment("tempo/*;q=1, tempo/charge;q=0")
+
+      assert [%{method: "tempo", intent: "session"}] =
+               Headers.rank_by_accept_payment(offers, prefs)
+    end
+
+    test "preserves offer order on tie and returns empty when no match" do
+      offers = [accept_payment_offer("a", "charge"), accept_payment_offer("b", "charge")]
+      prefs = Headers.parse_accept_payment("*/charge")
+
+      assert [%{method: "a"}, %{method: "b"}] = Headers.rank_by_accept_payment(offers, prefs)
+
+      no_match_prefs = Headers.parse_accept_payment("tempo/charge")
+      assert Headers.rank_by_accept_payment([accept_payment_offer("lightning", "charge")], no_match_prefs) == []
+      assert Headers.rank_by_accept_payment(offers, []) == []
+    end
+  end
 end

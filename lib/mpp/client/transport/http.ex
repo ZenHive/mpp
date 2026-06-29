@@ -14,12 +14,15 @@ defmodule MPP.Client.Transport.HTTP do
       single comma-separated header value; both forms are handled.
     * Credential attachment: `Authorization: Payment <base64url-json>`,
       produced via `MPP.Headers.format_credential/1`.
+    * Optional `Accept-Payment` advertisement via `set_accept_payment/2` or
+      `set_accept_payment_from_providers/3` (gated by `MPP.Client.AcceptPolicy`).
   """
 
   use MPP.Client.Transport
   use Descripex, namespace: "/client"
 
   alias MPP.Challenge
+  alias MPP.Client.AcceptPolicy
   alias MPP.Client.Transport
   alias MPP.Credential
   alias MPP.Headers
@@ -78,4 +81,79 @@ defmodule MPP.Client.Transport.HTTP do
   def set_credential(%Req.Request{} = request, %Credential{} = credential) do
     Req.Request.put_header(request, "authorization", Headers.format_credential(credential))
   end
+
+  api(
+    :set_accept_payment,
+    "Attach an `Accept-Payment` header built from preference entries.",
+    params: [
+      request: [kind: :value, description: "Req.Request struct"],
+      entries: [
+        kind: :value,
+        description: "List of `{method, intent, q}` tuples advertising client capabilities"
+      ]
+    ],
+    returns: %{type: :struct, description: "Req.Request with Accept-Payment header set"}
+  )
+
+  @doc """
+  Attach an `Accept-Payment` header from preference entries.
+
+  Does not overwrite an existing `Accept-Payment` header on the request.
+  """
+  @spec set_accept_payment(Req.Request.t(), [Headers.accept_payment_entry() | map()]) ::
+          Req.Request.t()
+  def set_accept_payment(%Req.Request{} = request, entries) when is_list(entries) do
+    if entries == [] or has_accept_payment_header?(request) do
+      request
+    else
+      Req.Request.put_header(request, "accept-payment", Headers.format_accept_payment(entries))
+    end
+  end
+
+  api(
+    :set_accept_payment_from_providers,
+    "Attach `Accept-Payment` from supported `(method, intent)` pairs when policy allows.",
+    params: [
+      request: [kind: :value, description: "Req.Request struct"],
+      providers: [
+        kind: :value,
+        description: "List of `{method, intent}` tuples the client can pay with"
+      ],
+      policy: [
+        kind: :value,
+        description: "MPP.Client.AcceptPolicy gate (defaults to `:always`)"
+      ]
+    ],
+    returns: %{type: :struct, description: "Req.Request, unchanged when policy blocks injection"}
+  )
+
+  @doc """
+  Attach `Accept-Payment` from a list of supported `{method, intent}` pairs.
+
+  Respects `MPP.Client.AcceptPolicy` — when `allows?/2` is false the request is
+  returned unchanged. Caller-set `Accept-Payment` headers are never overwritten.
+  """
+  @spec set_accept_payment_from_providers(
+          Req.Request.t(),
+          [{String.t(), String.t()}],
+          AcceptPolicy.t()
+        ) :: Req.Request.t()
+  def set_accept_payment_from_providers(%Req.Request{} = request, providers, policy \\ :always) when is_list(providers) do
+    url = request_url(request)
+
+    if providers == [] or has_accept_payment_header?(request) or not AcceptPolicy.allows?(policy, url) do
+      request
+    else
+      entries = Enum.map(providers, fn {method, intent} -> {method, intent, 1.0} end)
+      set_accept_payment(request, entries)
+    end
+  end
+
+  defp has_accept_payment_header?(request) do
+    Req.Request.get_header(request, "accept-payment") != []
+  end
+
+  defp request_url(%Req.Request{url: %URI{} = uri}), do: URI.to_string(uri)
+  defp request_url(%Req.Request{url: url}) when is_binary(url), do: url
+  defp request_url(%Req.Request{}), do: ""
 end

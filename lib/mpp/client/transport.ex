@@ -27,7 +27,7 @@ defmodule MPP.Client.Transport do
   challenge whose `method`/`intent` is supported by a `MPP.Client.MultiProvider`.
   This matches the baseline "first supported in server offer order" behaviour
   shared with the reference SDKs; ranking via `Accept-Payment` is layered on top
-  later and is out of scope for the transport itself.
+  via the optional `:accept_payment` keyword to `select_challenge/3`.
   """
 
   use Descripex, namespace: "/client"
@@ -35,6 +35,7 @@ defmodule MPP.Client.Transport do
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
   alias MPP.Credential
+  alias MPP.Headers
 
   @doc """
   Return `true` if the response signals that a payment is required.
@@ -68,7 +69,11 @@ defmodule MPP.Client.Transport do
   api(:select_challenge, "Pick the first challenge whose method+intent is supported by a MultiProvider.",
     params: [
       challenges: [kind: :value, description: "List of MPP.Challenge structs in server offer order"],
-      multi: [kind: :value, description: "MPP.Client.MultiProvider struct"]
+      multi: [kind: :value, description: "MPP.Client.MultiProvider struct"],
+      opts: [
+        kind: :value,
+        description: "Optional `:accept_payment` preference list (`{method, intent, q}` tuples)"
+      ]
     ],
     returns: %{
       type: :tagged_tuple,
@@ -78,20 +83,25 @@ defmodule MPP.Client.Transport do
   )
 
   @doc """
-  Pick the first challenge whose `method`/`intent` is supported by the
-  `MultiProvider`.
+  Pick the first supported challenge, optionally ranked by `Accept-Payment`.
 
-  Preserves server offer order — the first supported challenge wins, matching
-  `MPP.Client.MultiProvider.pay/2`'s dispatch order. Callers that need
-  preference-based ranking (via `Accept-Payment`) should layer that on top.
+  When `:accept_payment` is provided, challenges are reordered by client
+  preferences before the first `MultiProvider`-supported match is chosen.
+  Malformed preference lists are ignored (baseline server-offer order).
 
   Returns `{:error, :no_supported_challenge}` if no challenge matches any
   provider, including the empty-list case.
   """
-  @spec select_challenge([Challenge.t()], MultiProvider.t()) ::
+  @spec select_challenge([Challenge.t()], MultiProvider.t(), keyword()) ::
           {:ok, Challenge.t()} | {:error, :no_supported_challenge}
-  def select_challenge(challenges, %MultiProvider{} = multi) when is_list(challenges) do
-    case Enum.find(challenges, fn %Challenge{method: m, intent: i} ->
+  def select_challenge(challenges, %MultiProvider{} = multi, opts \\ []) when is_list(challenges) do
+    ranked =
+      case Keyword.get(opts, :accept_payment, []) do
+        [] -> challenges
+        preferences -> Headers.rank_by_accept_payment(challenges, preferences)
+      end
+
+    case Enum.find(ranked, fn %Challenge{method: m, intent: i} ->
            MultiProvider.supports?(multi, m, i)
          end) do
       %Challenge{} = c -> {:ok, c}

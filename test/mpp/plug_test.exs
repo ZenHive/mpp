@@ -985,8 +985,6 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- Multi-method 402 response ---
-
   describe "call/2 multi-method 402 response" do
     setup do
       config =
@@ -1063,6 +1061,80 @@ defmodule MPP.PlugTest do
         end)
 
       assert [_, _] = Enum.uniq(ids)
+    end
+  end
+
+  describe "call/2 Accept-Payment challenge filtering" do
+    setup do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockTempoMethod, amount: "500", currency: "usd"]
+          ]
+        )
+
+      {:ok, config: config}
+    end
+
+    defp challenge_methods(conn) do
+      conn
+      |> get_all_resp_headers("www-authenticate")
+      |> Enum.map(fn h ->
+        {:ok, c} = Headers.parse_challenge(h)
+        c.method
+      end)
+    end
+
+    test "no-op when Accept-Payment header absent", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      assert Enum.sort(challenge_methods(conn)) == ["mock", "tempo"]
+    end
+
+    test "reorders challenges by q-value preference", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("accept-payment", "tempo/charge, mock/charge;q=0.5")
+        |> call_plug(config)
+
+      assert challenge_methods(conn) == ["tempo", "mock"]
+    end
+
+    test "q=0 excludes a method", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("accept-payment", "mock/charge;q=0, tempo/charge")
+        |> call_plug(config)
+
+      assert challenge_methods(conn) == ["tempo"]
+    end
+
+    test "malformed Accept-Payment is ignored (all challenges offered)", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("accept-payment", "Not-A-Valid-Header")
+        |> call_plug(config)
+
+      assert Enum.sort(challenge_methods(conn)) == ["mock", "tempo"]
+    end
+
+    test "no matching Accept-Payment falls back to all challenges", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("accept-payment", "*/session")
+        |> call_plug(config)
+
+      assert Enum.sort(challenge_methods(conn)) == ["mock", "tempo"]
     end
   end
 

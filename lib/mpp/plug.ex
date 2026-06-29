@@ -393,8 +393,10 @@ defmodule MPP.Plug do
   defp respond_error(conn, config, %Errors{} = error) do
     conn =
       if error.status == 402 do
+        entries = filter_method_entries_by_accept_payment(conn, config.method_entries)
+
         challenge_headers =
-          Enum.map(config.method_entries, fn entry ->
+          Enum.map(entries, fn entry ->
             challenge = generate_challenge(config, entry)
             {"www-authenticate", Headers.format_challenge(challenge)}
           end)
@@ -409,6 +411,18 @@ defmodule MPP.Plug do
     |> Plug.Conn.put_resp_content_type("application/problem+json")
     |> Plug.Conn.send_resp(error.status, Errors.to_json(error))
     |> Plug.Conn.halt()
+  end
+
+  defp filter_method_entries_by_accept_payment(conn, method_entries) do
+    header =
+      case Plug.Conn.get_req_header(conn, "accept-payment") do
+        [] -> nil
+        [value | _] -> value
+      end
+
+    Headers.apply_accept_payment_header(method_entries, header, fn entry ->
+      {entry.method.method_name(), "charge"}
+    end)
   end
 
   # Generates a fresh challenge for a specific method entry.

@@ -24,7 +24,8 @@ defmodule MPP.DescripexTest do
     MPP.Verifier,
     MPP.Mcp,
     MPP.Client.PaymentProvider,
-    MPP.Client.MultiProvider
+    MPP.Client.MultiProvider,
+    MPP.Client.AcceptPolicy
   ]
 
   describe "api() annotations" do

@@ -173,6 +173,64 @@ defmodule MPP.Client.Transport.HTTPTest do
       assert {:error, :no_supported_challenge} =
                Transport.select_challenge([], MultiProvider.new([{TempoProvider, %{}}]))
     end
+
+    test "ranks by Accept-Payment before picking supported challenge" do
+      challenges = [make_challenge("stripe"), make_challenge("tempo")]
+      multi = MultiProvider.new([{TempoProvider, %{}}, {StripeProvider, %{}}])
+      prefs = Headers.parse_accept_payment("stripe/charge, tempo/charge;q=0.5")
+
+      assert {:ok, c} = Transport.select_challenge(challenges, multi, accept_payment: prefs)
+      assert c.method == "stripe"
+    end
+  end
+
+  describe "set_accept_payment/2" do
+    test "sets Accept-Payment header from entries" do
+      request = %Req.Request{}
+      entries = Headers.parse_accept_payment("tempo/charge, stripe/charge;q=0.5")
+
+      updated = HTTP.set_accept_payment(request, entries)
+
+      assert [header] = Req.Request.get_header(updated, "accept-payment")
+      assert header == "tempo/charge, stripe/charge;q=0.5"
+    end
+
+    test "does not overwrite existing Accept-Payment header" do
+      request = Req.Request.put_header(%Req.Request{}, "accept-payment", "custom/charge")
+
+      updated = HTTP.set_accept_payment(request, [{"tempo", "charge", 1.0}])
+
+      assert Req.Request.get_header(updated, "accept-payment") == ["custom/charge"]
+    end
+  end
+
+  describe "set_accept_payment_from_providers/3" do
+    test "injects header from provider list when policy allows" do
+      request = Req.Request.new(url: "https://app.example.com/api")
+
+      updated =
+        HTTP.set_accept_payment_from_providers(
+          request,
+          [{"tempo", "charge"}, {"stripe", "charge"}],
+          {:same_origin, "https://app.example.com"}
+        )
+
+      assert [header] = Req.Request.get_header(updated, "accept-payment")
+      assert header == "tempo/charge, stripe/charge"
+    end
+
+    test "skips injection when policy blocks cross-origin" do
+      request = Req.Request.new(url: "https://other.example.com/api")
+
+      updated =
+        HTTP.set_accept_payment_from_providers(
+          request,
+          [{"tempo", "charge"}],
+          {:same_origin, "https://app.example.com"}
+        )
+
+      assert Req.Request.get_header(updated, "accept-payment") == []
+    end
   end
 
   # -- Descripex annotation presence ---------------------------------------------
@@ -184,5 +242,7 @@ defmodule MPP.Client.Transport.HTTPTest do
     assert :payment_required? in names
     assert :get_challenges in names
     assert :set_credential in names
+    assert :set_accept_payment in names
+    assert :set_accept_payment_from_providers in names
   end
 end
