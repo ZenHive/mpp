@@ -1288,7 +1288,7 @@ shipped_in = "e51dc9f"
 id = "57"
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "done"
 title = "Unit tests for MultiProvider and ConCacheStore"
 scores = { d = 2, b = 5, u = 6 }
 markers = ["parallel"]
@@ -1296,9 +1296,14 @@ acceptance_criteria = ["multi_provider_test.exs covers first-match, no-match, an
 assignee = "codex"
 model = "gpt-5.5"
 body = "Close the two direct-unit-test gaps surfaced in the 2026-06-12 health review. Add test/mpp/client/multi_provider_test.exs covering MPP.Client.MultiProvider first-match routing across [{module, config}] entries, the no-match path, and config pass-through to the chosen provider. Add test/mpp/tempo/con_cache_store_test.exs covering MPP.Tempo.ConCacheStore get/put, TTL expiry, and check_and_mark atomicity (the atomic dedup path). Both modules currently have zero direct tests; adding them also satisfies the coverage-before-mutating gate for any future change to either."
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1782738917316-f3eedadb, decfbcc539ebc8aa7ed0d2fa4a7c9c4fb3147f4c)."
+delivered_by = "codex"
+verified = true
 created_at = "2026-06-12"
 started_at = "2026-06-29"
 scored_at = "2026-06-12"
+done_at = "2026-06-29"
+shipped_in = "decfbcc539ebc8aa7ed0d2fa4a7c9c4fb3147f4c"
 
 [[task]]
 id = "58"
