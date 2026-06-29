@@ -8,6 +8,8 @@ defmodule MPP.PlugTest do
   alias MPP.Intents.Charge
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.TempoMemoryStore
 
   # --- Mock Methods ---
 
@@ -81,6 +83,23 @@ defmodule MPP.PlugTest do
 
     def verify(_payload, _charge) do
       {:error, Errors.new(:invalid_payload, "Missing token field")}
+    end
+  end
+
+  defmodule MockTempoMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "tempo"
+
+    @impl MPP.Method
+    def verify(%{"proof" => "valid"}, _charge) do
+      {:ok, Receipt.new(method: method_name(), reference: "tempo_ref")}
+    end
+
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "Missing proof")}
     end
   end
 
@@ -178,6 +197,12 @@ defmodule MPP.PlugTest do
     Plug.Conn.get_resp_header(conn, header)
   end
 
+  defp start_replay_store! do
+    cache_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
+    start_supervised!({ConCacheStore, name: cache_name})
+    {ConCacheStore, name: cache_name}
+  end
+
   # --- init/1 (single-method, backwards compat) ---
 
   describe "init/1" do
@@ -226,7 +251,15 @@ defmodule MPP.PlugTest do
       assert config.expires_in == 300
       assert config.digest == nil
       assert config.opaque == nil
+      assert config.store == nil
       assert first_entry(config).charge.recipient == nil
+    end
+
+    test "accepts optional shared replay store" do
+      store = {ConCacheStore, name: :plug_replay_test}
+      config = init_config(store: store)
+
+      assert config.store == store
     end
 
     test "raises when expires_in is not a positive integer" do
@@ -415,6 +448,110 @@ defmodule MPP.PlugTest do
     end
   end
 
+  describe "call/2 with shared replay store" do
+    setup do
+      store = start_replay_store!()
+      config = init_config(store: store)
+      auth_header = build_authorization_header(config)
+
+      {:ok, config: config, auth_header: auth_header}
+    end
+
+    test "rejects the same credential on second use", %{config: config, auth_header: auth_header} do
+      first_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute first_conn.halted
+
+      second_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert second_conn.status == 402
+      body = decode_json_body(second_conn)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] == "Payment credential already used"
+    end
+
+    test "does not mark failed method verification as used", %{config: config} do
+      auth_header = build_authorization_header(config, %{"proof" => "invalid"})
+
+      first_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      second_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert first_conn.status == 402
+      assert second_conn.status == 402
+      assert decode_json_body(first_conn)["detail"] == "Invalid proof"
+      assert decode_json_body(second_conn)["detail"] == "Invalid proof"
+    end
+
+    test "non-tempo method_config store does not skip plug-level replay store" do
+      config =
+        init_config(
+          method_config: %{"store" => TempoMemoryStore},
+          store: start_replay_store!()
+        )
+
+      auth_header = build_authorization_header(config)
+
+      first_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      second_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute first_conn.halted
+      assert second_conn.status == 402
+      assert decode_json_body(second_conn)["detail"] == "Payment credential already used"
+    end
+
+    test "tempo method with its own store skips plug-level replay store" do
+      config =
+        init_config(
+          method: MockTempoMethod,
+          method_config: %{"store" => TempoMemoryStore},
+          store: start_replay_store!()
+        )
+
+      auth_header = build_authorization_header(config)
+
+      first_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      second_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute first_conn.halted
+      refute second_conn.halted
+    end
+  end
+
   # --- Valid credential → pass-through ---
 
   describe "call/2 with valid credential" do
@@ -458,6 +595,26 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       assert get_resp_header(conn, "cache-control") == "private"
+    end
+
+    test "accepts the same credential twice when no shared replay store is configured", %{
+      config: config,
+      auth_header: auth_header
+    } do
+      first_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      second_conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute first_conn.halted
+      refute second_conn.halted
     end
 
     test "accepts credential whose digest matches endpoint config" do

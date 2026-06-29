@@ -43,6 +43,7 @@ defmodule MPP.Plug do
     * `:expires_in` — (optional) challenge TTL in seconds (integer, defaults to 300)
     * `:digest` — (optional) expected content digest for body-bound challenges
     * `:opaque` — (optional) base64url-encoded server correlation data
+    * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store
 
   ## Single-Method Options
 
@@ -68,9 +69,12 @@ defmodule MPP.Plug do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.JCS
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Verifier
 
   @default_expires_in_seconds 300
+  @dedup_store_key_prefix "mpp:credential:"
+  @dedup_store_error_detail "Dedup store error"
 
   defmodule MethodEntry do
     @moduledoc """
@@ -105,11 +109,12 @@ defmodule MPP.Plug do
             method_entries: [MethodEntry.t()],
             expires_in: pos_integer(),
             digest: String.t() | nil,
-            opaque: String.t() | nil
+            opaque: String.t() | nil,
+            store: module() | {module(), keyword()} | nil
           }
 
     @enforce_keys [:secret_key, :realm, :method_entries]
-    defstruct [:secret_key, :realm, :method_entries, :expires_in, :digest, :opaque]
+    defstruct [:secret_key, :realm, :method_entries, :expires_in, :digest, :opaque, :store]
   end
 
   @doc """
@@ -132,7 +137,8 @@ defmodule MPP.Plug do
       method_entries: entries,
       expires_in: validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds)),
       digest: Keyword.get(opts, :digest),
-      opaque: Keyword.get(opts, :opaque)
+      opaque: Keyword.get(opts, :opaque),
+      store: validate_store!(Keyword.get(opts, :store))
     }
   end
 
@@ -140,6 +146,23 @@ defmodule MPP.Plug do
 
   defp validate_expires_in!(_seconds) do
     raise ArgumentError, "MPP.Plug: :expires_in must be a positive integer"
+  end
+
+  defp validate_store!(nil), do: nil
+
+  defp validate_store!({ConCacheStore, opts} = store) when is_list(opts), do: store
+
+  defp validate_store!({store, _opts}) do
+    raise ArgumentError,
+          "MPP.Plug :store tuple form is only supported for {MPP.Tempo.ConCacheStore, opts}; got: #{inspect(store)}"
+  end
+
+  defp validate_store!(store) do
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
+      raise ArgumentError, "MPP.Plug :store must implement MPP.Tempo.Store (get/1, put/2)"
+    end
+
+    store
   end
 
   # Normalizes single-method and multi-method opts into a list of keyword lists.
@@ -276,6 +299,8 @@ defmodule MPP.Plug do
   # Delegates verification to the transport-neutral MPP.Verifier, then handles
   # the Plug-specific result (conn assigns, headers, error responses).
   defp verify_credential(conn, config, credential, entry) do
+    store = replay_store(config, entry)
+
     opts = [
       secret_key: config.secret_key,
       realm: config.realm,
@@ -286,16 +311,81 @@ defmodule MPP.Plug do
       opaque: config.opaque
     ]
 
-    case Verifier.verify(credential, opts) do
-      {:ok, receipt} ->
-        conn
-        |> Plug.Conn.assign(:mpp_receipt, receipt)
-        |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
-        |> Plug.Conn.put_resp_header("cache-control", "private")
-
+    with :ok <- check_credential_unused(store, credential),
+         {:ok, receipt} <- Verifier.verify(credential, opts),
+         :ok <- mark_credential_used(store, credential) do
+      conn
+      |> Plug.Conn.assign(:mpp_receipt, receipt)
+      |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
+      |> Plug.Conn.put_resp_header("cache-control", "private")
+    else
       {:error, %Errors{} = error} ->
         respond_error(conn, config, error)
     end
+  end
+
+  defp replay_store(%Config{store: nil}, _entry), do: nil
+
+  defp replay_store(config, %{method_config: %{"store" => store}, method: method}) when not is_nil(store) do
+    if method.method_name() == "tempo", do: nil, else: config.store
+  end
+
+  defp replay_store(config, _entry), do: config.store
+
+  defp check_credential_unused(nil, _credential), do: :ok
+
+  defp check_credential_unused(store, credential) do
+    key = credential_store_key(credential)
+
+    case store_get(store, key) do
+      :not_found -> :ok
+      {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+    end
+  end
+
+  defp mark_credential_used(nil, _credential), do: :ok
+
+  defp mark_credential_used(store, credential) do
+    key = credential_store_key(credential)
+    value = System.system_time(:millisecond)
+
+    if store_supports_atomic?(store) do
+      case store_check_and_mark(store, key, value) do
+        :ok -> :ok
+        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      end
+    else
+      case store_put(store, key, value) do
+        :ok -> :ok
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      end
+    end
+  end
+
+  defp store_get({ConCacheStore, opts}, key), do: ConCacheStore.get(key, opts)
+  defp store_get(store, key), do: store.get(key)
+
+  defp store_put(store, key, value), do: store.put(key, value)
+
+  defp store_check_and_mark({ConCacheStore, opts}, key, value) do
+    ConCacheStore.check_and_mark(key, value, opts)
+  end
+
+  defp store_check_and_mark(store, key, value), do: store.check_and_mark(key, value)
+
+  defp store_supports_atomic?({ConCacheStore, _opts}), do: true
+  defp store_supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
+
+  defp credential_store_key(credential) do
+    @dedup_store_key_prefix <> credential.challenge.id <> ":" <> payload_hash(credential.payload)
+  end
+
+  defp payload_hash(payload) do
+    :sha256
+    |> :crypto.hash(JCS.canonicalize(payload))
+    |> Base.url_encode64(padding: false)
   end
 
   # Sends an error response with RFC 9457 error body.
