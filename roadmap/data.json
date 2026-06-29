@@ -845,7 +845,7 @@
       "id": 37,
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "pending",
       "title": "Accept-Payment header support",
       "scores": {
         "d": 3,

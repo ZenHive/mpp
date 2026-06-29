@@ -690,7 +690,7 @@ shipped_in = "a1776308dba7448cba00eeec611300faa6cb2989"
 id = 37
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "pending"
 title = "Accept-Payment header support"
 scores = { d = 3, b = 6, u = 7 }
 markers = ["parallel"]
