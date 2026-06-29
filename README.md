@@ -191,6 +191,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.JCS` | RFC 8785 JSON Canonicalization (MPP subset) for cross-SDK HMAC interop |
 | `MPP.BodyDigest` | SHA-256 body digest compute/verify for request body binding |
 | `MPP.Amount` | Amount/decimals helpers: `parse_units`, `with_base_units`, `parse_dollar_amount` |
+| `MPP.Expires` | Expiration helpers: `seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years`, `assert!` |
+| `MPP.DID` | DID helpers for EVM credential sources |
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |

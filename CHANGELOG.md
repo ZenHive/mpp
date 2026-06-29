@@ -8,6 +8,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+Protocol utilities. Added `MPP.Expires` for ISO 8601 challenge-expiration helpers and `MPP.DID.evm_did/2` for `did:pkh:eip155` credential-source identifiers.
+
+Security. `MPP.Plug` now accepts an optional shared replay store for generic credential deduplication across non-Tempo methods, using the existing `MPP.Tempo.Store` interface and atomic `check_and_mark/2` when available.
+
 ## [0.6.1] - 2026-06-29
 
 **Security (Tempo hash-credential dedup).** The `type="hash"` credential path now commits its dedup mark through the store's atomic `check_and_mark/2` — the same primitive the `type="transaction"` path already uses — matching the reference SDKs (mpp-rs `Store::put_if_absent`, mppx atomic `markHashUsed`). The mark still happens only after successful on-chain verification, so a transient receipt-RPC failure does not burn a legitimate hash; stores that do not implement `check_and_mark/2` keep the documented best-effort fallback.

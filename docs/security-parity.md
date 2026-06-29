@@ -23,9 +23,9 @@ the parity set is well-bounded. Last full audit: 2026-06-24.
 
 | Advisory | Sev | What it covered | Our status |
 |---|---|---|---|
-| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — 10 vectors: charge/session replay, free requests, channel piggyback, fee-payer manipulation, Stripe replay | **Partial — see component rows.** Charge-path replay & fee-payer drain: ✓ / 📋 Task 46. Session vectors: 📋 Task 50 (unbuilt). Stripe replay: 📋 Task 35/64. |
+| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — 10 vectors: charge/session replay, free requests, channel piggyback, fee-payer manipulation, Stripe replay | **Partial — see component rows.** Charge-path replay, Stripe replay, and shipped fee-payer drain fixes: ✓. Remaining Tempo hardening: 📋 Task 46. Session vectors: 📋 Task 50 (unbuilt). |
 | mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Tempo session close-voucher bypass via settled-amount equality (`<` vs `<=`) | 📋 **Task 50** — sessions not yet implemented; the `<=` boundary is a pinned acceptance criterion for the close handler. |
-| mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 | MEDIUM 5.4 | Stripe charge replay via missing `Idempotent-Replayed` check | 📋 **Task 35** (plug-level dedup) + **Task 64** (Stripe stub scenario asserting replay → 402). |
+| mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 | MEDIUM 5.4 | Stripe charge replay via missing `Idempotent-Replayed` check | ✓ Stripe replay is covered by the `Idempotent-Replayed` rejection plus Plug-level credential dedup (Tasks 35 + 64). |
 
 mpp-specs: no advisories.
 
@@ -44,6 +44,7 @@ mpp-specs: no advisories.
 | mpp-rs #293 / mppx #534 (`e80feeb`) pre-broadcast simulation | Sponsor commits gas for a co-signed tx that would revert on-chain | `MPP.Methods.Tempo` simulates the full co-signed tx via `eth_simulateV1` before broadcast on both paths; reverting → reject, -32601 → graceful skip, other RPC error → fail closed — `tempo.ex` (Task 59, done) |
 | mpp-rs #219 prevent caching of 402 | Intermediary caches serving stale challenges | `cache-control: no-store` on all error responses — `plug.ex:293` |
 | mpp-specs #210 verify-before-extract-SPT ordering | Stripe API call triggered before challenge validity confirmed | Pipeline runs `Challenge.verify` + expiry + request-match *before* `method.verify` — `verifier.ex:81-87` |
+| mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 + generic charge replay hardening | Reused Stripe / EVM credentials inside the challenge window | `MPP.Methods.Stripe` rejects `Idempotent-Replayed: true`; `MPP.Plug` supports shared credential dedup keyed by challenge id + payload hash, using atomic `check_and_mark/2` when available — `stripe.ex:226-229`, `plug.ex:302-382` |
 | mppx #450 reject forged credential metadata | Client `meta` overriding server-derived request | No client `meta` field exists; server re-derives request from its own charge and pins it — `verifier.ex:151-158` |
 | mpp-specs #285 / mppx #570 non-empty challenge id | Empty `id` undermining HMAC binding | Rejected via HMAC recomputation — empty `id` never matches a real MAC — `challenge.ex:82-85` |
 | (defense-in-depth) JCS recursion | Stack-exhaustion via deeply nested input | Not attacker-reachable: `JCS.canonicalize/1` runs only on server-controlled data (`charge`); the credential's echoed `request` stays a raw string, never re-canonicalized — `verifier.ex:151-156`, `jcs.ex` |
@@ -56,7 +57,6 @@ mpp-specs: no advisories.
 |---|---|
 | Fee-payer token allowlist (#286) · atomic `put_if_absent` CAS (#280) · proof-wallet-binding (#253) · proof-source DID validation (#267, `384c4fe`) | **Task 46** (Tempo hardening audit) |
 | Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
-| Generic EVM/Stripe replay incl. **Stripe `Idempotent-Replayed` CVE-2026-34210** | **Task 35** (plug-level dedup) + **Task 64** (Stripe stubs) |
 | Hash-credential `source` (did:pkh) validation | **Task 55** |
 
 ---
