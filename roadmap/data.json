@@ -845,7 +845,7 @@
       "id": 37,
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Accept-Payment header support",
       "scores": {
         "d": 3,
@@ -868,6 +868,7 @@
         "Descripex annotations"
       ],
       "body": "Add `MPP.Headers.parse_accept_payment/1` parsing spec §7.4 `Accept-Payment` into a ranked `[{method, intent, q}]` list. Add `format_accept_payment/1` for client-side generation. Update `MPP.Plug` to filter/reorder `WWW-Authenticate` challenges based on client's `Accept-Payment` (no-op when absent, per spec). Update `MPP.Client.Transport.HTTP` (Task 33b) to optionally set `Accept-Payment` from a provider list. Add a client-side `MPP.Client.AcceptPolicy` that honors server-advertised methods on the response path — parallel to mpp-rs `AcceptPaymentPolicy` (read `refs/mpp-rs/src/client/accept_payment_policy.rs` at pickup time to confirm policy shape and filter/order semantics).\n",
+      "started_at": "2026-06-29",
       "cross_repo": []
     },
     {
