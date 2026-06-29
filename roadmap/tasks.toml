@@ -616,7 +616,7 @@ implemented = "Shipped MPP.Amount for pure integer/string base-unit conversion w
 id = 27
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "pending"
 title = "Expiration and DID helpers"
 scores = { d = 2, b = 4, u = 5 }
 markers = ["parallel"]
