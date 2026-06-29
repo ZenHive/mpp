@@ -1520,7 +1520,7 @@ shipped_in = "46c5b0e1311da7d92190dc7d9ea89027a1d365e9"
 id = "67"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Align cold check scope with Tempo JS cross-validation dependencies"
 scores = { d = 3, b = 7, u = 5 }
 acceptance_criteria = ["A fresh checkout can run the documented offline check command without missing gitignored JS files", "Tempo cross-validation tests still have an explicit way to run when the JS toolchain is available", "CLAUDE.md, mix aliases, and CI describe the same test scope", "No integration tests are silently skipped beyond the documented excluded tags"]
@@ -1530,4 +1530,5 @@ body = """
 The post-merge audit for range 422bcdd^..0c5e6bb found that the documented cold/offline check reaches `mix test.json --cover --exclude integration` and then fails in `test/mpp/tempo/cross_validation_test.exs` because the tests read `node_modules/viem/...`, while the repo has no committed package.json/package-lock and `mix npm.install` reports no npm dependencies. Decide and implement the intended contract: either commit/bootstrap the JS dependencies needed for these deterministic cross-validation tests in fresh checkouts, or exclude the `:cross_validation` tag from the documented offline gate and provide a clearly documented opt-in command. Keep CI, `mix precommit`/`mix precommit.full`, CLAUDE.md, and test docs consistent.
 """
 created_at = "2026-06-29"
+started_at = "2026-06-29"
 scored_at = "2026-06-29"
