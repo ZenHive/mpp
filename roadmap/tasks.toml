@@ -664,7 +664,7 @@ implemented = "Extracted the verification pipeline from MPP.Plug into a transpor
 id = 35
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "pending"
 title = "Generic dedup at Plug level"
 scores = { d = 3, b = 7, u = 7 }
 markers = ["parallel"]
