@@ -1099,7 +1099,7 @@ Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` f
 id = 45
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Tier-2 pinned-field verification"
 scores = { d = 4, b = 8, u = 7 }
 acceptance_criteria = ["All fields the spec / reference impl require to pin are pinned", "Pinning mismatch returns a distinct error (vs. HMAC mismatch)", "Cross-validated against mpp-rs test vectors for both pass and fail paths", "Unit + property tests for field-by-field divergence"]
@@ -1109,6 +1109,7 @@ Extend `MPP.Verifier` with explicit field-by-field pinning of the credential's e
 Read the current Tier-2 pattern in `refs/mpp-rs` (server-side charge path) at implementation time — the latest reference impl defines which fields must pin and how to surface mismatch errors. Match its semantics; let the Elixir shape follow `MPP.Verifier` conventions. Distinguish the pinning-mismatch error from the HMAC-mismatch error so callers can tell replay-attacks from corrupt credentials.
 """
 created_at = "2026-05-16"
+started_at = "2026-06-29"
 scored_at = "2026-05-16"
 
 [[task]]
