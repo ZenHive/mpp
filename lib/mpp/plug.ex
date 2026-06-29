@@ -51,13 +51,14 @@ defmodule MPP.Plug do
     * `:currency` — (required) currency code (string, normalized to lowercase)
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
+    * `:external_id` — (optional) merchant reference ID included in the challenge request
     * `:method_config` — (optional) server-only config map for `verify/2`
 
   ## Multi-Method Options
 
     * `:methods` — (required) list of keyword lists, each with per-method opts:
       `:method`, `:amount`, `:currency`, and optionally `:recipient`,
-      `:description`, `:method_config`
+      `:description`, `:external_id`, `:method_config`
   """
 
   @behaviour Plug
@@ -154,7 +155,17 @@ defmodule MPP.Plug do
         Keyword.fetch!(opts, :methods)
 
       has_method ->
-        [Keyword.take(opts, [:method, :amount, :currency, :recipient, :description, :method_config])]
+        [
+          Keyword.take(opts, [
+            :method,
+            :amount,
+            :currency,
+            :recipient,
+            :description,
+            :external_id,
+            :method_config
+          ])
+        ]
 
       true ->
         raise ArgumentError, "MPP.Plug requires either :method or :methods option"
@@ -172,7 +183,8 @@ defmodule MPP.Plug do
         amount: require_opt!(method_opts, :amount),
         currency: require_opt!(method_opts, :currency),
         recipient: Keyword.get(method_opts, :recipient),
-        description: Keyword.get(method_opts, :description)
+        description: Keyword.get(method_opts, :description),
+        external_id: Keyword.get(method_opts, :external_id)
       )
 
     # Pass method_config via charge.method_details so challenge_method_details

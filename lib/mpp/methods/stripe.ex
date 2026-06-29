@@ -174,8 +174,12 @@ defmodule MPP.Methods.Stripe do
       )
 
     case result do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-        {:ok, body}
+      {:ok, %Req.Response{status: status, body: body} = response} when status in 200..299 ->
+        if idempotent_replayed?(response) do
+          {:error, Errors.new(:verification_failed, "Payment has already been processed.")}
+        else
+          {:ok, body}
+        end
 
       {:ok, %Req.Response{}} ->
         {:error, Errors.new(:verification_failed, "Stripe PaymentIntent creation failed")}
@@ -216,6 +220,15 @@ defmodule MPP.Methods.Stripe do
     case config["realm"] do
       nil -> metadata
       realm -> metadata ++ [{"metadata[mpp_server_id]", realm}]
+    end
+  end
+
+  # Stripe marks replayed idempotency keys with Idempotent-Replayed: true.
+  # https://docs.stripe.com/error-low-level#idempotency
+  defp idempotent_replayed?(response) do
+    case Req.Response.get_header(response, "idempotent-replayed") do
+      ["true" | _] -> true
+      _ -> false
     end
   end
 

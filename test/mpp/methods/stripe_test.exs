@@ -1,15 +1,20 @@
 defmodule MPP.Methods.StripeTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Credential
   alias MPP.Errors
+  alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.Stripe
+  alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
 
   @stripe_secret_key "sk_test_abc123"
   @network_id "profile_1MqDcVKA5fEO2tZvKQm9g8Yj"
   @spt "spt_1N4Zv32eZvKYlo2CPhVPkJlW"
   @pi_id "pi_3N4Zv42eZvKYlo2C0001"
+  @hmac_secret "test-hmac-secret-for-stripe-stubs"
+  @realm "api.example.com"
 
   setup do
     {:ok, charge} =
@@ -103,8 +108,22 @@ defmodule MPP.Methods.StripeTest do
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.status == 402
       assert error.type =~ "verification-failed"
       assert error.detail =~ "canceled"
+    end
+
+    test "returns error when Stripe replays an idempotent credential", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("idempotent-replayed", "true")
+        |> Req.Test.json(%{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.status == 402
+      assert error.type =~ "verification-failed"
+      assert error.detail == "Payment has already been processed."
     end
 
     test "returns error on Stripe API error response", %{charge: charge} do
@@ -120,6 +139,7 @@ defmodule MPP.Methods.StripeTest do
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.status == 402
       assert error.type =~ "verification-failed"
       assert error.detail == "Stripe PaymentIntent creation failed"
       refute error.detail =~ "Your card was declined."
@@ -134,7 +154,7 @@ defmodule MPP.Methods.StripeTest do
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
-      assert error.type =~ "verification-failed"
+      assert error.status == 402
       assert error.detail == "Stripe PaymentIntent creation failed"
       refute error.detail =~ "invalid_request_error"
     end
@@ -372,6 +392,156 @@ defmodule MPP.Methods.StripeTest do
       {:ok, charge} = Charge.new(amount: "5000", currency: "usd")
       assert charge.method_details == nil
       assert Stripe.challenge_method_details(charge) == nil
+    end
+  end
+
+  describe "stub-server parity scenarios (mpp-rs)" do
+    setup do
+      config =
+        PaymentPlug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Stripe,
+          amount: "5000",
+          currency: "usd",
+          external_id: "premium-001",
+          method_config: %{
+            "stripe_secret_key" => @stripe_secret_key,
+            "network_id" => @network_id,
+            "payment_method_types" => ["card"],
+            "req_options" => [plug: {Req.Test, Stripe}]
+          }
+        )
+
+      {:ok, config: config}
+    end
+
+    test "402 challenge includes externalId and methodDetails", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> PaymentPlug.call(config)
+
+      assert conn.status == 402
+
+      [challenge_header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+      assert {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      assert {:ok, request_map} = decode_challenge_request(challenge)
+
+      assert request_map["externalId"] == "premium-001"
+      assert request_map["methodDetails"]["networkId"] == @network_id
+      assert request_map["methodDetails"]["paymentMethodTypes"] == ["card"]
+    end
+
+    test "requires_action PaymentIntent returns 402 through plug", %{config: config} do
+      Req.Test.stub(Stripe, fn conn ->
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "requires_action"})
+      end)
+
+      conn = submit_stripe_credential(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "requires action"
+    end
+
+    test "non-succeeded PaymentIntent status returns 402 through plug", %{config: config} do
+      Req.Test.stub(Stripe, fn conn ->
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "processing"})
+      end)
+
+      conn = submit_stripe_credential(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "processing"
+    end
+
+    test "replayed idempotent credential returns 402 through plug", %{config: config} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("idempotent-replayed", "true")
+        |> Req.Test.json(%{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      conn = submit_stripe_credential(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] == "Payment has already been processed."
+    end
+
+    test "Stripe 400 error body returns 402 through plug", %{config: config} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_status(400)
+        |> Req.Test.json(%{
+          "error" => %{
+            "message" => "Invalid payment token",
+            "type" => "invalid_request_error",
+            "code" => "resource_missing"
+          }
+        })
+      end)
+
+      conn = submit_stripe_credential(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] == "Stripe PaymentIntent creation failed"
+    end
+
+    test "externalId from credential payload is echoed in receipt", %{config: config} do
+      Req.Test.stub(Stripe, fn conn ->
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      conn = submit_stripe_credential(config, external_id: "order_42")
+
+      assert conn.status == nil
+      receipt = conn.assigns[:mpp_receipt]
+      assert receipt.external_id == "order_42"
+      assert receipt.reference == @pi_id
+
+      [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
+      assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
+      assert parsed_receipt.external_id == "order_42"
+    end
+  end
+
+  defp submit_stripe_credential(config, opts \\ []) do
+    conn_402 =
+      :get
+      |> Plug.Test.conn("/api/data")
+      |> PaymentPlug.call(config)
+
+    [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+    {:ok, challenge} = Headers.parse_challenge(challenge_header)
+
+    payload = %{"spt" => @spt}
+
+    payload =
+      case Keyword.get(opts, :external_id) do
+        nil -> payload
+        external_id -> Map.put(payload, "externalId", external_id)
+      end
+
+    credential = %Credential{challenge: challenge, payload: payload}
+    auth_header = Headers.format_credential(credential)
+
+    :get
+    |> Plug.Test.conn("/api/data")
+    |> Plug.Conn.put_req_header("authorization", auth_header)
+    |> PaymentPlug.call(config)
+  end
+
+  defp decode_challenge_request(challenge) do
+    with {:ok, json} <- Base.url_decode64(challenge.request, padding: false) do
+      Jason.decode(json)
     end
   end
 end
