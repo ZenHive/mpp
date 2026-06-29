@@ -66,6 +66,10 @@ defmodule MPP.Tempo.Store do
         }
   """
 
+  alias MPP.Tempo.ConCacheStore
+
+  @type store_ref :: module() | {module(), keyword()}
+
   @doc """
   Look up a key in the store.
 
@@ -100,4 +104,34 @@ defmodule MPP.Tempo.Store do
               :ok | {:error, :already_exists} | {:error, term()}
 
   @optional_callbacks [check_and_mark: 2]
+
+  @doc """
+  Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
+  """
+  @spec get(store_ref(), String.t()) ::
+          {:ok, term()} | :not_found | {:error, term()}
+  def get({ConCacheStore, opts}, key), do: ConCacheStore.get(key, opts)
+  def get(store, key), do: store.get(key)
+
+  @doc """
+  Store a key-value pair using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
+  """
+  @spec put(store_ref(), String.t(), term()) :: :ok | {:error, term()}
+  def put({ConCacheStore, opts}, key, value), do: ConCacheStore.put(key, value, opts)
+  def put(store, key, value), do: store.put(key, value)
+
+  @doc """
+  Atomically check and mark a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
+  """
+  @spec check_and_mark(store_ref(), String.t(), term()) ::
+          :ok | {:error, :already_exists} | {:error, term()}
+  def check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
+  def check_and_mark(store, key, value), do: store.check_and_mark(key, value)
+
+  @doc """
+  Return true when the store supports atomic `check_and_mark`.
+  """
+  @spec supports_atomic?(store_ref()) :: boolean()
+  def supports_atomic?({ConCacheStore, _opts}), do: true
+  def supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
 end

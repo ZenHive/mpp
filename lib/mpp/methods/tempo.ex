@@ -77,6 +77,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Tempo.Store
   alias Onchain.Tempo.RPC
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transfer
@@ -488,18 +489,13 @@ defmodule MPP.Methods.Tempo do
       :ok
   end
 
-  defp store_get({ConCacheStore, opts}, key), do: ConCacheStore.get(key, opts)
-  defp store_get(store, key), do: store.get(key)
+  defp store_get(store, key), do: Store.get(store, key)
 
-  defp store_put({ConCacheStore, opts}, key, value), do: ConCacheStore.put(key, value, opts)
-  defp store_put(store, key, value), do: store.put(key, value)
+  defp store_put(store, key, value), do: Store.put(store, key, value)
 
-  defp store_check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
+  defp store_check_and_mark(store, key, value), do: Store.check_and_mark(store, key, value)
 
-  defp store_check_and_mark(store, key, value), do: store.check_and_mark(key, value)
-
-  defp store_supports_atomic?({ConCacheStore, _opts}), do: true
-  defp store_supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
+  defp store_supports_atomic?(store), do: Store.supports_atomic?(store)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 

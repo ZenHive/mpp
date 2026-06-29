@@ -70,6 +70,7 @@ defmodule MPP.Plug do
   alias MPP.Intents.Charge
   alias MPP.JCS
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Tempo.Store
   alias MPP.Verifier
 
   @default_expires_in_seconds 300
@@ -337,7 +338,7 @@ defmodule MPP.Plug do
   defp check_credential_unused(store, credential) do
     key = credential_store_key(credential)
 
-    case store_get(store, key) do
+    case Store.get(store, key) do
       :not_found -> :ok
       {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
@@ -350,33 +351,19 @@ defmodule MPP.Plug do
     key = credential_store_key(credential)
     value = System.system_time(:millisecond)
 
-    if store_supports_atomic?(store) do
-      case store_check_and_mark(store, key, value) do
+    if Store.supports_atomic?(store) do
+      case Store.check_and_mark(store, key, value) do
         :ok -> :ok
         {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
         {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
       end
     else
-      case store_put(store, key, value) do
+      case Store.put(store, key, value) do
         :ok -> :ok
         {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
       end
     end
   end
-
-  defp store_get({ConCacheStore, opts}, key), do: ConCacheStore.get(key, opts)
-  defp store_get(store, key), do: store.get(key)
-
-  defp store_put(store, key, value), do: store.put(key, value)
-
-  defp store_check_and_mark({ConCacheStore, opts}, key, value) do
-    ConCacheStore.check_and_mark(key, value, opts)
-  end
-
-  defp store_check_and_mark(store, key, value), do: store.check_and_mark(key, value)
-
-  defp store_supports_atomic?({ConCacheStore, _opts}), do: true
-  defp store_supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
 
   defp credential_store_key(credential) do
     @dedup_store_key_prefix <> credential.challenge.id <> ":" <> payload_hash(credential.payload)
