@@ -15,7 +15,7 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (13 of 20 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (13 of 20 done · 1 in progress)
 
 **Last shipped:** Task 57 — Unit tests for MultiProvider and ConCacheStore on 2026-06-29
 
@@ -131,7 +131,7 @@
 | Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
 | Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
-| Task 63 `[P]` | ⬜ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
+| Task 63 `[P]` | 🔄 | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 | Task 65 `[P]` | ✅ | 🎁 **utilities** · 🔒 Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) [D:2/B:7/U:6 → Eff:3.25] 🎯 |
 | Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17] 🎯 |
 <!-- TASKS:END -->
