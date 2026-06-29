@@ -46,6 +46,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # 1 pathUSD (6 decimals)
   @transfer_amount 1_000_000
   @test_memo "0x" <> String.duplicate("ab", 32)
+  @attribution_memo_version 1
+  @attribution_server_fingerprint_length 10
+  @attribution_client_fingerprint_length 10
+  @attribution_nonce_length 7
 
   # Plug config
   @hmac_secret "test-hmac-secret-for-tempo-integration"
@@ -143,13 +147,17 @@ defmodule MPP.Methods.TempoIntegrationTest do
   describe "full 402 handshake" do
     test "happy path: 402 → hash credential → receipt", %{
       config: config,
-      tx_hash: tx_hash
+      recipient: recipient_address,
+      rpc_url: rpc_url
     } do
       # Step 1: Request without credentials → 402 with challenge
       challenge = request_challenge!(config)
       assert challenge.method == "tempo"
       assert challenge.intent == "charge"
       assert challenge.realm == @realm
+
+      sender = fresh_wallet!(rpc_url)
+      tx_hash = broadcast_bound_transfer!(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       # Step 2: Build credential with tx hash + echoed challenge
       credential = %Credential{
@@ -185,7 +193,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
   describe "dedup store" do
     test "hash credential replay rejected with store", %{
       config: config,
-      tx_hash: tx_hash
+      recipient: recipient_address,
+      rpc_url: rpc_url
     } do
       # Start an in-memory store and inject it into the config's method_config
       start_supervised!(TempoMemoryStore)
@@ -196,6 +205,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       # First request: 402 → credential → success
       challenge1 = request_challenge!(config_with_store)
+      sender1 = fresh_wallet!(rpc_url)
+      tx_hash = broadcast_bound_transfer!(sender1, recipient_address, @transfer_amount, rpc_url, challenge1)
 
       credential1 = %Credential{
         challenge: challenge1,
@@ -211,11 +222,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert conn1.status == nil, "First request should pass through"
       assert %Receipt{} = conn1.assigns[:mpp_receipt]
 
-      # Second request: same hash → 402 with "already used" error
-      challenge2 = request_challenge!(config_with_store)
-
       credential2 = %Credential{
-        challenge: challenge2,
+        challenge: challenge1,
         payload: %{"type" => "hash", "hash" => tx_hash}
       }
 
@@ -426,22 +434,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
-      # Build and sign a valid 0x76 transaction
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          nonce: 0
-        )
-
       # Get challenge and submit credential
       challenge = request_challenge!(optimistic_config)
       assert challenge.method == "tempo"
+
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       credential = %Credential{
         challenge: challenge,
@@ -503,26 +500,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
-      # Build a tx with the impossible amount — it will pass local parsing
-      # (find_payment_call matches) but should fail simulation on Moderato
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: impossible_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          # Pin gas_limit: the builder auto-estimates via eth_estimateGas when
-          # omitted (onchain_tempo ≥ 0.4), which itself reverts on this
-          # deliberately-unaffordable transfer — failing the build before the tx
-          # can reach the simulation step this test asserts on.
-          gas_limit: 100_000,
-          nonce: 0
-        )
+      challenge = request_challenge!(optimistic_config)
 
-      body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
+      # Build a tx with the impossible amount — it will pass local parsing
+      # (find_payment_call matches) but should fail simulation on Moderato.
+      {:ok, signed_tx} =
+        build_bound_signed_tx(sender, recipient_address, impossible_amount, rpc_url, challenge, gas_limit: 100_000)
+
+      body = submit_credential!(optimistic_config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
 
       detail = body["detail"]
@@ -546,6 +531,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
           impossible_amount
         )
 
+      challenge = request_challenge!(optimistic_config)
+      memo = attribution_memo(challenge)
+
       harmless_call =
         TempoTestHelpers.build_call(
           @path_usd,
@@ -555,7 +543,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       payment_call =
         TempoTestHelpers.build_call(
           @path_usd,
-          TempoTestHelpers.transfer_calldata(recipient_address, impossible_amount)
+          TempoTestHelpers.transfer_with_memo_calldata(recipient_address, impossible_amount, memo)
         )
 
       {:ok, signed_tx} =
@@ -572,7 +560,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
           nonce: 0
         )
 
-      body = submit_credential!(optimistic_config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_credential!(optimistic_config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
 
       detail = body["detail"]
@@ -589,22 +577,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url
     } do
       sender = fresh_wallet!(rpc_url)
-      # Build and sign a 0x76 Tempo Transaction with a matching TIP-20 transfer
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          nonce: 0
-        )
-
       # Step 1: Get a 402 challenge
       challenge = request_challenge!(config)
       assert challenge.method == "tempo"
+
+      # Build and sign a 0x76 Tempo Transaction with a matching TIP-20 transfer.
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       # Step 2: Submit credential with signed transaction
       credential = %Credential{
@@ -694,19 +672,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
 
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          nonce: 0
-        )
-
       challenge = request_challenge!(config)
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       credential = %Credential{
         challenge: challenge,
@@ -722,7 +689,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert conn.status == nil, "First transaction submission should pass through"
       assert %Receipt{} = conn.assigns[:mpp_receipt]
 
-      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
     end
@@ -753,23 +720,17 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
+      # 402 → credential → server co-signs → broadcasts → receipt
+      challenge = request_challenge!(fee_payer_config)
+
       # Build a fee-payer transfer (placeholder sig, empty fee_token, expiring
       # nonce + future valid_before so it satisfies the sponsor policy)
       {:ok, signed_tx} =
-        TempoTxBuilder.build_fee_payer_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
           nonce: 0,
           nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
           valid_before: TempoTestHelpers.future_valid_before()
         )
-
-      # 402 → credential → server co-signs → broadcasts → receipt
-      challenge = request_challenge!(fee_payer_config)
 
       credential = %Credential{
         challenge: challenge,
@@ -797,8 +758,6 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      import TempoTestHelpers, only: [build_call: 2, transfer_calldata: 2]
-
       sender = fresh_wallet!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
@@ -819,8 +778,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
-      # Build a multicall with valid transfer + rogue extra call
-      valid_call = build_call(@path_usd, transfer_calldata(recipient_address, @transfer_amount))
+      challenge = request_challenge!(fee_payer_config)
+
+      # Build a multicall with valid payment + rogue extra call
+      valid_call = bound_payment_call(recipient_address, @transfer_amount, challenge)
       token_bytes = TempoTestHelpers.decode_address(@path_usd)
       rogue_call = [token_bytes, <<>>, <<0xDE, 0xAD, 0xBE, 0xEF>> <> :binary.copy(<<0>>, 64)]
 
@@ -834,10 +795,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
           # eth_estimateGas, so auto-estimation would fail the build before the
           # call-scope check (which is what rejects this tx) can run.
           gas_limit: 200_000,
-          nonce: 0
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
         )
 
-      body = submit_credential!(fee_payer_config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_credential!(fee_payer_config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "disallowed call pattern"
     end
@@ -1018,21 +981,15 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
+      # First: co-signed and broadcast succeeds
+      challenge = request_challenge!(config)
+
       {:ok, signed_tx} =
-        TempoTxBuilder.build_fee_payer_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
           nonce: 0,
           nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
           valid_before: TempoTestHelpers.future_valid_before()
         )
-
-      # First: co-signed and broadcast succeeds
-      challenge = request_challenge!(config)
 
       credential = %Credential{
         challenge: challenge,
@@ -1051,7 +1008,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert %Receipt{} = conn.assigns[:mpp_receipt]
 
       # Second: same client tx -> store catches duplicate
-      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
     end
@@ -1080,14 +1037,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
+      challenge = request_challenge!(config)
+
       {:ok, signed_tx} =
-        TempoTxBuilder.build_fee_payer_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
           nonce: 0,
           # Fee-payer txs MUST carry the expiring nonce key + a valid_before
           # window, or MPP.Methods.Tempo.FeePayerPolicy rejects them before
@@ -1095,8 +1048,6 @@ defmodule MPP.Methods.TempoIntegrationTest do
           nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
           valid_before: TempoTestHelpers.future_valid_before()
         )
-
-      challenge = request_challenge!(config)
 
       credential = %Credential{
         challenge: challenge,
@@ -1141,20 +1092,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
           }
         )
 
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_transfer(
-          private_key: sender.private_key,
-          token: @path_usd,
-          recipient: recipient_address,
-          amount: @transfer_amount,
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          nonce: 0
-        )
-
       # First submission: optimistic pass-through
       challenge = request_challenge!(config)
+
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       credential = %Credential{
         challenge: challenge,
@@ -1173,7 +1114,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert %Receipt{} = conn.assigns[:mpp_receipt]
 
       # Second submission: store catches duplicate before broadcast
-      body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
     end
@@ -1269,7 +1210,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Gets a fresh challenge, builds credential, submits, asserts 402, returns decoded body.
   defp submit_credential!(config, payload) do
     challenge = request_challenge!(config)
+    submit_credential!(config, challenge, payload)
+  end
 
+  defp submit_credential!(config, challenge, payload) do
     credential = %Credential{
       challenge: challenge,
       payload: payload
@@ -1285,6 +1229,54 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     assert conn.status == 402
     Jason.decode!(conn.resp_body)
+  end
+
+  defp broadcast_bound_transfer!(sender, recipient_address, amount, rpc_url, challenge) do
+    {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, amount, rpc_url, challenge)
+    broadcast_raw_transaction_sync!(signed_tx, rpc_url)
+  end
+
+  defp build_bound_signed_tx(sender, recipient_address, amount, rpc_url, challenge, opts \\ []) do
+    [
+      private_key: sender.private_key,
+      calls: [bound_payment_call(recipient_address, amount, challenge)],
+      chain_id: @chain_id,
+      rpc_url: rpc_url,
+      fee_token: @path_usd,
+      nonce: 0
+    ]
+    |> Keyword.merge(opts)
+    |> TempoTxBuilder.build_signed_multicall()
+  end
+
+  defp build_bound_fee_payer_tx(sender, recipient_address, amount, rpc_url, challenge, opts) do
+    [
+      private_key: sender.private_key,
+      calls: [bound_payment_call(recipient_address, amount, challenge)],
+      chain_id: @chain_id,
+      rpc_url: rpc_url,
+      nonce: 0,
+      nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+      valid_before: TempoTestHelpers.future_valid_before()
+    ]
+    |> Keyword.merge(opts)
+    |> TempoTxBuilder.build_fee_payer_multicall()
+  end
+
+  defp bound_payment_call(recipient_address, amount, challenge) do
+    TempoTestHelpers.build_call(
+      @path_usd,
+      TempoTestHelpers.transfer_with_memo_calldata(recipient_address, amount, attribution_memo(challenge))
+    )
+  end
+
+  defp attribution_memo(challenge) do
+    tag = binary_part(ExSha3.keccak_256("mpp"), 0, 4)
+    server = binary_part(ExSha3.keccak_256(challenge.realm), 0, @attribution_server_fingerprint_length)
+    client = <<0::size(@attribution_client_fingerprint_length * 8)>>
+    nonce = binary_part(ExSha3.keccak_256(challenge.id), 0, @attribution_nonce_length)
+
+    "0x" <> Base.encode16(tag <> <<@attribution_memo_version>> <> server <> client <> nonce, case: :lower)
   end
 
   # Builds a Tempo Plug config with common test defaults plus method_config overrides.

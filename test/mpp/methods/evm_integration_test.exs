@@ -36,6 +36,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
   # Small amounts to minimize testnet resource usage
   @weth_amount 10_000
   @eth_amount 10_000
+  @private_key_bytes 32
 
   # Plug config
   @hmac_secret "test-hmac-secret-for-evm-integration"
@@ -78,6 +79,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
     # Derive addresses
     {:ok, sender_address} = Onchain.Signer.address_from_key(private_key)
     {:ok, recipient_address} = Onchain.Signer.address_from_key(@recipient_key)
+    native_recipient_address = fresh_eoa_address!()
 
     # Get sender nonce
     {:ok, nonce} = Onchain.RPC.get_transaction_count(sender_address, rpc_opts)
@@ -120,10 +122,11 @@ defmodule MPP.Methods.EVMIntegrationTest do
       flunk("Test setup: WETH transfer reverted (tx: #{erc20_tx_hash})")
     end
 
-    # Step 3: Send native ETH to recipient (native ETH test tx)
+    # Step 3: Send native ETH to a distinct EOA. The fixed Hardhat recipient has
+    # bytecode on Sepolia and reverts plain native transfer gas estimation.
     {:ok, eth_tx_hash} =
       Onchain.Signer.send_transaction(
-        recipient_address,
+        native_recipient_address,
         <<>>,
         Keyword.merge(tx_opts, nonce: nonce + 2, value: @eth_amount)
       )
@@ -156,7 +159,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
         method: EVM,
         amount: Integer.to_string(@eth_amount),
         currency: "ETH",
-        recipient: recipient_address,
+        recipient: native_recipient_address,
         method_config: %{
           "rpc_url" => rpc_url,
           "chain_id" => @default_chain_id
@@ -170,7 +173,13 @@ defmodule MPP.Methods.EVMIntegrationTest do
      eth_tx_hash: eth_tx_hash,
      sender: sender_address,
      recipient: recipient_address,
+     eth_recipient: native_recipient_address,
      rpc_url: rpc_url}
+  end
+
+  defp fresh_eoa_address! do
+    private_key = "0x" <> Base.encode16(:crypto.strong_rand_bytes(@private_key_bytes), case: :lower)
+    Onchain.Signer.address_from_key!(private_key)
   end
 
   describe "direct verify/2 — ERC-20" do
@@ -226,7 +235,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
   describe "direct verify/2 — native ETH" do
     test "verifies a real native ETH transfer on Sepolia", %{
       eth_tx_hash: tx_hash,
-      recipient: recipient,
+      eth_recipient: recipient,
       rpc_url: rpc_url
     } do
       charge = build_charge("ETH", @eth_amount, recipient, rpc_url)
@@ -238,7 +247,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
 
     test "rejects wrong value", %{
       eth_tx_hash: tx_hash,
-      recipient: recipient,
+      eth_recipient: recipient,
       rpc_url: rpc_url
     } do
       charge = build_charge("ETH", @eth_amount + 1, recipient, rpc_url)

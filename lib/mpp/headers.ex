@@ -286,7 +286,7 @@ defmodule MPP.Headers do
         offers
 
       {:ok, preferences} ->
-        tuples = for %{method: m, intent: i, q: q} <- preferences, do: {m, i, q}
+        tuples = Enum.map(preferences, &entry_to_tuple/1)
 
         case rank_by_accept_payment(offers, tuples, method_intent) do
           [] -> offers
@@ -383,11 +383,13 @@ defmodule MPP.Headers do
            index: non_neg_integer()
          }
 
-  defp entry_to_tuple(%{method: method, intent: intent, q: q}), do: {method, intent, q}
+  defp entry_to_tuple(entry), do: accept_payment_entry_to_tuple(entry)
 
   defp normalize_accept_payment_entry({method, intent, q}) when is_float(q), do: {method, intent, q}
 
-  defp normalize_accept_payment_entry(%{method: method, intent: intent, q: q}), do: {method, intent, q}
+  defp normalize_accept_payment_entry(entry) when is_map(entry), do: accept_payment_entry_to_tuple(entry)
+
+  defp accept_payment_entry_to_tuple(%{method: method, intent: intent, q: q}), do: {method, intent, q}
 
   @spec parse_accept_payment_entries(String.t()) ::
           {:ok, [accept_payment_entry_internal()]} | {:error, :malformed}
