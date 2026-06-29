@@ -1434,16 +1434,21 @@ scored_at = "2026-06-24"
 id = "64"
 phase = 2
 bundle = "stripe"
-status = "in_progress"
+status = "done"
 title = "Stripe stub-server scenario parity vs mpp-rs"
 scores = { d = 3, b = 5, u = 5 }
 markers = ["parallel"]
 acceptance_criteria = ["requires_action / non-succeeded PaymentIntent status maps to a 402 (not a pass-through)", "Replayed idempotent credential is rejected with 402", "Stripe 400 error body maps to 402", "externalId flows into challenge methodDetails and is echoed in the receipt", "All scenarios run via Req.Test stubs in the default suite — no STRIPE_SECRET_KEY required"]
 out_of_scope = ["Live-API tests — those stay in stripe_integration_test.exs behind :integration", "3DS browser flow (mppx Playwright territory)", "Stripe Connect settlement (Task 52)"]
 body = "Our Stripe integration test (test/mpp/methods/stripe_integration_test.exs) is live-creds-only, so the request-shape regressions it would catch only run when STRIPE_SECRET_KEY is set. The Rust reference SDK (refs/mpp-rs/tests/integration_stripe.rs) covers the same scenarios against a LOCAL MOCK Stripe endpoint, so they run in CI without creds. Extend test/mpp/methods/stripe_test.exs (already uses Req.Test stubs) with mock-backed parity for: (1) PaymentIntent status requires_action / any non-succeeded status -> 402; (2) idempotent-replayed credential (Stripe returns an idempotent-replayed marker) -> 402; (3) Stripe 400 error body -> 402; (4) externalId propagated into the challenge methodDetails AND echoed in the receipt. Catches wrong request/response shapes without needing the live API. Cross-ref: externalId binding is also an audit line in Task 46 (mppx #537) — this is the creds-free unit/stub slice of it."
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1782738917465-b0b6b75b, 708e99a939b7e0fe7ea1aeecd7582a8f279d4696)."
+delivered_by = "cursor"
+verified = true
 created_at = "2026-06-24"
 started_at = "2026-06-29"
 scored_at = "2026-06-24"
+done_at = "2026-06-29"
+shipped_in = "708e99a939b7e0fe7ea1aeecd7582a8f279d4696"
 
 [[task]]
 id = "65"
