@@ -563,8 +563,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp normalize_address(_address), do: :error
-
   # Extracts and validates the serialized transaction from a transaction credential payload.
   defp extract_signature(%{"signature" => sig}) when is_binary(sig) and byte_size(sig) > 0 do
     {:ok, sig}
