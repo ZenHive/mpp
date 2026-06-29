@@ -15,11 +15,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (12 of 20 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (12 of 20 done · 1 in progress)
 
 **Last shipped:** Task 66 — Harden Tempo hash-credential dedup to an atomic commit on 2026-06-25
 
-**Up next:** Task 57 — Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯
+**Up next:** Task 35 — Generic dedup at Plug level [D:3/B:7/U:7 → Eff:2.33] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -125,7 +125,7 @@
 | Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
 | Task 53 | ⬜ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83?] 🚀 |
 | Task 56 `[P]` | ✅ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
-| Task 57 `[P]` | ⬜ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
+| Task 57 `[P]` | 🔄 | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
 | Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 59 | ✅ | 🎁 **tempo** · 🔒 Fee-payer pre-broadcast simulation of co-signed Tempo transactions [D:6/B:8/U:7 → Eff:1.25] 📋 |
 | Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
