@@ -754,7 +754,7 @@
       "id": 27,
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "done",
       "title": "Expiration and DID helpers",
       "scores": {
         "d": 2,
@@ -810,7 +810,7 @@
       "id": 35,
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "done",
       "title": "Generic dedup at Plug level",
       "scores": {
         "d": 3,

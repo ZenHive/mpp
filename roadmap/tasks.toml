@@ -616,7 +616,7 @@ implemented = "Shipped MPP.Amount for pure integer/string base-unit conversion w
 id = 27
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "done"
 title = "Expiration and DID helpers"
 scores = { d = 2, b = 4, u = 5 }
 markers = ["parallel"]
@@ -664,7 +664,7 @@ implemented = "Extracted the verification pipeline from MPP.Plug into a transpor
 id = 35
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "done"
 title = "Generic dedup at Plug level"
 scores = { d = 3, b = 7, u = 7 }
 markers = ["parallel"]
