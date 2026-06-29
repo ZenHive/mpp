@@ -108,6 +108,12 @@ defmodule MPP.PlugTest do
   # Returns the first (or only) method entry from config.
   defp first_entry(config), do: hd(config.method_entries)
 
+  defp expires_for(config) do
+    DateTime.utc_now()
+    |> DateTime.add(config.expires_in, :second)
+    |> DateTime.to_iso8601()
+  end
+
   # Builds a valid credential for the given config's first method entry.
   defp build_authorization_header(config, payload \\ %{"proof" => "valid"}) do
     build_authorization_header_for_entry(config, first_entry(config), payload)
@@ -115,16 +121,18 @@ defmodule MPP.PlugTest do
 
   # Builds a valid credential for a specific method entry.
   defp build_authorization_header_for_entry(config, entry, payload) do
-    challenge =
-      Challenge.create(
-        [
-          realm: config.realm,
-          method: entry.method.method_name(),
-          intent: "charge",
-          request: entry.request
-        ],
-        config.secret_key
-      )
+    params =
+      [
+        realm: config.realm,
+        method: entry.method.method_name(),
+        intent: "charge",
+        request: entry.request,
+        expires: expires_for(config)
+      ]
+
+    params = if config.digest, do: Keyword.put(params, :digest, config.digest), else: params
+    params = if config.opaque, do: Keyword.put(params, :opaque, config.opaque), else: params
+    challenge = Challenge.create(params, config.secret_key)
 
     credential = %Credential{challenge: challenge, payload: payload}
     Headers.format_credential(credential)
@@ -196,19 +204,37 @@ defmodule MPP.PlugTest do
     end
 
     test "accepts optional fields" do
-      config = init_config(recipient: "acct_123", description: "Premium", expires_in: 300, opaque: "eyJ0ZXN0Ijp0cnVlfQ")
+      config =
+        init_config(
+          recipient: "acct_123",
+          description: "Premium",
+          expires_in: 300,
+          digest: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE",
+          opaque: "eyJ0ZXN0Ijp0cnVlfQ"
+        )
+
       entry = first_entry(config)
       assert entry.charge.recipient == "acct_123"
       assert entry.charge.description == "Premium"
       assert config.expires_in == 300
+      assert config.digest == "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
       assert config.opaque == "eyJ0ZXN0Ijp0cnVlfQ"
     end
 
-    test "optional fields default to nil" do
+    test "optional fields use secure defaults" do
       config = init_config()
-      assert config.expires_in == nil
+      assert config.expires_in == 300
+      assert config.digest == nil
       assert config.opaque == nil
       assert first_entry(config).charge.recipient == nil
+    end
+
+    test "raises when expires_in is not a positive integer" do
+      for expires_in <- [0, -1, "300"] do
+        assert_raise ArgumentError, ~r/:expires_in must be a positive integer/, fn ->
+          init_config(expires_in: expires_in)
+        end
+      end
     end
 
     test "merges method_details from challenge_method_details callback" do
@@ -434,6 +460,53 @@ defmodule MPP.PlugTest do
       assert get_resp_header(conn, "cache-control") == "private"
     end
 
+    test "accepts credential whose digest matches endpoint config" do
+      digest = "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
+      config = init_config(digest: digest)
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute conn.halted
+      assert get_resp_header(conn, "payment-receipt")
+    end
+
+    test "rejects credential whose digest differs from endpoint config" do
+      config = init_config(digest: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE")
+      entry = first_entry(config)
+
+      challenge =
+        Challenge.create(
+          [
+            realm: config.realm,
+            method: entry.method.method_name(),
+            intent: "charge",
+            request: entry.request,
+            expires: expires_for(config),
+            digest: "sha-256=Y48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
+          ],
+          config.secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+      assert body["detail"] =~ "digest"
+    end
+
     test "assigns receipt to conn", %{config: config, auth_header: auth_header} do
       conn =
         :get
@@ -442,6 +515,52 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       assert %Receipt{method: "mock", reference: "ref_1000"} = conn.assigns[:mpp_receipt]
+    end
+
+    test "accepts credential whose opaque matches endpoint config" do
+      config = init_config(opaque: "eyJyb3V0ZSI6ImEifQ")
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute conn.halted
+      assert get_resp_header(conn, "payment-receipt")
+    end
+
+    test "rejects credential whose opaque differs from endpoint config" do
+      config = init_config(opaque: "eyJyb3V0ZSI6ImEifQ")
+      entry = first_entry(config)
+
+      challenge =
+        Challenge.create(
+          [
+            realm: config.realm,
+            method: entry.method.method_name(),
+            intent: "charge",
+            request: entry.request,
+            expires: expires_for(config),
+            opaque: "eyJyb3V0ZSI6ImIifQ"
+          ],
+          config.secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-challenge"
+      assert body["detail"] =~ "opaque"
     end
   end
 
@@ -678,8 +797,8 @@ defmodule MPP.PlugTest do
   # --- Expiration ---
 
   describe "challenge expiration" do
-    test "includes expires field when expires_in is set" do
-      config = init_config(expires_in: 300)
+    test "includes expires field by default" do
+      config = init_config()
 
       conn =
         :get
@@ -691,7 +810,6 @@ defmodule MPP.PlugTest do
       assert challenge.expires
 
       {:ok, expires_dt, _} = DateTime.from_iso8601(challenge.expires)
-      # Should be ~5 minutes in the future (with some tolerance)
       diff = DateTime.diff(expires_dt, DateTime.utc_now(), :second)
       assert diff > 290 and diff <= 300
     end

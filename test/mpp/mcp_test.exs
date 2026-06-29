@@ -53,6 +53,10 @@ defmodule MPP.McpTest do
       assert Mcp.credential_meta_key() == "org.paymentauth/credential"
     end
 
+    test "payment_required_meta_key matches spec" do
+      assert Mcp.payment_required_meta_key() == "org.paymentauth/payment-required"
+    end
+
     test "receipt_meta_key matches spec" do
       assert Mcp.receipt_meta_key() == "org.paymentauth/receipt"
     end
@@ -260,6 +264,22 @@ defmodule MPP.McpTest do
       assert Mcp.payment_required?(error)
     end
 
+    test "returns true for payment-required result metadata" do
+      result = %{
+        "result" => %{
+          "_meta" => %{
+            "org.paymentauth/payment-required" => %{
+              "challenges" => [
+                sample_challenge() |> Mcp.payment_required_error() |> get_in(["data", "challenges"]) |> hd()
+              ]
+            }
+          }
+        }
+      }
+
+      assert Mcp.payment_required?(result)
+    end
+
     test "returns false for -32043 error" do
       error = Mcp.verification_failed_error(sample_challenge(), Errors.new(:verification_failed, "bad"))
       refute Mcp.payment_required?(error)
@@ -271,6 +291,12 @@ defmodule MPP.McpTest do
 
     test "returns false for map without code" do
       refute Mcp.payment_required?(%{"message" => "something"})
+    end
+
+    test "returns false for malformed payment-required result metadata" do
+      result = %{"result" => %{"_meta" => %{"org.paymentauth/payment-required" => %{"challenges" => []}}}}
+
+      refute Mcp.payment_required?(result)
     end
   end
 
@@ -287,6 +313,25 @@ defmodule MPP.McpTest do
       assert parsed.request == challenge.request
       assert parsed.expires == "2026-12-31T23:59:59Z"
       assert parsed.description == "API call fee"
+    end
+
+    test "parses challenges from payment-required result metadata" do
+      challenge = sample_challenge()
+      error = Mcp.payment_required_error(challenge)
+
+      response = %{
+        "result" => %{
+          "_meta" => %{
+            "org.paymentauth/payment-required" => %{
+              "challenges" => error["data"]["challenges"]
+            }
+          }
+        }
+      }
+
+      assert {:ok, [parsed]} = Mcp.extract_challenges(response)
+      assert parsed.id == challenge.id
+      assert parsed.request == challenge.request
     end
 
     test "parses multiple challenges" do

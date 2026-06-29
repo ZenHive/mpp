@@ -8,11 +8,12 @@ defmodule MPP.Mcp do
 
   ## Constants
 
-  Four constants defined by the MPP transport spec for MCP:
+  Five constants defined by the MPP transport spec for MCP:
 
     * `payment_required_code/0` — JSON-RPC error code `-32042`
     * `verification_failed_code/0` — JSON-RPC error code `-32043`
     * `credential_meta_key/0` — `"org.paymentauth/credential"`
+    * `payment_required_meta_key/0` — `"org.paymentauth/payment-required"`
     * `receipt_meta_key/0` — `"org.paymentauth/receipt"`
 
   ## Server Helpers
@@ -50,6 +51,9 @@ defmodule MPP.Mcp do
   # Metadata key for credentials in params._meta
   @credential_meta_key "org.paymentauth/credential"
 
+  # Metadata key for payment-required data in result._meta
+  @payment_required_meta_key "org.paymentauth/payment-required"
+
   # Metadata key for receipts in result._meta
   @receipt_meta_key "org.paymentauth/receipt"
 
@@ -77,6 +81,13 @@ defmodule MPP.Mcp do
 
   @spec credential_meta_key :: String.t()
   def credential_meta_key, do: @credential_meta_key
+
+  api(:payment_required_meta_key, "Metadata key for payment-required results in `result._meta`.",
+    returns: %{type: :string, description: ~s(Key `"org.paymentauth/payment-required"`)}
+  )
+
+  @spec payment_required_meta_key :: String.t()
+  def payment_required_meta_key, do: @payment_required_meta_key
 
   api(:receipt_meta_key, "Metadata key for receipts in `result._meta`.",
     returns: %{type: :string, description: ~s(Key `"org.paymentauth/receipt"`)}
@@ -229,6 +240,14 @@ defmodule MPP.Mcp do
   @spec payment_required?(map()) :: boolean()
   def payment_required?(%{"code" => @payment_required_code}), do: true
 
+  @spec payment_required?(map()) :: boolean()
+  def payment_required?(%{"result" => result}) when is_map(result), do: payment_required?(result)
+
+  @spec payment_required?(map()) :: boolean()
+  def payment_required?(%{"_meta" => %{@payment_required_meta_key => data}}) when is_map(data) do
+    match?({:ok, [_ | _]}, extract_challenges_from_data(data))
+  end
+
   @spec payment_required?(map()) :: false
   def payment_required?(%{}), do: false
 
@@ -248,12 +267,7 @@ defmodule MPP.Mcp do
 
   @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
   def extract_challenges(%{"data" => %{"challenges" => challenges}}) when is_list(challenges) and challenges != [] do
-    results = Enum.map(challenges, &challenge_from_map/1)
-
-    case Enum.split_with(results, &match?({:ok, _}, &1)) do
-      {oks, []} -> {:ok, Enum.map(oks, fn {:ok, c} -> c end)}
-      {_, [{:error, reason} | _]} -> {:error, reason}
-    end
+    extract_challenges_from_list(challenges)
   end
 
   @spec extract_challenges(map()) :: {:error, :no_challenges}
@@ -261,6 +275,14 @@ defmodule MPP.Mcp do
 
   @spec extract_challenges(map()) :: {:error, :invalid_challenge}
   def extract_challenges(%{"data" => %{"challenges" => _}}), do: {:error, :invalid_challenge}
+
+  @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
+  def extract_challenges(%{"result" => result}) when is_map(result), do: extract_challenges(result)
+
+  @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
+  def extract_challenges(%{"_meta" => %{@payment_required_meta_key => data}}) when is_map(data) do
+    extract_challenges_from_data(data)
+  end
 
   @spec extract_challenges(map()) :: {:error, :no_challenges}
   def extract_challenges(%{}), do: {:error, :no_challenges}
@@ -371,6 +393,23 @@ defmodule MPP.Mcp do
   end
 
   defp credential_from_map(_), do: {:error, :invalid_credential}
+
+  defp extract_challenges_from_data(%{"challenges" => challenges}) when is_list(challenges) and challenges != [] do
+    extract_challenges_from_list(challenges)
+  end
+
+  defp extract_challenges_from_data(%{"challenges" => []}), do: {:error, :no_challenges}
+  defp extract_challenges_from_data(%{"challenges" => _}), do: {:error, :invalid_challenge}
+  defp extract_challenges_from_data(%{}), do: {:error, :no_challenges}
+
+  defp extract_challenges_from_list(challenges) do
+    results = Enum.map(challenges, &challenge_from_map/1)
+
+    case Enum.split_with(results, &match?({:ok, _}, &1)) do
+      {oks, []} -> {:ok, Enum.map(oks, fn {:ok, c} -> c end)}
+      {_, [{:error, reason} | _]} -> {:error, reason}
+    end
+  end
 
   # Converts a Receipt struct + challenge_id to an MCP receipt map (adds challengeId).
   defp receipt_to_mcp_map(%Receipt{} = receipt, challenge_id) do

@@ -19,6 +19,9 @@ defmodule MPP.Methods.TempoTest do
   @token_address "0x20C0000000000000000000000000000000000000"
   @recipient "0x1234567890AbcdEF1234567890aBcDeF12345678"
   @tx_hash "0x" <> String.duplicate("ab", 32)
+  @payer "0x1111111111111111111111111111111111111111"
+  @realm "api.test.com"
+  @challenge_id "challenge-test-1"
 
   # ERC-20 Transfer(address,address,uint256) topic
   @transfer_topic "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -166,6 +169,87 @@ defmodule MPP.Methods.TempoTest do
       assert receipt.timestamp
     end
 
+    test "accepts hash credential source matching transfer sender", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      stub_receipt(success_receipt(logs: [transfer_log(from: @payer)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "accepts auto-attribution memo bound to the challenge", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"challenge_id" => @challenge_id, "realm" => @realm})
+      }
+
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "rejects plain transfer when challenge binding context requires attribution memo", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"challenge_id" => @challenge_id, "realm" => @realm})
+      }
+
+      stub_receipt(success_receipt())
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "rejects auto-attribution memo bound to a different challenge", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"challenge_id" => @challenge_id, "realm" => @realm})
+      }
+
+      memo = attribution_memo(@realm, "other-challenge")
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "rejects hash credential source with wrong chain", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:1:#{@payer}")
+      }
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "source"
+    end
+
+    test "rejects hash credential source that does not match transfer sender", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      wrong_payer = "0x2222222222222222222222222222222222222222"
+      stub_receipt(success_receipt(logs: [transfer_log(from: wrong_payer)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
     test "returns error on missing hash field", %{charge: charge} do
       payload = %{"type" => "hash"}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -202,7 +286,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "not found"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "returns error when transaction reverted", %{charge: charge} do
@@ -262,7 +346,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "RPC error"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "returns error on network failure", %{charge: charge} do
@@ -273,7 +357,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "request failed"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "returns error on unexpected RPC response body", %{charge: charge} do
@@ -286,7 +370,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected RPC response"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "rejects transaction with invalid hex in signature field", %{charge: charge} do
@@ -476,7 +560,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "RPC error"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "returns error when transaction reverts on-chain", %{charge: charge, tx_hex: tx_hex} do
@@ -561,7 +645,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "RPC request failed"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
@@ -583,7 +667,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected RPC response"
+      assert error.detail == "Tempo RPC request failed"
     end
   end
 
@@ -751,7 +835,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "RPC error"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "calls eth_simulateV1 then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
@@ -813,7 +897,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "RPC request failed"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "async broadcast unexpected response status returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -836,7 +920,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Unexpected RPC response"
+      assert error.detail == "Tempo RPC request failed"
     end
 
     test "multicall: simulates the full co-signed transaction before broadcast", %{charge: charge} do
@@ -1647,6 +1731,15 @@ defmodule MPP.Methods.TempoTest do
       "transactionHash" => @tx_hash,
       "logIndex" => "0x0"
     }
+  end
+
+  defp attribution_memo(realm, challenge_id) do
+    tag = binary_part(ExSha3.keccak_256("mpp"), 0, 4)
+    server = binary_part(ExSha3.keccak_256(realm), 0, 10)
+    client = <<0::80>>
+    nonce = binary_part(ExSha3.keccak_256(challenge_id), 0, 7)
+
+    "0x" <> Base.encode16(tag <> <<1>> <> server <> client <> nonce, case: :lower)
   end
 
   describe "validate_config!/1 — fee payer" do

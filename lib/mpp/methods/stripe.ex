@@ -177,12 +177,11 @@ defmodule MPP.Methods.Stripe do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
-      {:ok, %Req.Response{body: body}} ->
-        message = extract_stripe_error(body)
-        {:error, Errors.new(:verification_failed, "Stripe PaymentIntent creation failed: #{message}")}
+      {:ok, %Req.Response{}} ->
+        {:error, Errors.new(:verification_failed, "Stripe PaymentIntent creation failed")}
 
-      {:error, exception} ->
-        {:error, Errors.new(:verification_failed, "Stripe API request failed: #{Exception.message(exception)}")}
+      {:error, _exception} ->
+        {:error, Errors.new(:verification_failed, "Stripe API request failed")}
     end
   end
 
@@ -245,10 +244,4 @@ defmodule MPP.Methods.Stripe do
   defp check_status(_body, _payload) do
     {:error, Errors.new(:verification_failed, "Unexpected Stripe response: missing status field")}
   end
-
-  # Extracts the error message from a Stripe API error response.
-  defp extract_stripe_error(%{"error" => %{"message" => message}}) when is_binary(message), do: message
-  defp extract_stripe_error(%{"error" => %{"type" => type}}), do: type
-  defp extract_stripe_error(body) when is_binary(body), do: "HTTP error"
-  defp extract_stripe_error(_), do: "unknown error"
 end

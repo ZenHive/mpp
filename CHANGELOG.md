@@ -8,7 +8,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-29
+
 **Security (Tempo hash-credential dedup).** The `type="hash"` credential path now commits its dedup mark through the store's atomic `check_and_mark/2` — the same primitive the `type="transaction"` path already uses — matching the reference SDKs (mpp-rs `Store::put_if_absent`, mppx atomic `markHashUsed`). The mark still happens only after successful on-chain verification, so a transient receipt-RPC failure does not burn a legitimate hash; stores that do not implement `check_and_mark/2` keep the documented best-effort fallback.
+
+**Security hardening parity.** Verifier/Plug now issue expiring challenges by default, fail closed on missing/invalid expiration, require echoed `digest`/`opaque` values to match endpoint configuration, and MCP clients recognize payment-required result metadata via `org.paymentauth/payment-required`. Tempo validates declared payer source against the matched transfer sender and chain, verifies challenge-bound attribution metadata on unconfigured memo transfers, and provider/RPC/store failure details are sanitized before becoming public 402 responses. **Breaking:** credentials for newly-issued challenges must echo valid expiration data, and Tempo no-static-memo routes now require challenge-bound attribution metadata.
+
+Development tooling. The dev baseline now pins Elixir `1.20.2-otp-29`, adds `ex_slop` and `reach` to `mix precommit.full`, refreshes the generated agent instructions, and includes MCP config for Cursor/Codex/Grok agents. Tempo's unsupported-`eth_simulateV1` degraded-mode log is now a warning so missing node support is visible during operations.
 
 ## [0.6.0] - 2026-06-24
 

@@ -70,24 +70,32 @@ defmodule MPP.VerifierTest do
     |> Base.url_encode64(padding: false)
   end
 
+  defp future_expires do
+    DateTime.utc_now()
+    |> DateTime.add(300, :second)
+    |> DateTime.to_iso8601()
+  end
+
   defp build_credential(opts \\ []) do
     charge = Keyword.get(opts, :charge, build_charge())
     secret = Keyword.get(opts, :secret_key, @secret_key)
     realm = Keyword.get(opts, :realm, @realm)
     method_name = Keyword.get(opts, :method_name, "mock")
     payload = Keyword.get(opts, :payload, %{"proof" => "valid"})
-    expires = Keyword.get(opts, :expires, nil)
+    expires = Keyword.get(opts, :expires, future_expires())
+    digest = Keyword.get(opts, :digest, nil)
+    opaque = Keyword.get(opts, :opaque, nil)
 
     params =
-      then(
-        [
-          realm: realm,
-          method: method_name,
-          intent: "charge",
-          request: encode_request(charge)
-        ],
-        fn p -> if expires, do: Keyword.put(p, :expires, expires), else: p end
-      )
+      [
+        realm: realm,
+        method: method_name,
+        intent: "charge",
+        request: encode_request(charge)
+      ]
+      |> then(fn p -> if expires, do: Keyword.put(p, :expires, expires), else: p end)
+      |> then(fn p -> if digest, do: Keyword.put(p, :digest, digest), else: p end)
+      |> then(fn p -> if opaque, do: Keyword.put(p, :opaque, opaque), else: p end)
 
     challenge = Challenge.create(params, secret)
     %Credential{challenge: challenge, payload: payload}
@@ -194,7 +202,7 @@ defmodule MPP.VerifierTest do
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert String.contains?(error.type, "invalid-challenge")
-      assert String.contains?(error.detail, "Request parameters do not match")
+      assert String.contains?(error.detail, "Credential realm does not match")
     end
   end
 
@@ -224,11 +232,25 @@ defmodule MPP.VerifierTest do
       assert {:ok, %Receipt{}} = Verifier.verify(credential, opts)
     end
 
-    test "nil expires passes" do
-      credential = build_credential()
+    test "nil expires returns payment_expired" do
+      charge = build_charge()
+
+      challenge =
+        Challenge.create(
+          [
+            realm: @realm,
+            method: "mock",
+            intent: "charge",
+            request: encode_request(charge)
+          ],
+          @secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
       assert credential.challenge.expires == nil
 
-      assert {:ok, %Receipt{}} = Verifier.verify(credential, verify_opts())
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, verify_opts(charge: charge))
+      assert String.contains?(error.type, "payment-expired")
     end
   end
 
@@ -289,6 +311,71 @@ defmodule MPP.VerifierTest do
     end
   end
 
+  describe "verify/2 opaque mismatch" do
+    test "matching opaque passes" do
+      opaque = "eyJyb3V0ZSI6ImEifQ"
+      credential = build_credential(opaque: opaque)
+      opts = verify_opts(opaque: opaque)
+
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, opts)
+    end
+
+    test "credential opaque rejected when endpoint has none" do
+      credential = build_credential(opaque: "eyJyb3V0ZSI6ImEifQ")
+      opts = verify_opts()
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.detail, "opaque")
+    end
+
+    test "missing credential opaque rejected when endpoint expects opaque" do
+      credential = build_credential()
+      opts = verify_opts(opaque: "eyJyb3V0ZSI6ImEifQ")
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.detail, "opaque")
+    end
+
+    test "wrong opaque rejected" do
+      credential = build_credential(opaque: "eyJyb3V0ZSI6ImEifQ")
+      opts = verify_opts(opaque: "eyJyb3V0ZSI6ImIifQ")
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.detail, "opaque")
+    end
+  end
+
+  describe "verify/2 digest mismatch" do
+    test "matching digest passes" do
+      digest = "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
+      credential = build_credential(digest: digest)
+      opts = verify_opts(digest: digest)
+
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, opts)
+    end
+
+    test "credential digest rejected when endpoint has none" do
+      credential = build_credential(digest: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE")
+      opts = verify_opts()
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.detail, "digest")
+    end
+
+    test "wrong digest rejected" do
+      credential = build_credential(digest: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE")
+      opts = verify_opts(digest: "sha-256=Y48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE")
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.detail, "digest")
+    end
+  end
+
   describe "verify/2 method verification failure" do
     test "method returns structured error" do
       credential = build_credential(payload: %{"proof" => "invalid"})
@@ -325,7 +412,8 @@ defmodule MPP.VerifierTest do
         realm: @realm,
         method: "mock",
         intent: "charge",
-        request: malformed_request
+        request: malformed_request,
+        expires: future_expires()
       ]
 
       challenge = Challenge.create(params, @secret_key)

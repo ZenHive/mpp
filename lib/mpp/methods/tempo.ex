@@ -86,6 +86,17 @@ defmodule MPP.Methods.Tempo do
   @moderato_chain_id 42_431
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
+  @address_hex_length 40
+  @attribution_memo_length 32
+  @attribution_tag binary_part(ExSha3.keccak_256("mpp"), 0, 4)
+  @attribution_version 1
+  @attribution_server_fingerprint_length 10
+  @attribution_client_fingerprint_length 10
+  @attribution_nonce_length 7
+  @dedup_store_error_detail "Dedup store error"
+  @tempo_rpc_error_detail "Tempo RPC request failed"
+  @simulation_rejected_detail "Pre-broadcast simulation rejected the transaction"
+  @simulation_failed_detail "Pre-broadcast simulation failed"
 
   api(:method_name, "Return the payment method identifier for Tempo.")
 
@@ -143,13 +154,15 @@ defmodule MPP.Methods.Tempo do
     else
       memo = config["memo"]
       store = config["store"]
+      expected_chain_id = config["chain_id"] || @moderato_chain_id
 
-      with {:ok, hash} <- extract_hash(payload),
+      with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
+           {:ok, hash} <- extract_hash(payload),
            :ok <- check_hash_unused(store, hash),
            {:ok, rpc_url} <- require_config(config, "rpc_url"),
            {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
            :ok <- check_receipt_status(receipt),
-           {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo),
+           {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source),
            :ok <- commit_hash_used(store, hash) do
         {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
       end
@@ -168,7 +181,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, signature} <- extract_signature(payload),
          {:ok, tx} <- Transaction.deserialize(signature),
          :ok <- verify_chain_id(tx, expected_chain_id),
-         {:ok, _payment} <-
+         {:ok, payment} <-
            Transaction.find_payment_call(tx, charge.currency,
              amount: charge.amount,
              recipient: charge.recipient,
@@ -177,6 +190,7 @@ defmodule MPP.Methods.Tempo do
          :ok <- maybe_validate_call_scope(tx, config),
          :ok <- maybe_validate_fee_payer_economics(tx, config, expected_chain_id),
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+         {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
@@ -371,7 +385,7 @@ defmodule MPP.Methods.Tempo do
     case store_get(store, key) do
       :not_found -> :ok
       {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 
@@ -391,7 +405,7 @@ defmodule MPP.Methods.Tempo do
     else
       case store_put(store, key, ts) do
         :ok -> :ok
-        {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
       end
     end
   end
@@ -418,7 +432,7 @@ defmodule MPP.Methods.Tempo do
     case store_check_and_mark(store, key, ts) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 
@@ -428,14 +442,14 @@ defmodule MPP.Methods.Tempo do
       :not_found ->
         case store_put(store, key, ts) do
           :ok -> :ok
-          {:error, reason} -> {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+          {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
         end
 
       {:ok, _} ->
         {:error, Errors.new(:verification_failed, "Transaction hash already used")}
 
-      {:error, reason} ->
-        {:error, Errors.new(:verification_failed, "Dedup store error: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 
@@ -523,6 +537,34 @@ defmodule MPP.Methods.Tempo do
     {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
   end
 
+  defp parse_hash_credential_source(nil, _expected_chain_id), do: {:ok, nil}
+
+  defp parse_hash_credential_source("did:pkh:eip155:" <> source, expected_chain_id) do
+    with [chain_id_string, address] <- String.split(source, ":", parts: 2),
+         {^expected_chain_id, ""} <- Integer.parse(chain_id_string),
+         {:ok, normalized_address} <- normalize_address(address) do
+      {:ok, normalized_address}
+    else
+      _ -> {:error, Errors.new(:invalid_payload, "Hash credential source is invalid")}
+    end
+  end
+
+  defp parse_hash_credential_source(_source, _expected_chain_id) do
+    {:error, Errors.new(:invalid_payload, "Hash credential source is invalid")}
+  end
+
+  defp normalize_address(address) when is_binary(address) do
+    hex = strip_0x(address)
+
+    if byte_size(hex) == @address_hex_length and hex_string?(hex) do
+      {:ok, "0x" <> String.downcase(hex)}
+    else
+      :error
+    end
+  end
+
+  defp normalize_address(_address), do: :error
+
   # Extracts and validates the serialized transaction from a transaction credential payload.
   defp extract_signature(%{"signature" => sig}) when is_binary(sig) and byte_size(sig) > 0 do
     {:ok, sig}
@@ -551,7 +593,7 @@ defmodule MPP.Methods.Tempo do
     with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config),
          {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
          :ok <- check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo) do
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil) do
       {:ok, tx_hash}
     end
   end
@@ -586,8 +628,8 @@ defmodule MPP.Methods.Tempo do
       {:ok, :success} ->
         :ok
 
-      {:ok, {:revert, detail}} ->
-        {:error, Errors.new(:verification_failed, "Pre-broadcast simulation rejected the transaction: #{detail}")}
+      {:ok, {:revert, _detail}} ->
+        {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
 
       {:ok, :unsupported} ->
         Logger.warning(
@@ -596,8 +638,8 @@ defmodule MPP.Methods.Tempo do
 
         :ok
 
-      {:error, reason} ->
-        {:error, Errors.new(:verification_failed, "Pre-broadcast simulation failed: #{reason}")}
+      {:error, _reason} ->
+        {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
     end
   end
 
@@ -617,21 +659,21 @@ defmodule MPP.Methods.Tempo do
   defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
     case RPC.broadcast_async(raw_hex, rpc_url, opts) do
       {:ok, _tx_hash} = ok -> ok
-      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
+      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
     end
   end
 
   defp rpc_broadcast_sync(raw_hex, rpc_url, opts) do
     case RPC.broadcast_sync(raw_hex, rpc_url, opts) do
       {:ok, _tx_hash, _receipt} = ok -> ok
-      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
+      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
     end
   end
 
   defp rpc_fetch_receipt(hash, rpc_url, opts) do
     case RPC.fetch_receipt(hash, rpc_url, opts) do
       {:ok, _receipt} = ok -> ok
-      {:error, msg} -> {:error, Errors.new(:verification_failed, msg)}
+      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
     end
   end
 
@@ -645,9 +687,9 @@ defmodule MPP.Methods.Tempo do
   # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
   # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.
   # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
-  defp find_matching_transfer(receipt, charge, memo)
+  defp find_matching_transfer(receipt, charge, memo, source)
 
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil, source) do
     # No memo configured — accept Transfer OR TransferWithMemo matching token/recipient/amount.
     with {:ok, amount_int} <- parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
@@ -655,20 +697,22 @@ defmodule MPP.Methods.Tempo do
       memo_transfers = Transfer.parse_transfer_with_memo_logs(logs)
 
       match =
-        Enum.find(transfers ++ memo_transfers, fn transfer ->
+        Enum.find(memo_transfers ++ transfers, fn transfer ->
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
-            transfer.amount == amount_int
+            transfer.amount == amount_int and
+            transfer_source_matches?(transfer, source) and
+            transfer_memo_bound?(transfer, charge)
         end)
 
       case match do
         nil -> {:error, Errors.new(:verification_failed, "No matching Transfer event found in transaction")}
-        transfer -> {:ok, transfer}
+        transfer -> check_matched_memo_binding(transfer, charge.method_details || %{}, nil)
       end
     end
   end
 
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo) when is_binary(memo) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo, source) when is_binary(memo) do
     # Memo configured — MUST match TransferWithMemo with matching memo value.
     with {:ok, amount_int} <- parse_charge_amount(charge.amount) do
       normalized_memo = String.downcase(strip_0x(memo))
@@ -680,7 +724,8 @@ defmodule MPP.Methods.Tempo do
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
             transfer.amount == amount_int and
-            String.downcase(strip_0x(transfer.memo)) == normalized_memo
+            String.downcase(strip_0x(transfer.memo)) == normalized_memo and
+            transfer_source_matches?(transfer, source)
         end)
 
       case match do
@@ -692,6 +737,75 @@ defmodule MPP.Methods.Tempo do
       end
     end
   end
+
+  defp transfer_source_matches?(_transfer, nil), do: true
+
+  defp transfer_source_matches?(transfer, source) do
+    Onchain.Address.equal?(transfer.from, source)
+  end
+
+  defp transfer_memo_bound?(transfer, %Charge{method_details: config}) do
+    case {Map.has_key?(transfer, :memo), config || %{}} do
+      {true, %{"challenge_id" => challenge_id, "realm" => realm}} ->
+        attribution_memo_bound?(transfer.memo, realm, challenge_id)
+
+      {true, _config} ->
+        true
+
+      {false, %{"challenge_id" => _challenge_id, "realm" => _realm}} ->
+        false
+
+      {false, _config} ->
+        true
+    end
+  end
+
+  defp check_matched_memo_binding(match, _config, memo) when is_binary(memo), do: {:ok, match}
+
+  defp check_matched_memo_binding(match, %{"challenge_id" => challenge_id, "realm" => realm}, nil) do
+    case Map.fetch(match, :memo) do
+      {:ok, memo} ->
+        if attribution_memo_bound?(memo, realm, challenge_id) do
+          {:ok, match}
+        else
+          {:error, Errors.new(:verification_failed, "Payment memo is not bound to this challenge")}
+        end
+
+      :error ->
+        {:error, Errors.new(:verification_failed, "Payment memo is not bound to this challenge")}
+    end
+  end
+
+  defp check_matched_memo_binding(match, _config, nil), do: {:ok, match}
+
+  defp attribution_memo_bound?(memo, realm, challenge_id) do
+    with {:ok, bytes} <- decode_memo(memo),
+         {:ok, server, nonce} <- decode_attribution_parts(bytes) do
+      server == binary_part(ExSha3.keccak_256(realm), 0, @attribution_server_fingerprint_length) and
+        nonce == binary_part(ExSha3.keccak_256(challenge_id), 0, @attribution_nonce_length)
+    else
+      _ -> false
+    end
+  end
+
+  defp decode_attribution_parts(<<@attribution_tag, @attribution_version, rest::binary>>) do
+    server = binary_part(rest, 0, @attribution_server_fingerprint_length)
+    nonce_offset = @attribution_server_fingerprint_length + @attribution_client_fingerprint_length
+    nonce = binary_part(rest, nonce_offset, @attribution_nonce_length)
+
+    {:ok, server, nonce}
+  end
+
+  defp decode_attribution_parts(_bytes), do: :error
+
+  defp decode_memo(memo) when is_binary(memo) do
+    case Base.decode16(strip_0x(memo), case: :mixed) do
+      {:ok, <<_::binary-size(@attribution_memo_length)>> = bytes} -> {:ok, bytes}
+      _ -> :error
+    end
+  end
+
+  defp decode_memo(_memo), do: :error
 
   # Parses charge amount string to integer safely.
   defp parse_charge_amount(amount) do

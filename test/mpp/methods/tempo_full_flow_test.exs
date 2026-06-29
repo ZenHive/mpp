@@ -63,7 +63,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "hash path filters correct Transfer from noisy logs" do
     test "selects correct Transfer event ignoring unrelated logs" do
-      config = init_tempo_config()
+      config = init_tempo_config(method_config: %{"memo" => @test_memo})
 
       unrelated_log = %{
         "address" => "0x0000000000000000000000000000000000000001",
@@ -75,7 +75,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       }
 
       wrong_token_transfer = transfer_log(token: "0x0000000000000000000000000000000000000099")
-      correct_transfer = transfer_log()
+      correct_transfer = transfer_with_memo_log(memo: @test_memo)
 
       receipt = success_receipt(logs: [unrelated_log, wrong_token_transfer, correct_transfer])
       stub_receipt(receipt)
@@ -209,12 +209,12 @@ defmodule MPP.Methods.TempoFullFlowTest do
       start_supervised!(TempoMemoryStore)
 
       config =
-        init_tempo_config(method_config: %{"store" => TempoMemoryStore})
+        init_tempo_config(method_config: %{"store" => TempoMemoryStore, "memo" => @test_memo})
 
-      call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
       tx_hex = build_tempo_tx(calls: [call], chain_id: @chain_id)
 
-      stub_broadcast_and_receipt(success_receipt())
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
       # First: succeeds
       conn =
@@ -241,14 +241,14 @@ defmodule MPP.Methods.TempoFullFlowTest do
   describe "optimistic multicall simulates the full transaction before broadcast" do
     test "simulates via eth_simulateV1, then broadcasts" do
       config =
-        init_tempo_config(method_config: %{"wait_for_confirmation" => false})
+        init_tempo_config(method_config: %{"wait_for_confirmation" => false, "memo" => @test_memo})
 
       # Build 3-call tx: [approve(dex), swap(dex), transfer(token)]. The full tx is
       # simulated via eth_simulateV1 — there is no per-call eth_call to mis-target.
       dex = dex_address()
       approve_call = build_call(@token_address, approve_calldata(dex, 1_000_000))
       swap_call = build_call(dex, swap_calldata())
-      transfer_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+      transfer_call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: @chain_id)
 
       test_pid = self()
@@ -292,14 +292,16 @@ defmodule MPP.Methods.TempoFullFlowTest do
       fee_payer_mc = Keyword.fetch!(fee_payer_config(), :method_config)
 
       config =
-        init_tempo_config(method_config: Map.put(fee_payer_mc, "store", TempoMemoryStore))
+        init_tempo_config(
+          method_config: fee_payer_mc |> Map.put("store", TempoMemoryStore) |> Map.put("memo", @test_memo)
+        )
+
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
 
       {:ok, signed_tx} =
-        TempoTxBuilder.build_fee_payer_transfer(
+        TempoTxBuilder.build_fee_payer_multicall(
           private_key: @client_private_key,
-          token: @token_address,
-          recipient: @recipient,
-          amount: 1_000_000,
+          calls: [call],
           chain_id: @chain_id,
           rpc_url: @rpc_url,
           # Pin gas so the builder skips eth_estimateGas — this suite is offline
@@ -310,7 +312,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
           valid_before: future_valid_before()
         )
 
-      stub_broadcast_and_receipt(success_receipt())
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
       # First: co-signed and broadcast succeeds
       conn =
@@ -336,7 +338,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   # --- Config builders ---
 
-  defp init_tempo_config(overrides \\ []) do
+  defp init_tempo_config(overrides) do
     extra_method_config = Keyword.get(overrides, :method_config, %{})
 
     method_config =
@@ -472,7 +474,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
   end
 
   # Builds a raw ERC-20 Transfer log entry.
-  defp transfer_log(opts \\ []) do
+  defp transfer_log(opts) do
     amount = Keyword.get(opts, :amount, 1_000_000)
     from = Keyword.get(opts, :from, "0x" <> String.duplicate("00", 20))
     to = Keyword.get(opts, :to, @recipient)

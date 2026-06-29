@@ -121,7 +121,9 @@ defmodule MPP.Methods.StripeTest do
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "Your card was declined."
+      assert error.detail == "Stripe PaymentIntent creation failed"
+      refute error.detail =~ "Your card was declined."
+      refute error.detail =~ "card_error"
     end
 
     test "returns error on Stripe API error without message", %{charge: charge} do
@@ -133,7 +135,8 @@ defmodule MPP.Methods.StripeTest do
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "invalid_request_error"
+      assert error.detail == "Stripe PaymentIntent creation failed"
+      refute error.detail =~ "invalid_request_error"
     end
 
     test "returns error on network failure", %{charge: charge} do
@@ -143,7 +146,7 @@ defmodule MPP.Methods.StripeTest do
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "request failed"
+      assert error.detail == "Stripe API request failed"
     end
 
     test "returns error when stripe_secret_key is missing" do

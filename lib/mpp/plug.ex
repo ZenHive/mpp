@@ -40,7 +40,8 @@ defmodule MPP.Plug do
 
     * `:secret_key` — (required) HMAC-SHA256 key for challenge binding
     * `:realm` — (required) server protection space
-    * `:expires_in` — (optional) challenge TTL in seconds (integer)
+    * `:expires_in` — (optional) challenge TTL in seconds (integer, defaults to 300)
+    * `:digest` — (optional) expected content digest for body-bound challenges
     * `:opaque` — (optional) base64url-encoded server correlation data
 
   ## Single-Method Options
@@ -67,6 +68,8 @@ defmodule MPP.Plug do
   alias MPP.Intents.Charge
   alias MPP.JCS
   alias MPP.Verifier
+
+  @default_expires_in_seconds 300
 
   defmodule MethodEntry do
     @moduledoc """
@@ -99,12 +102,13 @@ defmodule MPP.Plug do
             secret_key: String.t(),
             realm: String.t(),
             method_entries: [MethodEntry.t()],
-            expires_in: pos_integer() | nil,
+            expires_in: pos_integer(),
+            digest: String.t() | nil,
             opaque: String.t() | nil
           }
 
     @enforce_keys [:secret_key, :realm, :method_entries]
-    defstruct [:secret_key, :realm, :method_entries, :expires_in, :opaque]
+    defstruct [:secret_key, :realm, :method_entries, :expires_in, :digest, :opaque]
   end
 
   @doc """
@@ -125,9 +129,16 @@ defmodule MPP.Plug do
       secret_key: require_opt!(opts, :secret_key),
       realm: require_opt!(opts, :realm),
       method_entries: entries,
-      expires_in: Keyword.get(opts, :expires_in),
+      expires_in: validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds)),
+      digest: Keyword.get(opts, :digest),
       opaque: Keyword.get(opts, :opaque)
     }
+  end
+
+  defp validate_expires_in!(seconds) when is_integer(seconds) and seconds > 0, do: seconds
+
+  defp validate_expires_in!(_seconds) do
+    raise ArgumentError, "MPP.Plug: :expires_in must be a positive integer"
   end
 
   # Normalizes single-method and multi-method opts into a list of keyword lists.
@@ -258,7 +269,9 @@ defmodule MPP.Plug do
       realm: config.realm,
       method: entry.method,
       charge: entry.charge,
-      method_config: entry.method_config
+      method_config: entry.method_config,
+      digest: config.digest,
+      opaque: config.opaque
     ]
 
     case Verifier.verify(credential, opts) do
@@ -306,14 +319,13 @@ defmodule MPP.Plug do
         request: entry.request
       ]
       |> maybe_add(:expires, compute_expires(config.expires_in))
+      |> maybe_add(:digest, config.digest)
       |> maybe_add(:opaque, config.opaque)
 
     Challenge.create(params, config.secret_key)
   end
 
   # Computes an RFC 3339 expiration timestamp from a TTL in seconds.
-  defp compute_expires(nil), do: nil
-
   defp compute_expires(seconds) when is_integer(seconds) do
     DateTime.utc_now()
     |> DateTime.add(seconds, :second)

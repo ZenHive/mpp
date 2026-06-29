@@ -140,12 +140,19 @@ defmodule MPP.Demo.RouterTest do
           realm: config.realm,
           method: entry.method.method_name(),
           intent: "charge",
-          request: entry.request
+          request: entry.request,
+          expires: expires_for(config)
         ],
         config.secret_key
       )
 
     Headers.format_credential(%Credential{challenge: challenge, payload: payload})
+  end
+
+  defp expires_for(config) do
+    DateTime.utc_now()
+    |> DateTime.add(config.expires_in, :second)
+    |> DateTime.to_iso8601()
   end
 
   defp put_auth_header(conn, header_value) do

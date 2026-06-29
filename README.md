@@ -171,6 +171,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 
 **Tempo capabilities:** Fee payer co-signing (server sponsors gas), optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, and pluggable dedup stores with a built-in ETS+TTL option via ConCache.
 
+**Tempo security note:** Challenges expire by default. On routes without a configured static memo, Tempo payments must use challenge-bound attribution metadata; plain transfers are rejected by the hardened verifier.
+
 **Tempo networks:** [Mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) (chain ID `4217`, `rpc.tempo.xyz`) | [Testnet (Moderato)](https://docs.tempo.xyz/quickstart/connection-details#testnet) (chain ID `42431`, `rpc.moderato.tempo.xyz`)
 
 ## Modules
@@ -205,7 +207,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.4.0"}
+    {:mpp, "~> 0.6.1"}
   ]
 end
 ```

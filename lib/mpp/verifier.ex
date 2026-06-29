@@ -32,6 +32,8 @@ defmodule MPP.Verifier do
     * `:method` — (required) module implementing `MPP.Method`
     * `:charge` — (required) `MPP.Intents.Charge.t()` for this endpoint
     * `:method_config` — (optional) server-only config map, default `%{}`
+    * `:digest` — (optional) expected endpoint digest value
+    * `:opaque` — (optional) expected endpoint opaque value
   """
 
   use Descripex, namespace: "/protocol"
@@ -58,6 +60,7 @@ defmodule MPP.Verifier do
       :intent_mismatch,
       :method_mismatch,
       :payment_expired,
+      :realm_mismatch,
       :request_mismatch,
       :verification_failed
     ]
@@ -70,11 +73,14 @@ defmodule MPP.Verifier do
     method = require_opt!(opts, :method)
     charge = require_opt!(opts, :charge)
     method_config = Keyword.get(opts, :method_config, %{})
+    digest = Keyword.get(opts, :digest)
+    opaque = Keyword.get(opts, :opaque)
 
     runtime_config =
       method_config
       |> Map.put("challenge_id", credential.challenge.id)
       |> Map.put("realm", realm)
+      |> Map.put("credential_source", credential.source)
 
     charge_for_verify = merge_method_config(charge, runtime_config)
 
@@ -84,6 +90,8 @@ defmodule MPP.Verifier do
          :ok <- check_realm_match(credential.challenge, realm),
          :ok <- check_expiration(credential.challenge),
          :ok <- check_request_match(credential.challenge, charge),
+         :ok <- check_digest_match(credential.challenge, digest),
+         :ok <- check_opaque_match(credential.challenge, opaque),
          {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
       {:ok, receipt}
     else
@@ -99,8 +107,17 @@ defmodule MPP.Verifier do
       {:error, :method_mismatch} ->
         {:error, Errors.new(:invalid_challenge, "Credential method does not match this endpoint")}
 
+      {:error, :realm_mismatch} ->
+        {:error, Errors.new(:invalid_challenge, "Credential realm does not match this endpoint")}
+
       {:error, :request_mismatch} ->
         {:error, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint")}
+
+      {:error, :digest_mismatch} ->
+        {:error, Errors.new(:invalid_challenge, "Credential digest does not match this endpoint")}
+
+      {:error, :opaque_mismatch} ->
+        {:error, Errors.new(:invalid_challenge, "Credential opaque data does not match this endpoint")}
 
       {:error, %Errors{} = error} ->
         {:error, error}
@@ -126,10 +143,10 @@ defmodule MPP.Verifier do
   # Defense-in-depth: HMAC binding covers realm when secrets are unique per realm,
   # but an explicit check prevents cross-realm replay in shared-secret deployments.
   defp check_realm_match(%Challenge{realm: realm}, realm), do: :ok
-  defp check_realm_match(_challenge, _realm), do: {:error, :request_mismatch}
+  defp check_realm_match(_challenge, _realm), do: {:error, :realm_mismatch}
 
   # Checks whether a challenge has expired based on its `expires` field.
-  defp check_expiration(%Challenge{expires: nil}), do: :ok
+  defp check_expiration(%Challenge{expires: nil}), do: {:error, :payment_expired}
 
   defp check_expiration(%Challenge{expires: expires}) do
     case DateTime.from_iso8601(expires) do
@@ -157,6 +174,12 @@ defmodule MPP.Verifier do
 
     if request == expected, do: :ok, else: {:error, :request_mismatch}
   end
+
+  defp check_digest_match(%Challenge{digest: digest}, digest), do: :ok
+  defp check_digest_match(_challenge, _expected), do: {:error, :digest_mismatch}
+
+  defp check_opaque_match(%Challenge{opaque: opaque}, opaque), do: :ok
+  defp check_opaque_match(_challenge, _expected), do: {:error, :opaque_mismatch}
 
   # Merges server-only method_config into charge.method_details for verify/2.
   defp merge_method_config(charge, runtime_config) do
