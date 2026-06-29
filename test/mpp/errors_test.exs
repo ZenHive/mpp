@@ -12,6 +12,7 @@ defmodule MPP.ErrorsTest do
     {:method_unsupported, 400, "Method Unsupported"},
     {:malformed_credential, 402, "Malformed Credential"},
     {:invalid_challenge, 402, "Invalid Challenge"},
+    {:credential_mismatch, 402, "Credential Mismatch"},
     {:invalid_payload, 402, "Invalid Payload"},
     {:bad_request, 400, "Bad Request"},
     {:payment_action_required, 402, "Payment Action Required"},
@@ -96,10 +97,10 @@ defmodule MPP.ErrorsTest do
       end
     end
 
-    test "returns all 17 problem types" do
+    test "returns all 18 problem types" do
       types = Errors.types()
 
-      assert Enum.count(types) == 17
+      assert Enum.count(types) == 18
       assert :payment_required in types
       assert :malformed_credential in types
       # Session types

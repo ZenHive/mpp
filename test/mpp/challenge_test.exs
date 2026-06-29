@@ -152,4 +152,20 @@ defmodule MPP.ChallengeTest do
       assert {:error, :invalid_challenge} = Challenge.verify(tampered, @secret_key)
     end
   end
+
+  describe "verify_server_binding/3" do
+    test "passes when echoed realm is tampered but server realm matches HMAC input" do
+      challenge = Challenge.create(@base_params, @secret_key)
+      tampered = %{challenge | realm: "evil.example.com"}
+
+      assert :ok = Challenge.verify_server_binding(tampered, @secret_key, "api.example.com")
+    end
+
+    test "fails when server realm does not match HMAC binding" do
+      challenge = Challenge.create(@base_params, @secret_key)
+
+      assert {:error, :invalid_challenge} =
+               Challenge.verify_server_binding(challenge, @secret_key, "other.example.com")
+    end
+  end
 end

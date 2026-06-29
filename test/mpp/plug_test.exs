@@ -660,7 +660,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
       assert body["detail"] =~ "digest"
     end
 
@@ -716,7 +716,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
       assert body["detail"] =~ "opaque"
     end
   end
@@ -876,7 +876,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
     end
 
     test "rejects credential with wrong currency" do
@@ -893,7 +893,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
     end
 
     test "rejects credential with wrong recipient" do
@@ -910,7 +910,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
     end
 
     test "rejects credential with no recipient on endpoint that requires one" do
@@ -929,7 +929,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
     end
 
     test "rejects credential with wrong realm (shared-secret deployment)" do
@@ -1269,7 +1269,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "invalid-challenge"
+      assert body["type"] =~ "credential-mismatch"
     end
   end
 

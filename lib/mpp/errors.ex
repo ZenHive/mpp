@@ -17,6 +17,7 @@ defmodule MPP.Errors do
     * `:method_unsupported` — payment method not accepted (400)
     * `:malformed_credential` — credential cannot be parsed (402)
     * `:invalid_challenge` — challenge ID doesn't match or is unknown (402)
+    * `:credential_mismatch` — echoed challenge fields don't match this endpoint (402)
     * `:invalid_payload` — credential payload doesn't match schema (402)
     * `:bad_request` — malformed request (400)
     * `:payment_action_required` — payment requires additional action, e.g. 3DS (402)
@@ -44,6 +45,7 @@ defmodule MPP.Errors do
     method_unsupported: %{suffix: "method-unsupported", title: "Method Unsupported", status: 400},
     malformed_credential: %{suffix: "malformed-credential", title: "Malformed Credential", status: 402},
     invalid_challenge: %{suffix: "invalid-challenge", title: "Invalid Challenge", status: 402},
+    credential_mismatch: %{suffix: "credential-mismatch", title: "Credential Mismatch", status: 402},
     invalid_payload: %{suffix: "invalid-payload", title: "Invalid Payload", status: 402},
     bad_request: %{suffix: "bad-request", title: "Bad Request", status: 400},
     payment_action_required: %{
@@ -85,6 +87,7 @@ defmodule MPP.Errors do
           | :method_unsupported
           | :malformed_credential
           | :invalid_challenge
+          | :credential_mismatch
           | :invalid_payload
           | :bad_request
           | :payment_action_required

@@ -157,18 +157,19 @@ defmodule MPP.VerifierTest do
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert error.status == 402
       assert String.contains?(error.type, "invalid-challenge")
+      refute String.contains?(error.type, "credential-mismatch")
     end
   end
 
   describe "verify/2 method mismatch" do
-    test "credential for different method returns invalid_challenge" do
+    test "credential for different method returns credential_mismatch" do
       # Credential was created for "mock" method, but we verify with MockMethodUnexpected ("mock_unexpected")
       credential = build_credential(method_name: "mock")
       opts = verify_opts(method: MockMethodUnexpected)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
-      assert String.contains?(error.detail, "Credential method does not match")
+      assert String.contains?(error.type, "credential-mismatch")
+      assert String.contains?(error.detail, "does not match this route's requirements")
     end
   end
 
@@ -182,7 +183,8 @@ defmodule MPP.VerifierTest do
         realm: @realm,
         method: "mock",
         intent: "session",
-        request: request
+        request: request,
+        expires: future_expires()
       ]
 
       challenge = Challenge.create(params, @secret_key)
@@ -190,19 +192,20 @@ defmodule MPP.VerifierTest do
       opts = verify_opts()
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
-      assert String.contains?(error.detail, "intent does not match")
+      assert String.contains?(error.type, "credential-mismatch")
+      assert String.contains?(error.detail, "intent 'session'")
     end
   end
 
   describe "verify/2 realm mismatch" do
-    test "different realm returns invalid_challenge" do
+    test "tampered echoed realm returns credential_mismatch (Tier-2, HMAC uses server realm)" do
       credential = build_credential()
-      opts = verify_opts(realm: "other.realm.com")
+      tampered = %{credential | challenge: %{credential.challenge | realm: "other.realm.com"}}
+      opts = verify_opts()
 
-      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
-      assert String.contains?(error.detail, "Credential realm does not match")
+      assert {:error, %Errors{} = error} = Verifier.verify(tampered, opts)
+      assert String.contains?(error.type, "credential-mismatch")
+      assert String.contains?(error.detail, "realm 'other.realm.com'")
     end
   end
 
@@ -232,7 +235,7 @@ defmodule MPP.VerifierTest do
       assert {:ok, %Receipt{}} = Verifier.verify(credential, opts)
     end
 
-    test "nil expires returns payment_expired" do
+    test "nil expires returns credential_mismatch" do
       charge = build_charge()
 
       challenge =
@@ -250,34 +253,35 @@ defmodule MPP.VerifierTest do
       assert credential.challenge.expires == nil
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, verify_opts(charge: charge))
-      assert String.contains?(error.type, "payment-expired")
+      assert String.contains?(error.type, "credential-mismatch")
+      assert String.contains?(error.detail, "expires")
     end
   end
 
   describe "verify/2 request mismatch" do
-    test "wrong amount returns invalid_challenge" do
+    test "wrong amount returns credential_mismatch" do
       credential = build_credential()
       opts = verify_opts(charge: build_charge(amount: "2000"))
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
 
-    test "wrong currency returns invalid_challenge" do
+    test "wrong currency returns credential_mismatch" do
       credential = build_credential()
       opts = verify_opts(charge: build_charge(currency: "eur"))
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
 
-    test "wrong recipient returns invalid_challenge" do
+    test "wrong recipient returns credential_mismatch" do
       charge = build_charge(recipient: "acct_123")
       credential = build_credential(charge: charge)
       opts = verify_opts(charge: build_charge(recipient: "acct_456"))
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
 
     test "different description prevents cross-route replay" do
@@ -287,7 +291,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(charge: charge_b)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
 
     test "different method_details prevents cross-route replay" do
@@ -297,7 +301,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(charge: charge_b)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
 
     test "credential with recipient rejected on endpoint without recipient" do
@@ -307,7 +311,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(charge: charge_without)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
   end
 
@@ -325,7 +329,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts()
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "opaque")
     end
 
@@ -334,7 +338,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(opaque: "eyJyb3V0ZSI6ImEifQ")
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "opaque")
     end
 
@@ -343,7 +347,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(opaque: "eyJyb3V0ZSI6ImIifQ")
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "opaque")
     end
   end
@@ -362,7 +366,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts()
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "digest")
     end
 
@@ -371,7 +375,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts(digest: "sha-256=Y48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE")
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "digest")
     end
   end
@@ -421,7 +425,7 @@ defmodule MPP.VerifierTest do
       opts = verify_opts()
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "invalid-challenge")
+      assert String.contains?(error.type, "credential-mismatch")
     end
   end
 

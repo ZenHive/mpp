@@ -92,6 +92,34 @@ defmodule MPP.Challenge do
   @spec verify(t(), String.t()) :: {:error, :invalid_challenge}
   def verify(%__MODULE__{id: nil}, _secret_key), do: {:error, :invalid_challenge}
 
+  api(
+    :verify_server_binding,
+    "Verify challenge HMAC using the server's configured realm (Tier-1 server binding). Recomputes the ID with `server_realm` instead of the echoed realm, matching mpp-rs `verify_hmac_and_expiry`.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct with echoed fields"],
+      secret_key: [kind: :value, description: "HMAC-SHA256 secret key"],
+      server_realm: [kind: :value, description: "Server's configured protection space realm"]
+    ],
+    returns: %{type: :tagged, description: "`:ok` if valid, `{:error, :invalid_challenge}` if tampered"},
+    errors: [:invalid_challenge],
+    composes_with: [:create, :verify]
+  )
+
+  @spec verify_server_binding(t(), String.t(), String.t()) :: :ok | {:error, :invalid_challenge}
+  def verify_server_binding(%__MODULE__{id: id} = challenge, secret_key, server_realm)
+      when is_binary(id) and is_binary(secret_key) and is_binary(server_realm) do
+    expected = compute_id(%{challenge | realm: server_realm}, secret_key)
+
+    if Plug.Crypto.secure_compare(id, expected) do
+      :ok
+    else
+      {:error, :invalid_challenge}
+    end
+  end
+
+  @spec verify_server_binding(t(), String.t(), String.t()) :: {:error, :invalid_challenge}
+  def verify_server_binding(%__MODULE__{id: nil}, _secret_key, _server_realm), do: {:error, :invalid_challenge}
+
   # Computes the HMAC-SHA256 challenge ID from 7 fixed positional slots.
   #
   # Input format: realm|method|intent|request|expires_or_empty|digest_or_empty|opaque_or_empty

@@ -2,9 +2,9 @@ defmodule MPP.Verifier do
   @moduledoc """
   Transport-neutral payment credential verification.
 
-  Implements the full MPP verification pipeline — HMAC challenge binding,
-  realm match, expiration check, request match, and method-specific
-  verification — without any HTTP or transport dependency.
+  Implements the full MPP verification pipeline — Tier-1 HMAC challenge binding
+  (server-realm provenance + expiry), Tier-2 pinned-field safety net, and
+  method-specific verification — without any HTTP or transport dependency.
 
   `MPP.Plug` delegates to this module for HTTP transport. `MPP.Mcp` and
   the client SDK (Phase 12) can use it directly for JSON-RPC and other
@@ -34,6 +34,16 @@ defmodule MPP.Verifier do
     * `:method_config` — (optional) server-only config map, default `%{}`
     * `:digest` — (optional) expected endpoint digest value
     * `:opaque` — (optional) expected endpoint opaque value
+
+  ## Verification tiers
+
+  **Tier 1** — HMAC provenance using the server's configured realm (not the echoed
+  realm) plus expiry. Failures return `:invalid_challenge` or `:payment_expired`.
+
+  **Tier 2** — Field-by-field pinning of the credential's echoed challenge against
+  this endpoint's configuration (realm, method, intent, request, digest, opaque).
+  Failures return `:credential_mismatch` so callers can distinguish replay attacks
+  from corrupt credentials.
   """
 
   use Descripex, namespace: "/protocol"
@@ -45,6 +55,8 @@ defmodule MPP.Verifier do
   alias MPP.JCS
   alias MPP.Receipt
   alias MPP.Telemetry
+
+  @expected_intent "charge"
 
   api(:verify, "Verify a payment credential against endpoint configuration. Transport-neutral.",
     params: [
@@ -58,6 +70,7 @@ defmodule MPP.Verifier do
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, %Errors{}}` on failure"},
     errors: [
       :invalid_challenge,
+      :credential_mismatch,
       :intent_mismatch,
       :method_mismatch,
       :payment_expired,
@@ -87,14 +100,8 @@ defmodule MPP.Verifier do
     start_time = Telemetry.verify_start(credential, charge, %{realm: realm})
 
     result =
-      with :ok <- Challenge.verify(credential.challenge, secret_key),
-           :ok <- check_intent_match(credential.challenge, "charge"),
-           :ok <- check_method_match(credential.challenge, method),
-           :ok <- check_realm_match(credential.challenge, realm),
-           :ok <- check_expiration(credential.challenge),
-           :ok <- check_request_match(credential.challenge, charge),
-           :ok <- check_digest_match(credential.challenge, digest),
-           :ok <- check_opaque_match(credential.challenge, opaque),
+      with :ok <- verify_tier1(credential.challenge, secret_key, realm),
+           :ok <- verify_pinned_fields(credential.challenge, method, realm, charge, digest, opaque),
            {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
         {:ok, receipt}
       else
@@ -104,23 +111,22 @@ defmodule MPP.Verifier do
         {:error, :payment_expired} ->
           {:error, Errors.new(:payment_expired, "Challenge has expired")}
 
-        {:error, :intent_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Credential intent does not match this endpoint")}
+        {:error, :missing_expires} ->
+          {:error, Errors.new(:credential_mismatch, "Challenge missing required expires field")}
 
-        {:error, :method_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Credential method does not match this endpoint")}
-
-        {:error, :realm_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Credential realm does not match this endpoint")}
-
-        {:error, :request_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint")}
-
-        {:error, :digest_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Credential digest does not match this endpoint")}
-
-        {:error, :opaque_mismatch} ->
-          {:error, Errors.new(:invalid_challenge, "Credential opaque data does not match this endpoint")}
+        {:error, reason}
+        when reason in [
+               :intent_mismatch,
+               :method_mismatch,
+               :realm_mismatch,
+               :request_mismatch,
+               :digest_mismatch,
+               :opaque_mismatch,
+               :currency_mismatch,
+               :recipient_mismatch,
+               :chain_id_mismatch
+             ] ->
+          {:error, Errors.new(:credential_mismatch, pinning_detail(reason, credential.challenge, charge))}
 
         {:error, %Errors{} = error} ->
           {:error, error}
@@ -141,26 +147,78 @@ defmodule MPP.Verifier do
     end
   end
 
-  # Verifies the credential's intent matches the expected intent type.
-  # Prevents cross-intent replay: a "session" credential can't be used on a "charge" endpoint.
+  # Tier 1: HMAC provenance (server realm) + expiry.
+  defp verify_tier1(challenge, secret_key, server_realm) do
+    with :ok <- Challenge.verify_server_binding(challenge, secret_key, server_realm) do
+      check_expiration(challenge)
+    end
+  end
+
+  # Tier 2: pinned field safety net — explicit field-by-field comparison against
+  # endpoint configuration. Matches mpp-rs `verify_pinned_fields/2` semantics.
+  defp verify_pinned_fields(challenge, method_module, expected_realm, charge, expected_digest, expected_opaque) do
+    with :ok <- check_method_match(challenge, method_module),
+         :ok <- check_intent_match(challenge, @expected_intent),
+         :ok <- check_realm_match(challenge, expected_realm),
+         :ok <- check_opaque_match(challenge, expected_opaque),
+         {:ok, request} <- decode_credential_request(challenge),
+         :ok <- check_request_currency(request, charge),
+         :ok <- check_request_recipient(request, charge),
+         :ok <- check_request_chain_id(request, charge),
+         :ok <- check_request_match(challenge, charge) do
+      check_digest_match(challenge, expected_digest)
+    end
+  end
+
+  defp pinning_detail(:intent_mismatch, challenge, _charge) do
+    "Credential intent '#{challenge.intent}' does not match this route's requirements (expected '#{@expected_intent}')"
+  end
+
+  defp pinning_detail(:method_mismatch, challenge, _charge) do
+    "Credential method '#{challenge.method}' does not match this route's requirements"
+  end
+
+  defp pinning_detail(:realm_mismatch, challenge, _charge) do
+    "Credential realm '#{challenge.realm}' does not match this route's requirements"
+  end
+
+  defp pinning_detail(:request_mismatch, _challenge, _charge) do
+    "Request parameters do not match this endpoint"
+  end
+
+  defp pinning_detail(:digest_mismatch, _challenge, _charge) do
+    "Credential digest does not match this endpoint"
+  end
+
+  defp pinning_detail(:opaque_mismatch, _challenge, _charge) do
+    "Credential opaque data does not match this route's requirements"
+  end
+
+  defp pinning_detail(:currency_mismatch, _challenge, charge) do
+    "Credential currency does not match this route's requirements (expected '#{charge.currency}')"
+  end
+
+  defp pinning_detail(:recipient_mismatch, _challenge, _charge) do
+    "Credential recipient does not match this route's requirements"
+  end
+
+  defp pinning_detail(:chain_id_mismatch, _challenge, charge) do
+    expected = get_in(charge.method_details || %{}, ["chainId"])
+
+    "Credential chainId does not match this route's requirements (expected '#{expected}')"
+  end
+
   defp check_intent_match(%Challenge{intent: intent}, intent), do: :ok
   defp check_intent_match(_challenge, _expected), do: {:error, :intent_mismatch}
 
-  # Verifies the credential's method matches the configured method module.
-  # Prevents cross-method attacks: a credential for "stripe" can't be verified by the "tempo" module.
-  # Plug routes by method name before calling Verifier, but MCP/client callers need this guard.
   defp check_method_match(%Challenge{method: method_name}, method_module) do
     if method_module.method_name() == method_name, do: :ok, else: {:error, :method_mismatch}
   end
 
-  # Verifies the credential's realm matches the expected realm.
-  # Defense-in-depth: HMAC binding covers realm when secrets are unique per realm,
-  # but an explicit check prevents cross-realm replay in shared-secret deployments.
   defp check_realm_match(%Challenge{realm: realm}, realm), do: :ok
   defp check_realm_match(_challenge, _realm), do: {:error, :realm_mismatch}
 
-  # Checks whether a challenge has expired based on its `expires` field.
-  defp check_expiration(%Challenge{expires: nil}), do: {:error, :payment_expired}
+  defp check_expiration(%Challenge{expires: nil}), do: {:error, :missing_expires}
 
   defp check_expiration(%Challenge{expires: expires}) do
     case DateTime.from_iso8601(expires) do
@@ -176,9 +234,6 @@ defmodule MPP.Verifier do
     end
   end
 
-  # Compares the credential's request against the endpoint's charge using full
-  # canonicalized string comparison. Prevents cross-route replay: a credential
-  # for one endpoint can't be used on another, even if they share amount/currency.
   defp check_request_match(%Challenge{request: request}, charge) do
     expected =
       charge
@@ -189,19 +244,60 @@ defmodule MPP.Verifier do
     if request == expected, do: :ok, else: {:error, :request_mismatch}
   end
 
+  defp check_request_currency(%{"currency" => currency}, %Charge{currency: expected}) do
+    if currency == expected, do: :ok, else: {:error, :currency_mismatch}
+  end
+
+  defp check_request_currency(_request, _charge), do: {:error, :currency_mismatch}
+
+  defp check_request_recipient(%{"recipient" => recipient}, %Charge{recipient: expected}) when is_binary(expected) do
+    if recipient == expected, do: :ok, else: {:error, :recipient_mismatch}
+  end
+
+  defp check_request_recipient(_request, %Charge{recipient: nil}), do: :ok
+
+  defp check_request_recipient(%{"recipient" => _}, %Charge{recipient: _}), do: {:error, :recipient_mismatch}
+
+  defp check_request_recipient(_request, %Charge{recipient: _}), do: {:error, :recipient_mismatch}
+
+  defp check_request_chain_id(request, %Charge{method_details: %{"chainId" => expected}}) do
+    actual = get_in(request, ["methodDetails", "chainId"])
+    actual_str = chain_id_string(actual)
+
+    if actual_str == chain_id_string(expected) do
+      :ok
+    else
+      {:error, :chain_id_mismatch}
+    end
+  end
+
+  defp check_request_chain_id(_request, _charge), do: :ok
+
+  defp chain_id_string(value) when is_integer(value), do: Integer.to_string(value)
+  defp chain_id_string(value) when is_binary(value), do: value
+  defp chain_id_string(_), do: nil
+
   defp check_digest_match(%Challenge{digest: digest}, digest), do: :ok
   defp check_digest_match(_challenge, _expected), do: {:error, :digest_mismatch}
 
   defp check_opaque_match(%Challenge{opaque: opaque}, opaque), do: :ok
   defp check_opaque_match(_challenge, _expected), do: {:error, :opaque_mismatch}
 
-  # Merges server-only method_config into charge.method_details for verify/2.
+  defp decode_credential_request(%Challenge{request: request}) do
+    with {:ok, json} <- Base.url_decode64(request, padding: false),
+         {:ok, map} <- Jason.decode(json),
+         true <- is_map(map) do
+      {:ok, map}
+    else
+      _ -> {:error, :request_mismatch}
+    end
+  end
+
   defp merge_method_config(charge, runtime_config) do
     merged = Map.merge(charge.method_details || %{}, runtime_config)
     %{charge | method_details: merged}
   end
 
-  # Fetches a required option or raises with a clear message.
   defp require_opt!(opts, key) do
     case Keyword.fetch(opts, key) do
       {:ok, value} -> value
