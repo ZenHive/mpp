@@ -371,20 +371,7 @@ defmodule MPP.Headers do
         %{method: method, intent: intent, q: q, index: index}
       end)
 
-    if prefs_internal == [] do
-      []
-    else
-      offers
-      |> Enum.with_index()
-      |> Enum.reduce([], fn {offer, offer_idx}, acc ->
-        case best_accept_payment_match(method_intent.(offer), prefs_internal) do
-          %{q: q} when q > 0.0 -> [{offer_idx, q, offer} | acc]
-          _ -> acc
-        end
-      end)
-      |> Enum.sort_by(fn {offer_idx, q, _offer} -> {-q, offer_idx} end)
-      |> Enum.map(fn {_idx, _q, offer} -> offer end)
-    end
+    rank_accept_payment_offers(offers, prefs_internal, method_intent)
   end
 
   # --- Private: Accept-Payment ---
@@ -410,23 +397,27 @@ defmodule MPP.Headers do
       |> String.split(",", trim: true)
       |> Enum.reject(&(&1 == ""))
 
-    if parts == [] do
-      {:error, :malformed}
-    else
-      parts
-      |> Enum.with_index()
-      |> Enum.reduce_while({:ok, []}, fn {part, index}, {:ok, acc} ->
-        case parse_accept_payment_part(part, index) do
-          {:ok, entry} -> {:cont, {:ok, [entry | acc]}}
-          {:error, _} -> {:halt, {:error, :malformed}}
-        end
-      end)
-      |> case do
-        {:ok, entries} -> {:ok, Enum.reverse(entries)}
-        other -> other
-      end
+    parse_accept_payment_parts(parts)
+  end
+
+  defp parse_accept_payment_parts([]), do: {:error, :malformed}
+
+  defp parse_accept_payment_parts(parts) do
+    parts
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, &parse_accept_payment_reduce_part/2)
+    |> reverse_accept_payment_entries()
+  end
+
+  defp parse_accept_payment_reduce_part({part, index}, {:ok, acc}) do
+    case parse_accept_payment_part(part, index) do
+      {:ok, entry} -> {:cont, {:ok, [entry | acc]}}
+      {:error, _} -> {:halt, {:error, :malformed}}
     end
   end
+
+  defp reverse_accept_payment_entries({:ok, entries}), do: {:ok, Enum.reverse(entries)}
+  defp reverse_accept_payment_entries(other), do: other
 
   defp parse_accept_payment_part(part, index) do
     {token, params_str} =
@@ -466,25 +457,28 @@ defmodule MPP.Headers do
   defp parse_accept_payment_q(params_str, part) do
     params_str
     |> String.split(";")
-    |> Enum.reduce_while({:ok, 1.0}, fn param, {:ok, acc} ->
-      param = String.trim(param)
-
-      case String.split(param, "=", parts: 2) do
-        [name, value] ->
-          if String.trim(name) == "q" do
-            case parse_accept_payment_q_value(String.trim(value), part) do
-              {:ok, q} -> {:cont, {:ok, q}}
-              error -> {:halt, error}
-            end
-          else
-            {:cont, {:ok, acc}}
-          end
-
-        _ ->
-          {:cont, {:ok, acc}}
-      end
-    end)
+    |> Enum.reduce_while({:ok, 1.0}, &parse_accept_payment_q_param(&1, &2, part))
   end
+
+  defp parse_accept_payment_q_param(param, {:ok, acc}, part) do
+    param
+    |> String.trim()
+    |> String.split("=", parts: 2)
+    |> parse_accept_payment_q_param_parts(acc, part)
+  end
+
+  defp parse_accept_payment_q_param_parts([name, value], acc, part) do
+    if String.trim(name) == "q" do
+      value |> String.trim() |> parse_accept_payment_q_value(part) |> continue_accept_payment_q()
+    else
+      {:cont, {:ok, acc}}
+    end
+  end
+
+  defp parse_accept_payment_q_param_parts(_parts, acc, _part), do: {:cont, {:ok, acc}}
+
+  defp continue_accept_payment_q({:ok, q}), do: {:cont, {:ok, q}}
+  defp continue_accept_payment_q(error), do: {:halt, error}
 
   defp parse_accept_payment_q_value(value, _part) do
     with {q, ""} <- Float.parse(value),
@@ -515,21 +509,45 @@ defmodule MPP.Headers do
   defp default_method_intent(%{method: method, intent: intent}) when is_binary(method) and is_binary(intent),
     do: {method, intent}
 
-  defp best_accept_payment_match({offer_method, offer_intent}, preferences) do
-    Enum.reduce(preferences, nil, fn pref, best ->
-      if accept_payment_matches?(offer_method, offer_intent, pref) do
-        candidate = %{
-          q: pref.q,
-          specificity: accept_payment_specificity(pref),
-          index: pref.index
-        }
+  defp rank_accept_payment_offers(_offers, [], _method_intent), do: []
 
-        if better_accept_payment_match?(candidate, best), do: candidate, else: best
-      else
-        best
-      end
-    end)
+  defp rank_accept_payment_offers(offers, prefs_internal, method_intent) do
+    offers
+    |> Enum.with_index()
+    |> Enum.flat_map(&rank_accept_payment_offer(&1, prefs_internal, method_intent))
+    |> Enum.sort_by(fn {offer_idx, q, _offer} -> {-q, offer_idx} end)
+    |> Enum.map(fn {_idx, _q, offer} -> offer end)
   end
+
+  defp rank_accept_payment_offer({offer, offer_idx}, preferences, method_intent) do
+    case best_accept_payment_match(method_intent.(offer), preferences) do
+      %{q: q} when q > 0.0 -> [{offer_idx, q, offer}]
+      _ -> []
+    end
+  end
+
+  defp best_accept_payment_match({offer_method, offer_intent}, preferences) do
+    Enum.reduce(preferences, nil, &maybe_better_accept_payment_match(&1, &2, offer_method, offer_intent))
+  end
+
+  defp maybe_better_accept_payment_match(pref, best, offer_method, offer_intent) do
+    if accept_payment_matches?(offer_method, offer_intent, pref) do
+      pref |> accept_payment_candidate() |> choose_accept_payment_match(best)
+    else
+      best
+    end
+  end
+
+  defp accept_payment_candidate(pref) do
+    %{
+      q: pref.q,
+      specificity: accept_payment_specificity(pref),
+      index: pref.index
+    }
+  end
+
+  defp choose_accept_payment_match(candidate, best),
+    do: if(better_accept_payment_match?(candidate, best), do: candidate, else: best)
 
   defp accept_payment_matches?(offer_method, offer_intent, %{method: method, intent: intent}) do
     (method == "*" or method == offer_method) and (intent == "*" or intent == offer_intent)

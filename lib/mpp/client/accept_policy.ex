@@ -97,16 +97,16 @@ defmodule MPP.Client.AcceptPolicy do
     if String.starts_with?(pattern, "*.") do
       match_wildcard_host?(uri, String.slice(pattern, 2..-1//1))
     else
-      case parse_origin(pattern) do
-        {:ok, pattern_origin} ->
-          case origin_from_url(uri) do
-            {:ok, request_origin} -> pattern_origin == request_origin
-            _ -> false
-          end
+      exact_origin_match?(uri, pattern)
+    end
+  end
 
-        :error ->
-          false
-      end
+  defp exact_origin_match?(uri, pattern) do
+    with {:ok, pattern_origin} <- parse_origin(pattern),
+         {:ok, request_origin} <- origin_from_url(uri) do
+      pattern_origin == request_origin
+    else
+      _ -> false
     end
   end
 
