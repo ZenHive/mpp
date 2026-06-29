@@ -226,10 +226,7 @@ defmodule MPP.Methods.Stripe do
   # Stripe marks replayed idempotency keys with Idempotent-Replayed: true.
   # https://docs.stripe.com/error-low-level#idempotency
   defp idempotent_replayed?(response) do
-    case Req.Response.get_header(response, "idempotent-replayed") do
-      ["true" | _] -> true
-      _ -> false
-    end
+    match?(["true" | _], Req.Response.get_header(response, "idempotent-replayed"))
   end
 
   # Checks the PaymentIntent status and returns a receipt or error.

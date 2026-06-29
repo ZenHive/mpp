@@ -100,7 +100,7 @@ defmodule MPP.MixProject do
       links: %{
         "GitHub" => @source_url,
         "MPP Spec" => "https://mpp.dev",
-        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+        "Changelog" => "#{@source_url}/blob/v#{@version}/CHANGELOG.md"
       }
     ]
   end
