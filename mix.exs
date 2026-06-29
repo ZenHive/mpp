@@ -54,6 +54,7 @@ defmodule MPP.MixProject do
       {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
       {:ex_unit_json, "~> 0.6.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.0", only: [:dev, :test]},
       {:tidewave, "~> 0.6", only: :dev},
       {:bandit, "~> 1.12.0", only: :dev},
 

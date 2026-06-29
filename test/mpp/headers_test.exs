@@ -1,5 +1,6 @@
 defmodule MPP.HeadersTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias MPP.Challenge
   alias MPP.Credential
@@ -489,6 +490,81 @@ defmodule MPP.HeadersTest do
       header = Headers.format_challenge(make_challenge(request: request))
 
       assert {:ok, %Challenge{request: ^request}} = Headers.parse_challenge(header)
+    end
+  end
+
+  # --- Property tests for Task 63 ---
+
+  defp safe_str do
+    StreamData.string(:printable, min_length: 1, max_length: 40)
+    |> StreamData.map(&String.replace(&1, ["\r", "\n"], " "))
+  end
+
+  describe "property: round-trip identity (format then parse)" do
+    property "format_challenge/1 + parse_challenge/1 is identity" do
+      check all realm <- safe_str(),
+                method <- StreamData.one_of([
+                  StreamData.constant("stripe"),
+                  StreamData.constant("tempo"),
+                  StreamData.constant("evm")
+                ]),
+                request <- StreamData.string(:alphanumeric, min_length: 8, max_length: 64) do
+        ch = make_challenge(realm: realm, method: method, request: request)
+        h = Headers.format_challenge(ch)
+        assert {:ok, ^ch} = Headers.parse_challenge(h)
+      end
+    end
+
+    property "format_credential/1 + parse_credential/1 is identity" do
+      check all pval <- safe_str() do
+        cred = make_credential(payload: %{"p" => pval})
+        h = Headers.format_credential(cred)
+        assert {:ok, parsed} = Headers.parse_credential(h)
+        assert parsed.challenge.realm == cred.challenge.realm
+        assert parsed.payload == cred.payload
+      end
+    end
+
+    property "format_receipt/1 + parse_receipt/1 is identity" do
+      check all ref <- safe_str() do
+        r = Receipt.new(method: "stripe", reference: ref)
+        h = Headers.format_receipt(r)
+        assert {:ok, ^r} = Headers.parse_receipt(h)
+      end
+    end
+  end
+
+  describe "property: malformed-input robustness (never raise, always {:error, _})" do
+    property "parse_challenge/1 on arbitrary binaries returns {:error, _}" do
+      check all bin <- StreamData.binary(max_length: 2048) do
+        assert {:error, _} = Headers.parse_challenge(bin)
+      end
+    end
+
+    property "parse_credential/1 on arbitrary binaries returns {:error, _}" do
+      check all bin <- StreamData.binary(max_length: 2048) do
+        assert {:error, _} = Headers.parse_credential(bin)
+      end
+    end
+
+    property "parse_receipt/1 on arbitrary binaries returns {:error, _}" do
+      check all bin <- StreamData.binary(max_length: 2048) do
+        assert {:error, _} = Headers.parse_receipt(bin)
+      end
+    end
+
+    property "Credential.decode on arbitrary binaries and corrupt base64url returns {:error, _}" do
+      check all bin <- StreamData.binary(max_length: 512) do
+        assert {:error, _} = Credential.decode(bin)
+      end
+    end
+
+    property "corrupt base64url tokens for credential header/decode return error" do
+      check all b <- StreamData.string(:alphanumeric, min_length: 4, max_length: 64) do
+        bad = String.slice(b, 0, div(String.length(b), 2)) <> "!!!" <> String.slice(b, -3, 3)
+        assert {:error, _} = Credential.decode(bad)
+        assert {:error, _} = Headers.parse_credential("Payment " <> bad)
+      end
     end
   end
 end
