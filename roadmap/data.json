@@ -1897,7 +1897,7 @@
       "id": "63",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Header parser property/fuzz tests",
       "scores": {
         "d": 3,
@@ -1921,10 +1921,15 @@
         "Porting Rust's libFuzzer harness itself — StreamData property tests are the Elixir-idiomatic equivalent",
         "The request/token size cap (memory-exhaustion DoS hardening) — that is the security fix tracked in Task 65; these property tests will exercise the cap once it lands"
       ],
+      "shipped_in": "126bea7ee86087e7b35cb96d1f5601425eb49af3",
       "body": "The Rust reference SDK fuzzes all four wire-format parsers (WWW-Authenticate: Payment, Authorization: Payment, Payment-Receipt, base64url-JSON) — refs/mpp-rs/fuzz/fuzz_targets/. We have zero property/fuzz coverage. Add {:stream_data, \"~> 1.0\", only: [:dev, :test]} and property tests for MPP.Headers: (1) round-trip identity — format then parse reproduces the input struct for WWW-Authenticate, Authorization, and Payment-Receipt; (2) malformed-input robustness — arbitrary/garbage binaries and truncated/over-padded base64url never raise, always return {:error, _}. Include the credential base64url(JSON) decode path used by MPP.Credential. First consumer: our own 402 endpoint parses arbitrary client-supplied headers — a parser panic on malformed input is a DoS surface for a money protocol. The related memory-exhaustion size cap (mpp-rs #299) is tracked separately as the security fix in Task 65; these property tests will exercise that cap once it lands.",
       "created_at": "2026-06-24",
       "started_at": "2026-06-29",
+      "done_at": "2026-06-29",
       "scored_at": "2026-06-24",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1782738917622-cb805a73, 126bea7ee86087e7b35cb96d1f5601425eb49af3).",
+      "delivered_by": "grok",
+      "verified": true,
       "cross_repo": []
     },
     {
