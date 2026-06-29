@@ -754,7 +754,7 @@
       "id": 27,
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Expiration and DID helpers",
       "scores": {
         "d": 2,
@@ -777,6 +777,7 @@
         "Unit tests for each helper"
       ],
       "body": "Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1` (= n × 30 × 86400s, matching mppx convention), `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases), plus `assert!/2` overload taking an optional `challenge_id` for richer error context. Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `\"did:pkh:eip155:<chain_id>:<address>\"`.\n",
+      "started_at": "2026-06-29",
       "cross_repo": []
     },
     {

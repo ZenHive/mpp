@@ -616,13 +616,10 @@ implemented = "Shipped MPP.Amount for pure integer/string base-unit conversion w
 id = 27
 phase = 9
 bundle = "utilities"
+status = "in_progress"
 title = "Expiration and DID helpers"
-status = "pending"
 scores = { d = 2, b = 4, u = 5 }
 markers = ["parallel"]
-body = """
-Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1` (= n × 30 × 86400s, matching mppx convention), `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases), plus `assert!/2` overload taking an optional `challenge_id` for richer error context. Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `"did:pkh:eip155:<chain_id>:<address>"`.
-"""
 acceptance_criteria = [
   "MPP.Expires.minutes(5) returns valid ISO 8601 ~5 minutes from now",
   "MPP.Expires.months(1) returns ~30 days from now (mppx-compatible)",
@@ -631,6 +628,10 @@ acceptance_criteria = [
   "MPP.DID.evm_did/2 returns correctly formatted DID string",
   "Unit tests for each helper"
 ]
+body = """
+Add `MPP.Expires` module with `seconds/1`, `minutes/1`, `hours/1`, `days/1`, `weeks/1`, `months/1` (= n × 30 × 86400s, matching mppx convention), `years/1` returning ISO 8601 datetime strings offset from `DateTime.utc_now/0`. Add `assert!/1` that raises on nil, malformed, or expired timestamps (timezone-aware comparison, malformed ISO edge cases), plus `assert!/2` overload taking an optional `challenge_id` for richer error context. Add `MPP.DID` module with `evm_did/2` that takes an address and chain_id and returns `"did:pkh:eip155:<chain_id>:<address>"`.
+"""
+started_at = "2026-06-29"
 
 [[task]]
 id = 34
