@@ -810,7 +810,7 @@
       "id": 35,
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Generic dedup at Plug level",
       "scores": {
         "d": 3,
@@ -832,8 +832,13 @@
         "Unit test: same credential rejected on second use",
         "Backward compatible — no store = current behavior (no dedup)"
       ],
+      "shipped_in": "a1776308dba7448cba00eeec611300faa6cb2989",
       "body": "Lift replay protection from Tempo-only to all payment methods. Currently `MPP.Tempo.Store` provides dedup for Tempo credentials, but EVM and Stripe accept the same payment proof twice within the challenge window. Add optional `:store` to `MPP.Plug.Config` (shared across all methods). Before calling `method.verify/2`, check if the credential has been seen (keyed on challenge_id + payload hash). After successful verification, mark as used. Methods that already have their own dedup (Tempo) can skip the plug-level check. The `MPP.Tempo.Store` behaviour is already the right interface — reuse it at the Plug level.\n",
       "started_at": "2026-06-29",
+      "done_at": "2026-06-29",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1782741994987-fb004049, a1776308dba7448cba00eeec611300faa6cb2989).",
+      "delivered_by": "codex",
+      "verified": true,
       "cross_repo": []
     },
     {
