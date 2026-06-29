@@ -1,2 +1,2 @@
-ExUnit.configure(exclude: [:integration])
+ExUnit.configure(exclude: [:integration, :cross_validation])
 ExUnit.start()

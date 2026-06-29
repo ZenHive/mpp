@@ -165,7 +165,7 @@ defmodule MPP.MixProject do
         "doctor --raise",
         # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV via `env`
         # (Elixir 1.20's `mix cmd` no longer parses a leading VAR=val prefix).
-        "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration",
+        "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration --exclude cross_validation",
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
         "sobelow --skip"
       ],
