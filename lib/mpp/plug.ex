@@ -69,6 +69,7 @@ defmodule MPP.Plug do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.JCS
+  alias MPP.Telemetry
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
   alias MPP.Verifier
@@ -269,11 +270,12 @@ defmodule MPP.Plug do
       {:ok, credential} ->
         case find_method_entry(config, credential.challenge.method) do
           nil ->
-            respond_error(
-              conn,
-              config,
-              Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
-            )
+            charge = Telemetry.charge_from_challenge(credential.challenge)
+            error = Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
+            start_time = Telemetry.verify_start(credential, charge, %{realm: config.realm})
+            Telemetry.verify_fail(credential, charge, start_time, error, %{realm: config.realm})
+
+            respond_error(conn, config, error)
 
           entry ->
             verify_credential(conn, config, credential, entry)
@@ -301,27 +303,35 @@ defmodule MPP.Plug do
   # the Plug-specific result (conn assigns, headers, error responses).
   defp verify_credential(conn, config, credential, entry) do
     store = replay_store(config, entry)
+    charge = entry.charge
 
     opts = [
       secret_key: config.secret_key,
       realm: config.realm,
       method: entry.method,
-      charge: entry.charge,
+      charge: charge,
       method_config: entry.method_config,
       digest: config.digest,
       opaque: config.opaque
     ]
 
-    with :ok <- check_credential_unused(store, credential),
-         {:ok, receipt} <- Verifier.verify(credential, opts),
-         :ok <- mark_credential_used(store, credential) do
-      conn
-      |> Plug.Conn.assign(:mpp_receipt, receipt)
-      |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
-      |> Plug.Conn.put_resp_header("cache-control", "private")
-    else
+    case check_credential_unused(store, credential) do
       {:error, %Errors{} = error} ->
+        start_time = Telemetry.verify_start(credential, charge, %{realm: config.realm})
+        Telemetry.verify_fail(credential, charge, start_time, error, %{realm: config.realm})
         respond_error(conn, config, error)
+
+      :ok ->
+        with {:ok, receipt} <- Verifier.verify(credential, opts),
+             :ok <- mark_credential_used(store, credential) do
+          conn
+          |> Plug.Conn.assign(:mpp_receipt, receipt)
+          |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
+          |> Plug.Conn.put_resp_header("cache-control", "private")
+        else
+          {:error, %Errors{} = error} ->
+            respond_error(conn, config, error)
+        end
     end
   end
 
@@ -385,6 +395,7 @@ defmodule MPP.Plug do
         challenge_headers =
           Enum.map(entries, fn entry ->
             challenge = generate_challenge(config, entry)
+            Telemetry.challenge(challenge, entry.charge, %{realm: config.realm})
             {"www-authenticate", Headers.format_challenge(challenge)}
           end)
 

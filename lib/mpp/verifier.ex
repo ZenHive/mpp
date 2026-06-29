@@ -44,6 +44,7 @@ defmodule MPP.Verifier do
   alias MPP.Intents.Charge
   alias MPP.JCS
   alias MPP.Receipt
+  alias MPP.Telemetry
 
   api(:verify, "Verify a payment credential against endpoint configuration. Transport-neutral.",
     params: [
@@ -83,47 +84,60 @@ defmodule MPP.Verifier do
       |> Map.put("credential_source", credential.source)
 
     charge_for_verify = merge_method_config(charge, runtime_config)
+    start_time = Telemetry.verify_start(credential, charge, %{realm: realm})
 
-    with :ok <- Challenge.verify(credential.challenge, secret_key),
-         :ok <- check_intent_match(credential.challenge, "charge"),
-         :ok <- check_method_match(credential.challenge, method),
-         :ok <- check_realm_match(credential.challenge, realm),
-         :ok <- check_expiration(credential.challenge),
-         :ok <- check_request_match(credential.challenge, charge),
-         :ok <- check_digest_match(credential.challenge, digest),
-         :ok <- check_opaque_match(credential.challenge, opaque),
-         {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
-      {:ok, receipt}
-    else
-      {:error, :invalid_challenge} ->
-        {:error, Errors.new(:invalid_challenge, "Challenge verification failed")}
+    result =
+      with :ok <- Challenge.verify(credential.challenge, secret_key),
+           :ok <- check_intent_match(credential.challenge, "charge"),
+           :ok <- check_method_match(credential.challenge, method),
+           :ok <- check_realm_match(credential.challenge, realm),
+           :ok <- check_expiration(credential.challenge),
+           :ok <- check_request_match(credential.challenge, charge),
+           :ok <- check_digest_match(credential.challenge, digest),
+           :ok <- check_opaque_match(credential.challenge, opaque),
+           {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
+        {:ok, receipt}
+      else
+        {:error, :invalid_challenge} ->
+          {:error, Errors.new(:invalid_challenge, "Challenge verification failed")}
 
-      {:error, :payment_expired} ->
-        {:error, Errors.new(:payment_expired, "Challenge has expired")}
+        {:error, :payment_expired} ->
+          {:error, Errors.new(:payment_expired, "Challenge has expired")}
 
-      {:error, :intent_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Credential intent does not match this endpoint")}
+        {:error, :intent_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Credential intent does not match this endpoint")}
 
-      {:error, :method_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Credential method does not match this endpoint")}
+        {:error, :method_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Credential method does not match this endpoint")}
 
-      {:error, :realm_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Credential realm does not match this endpoint")}
+        {:error, :realm_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Credential realm does not match this endpoint")}
 
-      {:error, :request_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint")}
+        {:error, :request_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Request parameters do not match this endpoint")}
 
-      {:error, :digest_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Credential digest does not match this endpoint")}
+        {:error, :digest_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Credential digest does not match this endpoint")}
 
-      {:error, :opaque_mismatch} ->
-        {:error, Errors.new(:invalid_challenge, "Credential opaque data does not match this endpoint")}
+        {:error, :opaque_mismatch} ->
+          {:error, Errors.new(:invalid_challenge, "Credential opaque data does not match this endpoint")}
 
-      {:error, %Errors{} = error} ->
+        {:error, %Errors{} = error} ->
+          {:error, error}
+
+        {:error, reason} ->
+          {:error, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}")}
+      end
+
+    case result do
+      {:ok, receipt} ->
+        Telemetry.verify_ok(credential, charge, start_time, %{realm: realm})
+        Telemetry.receipt(credential, receipt, charge, %{realm: realm})
+        {:ok, receipt}
+
+      {:error, error} ->
+        Telemetry.verify_fail(credential, charge, start_time, error, %{realm: realm})
         {:error, error}
-
-      {:error, reason} ->
-        {:error, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}")}
     end
   end
 
