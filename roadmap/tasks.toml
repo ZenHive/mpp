@@ -690,7 +690,7 @@ shipped_in = "a1776308dba7448cba00eeec611300faa6cb2989"
 id = 37
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "done"
 title = "Accept-Payment header support"
 scores = { d = 3, b = 6, u = 7 }
 markers = ["parallel"]
@@ -705,7 +705,12 @@ acceptance_criteria = [
 body = """
 Add `MPP.Headers.parse_accept_payment/1` parsing spec §7.4 `Accept-Payment` into a ranked `[{method, intent, q}]` list. Add `format_accept_payment/1` for client-side generation. Update `MPP.Plug` to filter/reorder `WWW-Authenticate` challenges based on client's `Accept-Payment` (no-op when absent, per spec). Update `MPP.Client.Transport.HTTP` (Task 33b) to optionally set `Accept-Payment` from a provider list. Add a client-side `MPP.Client.AcceptPolicy` that honors server-advertised methods on the response path — parallel to mpp-rs `AcceptPaymentPolicy` (read `refs/mpp-rs/src/client/accept_payment_policy.rs` at pickup time to confirm policy shape and filter/order semantics).
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1782745061330-6ece4f77, e58fb26eba23aa9d52aae95b339680f1f58fd0ca)."
+delivered_by = "cursor"
+verified = true
 started_at = "2026-06-29"
+done_at = "2026-06-29"
+shipped_in = "e58fb26eba23aa9d52aae95b339680f1f58fd0ca"
 
 # ============================================================================
 # Tasks — Phase 10: Session Support
