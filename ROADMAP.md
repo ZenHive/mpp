@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (16 of 21 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (15 of 21 done · 1 in progress)
 
-**Last shipped:** Task 27 — Expiration and DID helpers, Task 35 — Generic dedup at Plug level, Task 57 — Unit tests for MultiProvider and ConCacheStore, Task 63 — Header parser property/fuzz tests on 2026-06-29
+**Last shipped:** Task 27 — Expiration and DID helpers, Task 57 — Unit tests for MultiProvider and ConCacheStore, Task 63 — Header parser property/fuzz tests on 2026-06-29
 
 **Up next:** Task 37 — Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17] 🎯
 <!-- FOCUS:END -->
@@ -119,7 +119,7 @@
 | Task 26 | ✅ | 🎁 **utilities** · Amount and decimals helpers [D:2/B:6/U:6 → Eff:3.0?] 🎯 |
 | Task 27 `[P]` | ✅ | 🎁 **utilities** · Expiration and DID helpers [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 | Task 34 | ✅ | 🎁 **utilities** · Verifier extraction + JCS [D:4/B:9/U:10 → Eff:2.38?] 🎯 |
-| Task 35 `[P]` | ✅ | 🎁 **utilities** · Generic dedup at Plug level [D:3/B:7/U:7 → Eff:2.33?] 🎯 |
+| Task 35 `[P]` | 🔄 | 🎁 **utilities** · Generic dedup at Plug level [D:3/B:7/U:7 → Eff:2.33?] 🎯 |
 | Task 37 `[P]` | ⬜ | 🎁 **utilities** · Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
 | Task 45 | ⬜ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 46 | ⬜ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
