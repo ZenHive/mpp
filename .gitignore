@@ -25,6 +25,9 @@ mpp-*.tar
 # Local hex docs cache.
 /.hex-docs/
 
+# Local Codex MCP/tool approval config.
+/.codex/config.toml
+
 # Cloned reference repos (spec + TypeScript/Rust SDKs).
 /refs/
 
@@ -41,4 +44,3 @@ mpp-*.tar
 /node_modules/
 /npm.lock
 /package.json
-
