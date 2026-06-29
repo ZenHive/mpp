@@ -36,6 +36,8 @@ defmodule MPP do
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
+    * `MPP.Expires` — Expiration timestamp helpers (duration offsets, assert!)
+    * `MPP.DID` — DID helpers for EVM credential sources
     * `MPP.JCS` — RFC 8785 JSON Canonicalization Scheme for HMAC interop
     * `MPP.Verifier` — Transport-neutral payment credential verification
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
@@ -64,6 +66,8 @@ defmodule MPP do
       MPP.Methods.EVM,
       MPP.BodyDigest,
       MPP.Amount,
+      MPP.Expires,
+      MPP.DID,
       MPP.JCS,
       MPP.Verifier,
       MPP.Mcp,

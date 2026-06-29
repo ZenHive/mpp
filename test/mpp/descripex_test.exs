@@ -18,6 +18,8 @@ defmodule MPP.DescripexTest do
     EVM,
     MPP.BodyDigest,
     MPP.Amount,
+    MPP.Expires,
+    MPP.DID,
     MPP.JCS,
     MPP.Verifier,
     MPP.Mcp,
