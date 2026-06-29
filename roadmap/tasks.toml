@@ -658,13 +658,10 @@ implemented = "Extracted the verification pipeline from MPP.Plug into a transpor
 id = 35
 phase = 9
 bundle = "utilities"
+status = "in_progress"
 title = "Generic dedup at Plug level"
-status = "pending"
 scores = { d = 3, b = 7, u = 7 }
 markers = ["parallel"]
-body = """
-Lift replay protection from Tempo-only to all payment methods. Currently `MPP.Tempo.Store` provides dedup for Tempo credentials, but EVM and Stripe accept the same payment proof twice within the challenge window. Add optional `:store` to `MPP.Plug.Config` (shared across all methods). Before calling `method.verify/2`, check if the credential has been seen (keyed on challenge_id + payload hash). After successful verification, mark as used. Methods that already have their own dedup (Tempo) can skip the plug-level check. The `MPP.Tempo.Store` behaviour is already the right interface — reuse it at the Plug level.
-"""
 acceptance_criteria = [
   "Optional :store option in MPP.Plug config (shared across methods)",
   "Dedup check before method.verify/2, mark after success",
@@ -673,6 +670,10 @@ acceptance_criteria = [
   "Unit test: same credential rejected on second use",
   "Backward compatible — no store = current behavior (no dedup)"
 ]
+body = """
+Lift replay protection from Tempo-only to all payment methods. Currently `MPP.Tempo.Store` provides dedup for Tempo credentials, but EVM and Stripe accept the same payment proof twice within the challenge window. Add optional `:store` to `MPP.Plug.Config` (shared across all methods). Before calling `method.verify/2`, check if the credential has been seen (keyed on challenge_id + payload hash). After successful verification, mark as used. Methods that already have their own dedup (Tempo) can skip the plug-level check. The `MPP.Tempo.Store` behaviour is already the right interface — reuse it at the Plug level.
+"""
+started_at = "2026-06-29"
 
 [[task]]
 id = 37
