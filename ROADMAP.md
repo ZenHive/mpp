@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (16 of 21 done · 1 in progress)
+**Focus phase:** 9 — Protocol Utilities (17 of 21 done · 0 in progress)
 
-**Last shipped:** Task 27 — Expiration and DID helpers, Task 35 — Generic dedup at Plug level, Task 57 — Unit tests for MultiProvider and ConCacheStore, Task 63 — Header parser property/fuzz tests on 2026-06-29
+**Last shipped:** Task 27 — Expiration and DID helpers, Task 35 — Generic dedup at Plug level, Task 57 — Unit tests for MultiProvider and ConCacheStore, Task 63 — Header parser property/fuzz tests, Task 67 — Align cold check scope with Tempo JS cross-validation dependencies on 2026-06-29
 
 **Up next:** Task 37 — Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17] 🎯
 <!-- FOCUS:END -->
@@ -134,7 +134,7 @@
 | Task 63 `[P]` | ✅ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 | Task 65 `[P]` | ✅ | 🎁 **utilities** · 🔒 Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) [D:2/B:7/U:6 → Eff:3.25] 🎯 |
 | Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17] 🎯 |
-| Task 67 | 🔄 | 🎁 **utilities** · Align cold check scope with Tempo JS cross-validation dependencies [D:3/B:7/U:5 → Eff:2.0] 🎯 |
+| Task 67 | ✅ | 🎁 **utilities** · Align cold check scope with Tempo JS cross-validation dependencies [D:3/B:7/U:5 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
 ---
