@@ -1551,3 +1551,31 @@ started_at = "2026-06-29"
 scored_at = "2026-06-29"
 done_at = "2026-06-29"
 shipped_in = "7a60f35d4c92290ce4a626f12a50a337977e9290"
+
+[[task]]
+id = "68"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Tempo hosted fee-payer parity"
+scores = { d = 5, b = 7, u = 6 }
+markers = ["security"]
+body = """
+Add server-side parity for the hosted Tempo fee-payer fill path identified in the Task 46 audit. Keep public artifacts sanitized; use the private advisory / latest reference SDK source at pickup for the full mechanism and acceptance details. Include Moderato integration coverage for the hosted-fill success path and the configured rejection path.
+"""
+created_at = "2026-06-30"
+scored_at = "2026-06-30"
+
+[[task]]
+id = "69"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Tempo proof access-key authorization parity"
+scores = { d = 4, b = 6, u = 5 }
+markers = ["security"]
+body = """
+Extend zero-amount Tempo proof verification to match the latest reference SDK authorization path when the direct signer is not the wallet named by the proof source. Keep public artifacts sanitized; read the private advisory / reference SDK source at pickup for exact behavior. Include deterministic unit coverage and Moderato integration coverage for the accepted authorization path and rejected stale/revoked authorization path.
+"""
+created_at = "2026-06-30"
+scored_at = "2026-06-30"

@@ -22,8 +22,8 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 | **EIP-712 proof v3 wallet binding** | mppx #532, #253 | ✓ **new** | `MPP.Methods.Tempo.Proof` + `type="proof"` verify path; conformance vector pinned |
 | Proof replay via store | mpp-rs #285 | ✓ **new** | `mpp:proof:<challenge_id>` via `check_and_mark/2` when store configured |
 | Zero-amount requires proof (not hash/tx) | mppx proof flow | ✓ **new** | `reject_non_proof_for_zero_amount/2` |
-| Hosted fee-payer fills (`fillHostedFeePayerTransaction`) | mppx #536, #538, #584 | ✗ | Server only co-signs locally via `fee_payer_private_key`; no hosted-fill RPC |
-| Proof access-key / on-chain keychain fallback | mppx `resolveAccount` #579 | ◐ | Direct signer recovery only; no RPC keychain lookup |
+| Hosted fee-payer fills (`fillHostedFeePayerTransaction`) | mppx #536, #538, #584 | ✗ | Server only co-signs locally via `fee_payer_private_key`; tracked in Task 68 |
+| Proof access-key / on-chain keychain fallback | mppx `resolveAccount` #579 | ◐ | Direct signer recovery only; full authorization parity tracked in Task 69 |
 | Client-side Tempo chain pinning | mpp-rs `8880cf7` | N/A | Client transport — overlaps Task 45 |
 
 ---
@@ -49,7 +49,7 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 
 | Upstream fix | Ref | Status | Our equivalent |
 |---|---|---|---|
-| **Charge `externalId` binding** — reject credential `externalId` that disagrees with route request | mppx #537 | ✓ **new** | `Stripe.check_external_id_binding/2` |
+| **Charge `externalId` binding** — require credential `externalId` to match route request and ignore payload-only IDs | mppx #537 | ✓ **new** | `Stripe.check_external_id_binding/2`; receipt uses server-bound `Charge.external_id` |
 
 ---
 
@@ -75,7 +75,7 @@ Pinned in `test/mpp/methods/tempo/proof_test.exs` from `refs/mppx/src/tempo/Proo
 
 ## Follow-up (not Task 46)
 
-- **Hosted fee-payer fills** — requires `fillHostedFeePayerTransaction` parity and config surface.
-- **Proof access-key keychain** — optional RPC lookup when signature does not recover to `source` DID.
+- **Task 68:** hosted fee-payer fills — requires hosted-fill parity and config surface.
+- **Task 69:** proof access-key keychain — optional RPC lookup when signature does not recover to `source` DID.
 - **Session server** — Task 50 closes the N/A rows above.
 - **Client chain pinning** — Task 45.

@@ -2136,6 +2136,52 @@
       "delivered_by": "grok",
       "verified": true,
       "cross_repo": []
+    },
+    {
+      "id": "68",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Tempo hosted fee-payer parity",
+      "scores": {
+        "d": 5,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.3,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "body": "Add server-side parity for the hosted Tempo fee-payer fill path identified in the Task 46 audit. Keep public artifacts sanitized; use the private advisory / latest reference SDK source at pickup for the full mechanism and acceptance details. Include Moderato integration coverage for the hosted-fill success path and the configured rejection path.\n",
+      "created_at": "2026-06-30",
+      "scored_at": "2026-06-30",
+      "cross_repo": []
+    },
+    {
+      "id": "69",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Tempo proof access-key authorization parity",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.38,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "body": "Extend zero-amount Tempo proof verification to match the latest reference SDK authorization path when the direct signer is not the wallet named by the proof source. Keep public artifacts sanitized; read the private advisory / reference SDK source at pickup for exact behavior. Include deterministic unit coverage and Moderato integration coverage for the accepted authorization path and rejected stale/revoked authorization path.\n",
+      "created_at": "2026-06-30",
+      "scored_at": "2026-06-30",
+      "cross_repo": []
     }
   ]
 }

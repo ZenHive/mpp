@@ -65,11 +65,12 @@ defmodule MPP.Methods.StripeTest do
       assert receipt.timestamp
     end
 
-    test "echoes externalId from payload to receipt", %{charge: charge} do
+    test "echoes externalId from route request to receipt", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
       end)
 
+      charge = %{charge | external_id: "order_42"}
       payload = %{"spt" => @spt, "externalId" => "order_42"}
       assert {:ok, %Receipt{} = receipt} = Stripe.verify(payload, charge)
       assert receipt.external_id == "order_42"
@@ -85,13 +86,21 @@ defmodule MPP.Methods.StripeTest do
       assert error.detail =~ "externalId"
     end
 
-    test "allows missing credential externalId when route has externalId", %{charge: charge} do
+    test "rejects missing credential externalId when route has externalId", %{charge: charge} do
+      charge = %{charge | external_id: "order_42"}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.type =~ "invalid-challenge"
+      assert error.detail =~ "externalId"
+    end
+
+    test "ignores payload-only externalId when route has no externalId", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
       end)
 
-      charge = %{charge | external_id: "order_42"}
-      assert {:ok, _} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert {:ok, receipt} = Stripe.verify(%{"spt" => @spt, "externalId" => "attacker-order"}, charge)
+      assert receipt.external_id == nil
     end
 
     test "returns error when spt is missing", %{charge: charge} do
@@ -457,7 +466,7 @@ defmodule MPP.Methods.StripeTest do
         Req.Test.json(conn, %{"id" => @pi_id, "status" => "requires_action"})
       end)
 
-      conn = submit_stripe_credential(config)
+      conn = submit_stripe_credential(config, external_id: "premium-001")
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
@@ -470,7 +479,7 @@ defmodule MPP.Methods.StripeTest do
         Req.Test.json(conn, %{"id" => @pi_id, "status" => "processing"})
       end)
 
-      conn = submit_stripe_credential(config)
+      conn = submit_stripe_credential(config, external_id: "premium-001")
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
@@ -485,7 +494,7 @@ defmodule MPP.Methods.StripeTest do
         |> Req.Test.json(%{"id" => @pi_id, "status" => "succeeded"})
       end)
 
-      conn = submit_stripe_credential(config)
+      conn = submit_stripe_credential(config, external_id: "premium-001")
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
@@ -506,7 +515,7 @@ defmodule MPP.Methods.StripeTest do
         })
       end)
 
-      conn = submit_stripe_credential(config)
+      conn = submit_stripe_credential(config, external_id: "premium-001")
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
@@ -534,7 +543,7 @@ defmodule MPP.Methods.StripeTest do
     end
   end
 
-  defp submit_stripe_credential(config, opts \\ []) do
+  defp submit_stripe_credential(config, opts) do
     conn_402 =
       :get
       |> Plug.Test.conn("/api/data")

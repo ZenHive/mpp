@@ -43,6 +43,11 @@ defmodule MPP.Methods.Tempo.ProofTest do
                Proof.verify_signature(vector_params(), "0xdead", @vector_account)
     end
 
+    test "rejects invalid expected account without raising" do
+      assert {:error, "invalid proof account address"} =
+               Proof.verify_signature(vector_params(), @vector_signature, "0xdead")
+    end
+
     test "rejects signature that fails recovery" do
       bad_sig = "0x" <> String.duplicate("ab", 65)
 

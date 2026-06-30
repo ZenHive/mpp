@@ -124,6 +124,8 @@ defmodule MPP.Methods.Tempo.Proof do
       {:error, _} ->
         {:error, "proof signature recovery failed"}
     end
+  rescue
+    ArgumentError -> {:error, "invalid proof account address"}
   end
 
   defp strip_0x("0x" <> rest), do: rest

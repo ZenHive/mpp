@@ -100,7 +100,7 @@ defmodule MPP.Methods.Stripe do
          {:ok, spt} <- extract_spt(payload),
          {:ok, stripe_secret_key} <- require_config(config, "stripe_secret_key"),
          {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config) do
-      check_status(pi, payload)
+      check_status(pi, charge)
     end
   end
 
@@ -143,7 +143,6 @@ defmodule MPP.Methods.Stripe do
 
   defp check_external_id_binding(payload, %Charge{external_id: request_id}) do
     case payload["externalId"] do
-      nil -> :ok
       cred_id when cred_id == request_id -> :ok
       _ -> {:error, Errors.new(:invalid_challenge, "credential externalId does not match this route request")}
     end
@@ -242,28 +241,26 @@ defmodule MPP.Methods.Stripe do
   end
 
   # Checks the PaymentIntent status and returns a receipt or error.
-  defp check_status(%{"status" => "succeeded", "id" => pi_id}, payload) do
-    external_id = payload["externalId"]
-
+  defp check_status(%{"status" => "succeeded", "id" => pi_id}, %Charge{} = charge) do
     receipt =
       Receipt.new(
         method: method_name(),
         reference: pi_id,
-        external_id: external_id
+        external_id: charge.external_id
       )
 
     {:ok, receipt}
   end
 
-  defp check_status(%{"status" => "requires_action"}, _payload) do
+  defp check_status(%{"status" => "requires_action"}, _charge) do
     {:error, Errors.new(:verification_failed, "PaymentIntent requires action (e.g., 3DS)")}
   end
 
-  defp check_status(%{"status" => status}, _payload) do
+  defp check_status(%{"status" => status}, _charge) do
     {:error, Errors.new(:verification_failed, "PaymentIntent status: #{status}")}
   end
 
-  defp check_status(_body, _payload) do
+  defp check_status(_body, _charge) do
     {:error, Errors.new(:verification_failed, "Unexpected Stripe response: missing status field")}
   end
 end
