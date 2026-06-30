@@ -57,6 +57,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   alias Onchain.Tempo.Transaction
 
   @moderato_chain_id 42_431
+  @mainnet_chain_id 4217
+  @path_usd "0x20c0000000000000000000000000000000000000"
+  @usdc "0x20C000000000000000000000b9537d11c60E8b50"
 
   # 0x76 RLP envelope field indices (see Onchain.Tempo.Transaction wire format).
   @max_priority_fee_index 1
@@ -118,6 +121,33 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @spec resolve(non_neg_integer(), map() | nil) :: t()
   def resolve(chain_id, overrides) do
     chain_id |> base_policy() |> apply_overrides(overrides || %{})
+  end
+
+  @doc """
+  Return the default sponsor fee-token allowlist for `chain_id`.
+
+  Matches mppx `defaultAllowedFeeTokens` / mpp-rs `default_allowed_fee_tokens`:
+  pathUSD plus the chain's default currency (USDC on mainnet, pathUSD on Moderato).
+  """
+  @spec default_allowed_fee_tokens(non_neg_integer()) :: [String.t()]
+  def default_allowed_fee_tokens(chain_id) do
+    chain_default =
+      if chain_id == @mainnet_chain_id,
+        do: @usdc,
+        else: @path_usd
+
+    Enum.uniq_by([@path_usd, chain_default], &String.downcase/1)
+  end
+
+  @doc """
+  Return true when `fee_token` is on the allowlist for `chain_id`.
+
+  `overrides` is an optional list of hex addresses replacing the per-chain default.
+  """
+  @spec fee_token_allowed?(non_neg_integer(), String.t(), [String.t()] | nil) :: boolean()
+  def fee_token_allowed?(chain_id, fee_token, overrides \\ nil) do
+    allowed = overrides || default_allowed_fee_tokens(chain_id)
+    Enum.any?(allowed, &Onchain.Address.equal?(&1, fee_token))
   end
 
   @spec base_policy(non_neg_integer()) :: t()

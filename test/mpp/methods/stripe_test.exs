@@ -75,6 +75,25 @@ defmodule MPP.Methods.StripeTest do
       assert receipt.external_id == "order_42"
     end
 
+    test "rejects credential externalId that disagrees with route request", %{charge: charge} do
+      charge = %{charge | external_id: "order_42"}
+
+      assert {:error, %Errors{} = error} =
+               Stripe.verify(%{"spt" => @spt, "externalId" => "order_99"}, charge)
+
+      assert error.type =~ "invalid-challenge"
+      assert error.detail =~ "externalId"
+    end
+
+    test "allows missing credential externalId when route has externalId", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      charge = %{charge | external_id: "order_42"}
+      assert {:ok, _} = Stripe.verify(%{"spt" => @spt}, charge)
+    end
+
     test "returns error when spt is missing", %{charge: charge} do
       assert {:error, %Errors{} = error} = Stripe.verify(%{}, charge)
       assert error.type =~ "invalid-payload"
@@ -495,21 +514,23 @@ defmodule MPP.Methods.StripeTest do
       assert body["detail"] == "Stripe PaymentIntent creation failed"
     end
 
-    test "externalId from credential payload is echoed in receipt", %{config: config} do
+    test "externalId from credential payload is echoed in receipt when it matches route request", %{
+      config: config
+    } do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
       end)
 
-      conn = submit_stripe_credential(config, external_id: "order_42")
+      conn = submit_stripe_credential(config, external_id: "premium-001")
 
       assert conn.status == nil
       receipt = conn.assigns[:mpp_receipt]
-      assert receipt.external_id == "order_42"
+      assert receipt.external_id == "premium-001"
       assert receipt.reference == @pi_id
 
       [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
-      assert parsed_receipt.external_id == "order_42"
+      assert parsed_receipt.external_id == "premium-001"
     end
   end
 

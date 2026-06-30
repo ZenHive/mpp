@@ -2191,4 +2191,94 @@ defmodule MPP.Methods.TempoTest do
   defp simulate_success_body do
     %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x1"}]}], "id" => 1}
   end
+
+  describe "verify/2 — proof credentials (zero-amount)" do
+    @proof_account "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
+    @proof_signature "0x53f5d64d9f995e841b4212639b2e17e508e96752e10316df3814a16443dcbdb626c082190a4c3ecc3148101eb443d15bd83b579380b1be735a9c99f0df36c9fe1b"
+    @proof_challenge_id "kM9xPqWvT2nJrHsY4aDfEb"
+
+    setup %{charge: charge} do
+      zero_charge = %{
+        charge
+        | amount: "0",
+          method_details:
+            Map.merge(charge.method_details, %{
+              "challenge_id" => @proof_challenge_id,
+              "realm" => "api.example.com",
+              "credential_source" => "did:pkh:eip155:42431:#{@proof_account}"
+            })
+      }
+
+      {:ok, charge: zero_charge}
+    end
+
+    test "accepts a valid proof credential for zero-amount charge", %{charge: charge} do
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+    end
+
+    test "rejects proof for non-zero amount", %{charge: charge} do
+      charge = %{charge | amount: "1000"}
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "zero-amount"
+    end
+
+    test "rejects hash credential for zero-amount charge", %{charge: charge} do
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "proof credential"
+    end
+
+    test "rejects proof without source", %{charge: charge} do
+      charge = put_in(charge.method_details["credential_source"], nil)
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "source"
+    end
+  end
+
+  describe "verify/2 — fee payer token allowlist" do
+    @fee_payer_key_allow "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    @rogue_token "0x1111111111111111111111111111111111111111"
+
+    setup %{charge: charge} do
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer" => true,
+              "fee_payer_private_key" => @fee_payer_key_allow,
+              "fee_token" => @rogue_token
+            })
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "rejects non-allowlisted fee_token before broadcast", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431, fee_payer: true)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "not allowed"
+    end
+
+    test "accepts custom allowlisted fee_token override", %{charge: charge} do
+      charge =
+        put_in(charge.method_details["fee_payer_allowed_fee_tokens"], [@rogue_token])
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431, fee_payer: true)
+
+      stub_broadcast_and_receipt(success_receipt())
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, _} = Tempo.verify(payload, charge)
+    end
+  end
 end

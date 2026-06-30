@@ -18,6 +18,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
   alias MPP.Credential
   alias MPP.Headers
+  alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.TempoMemoryStore
@@ -1394,5 +1395,98 @@ defmodule MPP.Methods.TempoIntegrationTest do
       {:error, reason} ->
         flunk("Failed to get transaction receipt: #{inspect(reason)}")
     end
+  end
+
+  describe "proof credentials (zero-amount auth)" do
+    @tag :integration
+    test "verifies wallet-bound proof credential without on-chain settlement", %{rpc_url: rpc_url} do
+      wallet = fresh_wallet!(rpc_url)
+      {:ok, address} = Onchain.Signer.address_from_key(wallet.private_key)
+      challenge_id = "integration-proof-#{System.unique_integer([:positive])}"
+      realm = @realm
+      source = "did:pkh:eip155:#{@chain_id}:#{address}"
+
+      digest =
+        MPP.Methods.Tempo.Proof.hash(%{
+          account: address,
+          chain_id: @chain_id,
+          challenge_id: challenge_id,
+          realm: realm
+        })
+
+      signature = sign_proof_payload!(digest, wallet.private_key, address)
+
+      charge = %Charge{
+        amount: "0",
+        currency: @path_usd,
+        recipient: address,
+        method_details: %{
+          "rpc_url" => rpc_url,
+          "chain_id" => @chain_id,
+          "challenge_id" => challenge_id,
+          "realm" => realm,
+          "credential_source" => source
+        }
+      }
+
+      payload = %{"type" => "proof", "signature" => signature}
+
+      assert {:ok, %Receipt{reference: ^challenge_id}} = Tempo.verify(payload, charge)
+    end
+  end
+
+  describe "fee payer token allowlist" do
+    @tag :integration
+    test "rejects sponsored transaction when configured fee_token is not allowlisted", %{
+      rpc_url: rpc_url,
+      recipient: recipient_address
+    } do
+      sender = fresh_wallet!(rpc_url)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      rogue_token = "0x1111111111111111111111111111111111111111"
+
+      charge = %Charge{
+        amount: Integer.to_string(@transfer_amount),
+        currency: @path_usd,
+        recipient: recipient_address,
+        method_details: %{
+          "rpc_url" => rpc_url,
+          "chain_id" => @chain_id,
+          "fee_payer" => true,
+          "fee_payer_private_key" => fee_payer_key_hex,
+          "fee_token" => rogue_token
+        }
+      }
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: sender.private_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
+        )
+
+      payload = %{"type" => "transaction", "signature" => signed_tx}
+
+      assert {:error, %MPP.Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "not allowed"
+    end
+  end
+
+  defp sign_proof_payload!(digest, private_key, address) do
+    addr_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(address, "0x", ""))
+
+    {:ok, sig} = Cartouche.Signer.Curvy.sign_payload(digest, private_key)
+    sig = Cartouche.Recover.normalize_low_s(sig)
+    {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, addr_bytes)
+
+    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 end

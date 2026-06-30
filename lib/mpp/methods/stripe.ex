@@ -96,7 +96,8 @@ defmodule MPP.Methods.Stripe do
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with {:ok, spt} <- extract_spt(payload),
+    with :ok <- check_external_id_binding(payload, charge),
+         {:ok, spt} <- extract_spt(payload),
          {:ok, stripe_secret_key} <- require_config(config, "stripe_secret_key"),
          {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config) do
       check_status(pi, payload)
@@ -136,6 +137,17 @@ defmodule MPP.Methods.Stripe do
   # Extracts the SPT from the credential payload.
   defp extract_spt(%{"spt" => spt}) when is_binary(spt) and byte_size(spt) > 0, do: {:ok, spt}
   defp extract_spt(_), do: {:error, Errors.new(:invalid_payload, "Missing or invalid 'spt' field in credential payload")}
+
+  # Rejects credentials whose externalId disagrees with the route request (mppx #537).
+  defp check_external_id_binding(_payload, %Charge{external_id: nil}), do: :ok
+
+  defp check_external_id_binding(payload, %Charge{external_id: request_id}) do
+    case payload["externalId"] do
+      nil -> :ok
+      cred_id when cred_id == request_id -> :ok
+      _ -> {:error, Errors.new(:invalid_challenge, "credential externalId does not match this route request")}
+    end
+  end
 
   # Validates that a required config key is present.
   defp require_config(config, key) do

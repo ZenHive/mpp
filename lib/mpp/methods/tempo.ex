@@ -35,7 +35,10 @@ defmodule MPP.Methods.Tempo do
     * `"fee_payer_private_key"` — (required when `fee_payer: true`) hex-encoded 32-byte
       secp256k1 private key for the fee payer account
     * `"fee_token"` — (required when `fee_payer: true`) hex address of a USD-denominated
-      TIP-20 token to use for fee payment (e.g., pathUSD)
+      TIP-20 token to use for fee payment (e.g., pathUSD). Must be on the sponsor
+      allowlist (`fee_payer_allowed_fee_tokens` or per-chain defaults).
+    * `"fee_payer_allowed_fee_tokens"` — (optional, `fee_payer: true` only) list of
+      hex addresses overriding the default sponsor fee-token allowlist.
     * `"fee_payer_policy"` — (optional, `fee_payer: true` only) map of sponsor
       ceilings overriding the per-chain defaults: `"max_gas"`,
       `"max_fee_per_gas"`, `"max_priority_fee_per_gas"`, `"max_total_fee"` (wei),
@@ -72,9 +75,11 @@ defmodule MPP.Methods.Tempo do
   use MPP.Method
   use Descripex, namespace: "/methods"
 
+  alias MPP.DID
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo.FeePayerPolicy
+  alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -87,7 +92,6 @@ defmodule MPP.Methods.Tempo do
   @moderato_chain_id 42_431
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
-  @address_hex_length 40
   @attribution_memo_length 32
   @attribution_tag binary_part(ExSha3.keccak_256("mpp"), 0, 4)
   @attribution_version 1
@@ -95,6 +99,8 @@ defmodule MPP.Methods.Tempo do
   @attribution_client_fingerprint_length 10
   @attribution_nonce_length 7
   @dedup_store_error_detail "Dedup store error"
+  @store_key_prefix "mpp:charge:"
+  @proof_store_key_prefix "mpp:proof:"
   @tempo_rpc_error_detail "Tempo RPC request failed"
   @simulation_rejected_detail "Pre-broadcast simulation rejected the transaction"
   @simulation_failed_detail "Pre-broadcast simulation failed"
@@ -127,6 +133,7 @@ defmodule MPP.Methods.Tempo do
     validate_memo!(config["memo"])
     validate_store!(config["store"])
     validate_fee_payer!(config)
+    validate_fee_payer_allowed_tokens!(config)
     :ok
   end
 
@@ -150,23 +157,9 @@ defmodule MPP.Methods.Tempo do
   def verify(%{"type" => "hash"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    if config["fee_payer"] do
-      {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
-    else
-      memo = config["memo"]
-      store = config["store"]
-      expected_chain_id = config["chain_id"] || @moderato_chain_id
-
-      with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
-           {:ok, hash} <- extract_hash(payload),
-           :ok <- check_hash_unused(store, hash),
-           {:ok, rpc_url} <- require_config(config, "rpc_url"),
-           {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
-           :ok <- check_receipt_status(receipt),
-           {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source),
-           :ok <- commit_hash_used(store, hash) do
-        {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
-      end
+    with :ok <- reject_non_proof_for_zero_amount(charge, "hash"),
+         :ok <- reject_hash_when_fee_payer(config) do
+      verify_hash_credential(payload, charge, config)
     end
   end
 
@@ -174,6 +167,55 @@ defmodule MPP.Methods.Tempo do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
+
+    with :ok <- reject_non_proof_for_zero_amount(charge, "transaction") do
+      verify_transaction_credential(payload, charge, config)
+    end
+  end
+
+  @impl MPP.Method
+  @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(%{"type" => "proof"} = payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+    store = config["store"]
+    expected_chain_id = config["chain_id"] || @moderato_chain_id
+
+    with :ok <- require_zero_amount(charge),
+         {:ok, signature} <- extract_proof_signature(payload),
+         {:ok, source} <- require_proof_source(config["credential_source"]),
+         {:ok, parsed} <- parse_proof_source(source, expected_chain_id),
+         :ok <- verify_proof_signature(parsed, config, signature),
+         :ok <- commit_proof_used(store, config["challenge_id"]) do
+      reference = config["challenge_id"] || "proof"
+      {:ok, Receipt.new(method: "tempo", reference: reference, external_id: charge.external_id)}
+    end
+  end
+
+  @impl MPP.Method
+  @spec verify(map(), Charge.t()) :: {:error, Errors.t()}
+  def verify(_payload, %Charge{}) do
+    {:error,
+     Errors.new(:invalid_payload, ~s(Missing or invalid 'type' field — expected "hash", "transaction", or "proof"))}
+  end
+
+  defp verify_hash_credential(payload, charge, config) do
+    memo = config["memo"]
+    store = config["store"]
+    expected_chain_id = config["chain_id"] || @moderato_chain_id
+
+    with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
+         {:ok, hash} <- extract_hash(payload),
+         :ok <- check_hash_unused(store, hash),
+         {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
+         :ok <- check_receipt_status(receipt),
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source),
+         :ok <- commit_hash_used(store, hash) do
+      {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
+    end
+  end
+
+  defp verify_transaction_credential(payload, charge, config) do
     memo = config["memo"]
     store = config["store"]
     expected_chain_id = config["chain_id"] || @moderato_chain_id
@@ -195,20 +237,12 @@ defmodule MPP.Methods.Tempo do
          :ok <- reserve_hash_atomic(store, tx.raw),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
-      # Post-broadcast: record on-chain hash if it differs from input (malleable variants).
-      # Best-effort — payment already succeeded, so store failures don't fail the request.
       safe_dedup_post_broadcast(store, tx_hash, tx.raw)
       {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
     else
       {:error, %Errors{} = error} -> {:error, error}
       {:error, reason} when is_binary(reason) -> {:error, Errors.new(:verification_failed, reason)}
     end
-  end
-
-  @impl MPP.Method
-  @spec verify(map(), Charge.t()) :: {:error, Errors.t()}
-  def verify(_payload, %Charge{}) do
-    {:error, Errors.new(:invalid_payload, ~s(Missing or invalid 'type' field — expected "hash" or "transaction"))}
   end
 
   api(
@@ -290,6 +324,119 @@ defmodule MPP.Methods.Tempo do
 
   defp validate_fee_payer!(_config), do: :ok
 
+  defp validate_fee_payer_allowed_tokens!(%{"fee_payer" => true} = config) do
+    case config["fee_payer_allowed_fee_tokens"] do
+      nil ->
+        :ok
+
+      tokens when is_list(tokens) ->
+        if Enum.all?(tokens, &valid_fee_token_address?/1) do
+          :ok
+        else
+          raise ArgumentError,
+                "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of 20-byte hex addresses"
+        end
+
+      _ ->
+        raise ArgumentError,
+              "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of hex addresses"
+    end
+  end
+
+  defp validate_fee_payer_allowed_tokens!(_config), do: :ok
+
+  defp valid_fee_token_address?(token) when is_binary(token) do
+    hex = strip_0x(token)
+    byte_size(hex) == 40 and hex_string?(hex)
+  end
+
+  defp valid_fee_token_address?(_), do: false
+
+  defp reject_hash_when_fee_payer(%{"fee_payer" => true}) do
+    {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
+  end
+
+  defp reject_hash_when_fee_payer(_config), do: :ok
+
+  defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}, "proof"), do: :ok
+
+  defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}, _type) do
+    {:error, Errors.new(:verification_failed, "Zero-amount challenges require a proof credential")}
+  end
+
+  defp reject_non_proof_for_zero_amount(_charge, _type), do: :ok
+
+  defp require_zero_amount(%Charge{amount: "0"}), do: :ok
+
+  defp require_zero_amount(_charge) do
+    {:error, Errors.new(:verification_failed, "Proof credentials are only valid for zero-amount challenges")}
+  end
+
+  defp extract_proof_signature(%{"signature" => sig}) when is_binary(sig) and byte_size(sig) > 0 do
+    {:ok, sig}
+  end
+
+  defp extract_proof_signature(_) do
+    {:error, Errors.new(:invalid_payload, "Missing or invalid 'signature' field in proof credential")}
+  end
+
+  defp require_proof_source(nil) do
+    {:error, Errors.new(:invalid_payload, "Proof credential must include a source")}
+  end
+
+  defp require_proof_source(source) when is_binary(source), do: {:ok, source}
+
+  defp require_proof_source(_) do
+    {:error, Errors.new(:invalid_payload, "Proof credential must include a source")}
+  end
+
+  defp parse_proof_source(source, expected_chain_id) do
+    with {:ok, %{chain_id: chain_id, address: address}} <- DID.parse_evm_did(source),
+         true <- chain_id == expected_chain_id do
+      {:ok, %{chain_id: chain_id, address: address}}
+    else
+      _ -> {:error, Errors.new(:invalid_payload, "Proof credential source is invalid")}
+    end
+  end
+
+  defp verify_proof_signature(%{address: address, chain_id: chain_id}, config, signature) do
+    challenge_id = config["challenge_id"]
+    realm = config["realm"]
+
+    if is_binary(challenge_id) and is_binary(realm) do
+      case Proof.verify_signature(
+             %{account: address, chain_id: chain_id, challenge_id: challenge_id, realm: realm},
+             signature,
+             address
+           ) do
+        :ok -> :ok
+        {:error, reason} -> {:error, Errors.new(:verification_failed, reason)}
+      end
+    else
+      {:error, Errors.new(:verification_failed, "Proof verification missing challenge binding")}
+    end
+  end
+
+  defp commit_proof_used(nil, _challenge_id), do: :ok
+
+  defp commit_proof_used(_store, nil), do: :ok
+
+  defp commit_proof_used(store, challenge_id) do
+    commit_store_mark(store, @proof_store_key_prefix <> challenge_id)
+  end
+
+  defp check_fee_token_allowed(config, _token) do
+    chain_id = config["chain_id"] || @moderato_chain_id
+    overrides = config["fee_payer_allowed_fee_tokens"]
+    fee_token_hex = config["fee_token"]
+
+    if FeePayerPolicy.fee_token_allowed?(chain_id, fee_token_hex, overrides) do
+      :ok
+    else
+      {:error, "Fee token is not allowed by fee payer policy"}
+    end
+  end
+
   # Validates call scope when fee_payer is enabled.
   # No-op when fee_payer is falsy — any call pattern is allowed for self-paying txs.
   defp maybe_validate_call_scope(tx, %{"fee_payer" => true}), do: Transaction.validate_call_scope(tx)
@@ -314,7 +461,8 @@ defmodule MPP.Methods.Tempo do
     with {:ok, key} <- decode_hex_key(config["fee_payer_private_key"]),
          {:ok, token} <- decode_hex_address(config["fee_token"]),
          :ok <- check_fee_payer_placeholder(tx),
-         :ok <- check_fee_token_empty(tx) do
+         :ok <- check_fee_token_empty(tx),
+         :ok <- check_fee_token_allowed(config, token) do
       Transaction.cosign_fee_payer(tx, key, token)
     end
   end
@@ -375,8 +523,6 @@ defmodule MPP.Methods.Tempo do
   # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
   # the same signed tx. Matches mppx (Charge.ts:144-146).
 
-  @store_key_prefix "mpp:charge:"
-
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
   defp check_hash_unused(nil, _hash), do: :ok
 
@@ -398,7 +544,10 @@ defmodule MPP.Methods.Tempo do
   defp commit_hash_used(nil, _hash), do: :ok
 
   defp commit_hash_used(store, hash) do
-    key = store_key(hash)
+    commit_store_mark(store, store_key(hash))
+  end
+
+  defp commit_store_mark(store, key) do
     ts = System.system_time(:millisecond)
 
     if store_supports_atomic?(store) do
@@ -535,27 +684,12 @@ defmodule MPP.Methods.Tempo do
 
   defp parse_hash_credential_source(nil, _expected_chain_id), do: {:ok, nil}
 
-  defp parse_hash_credential_source("did:pkh:eip155:" <> source, expected_chain_id) do
-    with [chain_id_string, address] <- String.split(source, ":", parts: 2),
-         {^expected_chain_id, ""} <- Integer.parse(chain_id_string),
-         {:ok, normalized_address} <- normalize_address(address) do
-      {:ok, normalized_address}
+  defp parse_hash_credential_source(source, expected_chain_id) when is_binary(source) do
+    with {:ok, %{chain_id: chain_id, address: address}} <- DID.parse_evm_did(source),
+         true <- chain_id == expected_chain_id do
+      {:ok, address}
     else
       _ -> {:error, Errors.new(:invalid_payload, "Hash credential source is invalid")}
-    end
-  end
-
-  defp parse_hash_credential_source(_source, _expected_chain_id) do
-    {:error, Errors.new(:invalid_payload, "Hash credential source is invalid")}
-  end
-
-  defp normalize_address(address) when is_binary(address) do
-    hex = strip_0x(address)
-
-    if byte_size(hex) == @address_hex_length and hex_string?(hex) do
-      {:ok, "0x" <> String.downcase(hex)}
-    else
-      :error
     end
   end
 

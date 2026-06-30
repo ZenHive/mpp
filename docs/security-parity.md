@@ -15,7 +15,7 @@ our unpatched weaknesses in a deployed, money-handling library would be an attac
 **Source basis.** The reference clones in `refs/` are shallow (mpp-rs 72 commits, mppx 174,
 mpp-specs 24, truncated ~2026-03). The **four published advisories below (2026-03-26) are the
 authoritative historical security record**; every named fix falls inside the visible window, so
-the parity set is well-bounded. Last full audit: 2026-06-24.
+the parity set is well-bounded. Last full audit: 2026-06-30.
 
 ---
 
@@ -23,7 +23,7 @@ the parity set is well-bounded. Last full audit: 2026-06-24.
 
 | Advisory | Sev | What it covered | Our status |
 |---|---|---|---|
-| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — 10 vectors: charge/session replay, free requests, channel piggyback, fee-payer manipulation, Stripe replay | **Partial — see component rows.** Charge-path replay, Stripe replay, and shipped fee-payer drain fixes: ✓. Remaining Tempo hardening: 📋 Task 46. Session vectors: 📋 Task 50 (unbuilt). |
+| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — 10 vectors: charge/session replay, free requests, channel piggyback, fee-payer manipulation, Stripe replay | **Partial — see component rows.** Charge-path replay, Stripe replay, fee-payer drain, proof binding, and fee-token allowlist: ✓. Session vectors: 📋 Task 50 (unbuilt). Hosted fee-payer fills: open (private advisory). |
 | mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Tempo session close-voucher bypass via settled-amount equality (`<` vs `<=`) | 📋 **Task 50** — sessions not yet implemented; the `<=` boundary is a pinned acceptance criterion for the close handler. |
 | mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 | MEDIUM 5.4 | Stripe charge replay via missing `Idempotent-Replayed` check | ✓ Stripe replay is covered by the `Idempotent-Replayed` rejection plus Plug-level credential dedup (Tasks 35 + 64). |
 
@@ -48,6 +48,11 @@ mpp-specs: no advisories.
 | mppx #450 reject forged credential metadata | Client `meta` overriding server-derived request | No client `meta` field exists; server re-derives request from its own charge and pins it — `verifier.ex:151-158` |
 | mpp-specs #285 / mppx #570 non-empty challenge id | Empty `id` undermining HMAC binding | Rejected via HMAC recomputation — empty `id` never matches a real MAC — `challenge.ex:82-85` |
 | (defense-in-depth) JCS recursion | Stack-exhaustion via deeply nested input | Not attacker-reachable: `JCS.canonicalize/1` runs only on server-controlled data (`charge`); the credential's echoed `request` stays a raw string, never re-canonicalized — `verifier.ex:151-156`, `jcs.ex` |
+| mpp-rs #286 fee-payer token allowlist | Sponsor co-signing arbitrary TIP-20 fee tokens | `FeePayerPolicy.fee_token_allowed?/3` + `default_allowed_fee_tokens/1`; enforced before co-sign — `fee_payer_policy.ex`, `tempo.ex` (Task 46) |
+| mppx #532 / #253 EIP-712 proof v3 wallet binding | Zero-amount bypass / proof replay across wallets | `MPP.Methods.Tempo.Proof` + `type="proof"` verify; store dedup `mpp:proof:<challenge_id>` — `proof.ex`, `tempo.ex` (Task 46) |
+| mpp-rs `384c4fe` hash-credential source DID | Forged / wrong-chain `did:pkh` source | `MPP.DID.parse_evm_did/1` + chain match — `did.ex`, `tempo.ex` (Task 46) |
+| mppx #537 Stripe charge externalId binding | Credential externalId overriding route correlation | `check_external_id_binding/2` — `stripe.ex` (Task 46) |
+| mpp-specs #266 PaymentWitness externalId | Session receipt wire field | Optional `external_id` / `externalId` on `SessionReceipt` — `session_receipt.ex` (Task 46) |
 
 ---
 
@@ -55,9 +60,10 @@ mpp-specs: no advisories.
 
 | Upstream fix | Where tracked |
 |---|---|
-| Fee-payer token allowlist (#286) · atomic `put_if_absent` CAS (#280) · proof-wallet-binding (#253) · proof-source DID validation (#267, `384c4fe`) | **Task 46** (Tempo hardening audit) |
+| Hosted fee-payer fills (mppx #536 / #538 / #584) | Open — private advisory; server-only local co-sign today |
+| Proof access-key / on-chain keychain fallback (mppx #579) | Follow-up — direct signer recovery only |
 | Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
-| Hash-credential `source` (did:pkh) validation | **Task 55** |
+| Client-side Tempo chain pinning (mpp-rs `8880cf7`) | **Task 45** |
 
 ---
 

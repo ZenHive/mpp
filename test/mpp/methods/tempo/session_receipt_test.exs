@@ -125,6 +125,24 @@ defmodule MPP.Methods.Tempo.SessionReceiptTest do
       assert raw["txHash"] == "0x123"
     end
 
+    test "externalId roundtrips when set" do
+      receipt = SessionReceipt.new(@required ++ [external_id: "order-99"])
+      encoded = SessionReceipt.to_header(receipt)
+
+      assert {:ok, decoded} = SessionReceipt.from_header(encoded)
+      assert decoded.external_id == "order-99"
+
+      raw = encoded |> Base.url_decode64!(padding: false) |> Jason.decode!()
+      assert raw["externalId"] == "order-99"
+    end
+
+    test "omits externalId from wire JSON when nil" do
+      encoded = SessionReceipt.to_header(SessionReceipt.new(@required))
+      raw = encoded |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      refute Map.has_key?(raw, "externalId")
+    end
+
     test "from_header trims surrounding whitespace" do
       encoded = SessionReceipt.to_header(SessionReceipt.new(@required))
 

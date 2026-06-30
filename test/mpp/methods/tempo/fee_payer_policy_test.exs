@@ -74,6 +74,35 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     end
   end
 
+  describe "default_allowed_fee_tokens/1 and fee_token_allowed?/3" do
+    test "includes pathUSD and chain default on Moderato" do
+      tokens = FeePayerPolicy.default_allowed_fee_tokens(@moderato_chain_id)
+      assert "0x20c0000000000000000000000000000000000000" in Enum.map(tokens, &String.downcase/1)
+    end
+
+    test "includes USDC on mainnet" do
+      tokens = FeePayerPolicy.default_allowed_fee_tokens(@mainnet_chain_id)
+      assert Enum.any?(tokens, &String.contains?(String.downcase(&1), "b9537d"))
+    end
+
+    test "rejects token outside default allowlist" do
+      refute FeePayerPolicy.fee_token_allowed?(
+               @moderato_chain_id,
+               "0x1111111111111111111111111111111111111111"
+             )
+    end
+
+    test "honors custom override list" do
+      custom = ["0x1111111111111111111111111111111111111111"]
+
+      assert FeePayerPolicy.fee_token_allowed?(
+               @moderato_chain_id,
+               "0x1111111111111111111111111111111111111111",
+               custom
+             )
+    end
+  end
+
   describe "validate/2 — accepts well-formed sponsored transactions" do
     test "passes a default-valid fee-payer tx" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)

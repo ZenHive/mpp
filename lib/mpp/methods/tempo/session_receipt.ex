@@ -32,6 +32,7 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
     * `spent` — amount spent in this session (decimal string)
     * `units` — optional integer, number of units consumed
     * `tx_hash` — optional settlement transaction hash (hex)
+    * `external_id` — optional merchant correlation ID echoed from the charge request
   """
 
   use Descripex, namespace: "/methods/tempo"
@@ -47,7 +48,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
           accepted_cumulative: String.t(),
           spent: String.t(),
           units: non_neg_integer() | nil,
-          tx_hash: String.t() | nil
+          tx_hash: String.t() | nil,
+          external_id: String.t() | nil
         }
 
   @enforce_keys [:challenge_id, :channel_id, :accepted_cumulative, :spent]
@@ -61,7 +63,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
             accepted_cumulative: nil,
             spent: nil,
             units: nil,
-            tx_hash: nil
+            tx_hash: nil,
+            external_id: nil
 
   # 16 KiB cap on client-supplied session-receipt tokens, enforced BEFORE any
   # base64url decode to prevent a memory-exhaustion DoS (an oversized token would
@@ -173,6 +176,7 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
     base
     |> maybe_put("units", receipt.units)
     |> maybe_put("txHash", receipt.tx_hash)
+    |> maybe_put("externalId", receipt.external_id)
   end
 
   defp maybe_put(map, _key, nil), do: map
@@ -195,7 +199,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
               is_binary(reference) and is_binary(challenge_id) and is_binary(channel_id) and
               is_binary(accepted_cumulative) and is_binary(spent) do
     with {:ok, units} <- validate_units(Map.get(map, "units")),
-         {:ok, tx_hash} <- validate_tx_hash(Map.get(map, "txHash")) do
+         {:ok, tx_hash} <- validate_tx_hash(Map.get(map, "txHash")),
+         {:ok, external_id} <- validate_external_id(Map.get(map, "externalId")) do
       {:ok,
        %__MODULE__{
          method: method,
@@ -208,7 +213,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
          accepted_cumulative: accepted_cumulative,
          spent: spent,
          units: units,
-         tx_hash: tx_hash
+         tx_hash: tx_hash,
+         external_id: external_id
        }}
     end
   end
@@ -222,4 +228,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
   defp validate_tx_hash(nil), do: {:ok, nil}
   defp validate_tx_hash(v) when is_binary(v), do: {:ok, v}
   defp validate_tx_hash(_), do: {:error, :invalid_field_type}
+
+  defp validate_external_id(nil), do: {:ok, nil}
+  defp validate_external_id(v) when is_binary(v), do: {:ok, v}
+  defp validate_external_id(_), do: {:error, :invalid_field_type}
 end
