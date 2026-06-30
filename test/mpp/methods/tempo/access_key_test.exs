@@ -47,6 +47,24 @@ defmodule MPP.Methods.Tempo.AccessKeyTest do
            )
   end
 
+  test "active?/3 returns false when key is expired" do
+    Req.Test.stub(AccessKeyStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "result" => build_get_key_result(false, 1),
+        "id" => request["id"]
+      })
+    end)
+
+    refute AccessKey.active?(@account, @access_key,
+             rpc_url: @rpc_url,
+             req_options: [plug: {Req.Test, AccessKeyStub}]
+           )
+  end
+
   test "active?/3 returns false when RPC reverts" do
     Req.Test.stub(AccessKeyStub, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -65,9 +83,9 @@ defmodule MPP.Methods.Tempo.AccessKeyTest do
            )
   end
 
-  defp build_get_key_result(revoked?) do
+  defp build_get_key_result(revoked?, expiry \\ 4_000_000_000) do
     key = Base.decode16!(String.replace_prefix(@access_key, "0x", ""), case: :mixed)
-    expiry_bin = 4_000_000_000 |> :binary.encode_unsigned() |> pad32()
+    expiry_bin = expiry |> :binary.encode_unsigned() |> pad32()
     revoked_bin = if(revoked?, do: pad32(1), else: pad32(0))
 
     words = [

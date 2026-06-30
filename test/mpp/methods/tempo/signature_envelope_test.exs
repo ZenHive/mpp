@@ -7,10 +7,12 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
 
   @root_private_key "01" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
   @access_private_key "02" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
+  @digest_a "a1" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
+  @digest_b "b2" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
 
   test "deserializes plain secp256k1 envelope" do
     {:ok, root_address} = Curvy.get_address(@root_private_key)
-    digest = :crypto.strong_rand_bytes(32)
+    digest = @digest_a
     sig_hex = sign_digest!(digest, @root_private_key, root_address)
 
     assert {:ok, {:secp256k1, _}} = SignatureEnvelope.deserialize(sig_hex)
@@ -20,7 +22,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
     {:ok, root_address} = Curvy.get_address(@root_private_key)
     {:ok, access_address} = Curvy.get_address(@access_private_key)
     root_hex = "0x" <> Base.encode16(root_address, case: :lower)
-    digest = :crypto.strong_rand_bytes(32)
+    digest = @digest_b
 
     for version <- [:v1, :v2] do
       payload =
@@ -40,7 +42,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   test "extract_address and verify_secp256k1 for secp256k1 envelope" do
     {:ok, root_address} = Curvy.get_address(@root_private_key)
     root_hex = "0x" <> Base.encode16(root_address, case: :lower)
-    digest = :crypto.strong_rand_bytes(32)
+    digest = @digest_a
     sig_hex = sign_digest!(digest, @root_private_key, root_address)
     {:ok, envelope} = SignatureEnvelope.deserialize(sig_hex)
 
