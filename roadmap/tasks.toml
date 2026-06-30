@@ -1099,19 +1099,23 @@ Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` f
 id = 45
 phase = 9
 bundle = "utilities"
-status = "blocked"
+status = "done"
 title = "Tier-2 pinned-field verification"
 scores = { d = 4, b = 8, u = 7 }
 acceptance_criteria = ["All fields the spec / reference impl require to pin are pinned", "Pinning mismatch returns a distinct error (vs. HMAC mismatch)", "Cross-validated against mpp-rs test vectors for both pass and fail paths", "Unit + property tests for field-by-field divergence"]
-blocked_reason = "land conflict retained for repair (task 45, run run-1782777032980-a140935c, branch harness/run-1782777032980-a140935c); resolver already attempted and the branch still conflicted. resolver witness: selection/spawn failed: {:model_required, Harness.AgentAdapter.Codex}. Repair: rebase the retained branch onto the target branch, resolve all conflict markers while keeping both reviewed intents, commit the resolved branch, move harness/run-1782777032980-a140935c to that commit if you used a scratch branch, then run dispatch-reland run-1782777032980-a140935c."
 body = """
 Extend `MPP.Verifier` with explicit field-by-field pinning of the credential's echoed challenge against the live request — re-asserting realm, method, request, expires, and digest agree. Catches cross-realm or replayed-with-different-request attacks that HMAC alone validates because the HMAC happens to match.
 
 Read the current Tier-2 pattern in `refs/mpp-rs` (server-side charge path) at implementation time — the latest reference impl defines which fields must pin and how to surface mismatch errors. Match its semantics; let the Elixir shape follow `MPP.Verifier` conventions. Distinguish the pinning-mismatch error from the HMAC-mismatch error so callers can tell replay-attacks from corrupt credentials.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1782777032980-a140935c, e571a8e01c0ceb95fe029fb34f4e5633abaee905)."
+delivered_by = "cursor"
+verified = true
 created_at = "2026-05-16"
 started_at = "2026-06-29"
 scored_at = "2026-05-16"
+done_at = "2026-06-30"
+shipped_in = "e571a8e01c0ceb95fe029fb34f4e5633abaee905"
 
 [[task]]
 id = 46
