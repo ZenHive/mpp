@@ -77,7 +77,10 @@ pipeline :paid_tempo do
       "rpc_url" => "https://rpc.tempo.xyz",
       "chain_id" => 4217,
       "fee_payer" => true,
+      # Either use a local fee-payer key...
       "fee_payer_private_key" => "0x...",
+      # ...or delegate co-signing to a hosted eth_fillTransaction endpoint.
+      # "fee_payer_url" => "https://sponsor.example.com",
       "fee_token" => "0x...(fee token address)",
       "wait_for_confirmation" => false,
       "memo" => "0x...(optional 32-byte memo)"
@@ -169,9 +172,9 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
 
-**Tempo capabilities:** Fee payer co-signing (server sponsors gas), optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, and pluggable dedup stores with a built-in ETS+TTL option via ConCache.
+**Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, zero-amount proof credentials, delegated access-key proof authorization, and pluggable dedup stores with a built-in ETS+TTL option via ConCache.
 
-**Tempo security note:** Challenges expire by default. On routes without a configured static memo, Tempo payments must use challenge-bound attribution metadata; plain transfers are rejected by the hardened verifier.
+**Tempo security note:** Challenges expire by default. On routes without a configured static memo, Tempo payments must use challenge-bound attribution metadata; plain transfers are rejected by the hardened verifier. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast.
 
 **Tempo networks:** [Mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) (chain ID `4217`, `rpc.tempo.xyz`) | [Testnet (Moderato)](https://docs.tempo.xyz/quickstart/connection-details#testnet) (chain ID `42431`, `rpc.moderato.tempo.xyz`)
 
@@ -197,9 +200,14 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
+| `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
+| `MPP.Methods.Tempo.HostedFeePayer` | Hosted `eth_fillTransaction` fee-payer fill support |
+| `MPP.Methods.Tempo.Proof` | EIP-712 proof credentials for zero-amount Tempo flows |
+| `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
+| `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: error codes, meta keys, server/client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
@@ -209,7 +217,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.6.1"}
+    {:mpp, "~> 0.6.2"}
   ]
 end
 ```

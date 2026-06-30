@@ -8,11 +8,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-30
+
 Protocol utilities. Added `MPP.Expires` for ISO 8601 challenge-expiration helpers and `MPP.DID.evm_did/2` for `did:pkh:eip155` credential-source identifiers.
 
 Security. `MPP.Plug` now accepts an optional shared replay store for generic credential deduplication across non-Tempo methods, using the existing `MPP.Tempo.Store` interface and atomic `check_and_mark/2` when available.
 
 **Security (Tempo + Stripe hardening — Task 46).** Tempo gains EIP-712 proof v3 credentials (`MPP.Methods.Tempo.Proof`, `type="proof"`) with wallet-bound signatures, optional store dedup, and zero-amount enforcement. Fee-payer co-signing now rejects fee tokens outside a per-chain allowlist (`FeePayerPolicy.default_allowed_fee_tokens/1`, overridable via `fee_payer_allowed_fee_tokens`). `MPP.DID.parse_evm_did/1` validates hash-credential `did:pkh` sources. `MPP.Methods.Tempo.SessionReceipt` adds optional `externalId` (PaymentWitness parity). Stripe rejects credential `externalId` values that disagree with the route request (mppx #537).
+
+**Security (Tempo proof access keys — Task 69).** Zero-amount Tempo proof verification now accepts active delegated access-key signatures through the Tempo AccountKeychain path when the direct signer is not the root wallet, and rejects stale or revoked access keys.
 
 **Security (Tempo hosted fee payer — Task 68).** Tempo charge verification can delegate fee-payer co-signing to a hosted `eth_fillTransaction` endpoint via `fee_payer_url`, matching mppx `fillHostedFeePayerTransaction`. Returned `feeToken` values are checked against the same sponsor allowlist as local co-signing before broadcast.
 
