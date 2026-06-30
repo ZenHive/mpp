@@ -23,7 +23,8 @@ defmodule MPP.Test.TempoAccessKey do
     payload = %{
       "action" => "authorize",
       "rootPrivateKey" => root_hex,
-      "rpcUrl" => rpc_url
+      "rpcUrl" => rpc_url,
+      "chainId" => Keyword.get(opts, :chain_id, 42_431)
     }
 
     decode_result!(run_script!(payload))
@@ -40,7 +41,8 @@ defmodule MPP.Test.TempoAccessKey do
     payload = %{
       "action" => "revoke",
       "rootPrivateKey" => root_hex,
-      "rpcUrl" => rpc_url
+      "rpcUrl" => rpc_url,
+      "chainId" => Keyword.get(opts, :chain_id, 42_431)
     }
 
     decode_result!(run_script!(payload))

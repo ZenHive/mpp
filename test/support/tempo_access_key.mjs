@@ -15,6 +15,7 @@ const {
   rootPrivateKey,
   accessPrivateKey: accessPrivateKeyIn,
   rpcUrl,
+  chainId = 42431,
   feeToken = "0x20c0000000000000000000000000000000000000",
 } = input
 
@@ -29,7 +30,7 @@ const accessKey = Account.fromSecp256k1(accessPrivateKey, { access: rootAccount 
 
 const client = createClient({
   account: rootAccount,
-  chain: tempoTestnet.extend({ feeToken }),
+  chain: tempoTestnet.extend({ id: Number(chainId), feeToken }),
   transport: http(rpcUrl),
 })
 

@@ -1441,7 +1441,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       root = fresh_wallet!(rpc_url)
 
       %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
-        TempoAccessKey.authorize!(root.private_key, rpc_url: rpc_url)
+        TempoAccessKey.authorize!(root.private_key, rpc_url: rpc_url, chain_id: @chain_id)
 
       challenge_id = "integration-proof-access-key-#{System.unique_integer([:positive])}"
       realm = @realm
@@ -1480,7 +1480,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       root = fresh_wallet!(rpc_url)
 
       %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
-        TempoAccessKey.authorize_and_revoke!(root.private_key, rpc_url: rpc_url)
+        TempoAccessKey.authorize_and_revoke!(root.private_key, rpc_url: rpc_url, chain_id: @chain_id)
 
       challenge_id = "integration-proof-revoked-key-#{System.unique_integer([:positive])}"
       realm = @realm
