@@ -2174,7 +2174,7 @@
       "id": "69",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Tempo proof access-key authorization parity",
       "scores": {
         "d": 4,
@@ -2188,10 +2188,15 @@
         "security"
       ],
       "depends_on": [],
+      "shipped_in": "86b0c5226b642d4016be1f109724b62d9e948897",
       "body": "Extend zero-amount Tempo proof verification to match the latest reference SDK authorization path when the direct signer is not the wallet named by the proof source. Keep public artifacts sanitized; read the private advisory / reference SDK source at pickup for exact behavior. Include deterministic unit coverage and Moderato integration coverage for the accepted authorization path and rejected stale/revoked authorization path.\n",
       "created_at": "2026-06-30",
       "started_at": "2026-06-30",
+      "done_at": "2026-06-30",
       "scored_at": "2026-06-30",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1782781915561-f6cb86c7, 86b0c5226b642d4016be1f109724b62d9e948897).",
+      "delivered_by": "cursor",
+      "verified": true,
       "cross_repo": []
     }
   ]

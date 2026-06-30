@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (21 of 23 done · 1 in progress)
+**Focus phase:** 9 — Protocol Utilities (22 of 23 done · 0 in progress)
 
-**Last shipped:** Task 45 — Tier-2 pinned-field verification, Task 46 — Tempo + session hardening audit vs. latest reference impls, Task 53 — Payment event hooks (server-side observability surface) on 2026-06-30
+**Last shipped:** Task 45 — Tier-2 pinned-field verification, Task 46 — Tempo + session hardening audit vs. latest reference impls, Task 53 — Payment event hooks (server-side observability surface), Task 69 — Tempo proof access-key authorization parity on 2026-06-30
 
 **Up next:** Task 68 — Tempo hosted fee-payer parity [D:5/B:7/U:6 → Eff:1.3] 📋
 <!-- FOCUS:END -->
@@ -136,7 +136,7 @@
 | Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17] 🎯 |
 | Task 67 | ✅ | 🎁 **utilities** · Align cold check scope with Tempo JS cross-validation dependencies [D:3/B:7/U:5 → Eff:2.0] 🎯 |
 | Task 68 | ⬜ | 🎁 **utilities** · 🔒 Tempo hosted fee-payer parity [D:5/B:7/U:6 → Eff:1.3] 📋 |
-| Task 69 | 🔄 | 🎁 **utilities** · 🔒 Tempo proof access-key authorization parity [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 69 | ✅ | 🎁 **utilities** · 🔒 Tempo proof access-key authorization parity [D:4/B:6/U:5 → Eff:1.38] 📋 |
 <!-- TASKS:END -->
 
 ---
