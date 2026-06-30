@@ -2151,7 +2151,7 @@
       "id": "68",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Tempo hosted fee-payer parity",
       "scores": {
         "d": 5,
@@ -2165,10 +2165,15 @@
         "security"
       ],
       "depends_on": [],
+      "shipped_in": "7778e94da6356244ba93b07f184534bdc1ef36fc",
       "body": "Add server-side parity for the hosted Tempo fee-payer fill path identified in the Task 46 audit. Keep public artifacts sanitized; use the private advisory / latest reference SDK source at pickup for the full mechanism and acceptance details. Include Moderato integration coverage for the hosted-fill success path and the configured rejection path.\n",
       "created_at": "2026-06-30",
       "started_at": "2026-06-30",
+      "done_at": "2026-06-30",
       "scored_at": "2026-06-30",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1782785088174-5f35e6ca, 7778e94da6356244ba93b07f184534bdc1ef36fc).",
+      "delivered_by": "cursor",
+      "verified": true,
       "cross_repo": []
     },
     {
