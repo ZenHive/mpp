@@ -24,7 +24,7 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 | Zero-amount requires proof (not hash/tx) | mppx proof flow | ✓ **new** | `reject_non_proof_for_zero_amount/2` |
 | Hosted fee-payer fills (`fillHostedFeePayerTransaction`) | mppx #536, #538, #584 | ✗ | Server only co-signs locally via `fee_payer_private_key`; tracked in Task 68 |
 | Proof access-key / on-chain keychain fallback | mppx `resolveAccount` #579 | ◐ | Direct signer recovery only; full authorization parity tracked in Task 69 |
-| Client-side Tempo chain pinning | mpp-rs `8880cf7` | N/A | Client transport — overlaps Task 45 |
+| Client-side Tempo chain pinning | mpp-rs `8880cf7` | N/A | Built-in Tempo provider — tracked in Task 33e |
 
 ---
 
@@ -78,4 +78,4 @@ Pinned in `test/mpp/methods/tempo/proof_test.exs` from `refs/mppx/src/tempo/Proo
 - **Task 68:** hosted fee-payer fills — requires hosted-fill parity and config surface.
 - **Task 69:** proof access-key keychain — optional RPC lookup when signature does not recover to `source` DID.
 - **Session server** — Task 50 closes the N/A rows above.
-- **Client chain pinning** — Task 45.
+- **Client chain pinning** — Task 33e.

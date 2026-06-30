@@ -63,7 +63,7 @@ mpp-specs: no advisories.
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | 📋 Task 68 — private advisory; server-only local co-sign today |
 | Proof access-key / on-chain keychain fallback (mppx #579) | 📋 Task 69 — direct signer recovery only for now |
 | Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
-| Client-side Tempo chain pinning (mpp-rs `8880cf7`) | **Task 45** |
+| Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 
 ---
 
