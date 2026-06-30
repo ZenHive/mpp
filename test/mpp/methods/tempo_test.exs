@@ -14,6 +14,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Test.NonAtomicGetFailStore
   alias MPP.Test.NonAtomicStore
   alias MPP.Test.TempoMemoryStore
+  alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @rpc_url "https://rpc.moderato.tempo.xyz"
@@ -2377,5 +2378,141 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:ok, _} = Tempo.verify(payload, charge)
     end
+  end
+
+  describe "validate_config!/1 — hosted fee payer" do
+    @hosted_url "https://sponsor.moderato.tempo.xyz"
+
+    test "accepts fee_payer_url without local key material" do
+      assert :ok =
+               Tempo.validate_config!(%{
+                 "rpc_url" => @rpc_url,
+                 "fee_payer_url" => @hosted_url
+               })
+    end
+
+    test "raises when fee_payer_url is combined with fee_payer_private_key" do
+      assert_raise ArgumentError, ~r/cannot be combined/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer_url" => @hosted_url,
+          "fee_payer_private_key" => String.duplicate("ab", 32)
+        })
+      end
+    end
+
+    test "raises on invalid fee_payer_url scheme" do
+      assert_raise ArgumentError, ~r/fee_payer_url must be an http or https URL/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer_url" => "ftp://sponsor.example.com"
+        })
+      end
+    end
+  end
+
+  describe "verify/2 — hosted fee payer fill" do
+    @client_private_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    @fee_payer_private_key "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    @hosted_url "https://sponsor.moderato.tempo.xyz"
+    @rogue_token "0x1111111111111111111111111111111111111111"
+
+    setup %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "fee_payer_url", @hosted_url)
+      }
+
+      {:ok, charge: charge}
+    end
+
+    test "fills via eth_fillTransaction then broadcasts", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        response =
+          case request["method"] do
+            "eth_fillTransaction" ->
+              %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+
+            "eth_simulateV1" ->
+              simulate_success_body()
+
+            _ ->
+              %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert receipt.method == "tempo"
+      assert receipt.status == "success"
+    end
+
+    test "rejects hosted fill when returned feeToken is outside configured allowlist", %{charge: charge} do
+      charge = put_in(charge.method_details["fee_payer_allowed_fee_tokens"], [@rogue_token])
+
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        response =
+          if request["method"] == "eth_fillTransaction" do
+            %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "not allowed"
+    end
+
+    test "challenge_method_details reports feePayer true for hosted config", %{charge: charge} do
+      assert %{"feePayer" => true} = Tempo.challenge_method_details(charge)
+    end
+  end
+
+  defp build_hosted_client_tx do
+    TempoTxBuilder.build_fee_payer_transfer(
+      private_key: @client_private_key,
+      token: @token_address,
+      recipient: @recipient,
+      amount: 1_000_000,
+      chain_id: 42_431,
+      rpc_url: @rpc_url,
+      gas_limit: 1_000_000,
+      nonce: 0,
+      nonce_key: expiring_nonce_key_int(),
+      valid_before: future_valid_before()
+    )
+  end
+
+  defp hosted_fill_tx_map(tx) do
+    fee_payer_key = Base.decode16!(@fee_payer_private_key, case: :mixed)
+    fee_token = Base.decode16!(String.replace_prefix(@token_address, "0x", ""), case: :mixed)
+    {:ok, cosigned} = Transaction.cosign_fee_payer(tx, fee_payer_key, fee_token)
+    [y_parity, r_bin, s_bin] = Enum.at(cosigned.fields, 11)
+
+    %{
+      "feeToken" => @token_address,
+      "feePayerSignature" => %{
+        "yParity" => if(y_parity == <<1>>, do: 1, else: 0),
+        "r" => "0x" <> Base.encode16(r_bin, case: :lower),
+        "s" => "0x" <> Base.encode16(s_bin, case: :lower)
+      }
+    }
   end
 end

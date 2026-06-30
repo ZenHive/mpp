@@ -14,6 +14,8 @@ Security. `MPP.Plug` now accepts an optional shared replay store for generic cre
 
 **Security (Tempo + Stripe hardening — Task 46).** Tempo gains EIP-712 proof v3 credentials (`MPP.Methods.Tempo.Proof`, `type="proof"`) with wallet-bound signatures, optional store dedup, and zero-amount enforcement. Fee-payer co-signing now rejects fee tokens outside a per-chain allowlist (`FeePayerPolicy.default_allowed_fee_tokens/1`, overridable via `fee_payer_allowed_fee_tokens`). `MPP.DID.parse_evm_did/1` validates hash-credential `did:pkh` sources. `MPP.Methods.Tempo.SessionReceipt` adds optional `externalId` (PaymentWitness parity). Stripe rejects credential `externalId` values that disagree with the route request (mppx #537).
 
+**Security (Tempo hosted fee payer — Task 68).** Tempo charge verification can delegate fee-payer co-signing to a hosted `eth_fillTransaction` endpoint via `fee_payer_url`, matching mppx `fillHostedFeePayerTransaction`. Returned `feeToken` values are checked against the same sponsor allowlist as local co-signing before broadcast.
+
 ## [0.6.1] - 2026-06-29
 
 **Security (Tempo hash-credential dedup).** The `type="hash"` credential path now commits its dedup mark through the store's atomic `check_and_mark/2` — the same primitive the `type="transaction"` path already uses — matching the reference SDKs (mpp-rs `Store::put_if_absent`, mppx atomic `markHashUsed`). The mark still happens only after successful on-chain verification, so a transient receipt-RPC failure does not burn a legitimate hash; stores that do not implement `check_and_mark/2` keep the documented best-effort fallback.

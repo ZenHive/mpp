@@ -32,6 +32,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
   # --- Testnet constants ---
   @default_rpc_url "https://rpc.moderato.tempo.xyz"
+  @default_hosted_fee_payer_url "https://sponsor.moderato.tempo.xyz"
   @chain_id 42_431
   @path_usd "0x20c0000000000000000000000000000000000000"
 
@@ -1514,6 +1515,99 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       assert {:error, %MPP.Errors{} = error} = Tempo.verify(payload, charge)
       assert error.detail =~ "Proof signature does not match source"
+    end
+  end
+
+  describe "hosted fee payer fill" do
+    @rogue_token "0x1111111111111111111111111111111111111111"
+
+    @tag :integration
+    test "happy path: delegates co-signing to Moderato hosted fee payer", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+
+      config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer_url" => @default_hosted_fee_payer_url
+          }
+        )
+
+      challenge = request_challenge!(config)
+
+      {:ok, signed_tx} =
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
+        )
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "transaction", "signature" => signed_tx}
+      }
+
+      auth_header = Headers.format_credential(credential)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil,
+             "Expected plug passthrough, got status #{conn.status}: #{conn.resp_body}"
+
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.status == "success"
+      assert receipt.method == "tempo"
+      assert String.starts_with?(receipt.reference, "0x")
+    end
+
+    @tag :integration
+    test "rejects hosted fill when returned feeToken is outside configured allowlist", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+
+      config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Tempo,
+          amount: Integer.to_string(@transfer_amount),
+          currency: @path_usd,
+          recipient: recipient_address,
+          method_config: %{
+            "rpc_url" => rpc_url,
+            "chain_id" => @chain_id,
+            "fee_payer_url" => @default_hosted_fee_payer_url,
+            "fee_payer_allowed_fee_tokens" => [@rogue_token]
+          }
+        )
+
+      challenge = request_challenge!(config)
+
+      {:ok, signed_tx} =
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
+          nonce: 0,
+          nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+          valid_before: TempoTestHelpers.future_valid_before()
+        )
+
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["detail"] =~ "not allowed"
     end
   end
 

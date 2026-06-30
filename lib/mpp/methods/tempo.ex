@@ -31,10 +31,17 @@ defmodule MPP.Methods.Tempo do
     * `"chain_id"` — (optional) network chain ID, defaults to `42431` (Moderato testnet)
     * `"fee_payer"` — (optional) enable server-side fee sponsorship, defaults to `false`.
       When `true`, the server co-signs client transactions with domain `0x78` to pay
-      transaction fees. Requires `"fee_payer_private_key"` and `"fee_token"`.
-    * `"fee_payer_private_key"` — (required when `fee_payer: true`) hex-encoded 32-byte
+      transaction fees. Requires `"fee_payer_private_key"` and `"fee_token"`, unless
+      `"fee_payer_url"` is set for hosted sponsorship.
+    * `"fee_payer_url"` — (optional) URL of a hosted fee-payer service that implements
+      `eth_fillTransaction`. When set, the server delegates co-signing to the remote
+      endpoint instead of using `"fee_payer_private_key"`. Mutually exclusive with the
+      local key path.
+    * `"fee_payer_private_key"` — (required when `fee_payer: true` and no `fee_payer_url`)
+      hex-encoded 32-byte
       secp256k1 private key for the fee payer account
-    * `"fee_token"` — (required when `fee_payer: true`) hex address of a USD-denominated
+    * `"fee_token"` — (required for local co-sign when `fee_payer: true` and no
+      `fee_payer_url`) hex address of a USD-denominated
       TIP-20 token to use for fee payment (e.g., pathUSD). Must be on the sponsor
       allowlist (`fee_payer_allowed_fee_tokens` or per-chain defaults).
     * `"fee_payer_allowed_fee_tokens"` — (optional, `fee_payer: true` only) list of
@@ -80,6 +87,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.FeePayerPolicy
+  alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -268,7 +276,7 @@ defmodule MPP.Methods.Tempo do
 
     details = %{
       "chainId" => config["chain_id"] || @moderato_chain_id,
-      "feePayer" => config["fee_payer"] || false
+      "feePayer" => fee_payer_enabled?(config)
     }
 
     case config["memo"] do
@@ -304,7 +312,21 @@ defmodule MPP.Methods.Tempo do
 
   # --- Fee payer helpers ---
 
-  # Validates fee payer config at init time. When fee_payer is enabled,
+  defp validate_fee_payer!(%{"fee_payer_url" => url} = config) when is_binary(url) do
+    if config["fee_payer_private_key"] || config["fee_token"] do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_url cannot be combined with fee_payer_private_key or fee_token"
+    end
+
+    if !valid_fee_payer_url?(url) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_url must be an http or https URL"
+    end
+
+    :ok
+  end
+
+  # Validates fee payer config at init time. When fee_payer is enabled locally,
   # requires fee_payer_private_key (32-byte hex) and fee_token (20-byte hex address).
   defp validate_fee_payer!(%{"fee_payer" => true} = config) do
     key = config["fee_payer_private_key"]
@@ -325,26 +347,29 @@ defmodule MPP.Methods.Tempo do
 
   defp validate_fee_payer!(_config), do: :ok
 
-  defp validate_fee_payer_allowed_tokens!(%{"fee_payer" => true} = config) do
-    case config["fee_payer_allowed_fee_tokens"] do
-      nil ->
-        :ok
-
-      tokens when is_list(tokens) ->
-        if Enum.all?(tokens, &valid_fee_token_address?/1) do
-          :ok
-        else
-          raise ArgumentError,
-                "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of 20-byte hex addresses"
-        end
-
-      _ ->
-        raise ArgumentError,
-              "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of hex addresses"
+  defp validate_fee_payer_allowed_tokens!(config) do
+    if fee_payer_enabled?(config) do
+      validate_fee_payer_allowed_tokens_list!(config["fee_payer_allowed_fee_tokens"])
+    else
+      :ok
     end
   end
 
-  defp validate_fee_payer_allowed_tokens!(_config), do: :ok
+  defp validate_fee_payer_allowed_tokens_list!(nil), do: :ok
+
+  defp validate_fee_payer_allowed_tokens_list!(tokens) when is_list(tokens) do
+    if Enum.all?(tokens, &valid_fee_token_address?/1) do
+      :ok
+    else
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of 20-byte hex addresses"
+    end
+  end
+
+  defp validate_fee_payer_allowed_tokens_list!(_tokens) do
+    raise ArgumentError,
+          "MPP.Methods.Tempo fee_payer_allowed_fee_tokens must be a list of hex addresses"
+  end
 
   defp valid_fee_token_address?(token) when is_binary(token) do
     hex = strip_0x(token)
@@ -353,11 +378,22 @@ defmodule MPP.Methods.Tempo do
 
   defp valid_fee_token_address?(_), do: false
 
-  defp reject_hash_when_fee_payer(%{"fee_payer" => true}) do
-    {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
+  defp reject_hash_when_fee_payer(config) do
+    if fee_payer_enabled?(config) do
+      {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
+    else
+      :ok
+    end
   end
 
-  defp reject_hash_when_fee_payer(_config), do: :ok
+  defp fee_payer_enabled?(%{"fee_payer_url" => url}) when is_binary(url), do: true
+  defp fee_payer_enabled?(%{"fee_payer" => true}), do: true
+  defp fee_payer_enabled?(_), do: false
+
+  defp valid_fee_payer_url?(url) do
+    uri = URI.parse(url)
+    uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != ""
+  end
 
   defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}, "proof"), do: :ok
 
@@ -445,35 +481,64 @@ defmodule MPP.Methods.Tempo do
 
   defp check_fee_token_allowed(config, _token) do
     chain_id = config["chain_id"] || @moderato_chain_id
+    check_returned_fee_token_allowed(config, config["fee_token"], chain_id)
+  end
+
+  defp check_returned_fee_token_allowed(config, fee_token_hex, chain_id) do
     overrides = config["fee_payer_allowed_fee_tokens"]
-    fee_token_hex = config["fee_token"]
 
     if FeePayerPolicy.fee_token_allowed?(chain_id, fee_token_hex, overrides) do
       :ok
     else
-      {:error, "Fee token is not allowed by fee payer policy"}
+      {:error, "Fee-sponsored transaction feeToken is not allowed"}
+    end
+  end
+
+  @fee_token_field_index 10
+
+  defp fee_token_hex(%Transaction{fields: fields}) do
+    case Enum.at(fields, @fee_token_field_index) do
+      <<token::binary-size(20)>> ->
+        {:ok, "0x" <> Base.encode16(token, case: :lower)}
+
+      _ ->
+        {:error, "hosted fee payer did not return a feeToken"}
     end
   end
 
   # Validates call scope when fee_payer is enabled.
   # No-op when fee_payer is falsy — any call pattern is allowed for self-paying txs.
-  defp maybe_validate_call_scope(tx, %{"fee_payer" => true}), do: Transaction.validate_call_scope(tx)
-
-  defp maybe_validate_call_scope(_tx, _config), do: :ok
+  defp maybe_validate_call_scope(tx, config) do
+    if fee_payer_enabled?(config), do: Transaction.validate_call_scope(tx), else: :ok
+  end
 
   # Bounds client-supplied gas economics when fee_payer is enabled, so a
   # malicious client cannot drain the server's wallet by embedding inflated
   # gas price / total fee / access list in the signed envelope the server
   # co-signs (GHSA-vv77-66rf-pm86, GHSA-qpxh-ff8m-c62v).
   # No-op when fee_payer is falsy — the client pays its own gas.
-  defp maybe_validate_fee_payer_economics(tx, %{"fee_payer" => true} = config, chain_id) do
-    policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
-    FeePayerPolicy.validate(tx, policy)
+  defp maybe_validate_fee_payer_economics(tx, config, chain_id) do
+    if fee_payer_enabled?(config) do
+      policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
+      FeePayerPolicy.validate(tx, policy)
+    else
+      :ok
+    end
   end
 
-  defp maybe_validate_fee_payer_economics(_tx, _config, _chain_id), do: :ok
+  defp maybe_cosign_fee_payer(tx, %{"fee_payer_url" => url} = config) when is_binary(url) do
+    chain_id = config["chain_id"] || @moderato_chain_id
 
-  # Co-signs transaction as fee payer when fee_payer is enabled.
+    with :ok <- check_fee_payer_placeholder(tx),
+         :ok <- check_fee_token_empty(tx),
+         {:ok, cosigned} <- HostedFeePayer.fill(tx, url, hosted_req_options(config)),
+         {:ok, fee_token_hex} <- fee_token_hex(cosigned),
+         :ok <- check_returned_fee_token_allowed(config, fee_token_hex, chain_id) do
+      {:ok, cosigned}
+    end
+  end
+
+  # Co-signs transaction as fee payer when fee_payer is enabled locally.
   # No-op when fee_payer is falsy — passes transaction through unchanged.
   defp maybe_cosign_fee_payer(tx, %{"fee_payer" => true} = config) do
     with {:ok, key} <- decode_hex_key(config["fee_payer_private_key"]),
@@ -801,6 +866,13 @@ defmodule MPP.Methods.Tempo do
   # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
 
   defp rpc_options(config), do: [req_options: config["req_options"] || []]
+
+  defp hosted_req_options(config) do
+    case config["req_options"] do
+      nil -> []
+      opts -> [req_options: opts]
+    end
+  end
 
   defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
     case RPC.broadcast_async(raw_hex, rpc_url, opts) do
