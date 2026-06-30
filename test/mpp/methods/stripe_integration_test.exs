@@ -41,21 +41,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
       """)
     end
 
-    plug_opts = [
-      secret_key: @hmac_secret,
-      realm: @realm,
-      method: MPP.Methods.Stripe,
-      amount: @amount,
-      currency: @currency,
-      method_config: %{
-        "stripe_secret_key" => stripe_secret_key,
-        "network_id" => "internal"
-      }
-    ]
-
-    config = MPP.Plug.init(plug_opts)
-
-    {:ok, config: config, stripe_secret_key: stripe_secret_key}
+    {:ok, config: plug_config(stripe_secret_key), stripe_secret_key: stripe_secret_key}
   end
 
   describe "full 402 handshake" do
@@ -171,9 +157,14 @@ defmodule MPP.Methods.StripeIntegrationTest do
     end
 
     test "receipt format matches spec", %{
-      config: config,
       stripe_secret_key: stripe_secret_key
     } do
+      config =
+        plug_config(
+          stripe_secret_key,
+          external_id: "test_order_42"
+        )
+
       # Get challenge
       conn_402 =
         :get
@@ -182,6 +173,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
       [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
       {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      assert challenge_request(challenge)["externalId"] == "test_order_42"
 
       # Create SPT and credential
       spt = create_test_spt!(stripe_secret_key, @amount, @currency)
@@ -210,6 +202,28 @@ defmodule MPP.Methods.StripeIntegrationTest do
       # Timestamp should be valid ISO 8601
       assert {:ok, _dt, _offset} = DateTime.from_iso8601(receipt.timestamp)
     end
+  end
+
+  defp plug_config(stripe_secret_key, opts \\ []) do
+    plug_opts =
+      Keyword.merge(
+        [
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: MPP.Methods.Stripe,
+          amount: @amount,
+          currency: @currency,
+          method_config: %{"stripe_secret_key" => stripe_secret_key, "network_id" => "internal"}
+        ],
+        opts
+      )
+
+    MPP.Plug.init(plug_opts)
+  end
+
+  defp challenge_request(challenge) do
+    {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+    Jason.decode!(json)
   end
 
   # Creates a test SPT via Stripe's test helpers endpoint.
