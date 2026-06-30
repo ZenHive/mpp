@@ -1571,7 +1571,7 @@
       "id": 53,
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Payment event hooks (server-side observability surface)",
       "scores": {
         "d": 3,
@@ -1590,10 +1590,15 @@
         "Cross-checked against the latest payment-event-hooks surface in reference SDKs",
         "Unit test asserts each event fires exactly once on the happy and sad paths"
       ],
+      "shipped_in": "778161899b66d2cfec3ef3f8364f55616d202fd7",
       "body": "Add a server-side observability surface — payment event hooks consumers can attach to for metrics, logging, and tracing. Read `refs/mpp-rs` (the payment event hooks extension) + the latest mppx event surface at pickup time to confirm which boundaries warrant events and what context they carry; mirror those semantics on top of standard Elixir `:telemetry`. Events must be safe to log — no raw credentials in payloads, only IDs and high-level outcomes. This is purely additive; no behavior change on the verify path.\n",
       "created_at": "2026-05-27",
       "started_at": "2026-06-29",
+      "done_at": "2026-06-30",
       "scored_at": "2026-05-27",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1782777032983-1c57d409, 778161899b66d2cfec3ef3f8364f55616d202fd7).",
+      "delivered_by": "cursor",
+      "verified": true,
       "cross_repo": []
     },
     {

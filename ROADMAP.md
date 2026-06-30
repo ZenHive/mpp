@@ -15,9 +15,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (18 of 21 done · 3 in progress)
+**Focus phase:** 9 — Protocol Utilities (19 of 21 done · 2 in progress)
 
-**Last shipped:** Task 27 — Expiration and DID helpers, Task 35 — Generic dedup at Plug level, Task 37 — Accept-Payment header support, Task 57 — Unit tests for MultiProvider and ConCacheStore, Task 63 — Header parser property/fuzz tests, Task 67 — Align cold check scope with Tempo JS cross-validation dependencies on 2026-06-29
+**Last shipped:** Task 53 — Payment event hooks (server-side observability surface) on 2026-06-30
 
 **Up next:** Task 32b — MCP server transport [D:3/B:7/U:8 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
@@ -123,7 +123,7 @@
 | Task 37 `[P]` | ✅ | 🎁 **utilities** · Accept-Payment header support [D:3/B:6/U:7 → Eff:2.17?] 🎯 |
 | Task 45 | 🔄 | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 46 | 🔄 | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
-| Task 53 | 🔄 | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83?] 🚀 |
+| Task 53 | ✅ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83?] 🚀 |
 | Task 56 `[P]` | ✅ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
 | Task 57 `[P]` | ✅ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
 | Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33] 📋 |
