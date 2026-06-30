@@ -53,6 +53,7 @@ mpp-specs: no advisories.
 | mpp-rs `384c4fe` hash-credential source DID | Forged / wrong-chain `did:pkh` source | `MPP.DID.parse_evm_did/1` + chain match — `did.ex`, `tempo.ex` (Task 46) |
 | mppx #537 Stripe charge externalId binding | Credential externalId overriding route correlation | `check_external_id_binding/2` — `stripe.ex` (Task 46) |
 | mpp-specs #266 PaymentWitness externalId | Session receipt wire field | Optional `external_id` / `externalId` on `SessionReceipt` — `session_receipt.ex` (Task 46) |
+| mppx #579 proof access-key authorization | Zero-amount proof signed by delegated access key | `recover_authorized_proof_signer` + AccountKeychain `getKey` active check — `proof.ex`, `access_key.ex`, `tempo.ex` (Task 69) |
 
 ---
 
@@ -61,7 +62,6 @@ mpp-specs: no advisories.
 | Upstream fix | Where tracked |
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | 📋 Task 68 — private advisory; server-only local co-sign today |
-| Proof access-key / on-chain keychain fallback (mppx #579) | 📋 Task 69 — direct signer recovery only for now |
 | Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
 | Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 

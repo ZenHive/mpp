@@ -3,6 +3,7 @@ defmodule MPP.Methods.TempoTest do
 
   import MPP.Test.TempoTestHelpers
 
+  alias Cartouche.Signer.Curvy
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
@@ -2240,7 +2241,103 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.detail =~ "source"
     end
+
+    test "accepts proof signed by an authorized access key for the root source", %{charge: charge} do
+      root_private_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
+      access_private_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
+      {:ok, root_address} = Curvy.get_address(root_private_key)
+      {:ok, access_address} = Curvy.get_address(access_private_key)
+      root_hex = "0x" <> Base.encode16(root_address, case: :lower)
+
+      charge =
+        put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{root_hex}")
+
+      proof_params = %{
+        account: root_hex,
+        chain_id: 42_431,
+        challenge_id: @proof_challenge_id,
+        realm: "api.example.com"
+      }
+
+      signature = sign_access_key_proof!(proof_params, access_private_key, access_address)
+      stub_active_access_key_metadata!()
+
+      payload = %{"type" => "proof", "signature" => signature}
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+    end
+
+    test "rejects proof signed by a revoked access key for the root source", %{charge: charge} do
+      root_private_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
+      access_private_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
+      {:ok, root_address} = Curvy.get_address(root_private_key)
+      {:ok, access_address} = Curvy.get_address(access_private_key)
+      root_hex = "0x" <> Base.encode16(root_address, case: :lower)
+
+      charge =
+        put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{root_hex}")
+
+      proof_params = %{
+        account: root_hex,
+        chain_id: 42_431,
+        challenge_id: @proof_challenge_id,
+        realm: "api.example.com"
+      }
+
+      signature = sign_access_key_proof!(proof_params, access_private_key, access_address)
+      stub_active_access_key_metadata!(revoked: true)
+
+      payload = %{"type" => "proof", "signature" => signature}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Proof signature does not match source"
+    end
   end
+
+  defp sign_access_key_proof!(params, private_key, address) do
+    digest = MPP.Methods.Tempo.Proof.hash(params)
+    {:ok, sig} = Curvy.sign_payload(digest, private_key)
+    sig = Cartouche.Recover.normalize_low_s(sig)
+    {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, address)
+
+    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
+  end
+
+  defp stub_active_access_key_metadata!(opts \\ []) do
+    revoked? = Keyword.get(opts, :revoked, false)
+    access_key = "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"
+    key = Base.decode16!(String.replace_prefix(access_key, "0x", ""), case: :mixed)
+    expiry_bin = 4_000_000_000 |> :binary.encode_unsigned() |> pad_word32()
+    revoked_bin = if(revoked?, do: pad_word32(1), else: pad_word32(0))
+
+    result =
+      "0x" <>
+        ([
+           pad_word32(0),
+           :binary.copy(<<0>>, 12) <> key,
+           expiry_bin,
+           pad_word32(0),
+           revoked_bin
+         ]
+         |> IO.iodata_to_binary()
+         |> Base.encode16(case: :lower))
+
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      rpc_result =
+        if request["method"] == "eth_call" do
+          result
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => rpc_result, "id" => request["id"]})
+    end)
+  end
+
+  defp pad_word32(value) when is_integer(value), do: value |> :binary.encode_unsigned() |> pad_word32()
+  defp pad_word32(bin) when byte_size(bin) <= 32, do: :binary.copy(<<0>>, 32 - byte_size(bin)) <> bin
 
   describe "verify/2 — fee payer token allowlist" do
     @fee_payer_key_allow "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"

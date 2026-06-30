@@ -78,6 +78,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
@@ -404,16 +405,33 @@ defmodule MPP.Methods.Tempo do
     realm = config["realm"]
 
     if is_binary(challenge_id) and is_binary(realm) do
-      case Proof.verify_signature(
-             %{account: address, chain_id: chain_id, challenge_id: challenge_id, realm: realm},
-             signature,
-             address
-           ) do
-        :ok -> :ok
-        {:error, reason} -> {:error, Errors.new(:verification_failed, reason)}
+      proof_params = %{
+        account: address,
+        chain_id: chain_id,
+        challenge_id: challenge_id,
+        realm: realm
+      }
+
+      case Proof.verify_signature(proof_params, signature, address) do
+        :ok ->
+          :ok
+
+        {:error, _} ->
+          verify_proof_access_key_authorization(proof_params, config, signature, address)
       end
     else
       {:error, Errors.new(:verification_failed, "Proof verification missing challenge binding")}
+    end
+  end
+
+  defp verify_proof_access_key_authorization(proof_params, config, signature, source_address) do
+    with {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         rpc_opts = Keyword.merge([rpc_url: rpc_url], rpc_options(config)),
+         {:ok, access_key} <- Proof.recover_authorized_proof_signer(proof_params, signature, source_address),
+         true <- AccessKey.active?(source_address, access_key, rpc_opts) do
+      :ok
+    else
+      _ -> {:error, Errors.new(:verification_failed, "Proof signature does not match source")}
     end
   end
 

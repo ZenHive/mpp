@@ -15,6 +15,7 @@ defmodule MPP.Methods.Tempo.Proof do
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
   alias Curvy.Signature, as: CurvySignature
+  alias MPP.Methods.Tempo.SignatureEnvelope
 
   @domain_name "MPP"
   @domain_version "3"
@@ -70,6 +71,56 @@ defmodule MPP.Methods.Tempo.Proof do
         else: {:error, "Proof signature does not match source"}
     end
   end
+
+  @doc """
+  Recover the authorized access-key signer when direct wallet verification fails.
+
+  Matches `recoverAuthorizedProofSigner` in `refs/mppx/src/tempo/server/Charge.ts`.
+  Returns `{:ok, access_key_address}` or `{:error, reason}`.
+  """
+  @spec recover_authorized_proof_signer(params(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def recover_authorized_proof_signer(params, signature_hex, source_address) do
+    digest = hash(params)
+
+    with {:ok, envelope} <- SignatureEnvelope.deserialize(signature_hex),
+         {:ok, signer} <- recover_authorized_signer(envelope, digest, source_address) do
+      {:ok, signer}
+    else
+      _ -> {:error, "proof signature recovery failed"}
+    end
+  end
+
+  defp recover_authorized_signer({:keychain, user_address, inner, version}, digest, source_address) do
+    if Onchain.Address.equal?(user_address, source_address) do
+      keychain_payload = keychain_payload(digest, source_address, version)
+
+      with {:ok, signer} <- SignatureEnvelope.extract_address(inner, keychain_payload),
+           true <- SignatureEnvelope.verify_secp256k1(inner, keychain_payload, signer) do
+        {:ok, signer}
+      else
+        _ -> {:error, "proof signature recovery failed"}
+      end
+    else
+      {:error, "proof signature recovery failed"}
+    end
+  end
+
+  defp recover_authorized_signer({:secp256k1, _} = envelope, digest, _source_address) do
+    with {:ok, signer} <- SignatureEnvelope.extract_address(envelope, digest),
+         true <- SignatureEnvelope.verify_secp256k1(envelope, digest, signer) do
+      {:ok, signer}
+    else
+      _ -> {:error, "proof signature recovery failed"}
+    end
+  end
+
+  defp keychain_payload(digest, source_address, :v2) do
+    addr = decode_address!(source_address)
+    Hash.keccak(<<0x04>> <> digest <> addr)
+  end
+
+  defp keychain_payload(digest, _source_address, :v1), do: digest
 
   @spec proof_types() :: %{String.t() => Type.t()}
   defp proof_types do

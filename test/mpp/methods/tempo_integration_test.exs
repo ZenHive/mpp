@@ -20,7 +20,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
+  alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
+  alias MPP.Test.TempoAccessKey
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
   alias Onchain.Tempo.Faucet
@@ -1407,7 +1409,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       source = "did:pkh:eip155:#{@chain_id}:#{address}"
 
       digest =
-        MPP.Methods.Tempo.Proof.hash(%{
+        Proof.hash(%{
           account: address,
           chain_id: @chain_id,
           challenge_id: challenge_id,
@@ -1432,6 +1434,86 @@ defmodule MPP.Methods.TempoIntegrationTest do
       payload = %{"type" => "proof", "signature" => signature}
 
       assert {:ok, %Receipt{reference: ^challenge_id}} = Tempo.verify(payload, charge)
+    end
+
+    @tag :integration
+    test "verifies proof signed by an authorized access key for the root source", %{rpc_url: rpc_url} do
+      root = fresh_wallet!(rpc_url)
+
+      %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
+        TempoAccessKey.authorize!(root.private_key, rpc_url: rpc_url)
+
+      challenge_id = "integration-proof-access-key-#{System.unique_integer([:positive])}"
+      realm = @realm
+      source = "did:pkh:eip155:#{@chain_id}:#{root_address}"
+
+      digest =
+        Proof.hash(%{
+          account: root_address,
+          chain_id: @chain_id,
+          challenge_id: challenge_id,
+          realm: realm
+        })
+
+      access_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
+      signature = TempoAccessKey.sign_proof!(digest, access_key, access_bytes)
+
+      charge = %Charge{
+        amount: "0",
+        currency: @path_usd,
+        recipient: root_address,
+        method_details: %{
+          "rpc_url" => rpc_url,
+          "chain_id" => @chain_id,
+          "challenge_id" => challenge_id,
+          "realm" => realm,
+          "credential_source" => source
+        }
+      }
+
+      payload = %{"type" => "proof", "signature" => signature}
+      assert {:ok, %Receipt{reference: ^challenge_id}} = Tempo.verify(payload, charge)
+    end
+
+    @tag :integration
+    test "rejects proof signed by a revoked access key for the root source", %{rpc_url: rpc_url} do
+      root = fresh_wallet!(rpc_url)
+
+      %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
+        TempoAccessKey.authorize_and_revoke!(root.private_key, rpc_url: rpc_url)
+
+      challenge_id = "integration-proof-revoked-key-#{System.unique_integer([:positive])}"
+      realm = @realm
+      source = "did:pkh:eip155:#{@chain_id}:#{root_address}"
+
+      digest =
+        Proof.hash(%{
+          account: root_address,
+          chain_id: @chain_id,
+          challenge_id: challenge_id,
+          realm: realm
+        })
+
+      access_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
+      signature = TempoAccessKey.sign_proof!(digest, access_key, access_bytes)
+
+      charge = %Charge{
+        amount: "0",
+        currency: @path_usd,
+        recipient: root_address,
+        method_details: %{
+          "rpc_url" => rpc_url,
+          "chain_id" => @chain_id,
+          "challenge_id" => challenge_id,
+          "realm" => realm,
+          "credential_source" => source
+        }
+      }
+
+      payload = %{"type" => "proof", "signature" => signature}
+
+      assert {:error, %MPP.Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Proof signature does not match source"
     end
   end
 
