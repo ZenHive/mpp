@@ -1380,7 +1380,7 @@
       "id": 46,
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Tempo + session hardening audit vs. latest reference impls",
       "scores": {
         "d": 5,
@@ -1399,10 +1399,15 @@
         "No regression in existing Tempo / session integration tests",
         "When the proof-signature-to-wallet binding work lands: pin the mppx EIP-712 proof v3 conformance vector (refs/mppx/src/tempo/Proof.conformance.test.ts — account 0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1, chainId 42431, challengeId kM9xPqWvT2nJrHsY4aDfEb -> digest 0x3860a700a55e02ad3c2dc047e92489feceecbdb0a801d948e1d9f0b61ea9bc3f, sig 0x53f5d64d9f995e841b4212639b2e17e508e96752e10316df3814a16443dcbdb626c082190a4c3ecc3148101eb443d15bd83b579380b1be735a9c99f0df36c9fe1b) as a deterministic conformance test"
       ],
+      "shipped_in": "3d722ee4b18788ad07d1586a20c0f94fa133b912",
       "body": "Audit `MPP.Methods.Tempo`, the `MPP.Tempo.*` modules, and (when Phase 10 lands) session billing against the latest Tempo + session-channel hardening in mppx and mpp-rs. Read `refs/mppx` and `refs/mpp-rs` git logs + relevant src/ at pickup time to identify which fixes are not yet reflected in our Elixir impl.\n\nLikely areas (illustrative — confirm against latest refs at pickup): challenge-bound memo validation on pull transactions, raw-opaque byte-exact preservation through round-trip, expired-challenge rejection on both server and client, fee-payer sponsorship hardening, post-channel-close charge rejection, session-channel scoping to the active challenge, replayed-voucher rejection, fresh-deposit state preservation, broadcast-transaction memo validation, channel-locking during close, fee-payer approve-target validation, proof-signature-to-wallet binding.\n\nProduce a delta report (parity / partial / missing per upstream fix), then patch the gaps with targeted commits. Integration tests against Moderato testnet (and Phase 10 session vectors where applicable) for each newly covered case.\n\nConcrete upstream deltas found 2026-06-12 (confirm still-current at pickup): externalId explicitly added to PaymentWitness (mpp-specs #266 — verify our `MPP.Methods.Tempo.SessionReceipt` wire format includes it); fee-payer token allowlist (mpp-rs #286); client-side Tempo chain pinning (mpp-rs 8880cf7 — overlaps Task 45); `Store::put_if_absent` atomic-CAS semantics vs our `check_and_mark` (mpp-rs #280 — confirm our ConCacheStore atomicity matches); Stripe charge externalId binding fix (mppx #537 — also touches `MPP.Methods.Stripe`); hosted Tempo fee-payer fills (mppx #538). Newer (found 2026-06-24): client SessionManager closes legacy channels at max(spent, acceptedCumulative) because some legacy servers report receipt.spent as a per-request delta while still requiring close at the highest accepted cumulative voucher (mppx #577, commit 7ab4e00, src/tempo/legacy/client/SessionManager.ts) — design note for when the Elixir session client lands; we currently ship only MPP.Methods.Tempo.SessionReceipt (the wire type), no client-side channel close logic.\n",
       "created_at": "2026-05-16",
       "started_at": "2026-06-29",
+      "done_at": "2026-06-30",
       "scored_at": "2026-05-16",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1782777032985-6e9586f9, 3d722ee4b18788ad07d1586a20c0f94fa133b912).",
+      "delivered_by": "cursor",
+      "verified": true,
       "cross_repo": []
     },
     {
