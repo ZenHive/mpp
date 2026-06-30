@@ -1,5 +1,11 @@
 defmodule MPP.Methods.Tempo.HostedFeePayer do
-  @moduledoc false
+  @moduledoc """
+  Hosted Tempo fee-payer JSON-RPC fill support.
+
+  This module sends a client-signed sponsorship envelope to a configured
+  `eth_fillTransaction` endpoint and locally rebuilds the broadcastable 0x76
+  transaction from the returned fee token and fee-payer signature.
+  """
 
   alias Onchain.Tempo.Transaction
 
@@ -105,11 +111,13 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     end
   end
 
-  defp parse_fill_response(%{"result" => %{"tx" => tx}}) when is_map(tx), do: {:ok, tx}
-
   defp parse_fill_response(%{"error" => %{"message" => message}}) when is_binary(message), do: {:error, message}
 
-  defp parse_fill_response(body), do: {:error, get_in(body, ["error", "message"]) || @default_fill_error}
+  defp parse_fill_response(%{"result" => %{"tx" => tx}}) when is_map(tx), do: {:ok, tx}
+
+  defp parse_fill_response(%{} = body), do: {:error, get_in(body, ["error", "message"]) || @default_fill_error}
+
+  defp parse_fill_response(_body), do: {:error, @default_fill_error}
 
   defp require_fee_token(%{"feeToken" => fee_token}) when is_binary(fee_token) and fee_token != "" do
     {:ok, fee_token}
@@ -168,17 +176,27 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   defp encode_uint(n) when is_integer(n) and n >= 0, do: :binary.encode_unsigned(n)
 
-  defp parse_y_parity(%{"yParity" => y}) when is_integer(y), do: {:ok, y}
+  defp parse_y_parity(%{"yParity" => y}) when is_integer(y), do: validate_recovery_id(y)
 
-  defp parse_y_parity(%{"yParity" => y}) when is_binary(y), do: decode_quantity(y)
+  defp parse_y_parity(%{"yParity" => y}) when is_binary(y) do
+    with {:ok, decoded} <- decode_quantity(y), do: validate_recovery_id(decoded)
+  end
 
   defp parse_y_parity(%{"v" => v}) when is_binary(v) do
     with {:ok, n} <- decode_quantity(v) do
-      {:ok, if(n >= 27, do: n - 27, else: n)}
+      n
+      |> normalize_v()
+      |> validate_recovery_id()
     end
   end
 
   defp parse_y_parity(_), do: {:error, :invalid}
+
+  defp normalize_v(n) when n in [27, 28], do: n - 27
+  defp normalize_v(n), do: n
+
+  defp validate_recovery_id(n) when n in [0, 1], do: {:ok, n}
+  defp validate_recovery_id(_), do: {:error, :invalid}
 
   defp decode_quantity("0x" <> hex) do
     hex = if rem(byte_size(hex), 2) == 1, do: "0" <> hex, else: hex

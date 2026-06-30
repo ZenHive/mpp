@@ -214,6 +214,32 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
              HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
   end
 
+  test "fill rejects unexpected successful response bodies" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+
+    Req.Test.stub(Tempo, fn conn ->
+      Plug.Conn.send_resp(conn, 200, "not-json")
+    end)
+
+    assert {:error, "hosted fee payer failed to sponsor transaction"} =
+             HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
+  end
+
+  test "fill rejects invalid yParity values" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    fill_tx = hosted_fill_response(tx)
+    fill_tx = put_in(fill_tx["feePayerSignature"]["yParity"], 2)
+
+    Req.Test.stub(Tempo, fn conn ->
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+    end)
+
+    assert {:error, "hosted fee payer returned an invalid feePayerSignature"} =
+             HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
+  end
+
   test "build_fill_request includes non-empty access lists" do
     calldata = transfer_calldata(@recipient, 1_000_000)
     access = [[<<0x01, 0x02>>, [<<0x03>>]]]
