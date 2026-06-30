@@ -44,6 +44,7 @@ defmodule MPP.MixProject do
       {:plug, "~> 1.19"},
       {:jason, "~> 1.4.5"},
       {:req, "~> 0.6.1"},
+      {:telemetry, "~> 1.4"},
 
       # Dev/test tooling
       {:ex_doc, "~> 0.40.2", only: :dev, runtime: false},
@@ -121,6 +122,7 @@ defmodule MPP.MixProject do
         :plug_crypto,
         :jason,
         :req,
+        :telemetry,
         :descripex,
         :onchain,
         :onchain_tempo,
