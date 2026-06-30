@@ -248,10 +248,10 @@ defmodule MPP.Headers do
   """
   @spec parse_accept_payment(String.t()) :: [accept_payment_entry()]
   def parse_accept_payment(header) when is_binary(header) do
-    case parse_accept_payment_entries(header) do
-      {:ok, entries} -> Enum.map(entries, &entry_to_tuple/1)
-      {:error, _} -> []
-    end
+    header
+    |> parse_accept_payment_entries()
+    |> accept_payment_entries_or_empty()
+    |> Enum.map(&entry_to_tuple/1)
   end
 
   api(
@@ -401,6 +401,9 @@ defmodule MPP.Headers do
 
     parse_accept_payment_parts(parts)
   end
+
+  defp accept_payment_entries_or_empty({:ok, entries}), do: entries
+  defp accept_payment_entries_or_empty({:error, :malformed}), do: []
 
   defp parse_accept_payment_parts([]), do: {:error, :malformed}
 
