@@ -30,8 +30,31 @@ defmodule MPP.Methods.EVM do
     * `"rpc_url"` — (required) JSON-RPC endpoint URL for the target EVM chain
     * `"chain_id"` — (optional) network chain ID, included in challenge details
       so the client knows which chain to transact on
+    * `"store"` — (optional but **strongly recommended** — see "Replay protection")
+      a module implementing `MPP.Tempo.Store`, or `{MPP.Tempo.ConCacheStore, opts}`,
+      used to enforce single-use of each on-chain transaction hash
     * `"req_options"` — (optional) merged into the `Onchain.RPC` call as
       `:req_options` (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
+
+  ## Replay protection
+
+  This method verifies an **already-broadcast** transaction by hash and matches it
+  against the charge's `token`/`to`/`amount`. That match alone does not bind the
+  proof to a single use, so without a dedup store one settled transfer can satisfy
+  unlimited future charges on a static-price route (replay).
+
+  Configure `"store"` to make each transaction hash single-use: the hash is checked
+  before verification and atomically committed after, reusing the same
+  `MPP.Tempo.Store` behaviour (and `MPP.Tempo.ConCacheStore`) as the Tempo method.
+  The store's TTL must be ≥ your challenge `expires_in` (a good default is 2×) so a
+  hash cannot be evicted and replayed while its challenge is still valid.
+
+  **Residual limitation:** a store makes each transaction single-use, but the
+  hash-pointer credential carries no on-chain binding to a *specific* challenge — so
+  on its *first* presentation, any unrelated transfer that happens to match
+  `token`/`to`/`amount` is accepted. Binding a payment to one challenge on-chain is
+  the EIP-3009 authorization path (nonce = `keccak256(challengeId ‖ realm)`), tracked
+  separately in the roadmap; prefer it when per-challenge attribution is required.
 
   ## Credential Payload
 
@@ -59,9 +82,17 @@ defmodule MPP.Methods.EVM do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
+  alias MPP.Tempo.Store
 
   @required_config_keys ~w(rpc_url)
   @zero_address "0x0000000000000000000000000000000000000000"
+
+  # Single-use dedup: an EVM tx hash is namespaced separately from Tempo's
+  # "mpp:charge:" keyspace so one shared store can back both methods without
+  # cross-method key collisions.
+  @dedup_store_error_detail "Dedup store error"
+  @store_key_prefix "mpp:evm:"
 
   api(:method_name, "Return the payment method identifier for EVM.")
 
@@ -88,6 +119,7 @@ defmodule MPP.Methods.EVM do
             "MPP.Methods.EVM requires these keys in method_config: #{Enum.join(missing, ", ")}"
     end
 
+    validate_store!(config["store"])
     :ok
   end
 
@@ -110,15 +142,25 @@ defmodule MPP.Methods.EVM do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
+    store = config["store"]
 
     with {:ok, hash} <- extract_hash(payload),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
-         :ok <- require_recipient(charge) do
-      if native_currency?(charge.currency) do
-        verify_native_transfer(hash, charge, rpc_url, config)
-      else
-        verify_erc20_transfer(hash, charge, rpc_url, config)
-      end
+         :ok <- require_recipient(charge),
+         :ok <- check_hash_unused(store, hash),
+         {:ok, receipt} <- verify_transfer(hash, charge, rpc_url, config),
+         :ok <- commit_hash_used(store, hash) do
+      {:ok, receipt}
+    end
+  end
+
+  # Dispatches to native or ERC-20 verification. Called between the dedup
+  # fast-reject (check_hash_unused) and the atomic commit (commit_hash_used).
+  defp verify_transfer(hash, charge, rpc_url, config) do
+    if native_currency?(charge.currency) do
+      verify_native_transfer(hash, charge, rpc_url, config)
+    else
+      verify_erc20_transfer(hash, charge, rpc_url, config)
     end
   end
 
@@ -286,4 +328,70 @@ defmodule MPP.Methods.EVM do
   end
 
   defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
+
+  # --- Single-use dedup (mirrors MPP.Methods.Tempo's type="hash" path) ---
+  # Reuses the MPP.Tempo.Store behaviour: fast-reject read before on-chain
+  # verification, atomic commit after. These thin wrappers are extraction
+  # candidates for the shared-helper refactor (roadmap task 73).
+
+  # Read-only pre-check: reject a tx hash already recorded as used.
+  defp check_hash_unused(nil, _hash), do: :ok
+
+  defp check_hash_unused(store, hash) do
+    case Store.get(store, store_key(hash)) do
+      :not_found -> :ok
+      {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+    end
+  end
+
+  # Commits a hash as used AFTER successful on-chain verification. Atomic when the
+  # store supports check_and_mark/2: concurrent same-hash requests collide here, so
+  # exactly one wins and the loser gets "already used" — closing the check→mark race
+  # the plain get/put commit left open. Stores without check_and_mark/2 fall back to a
+  # best-effort put (the early read remains their only, non-atomic, guard).
+  defp commit_hash_used(nil, _hash), do: :ok
+
+  defp commit_hash_used(store, hash) do
+    key = store_key(hash)
+    ts = System.system_time(:millisecond)
+
+    if Store.supports_atomic?(store) do
+      case Store.check_and_mark(store, key, ts) do
+        :ok -> :ok
+        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      end
+    else
+      case Store.put(store, key, ts) do
+        :ok -> :ok
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      end
+    end
+  end
+
+  # Canonical dedup key: lowercase the (0x-prefixed) hash so casing variants
+  # of the same transaction collapse to one entry.
+  defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
+
+  # Validates the :store config is a module implementing the Store behaviour.
+  defp validate_store!(nil), do: :ok
+
+  defp validate_store!({ConCacheStore, _opts}), do: validate_store!(ConCacheStore)
+
+  defp validate_store!(ConCacheStore), do: :ok
+
+  defp validate_store!({store, _opts}) do
+    raise ArgumentError,
+          "MPP.Methods.EVM :store tuple form is only supported for {MPP.Tempo.ConCacheStore, opts}; got: #{inspect(store)}"
+  end
+
+  defp validate_store!(store) do
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
+      raise ArgumentError,
+            "MPP.Methods.EVM :store must be a module implementing MPP.Tempo.Store (get/1, put/2)"
+    end
+
+    :ok
+  end
 end

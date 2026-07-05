@@ -5,6 +5,7 @@ defmodule MPP.Methods.EVMTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM
   alias MPP.Receipt
+  alias MPP.Tempo.Store
 
   @rpc_url "https://mainnet.infura.io/v3/test"
   @chain_id 1
@@ -20,6 +21,115 @@ defmodule MPP.Methods.EVMTest do
   @amount "1000000"
   # 1_000_000 in hex = 0xF4240 — padded to 32 bytes for log data
   @amount_hex "0x" <> String.duplicate("0", 58) <> "0f4240"
+
+  # --- Dedup test stores (EVM-scoped names — reuse the MPP.Tempo.Store behaviour) ---
+
+  defmodule MemoryStore do
+    @moduledoc false
+    @behaviour Store
+
+    use Agent
+
+    def start_link(_opts \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+    @impl true
+    def get(key) do
+      case Agent.get(__MODULE__, &Map.get(&1, key)) do
+        nil -> :not_found
+        value -> {:ok, value}
+      end
+    end
+
+    @impl true
+    def put(key, value) do
+      Agent.update(__MODULE__, &Map.put(&1, key, value))
+      :ok
+    end
+
+    @impl true
+    def check_and_mark(key, value) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        if Map.has_key?(state, key),
+          do: {{:error, :already_exists}, state},
+          else: {:ok, Map.put(state, key, value)}
+      end)
+    end
+
+    def keys, do: Agent.get(__MODULE__, &Map.keys/1)
+  end
+
+  # get/1 + put/2 only — forces the non-atomic commit fallback.
+  defmodule NonAtomicStore do
+    @moduledoc false
+    @behaviour Store
+
+    use Agent
+
+    def start_link(_opts \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+    @impl true
+    def get(key) do
+      case Agent.get(__MODULE__, &Map.get(&1, key)) do
+        nil -> :not_found
+        value -> {:ok, value}
+      end
+    end
+
+    @impl true
+    def put(key, value) do
+      Agent.update(__MODULE__, &Map.put(&1, key, value))
+      :ok
+    end
+  end
+
+  # Stateless failure stores exercising each dedup error branch.
+  defmodule GetFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: {:error, :connection_lost}
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: :ok
+  end
+
+  defmodule AlreadyExistsStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: {:error, :already_exists}
+  end
+
+  defmodule AtomicFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: {:error, :unexpected_store_error}
+  end
+
+  # get/1 + put/2 only (no check_and_mark/2), and put always fails — forces the
+  # non-atomic commit fallback's error branch.
+  defmodule NonAtomicPutFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: {:error, :disk_full}
+  end
 
   setup do
     {:ok, charge} =
@@ -409,7 +519,172 @@ defmodule MPP.Methods.EVMTest do
     end
   end
 
+  describe "validate_config!/1 — store" do
+    test "accepts a module implementing the Store behaviour" do
+      assert :ok = EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => MemoryStore})
+    end
+
+    test "accepts {ConCacheStore, opts}" do
+      assert :ok =
+               EVM.validate_config!(%{
+                 "rpc_url" => @rpc_url,
+                 "store" => {MPP.Tempo.ConCacheStore, ttl: 600}
+               })
+    end
+
+    test "raises on a module that does not implement the Store behaviour" do
+      assert_raise ArgumentError, ~r/must be a module implementing MPP.Tempo.Store/, fn ->
+        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => Enum})
+      end
+    end
+
+    test "raises on an unsupported store tuple form" do
+      assert_raise ArgumentError, ~r/tuple form is only supported/, fn ->
+        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => {MemoryStore, []}})
+      end
+    end
+  end
+
+  describe "verify/2 — single-use dedup" do
+    setup %{charge: charge} do
+      start_supervised!(MemoryStore)
+      {:ok, charge: with_store(charge, MemoryStore)}
+    end
+
+    test "accepts a transaction once then rejects replay on the same challenge", %{charge: charge} do
+      stub_success()
+      payload = %{"hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "rejects the same tx hash presented for a fresh challenge (cross-challenge reuse)", %{
+      charge: charge
+    } do
+      stub_success()
+      payload = %{"hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+
+      # A brand-new charge/challenge sharing the same store — the settled tx must
+      # not satisfy a second, unrelated charge. Binding is keyed on the tx hash,
+      # not the (per-402-fresh) challenge id, so the replay is caught.
+      {:ok, fresh} = Charge.new(amount: @amount, currency: @token_address, recipient: @recipient)
+      fresh = with_store(%{fresh | method_details: charge.method_details}, MemoryStore)
+
+      assert {:error, %Errors{} = error} = EVM.verify(payload, fresh)
+      assert error.detail =~ "already used"
+    end
+
+    test "canonicalizes the hash — an uppercase-hex variant collides with the stored entry", %{
+      charge: charge
+    } do
+      stub_success()
+
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+
+      upper = "0x" <> String.upcase(String.duplicate("ab", 32))
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => upper}, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "does not mark a hash used when verification fails (commit is after verify)", %{
+      charge: charge
+    } do
+      # First presentation: receipt has no matching Transfer → verification fails,
+      # so the hash must NOT be recorded as used.
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => %{receipt_with_transfer() | "logs" => []}
+        })
+      end)
+
+      assert {:error, %Errors{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert MemoryStore.keys() == []
+
+      # A later valid presentation of the same hash then succeeds.
+      stub_success()
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+    end
+  end
+
+  describe "verify/2 — dedup without atomic check_and_mark/2" do
+    setup %{charge: charge} do
+      start_supervised!(NonAtomicStore)
+      {:ok, charge: with_store(charge, NonAtomicStore)}
+    end
+
+    test "sequential fallback still enforces single-use", %{charge: charge} do
+      stub_success()
+      payload = %{"hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+  end
+
+  describe "verify/2 — no store configured" do
+    test "verification still succeeds (single-use binding is opt-in)", %{charge: charge} do
+      stub_success()
+      payload = %{"hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+      # Without a store there is no replay guard — the same hash verifies again.
+      assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+    end
+  end
+
+  describe "verify/2 — dedup store failures" do
+    test "read failure in the pre-check surfaces a generic dedup error", %{charge: charge} do
+      # get/1 fails before the receipt is even fetched — no RPC stub needed.
+      charge = with_store(charge, GetFailStore)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail == "Dedup store error"
+    end
+
+    test "atomic commit collision (already_exists) is rejected as replay", %{charge: charge} do
+      stub_success()
+      charge = with_store(charge, AlreadyExistsStore)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "unexpected atomic commit error surfaces a generic dedup error", %{charge: charge} do
+      stub_success()
+      charge = with_store(charge, AtomicFailStore)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail == "Dedup store error"
+    end
+
+    test "non-atomic put failure surfaces a generic dedup error", %{charge: charge} do
+      stub_success()
+      charge = with_store(charge, NonAtomicPutFailStore)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail == "Dedup store error"
+    end
+  end
+
   # --- Test helpers ---
+
+  # Merges a dedup store into the charge's method_details.
+  defp with_store(charge, store) do
+    %{charge | method_details: Map.put(charge.method_details, "store", store)}
+  end
+
+  # Stubs a successful ERC-20 receipt matching the default charge.
+  defp stub_success do
+    Req.Test.stub(EVM, fn conn ->
+      rpc_dispatch(conn, %{"eth_getTransactionReceipt" => receipt_with_transfer()})
+    end)
+  end
 
   # Reads and decodes a JSON-RPC request from the stub conn, returning the
   # method, the request id (which the response MUST echo — Onchain.RPC/Cartouche
