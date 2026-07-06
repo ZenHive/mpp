@@ -10,7 +10,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [0.6.4] - 2026-07-07
 
-**Security (Tempo static-memo hardening).** A static `"memo"` in the Tempo `method_config` now requires a dedup `"store"` to be configured — `MPP.Plug` raises `ArgumentError` at init otherwise. A static memo pins attribution independently of the per-challenge nonce, so the dedup store provides the single-use guarantee for that configuration, matching the reference Rust SDK's store-on-by-default backstop. Routes using the default per-challenge attribution (no static memo) are unaffected. Configure `MPP.Tempo.ConCacheStore` (or `{MPP.Tempo.ConCacheStore, opts}`) in your supervision tree, or omit the static memo.
+**Security (Tempo static-memo hardening — GHSA-34g7-vx6g-82mq).** A static `"memo"` in the Tempo `method_config` now requires a dedup `"store"` to be configured — `MPP.Plug` raises `ArgumentError` at init otherwise. A static memo pins attribution independently of the per-challenge nonce, so the dedup store provides the single-use guarantee for that configuration, matching the reference Rust SDK's store-on-by-default backstop. Routes using the default per-challenge attribution (no static memo) are unaffected. Configure `MPP.Tempo.ConCacheStore` (or `{MPP.Tempo.ConCacheStore, opts}`) in your supervision tree, or omit the static memo.
 
 ## [0.6.3] - 2026-07-06
 
