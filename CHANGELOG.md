@@ -8,6 +8,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-07
+
+**Security (Tempo static-memo hardening).** A static `"memo"` in the Tempo `method_config` now requires a dedup `"store"` to be configured — `MPP.Plug` raises `ArgumentError` at init otherwise. A static memo pins attribution independently of the per-challenge nonce, so the dedup store provides the single-use guarantee for that configuration, matching the reference Rust SDK's store-on-by-default backstop. Routes using the default per-challenge attribution (no static memo) are unaffected. Configure `MPP.Tempo.ConCacheStore` (or `{MPP.Tempo.ConCacheStore, opts}`) in your supervision tree, or omit the static memo.
+
 ## [0.6.3] - 2026-07-06
 
 **Security (EVM payment-proof single-use — GHSA-vp5h-xh25-44wf).** `MPP.Methods.EVM` gains an optional `"store"` config (an `MPP.Tempo.Store` module, or `{MPP.Tempo.ConCacheStore, opts}`) that makes each on-chain transaction hash single-use, closing a payment-proof replay gap: the method previously matched a settled transfer only by `token`/`to`/`amount` with no single-use binding, and the generic `MPP.Plug` store keys on the per-402 `challenge.id`, so one settled transaction could satisfy repeated charges on a static-price route. The tx hash is now checked before on-chain verification and atomically committed (`check_and_mark/2`, with a non-atomic `put/2` fallback) after — keyed on the canonical (lowercased) hash rather than the challenge id, mirroring the Tempo `type="hash"` path. Store misconfiguration is rejected at init via `validate_config!`. Configure a store with a TTL ≥ your challenge expiry; residual per-challenge on-chain attribution is provided by the EIP-3009 authorization path (roadmap).
