@@ -1603,3 +1603,81 @@ started_at = "2026-06-30"
 scored_at = "2026-06-30"
 done_at = "2026-06-30"
 shipped_in = "86b0c5226b642d4016be1f109724b62d9e948897"
+
+[[task]]
+id = "70"
+phase = 9
+bundle = "evm"
+status = "done"
+title = "EVM method: on-chain payment-proof hardening parity with Tempo"
+scores = { d = 4, b = 9, u = 8 }
+markers = ["security"]
+acceptance_criteria = ["Parity scope defined and verified against the private advisory's checklist", "Reuses/generalizes `MPP.Tempo.Store` rather than a parallel dedup mechanism", "Semantics cross-checked against refs/mpp-rs + refs/mppx", "No exploit-actionable detail committed to tasks.toml / ROADMAP.md; advisory referenced by id"]
+out_of_scope = ["Adding new EVM credential types (tasks 38/39/40)"]
+touches = ["lib/mpp/methods/evm.ex", "lib/mpp/tempo/store.ex", "test/mpp/methods/evm_test.exs"]
+body = "Harden `MPP.Methods.EVM` on-chain proof verification to reach parity with the anti-reuse guarantees the Tempo method already enforces, reusing or generalizing the existing `MPP.Tempo.Store` behaviour rather than adding a parallel mechanism. Per CLAUDE.md's disclosure policy this repo is public: DO NOT restate security-sensitive mechanism, trigger, or reproduction in this file — full scope, rationale, and tests are tracked in the private draft GitHub Security Advisory GHSA-vp5h-xh25-44wf. Confirm the exact required semantics against the refs/mpp-rs and refs/mppx on-chain verification paths before shipping (wire-format verification rule). Document any residual limitation in the EVM moduledoc until closed."
+implemented = "EVM single-use dedup via MPP.Tempo.Store: check-before/atomic-commit-after keyed on canonical tx hash; validate_store!; moduledoc semantics. +25 tests, precommit.full green (95.1% cov). Advisory GHSA-vp5h-xh25-44wf."
+created_at = "2026-07-05"
+started_at = "2026-07-05"
+scored_at = "2026-07-05"
+done_at = "2026-07-06"
+shipped_in = "ecc038088b1cda09ad8a84acc6cc112addb4a68f"
+
+[[task]]
+id = "71"
+phase = 9
+bundle = "tempo"
+status = "pending"
+title = "EVM/Tempo method-module hardening and doc corrections"
+scores = { d = 3, b = 6, u = 6 }
+markers = ["security"]
+depends_on = [70]
+acceptance_criteria = ["No client-facing 402 detail contains inspect() of an internal error reason", "Tempo RLP field indices defined in exactly one module; all consumers alias it", "HostedFeePayer errors (does not silently degrade) on unexpected field count", "EVM/Tempo tx-hash + currency handling consistent; redundant memo check removed", "Moduledoc optional-dep claims corrected; ConCacheStore default TTL = 600s"]
+out_of_scope = ["EVM single-use binding (task 70)", "Splitting MPP.Headers or extracting shared helpers (task 73)"]
+touches = ["lib/mpp/methods/evm.ex", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/hosted_fee_payer.ex", "lib/mpp/methods/tempo/fee_payer_policy.ex", "lib/mpp/verifier.ex", "lib/mpp/tempo/con_cache_store.ex"]
+body = "A cluster of coupled fixes in the EVM/Tempo payment-method modules — they share files, so land as one change. (1) Stop leaking internal error detail to clients: `MPP.Verifier`'s catch-all (verifier.ex:134), `MPP.Methods.EVM`'s RPC receipt/tx error paths (evm.ex:222,230), and `HostedFeePayer.post_fill/3` (hosted_fee_payer.ex:110) interpolate `inspect(reason)` into the client-facing RFC 9457 `detail`; `Errors.to_map/1` serializes it verbatim to the client. Log the raw reason server-side (Logger.warning) and return a generic detail string, matching the Tempo RPC paths' existing `@tempo_rpc_error_detail` pattern. (2) Centralize the Tempo 0x76 RLP field indices, currently hand-redeclared in tempo.ex, fee_payer_policy.ex, and hosted_fee_payer.ex, each indexing into onchain_tempo's private `[term()]` fields list: move them to one `@moduledoc false` index module all three alias, and make `HostedFeePayer` assert field count and fail closed instead of silently omitting `keyAuthorization` on a shape mismatch. Verify indices against refs/mpp-rs + refs/mppx (wire-format rule). (3) Small consistency fixes: align tx-hash format handling between `EVM.extract_hash` (requires 0x) and `Tempo.extract_hash` (strips it); downcase currency comparison in `EVM.native_currency?`; drop the redundant post-hoc `check_matched_memo_binding` in `find_matching_transfer`'s no-memo branch (the Enum.find predicate already guaranteed it). (4) Doc corrections in these files: the EVM/Tempo moduledocs falsely claim onchain/onchain_tempo are optional deps with an init-time availability check that does not exist — correct the docs; fix the stale Task-53 comment (tempo.ex:696); raise `ConCacheStore` default TTL to 2x the default challenge expiry (600s) per its own documented recommendation."
+created_at = "2026-07-05"
+scored_at = "2026-07-05"
+
+[[task]]
+id = "72"
+phase = 9
+bundle = "core-protocol"
+status = "pending"
+title = "Parse-time input validation parity for challenge/credential"
+scores = { d = 3, b = 5, u = 6 }
+acceptance_criteria = ["Malformed id/method/request/digest rejected at parse time with distinct errors, matching refs/mpp-rs + refs/mppx", "Invalid `expires` timestamp distinguished from expired", "JCS guards/rejects non-binary keys per its documented contract", "Property + unit tests cover field-by-field malformed input"]
+out_of_scope = ["Splitting MPP.Headers (task 73)"]
+touches = ["lib/mpp/headers.ex", "lib/mpp/credential.ex", "lib/mpp/mcp.ex", "lib/mpp/verifier.ex", "lib/mpp/jcs.ex"]
+body = "Add the early input-shape validation the reference SDKs perform but our parser defers. In `MPP.Headers.parse_challenge` and the `challenge_from_map` paths (`MPP.Credential`, `MPP.Mcp`), validate at parse time that `id` is non-empty, `method` is non-empty and lowercase, `request` decodes to valid base64url + JSON, and `digest` (when present) matches `^sha-256=`. Return distinct error atoms per failure rather than deferring to a downstream generic mismatch. Match mpp-rs (refs/mpp-rs/src/protocol/core/headers.rs) and mppx (refs/mppx/src/Challenge.ts) semantics — cross-check both. While in these files, fix adjacent small issues: `MPP.Verifier.check_expiration` reports a malformed (non-ISO-8601) `expires` as `:payment_expired` — give it a distinct invalid-timestamp error; remove the dead clause in `check_request_recipient`; align the 16 KiB `request`-size boundary with mpp-rs's quoted-path `>=`; add a binary-key guard (or documented raise) to `MPP.JCS.canonicalize` per its stated contract."
+created_at = "2026-07-05"
+scored_at = "2026-07-05"
+
+[[task]]
+id = "73"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Extract shared helpers and split MPP.Headers (mechanical refactor)"
+scores = { d = 3, b = 4, u = 6 }
+depends_on = [71, 72]
+acceptance_criteria = ["No duplicated strip_0x / hex_string? / decode-base64-json across the listed modules", "Accept-Payment logic lives in its own module with its tests", "Zero behavior change; full suite green; Dialyzer clean"]
+out_of_scope = ["Any correctness or validation change (task 72)"]
+touches = ["lib/mpp/headers.ex", "lib/mpp/credential.ex", "lib/mpp/receipt.ex", "lib/mpp/verifier.ex", "lib/mpp/mcp.ex", "lib/mpp/did.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/signature_envelope.ex", "lib/mpp/methods/tempo/proof.ex", "lib/mpp/methods/tempo/hosted_fee_payer.ex"]
+body = "Two coupled mechanical refactors — no behavior change (good codex candidate; recommend assignee=codex). (a) Extract duplicated internal helpers: `strip_0x/1` (duplicated 5x across did.ex, tempo.ex, signature_envelope.ex, proof.ex, hosted_fee_payer.ex), `hex_string?/1` (3x), and the byte-identical `require_config`/`check_receipt_status`/`parse_charge_amount` shared between evm.ex and tempo.ex into one small `MPP.Hex`-style helper module; and the ~4x base64url->JSON->error-tag decode (credential.ex, receipt.ex, verifier.ex, mcp.ex) into one shared `decode_base64_json/1 :: {:ok, map} | {:error, :invalid_base64 | :invalid_json}`. (b) Split the 870-line `MPP.Headers`: extract the self-contained Accept-Payment parse/rank/format algorithm into `MPP.AcceptPayment` (independently testable) and the byte-level multi-scheme boundary state machine into a private splitter; leave `MPP.Headers` for challenge/credential/receipt wire format. Pure refactor: existing tests pass unchanged (tests move with their code), full suite + Dialyzer green."
+created_at = "2026-07-05"
+scored_at = "2026-07-05"
+
+[[task]]
+id = "74"
+phase = 9
+bundle = "dx"
+status = "pending"
+title = "Docs hygiene: README modules, ROADMAP focus, SECURITY version"
+scores = { d = 1, b = 3, u = 5 }
+markers = ["docs"]
+acceptance_criteria = ["README Modules table lists all public modules", "ROADMAP.md has no stale hand-written focus prose conflicting with the generated block", "SECURITY.md supported version matches current (0.6.x)"]
+touches = ["README.md", "ROADMAP.md", "SECURITY.md"]
+body = "Small repo-doc corrections (inline-sized — no full dispatch really needed). Add the 5 shipped-but-unlisted modules to the README Modules table: `MPP.Client.AcceptPolicy`, `MPP.Client.Transport` + `MPP.Client.Transport.HTTP`, `MPP.Methods.Tempo.AccessKey`, `MPP.Methods.Tempo.SignatureEnvelope`. Replace or remove the ~2.5-month-stale free-text 'Current Focus' paragraph in ROADMAP.md in favor of the auto-generated FOCUS marker block directly below it. Bump SECURITY.md supported-versions from 0.5.x to 0.6.x. Regenerate AGENTS.md if any CLAUDE.md-adjacent content changes."
+created_at = "2026-07-05"
+scored_at = "2026-07-05"
