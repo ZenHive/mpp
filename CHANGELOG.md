@@ -8,6 +8,12 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-06
+
+**Security (EVM payment-proof single-use — GHSA-vp5h-xh25-44wf).** `MPP.Methods.EVM` gains an optional `"store"` config (an `MPP.Tempo.Store` module, or `{MPP.Tempo.ConCacheStore, opts}`) that makes each on-chain transaction hash single-use, closing a payment-proof replay gap: the method previously matched a settled transfer only by `token`/`to`/`amount` with no single-use binding, and the generic `MPP.Plug` store keys on the per-402 `challenge.id`, so one settled transaction could satisfy repeated charges on a static-price route. The tx hash is now checked before on-chain verification and atomically committed (`check_and_mark/2`, with a non-atomic `put/2` fallback) after — keyed on the canonical (lowercased) hash rather than the challenge id, mirroring the Tempo `type="hash"` path. Store misconfiguration is rejected at init via `validate_config!`. Configure a store with a TTL ≥ your challenge expiry; residual per-challenge on-chain attribution is provided by the EIP-3009 authorization path (roadmap).
+
+Dependency updates. Transitive: `plug 1.20.1 → 1.20.2`, `cowlib 2.17.1 → 2.18.0`, `hpax 1.0.3 → 1.0.4`, `makeup 1.2.1 → 1.2.2`; dev-only `ex_ast 0.12.5 → 0.12.7`.
+
 ## [0.6.2] - 2026-06-30
 
 Protocol utilities. Added `MPP.Expires` for ISO 8601 challenge-expiration helpers and `MPP.DID.evm_did/2` for `did:pkh:eip155` credential-source identifiers.
