@@ -141,6 +141,7 @@ defmodule MPP.Methods.Tempo do
 
     validate_memo!(config["memo"])
     validate_store!(config["store"])
+    validate_memo_store_binding!(config)
     validate_fee_payer!(config)
     validate_fee_payer_allowed_tokens!(config)
     :ok
@@ -311,6 +312,23 @@ defmodule MPP.Methods.Tempo do
   end
 
   # --- Fee payer helpers ---
+
+  # A static `memo` disables the automatic per-challenge attribution binding that the
+  # no-memo path relies on (the memo can't hold both a fixed value and a challenge-bound
+  # nonce). Without a dedup `store`, any third party can replay a publicly-observable
+  # matching TransferWithMemo they never signed. Require single-use enforcement in that
+  # configuration, matching mpp-rs's store-on-by-default backstop (refs/mpp-rs/src/server/tempo.rs).
+  defp validate_memo_store_binding!(%{"memo" => memo, "store" => store}) when is_binary(memo) and not is_nil(store),
+    do: :ok
+
+  defp validate_memo_store_binding!(%{"memo" => memo}) when is_binary(memo) do
+    raise ArgumentError,
+          ~s{MPP.Methods.Tempo: a static "memo" requires a "store" (dedup) in method_config — } <>
+            "without it, a publicly-observable matching transfer can be replayed by a third party. " <>
+            "Configure MPP.Tempo.ConCacheStore (or omit the static memo to use challenge-bound attribution)."
+  end
+
+  defp validate_memo_store_binding!(_config), do: :ok
 
   defp validate_fee_payer!(%{"fee_payer_url" => url} = config) when is_binary(url) do
     if config["fee_payer_private_key"] || config["fee_token"] do

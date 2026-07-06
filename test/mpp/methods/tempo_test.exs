@@ -77,18 +77,34 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
-    test "accepts valid memo with 0x prefix" do
+    test "accepts valid memo with 0x prefix (with a store)" do
       memo = "0x" <> String.duplicate("ab", 32)
-      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => ConCacheStore})
     end
 
-    test "accepts valid memo without 0x prefix" do
+    test "accepts valid memo without 0x prefix (with a store)" do
       memo = String.duplicate("ab", 32)
-      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => ConCacheStore})
     end
 
     test "accepts nil memo" do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => nil})
+    end
+
+    test "raises when a static memo is configured without a store" do
+      memo = "0x" <> String.duplicate("ab", 32)
+
+      assert_raise ArgumentError, ~r/static "memo" requires a "store"/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
+      end
+    end
+
+    test "raises when a static memo is configured with an explicitly nil store" do
+      memo = "0x" <> String.duplicate("ab", 32)
+
+      assert_raise ArgumentError, ~r/static "memo" requires a "store"/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => nil})
+      end
     end
 
     test "raises on memo with wrong length" do
@@ -218,6 +234,38 @@ defmodule MPP.Methods.TempoTest do
 
       memo = attribution_memo(@realm, "other-challenge")
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "rejects a memo whose bytes are the right length but not attribution-tagged", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"challenge_id" => @challenge_id, "realm" => @realm})
+      }
+
+      # 32 bytes (correct memo length) but without the "mpp" attribution tag/version prefix.
+      untagged_memo = "0x" <> String.duplicate("00", 32)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: untagged_memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "rejects a memo whose byte length is not the attribution length", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"challenge_id" => @challenge_id, "realm" => @realm})
+      }
+
+      # Too short to be a valid 32-byte attribution memo.
+      short_memo = "0xabcd"
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: short_memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -1000,6 +1048,22 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
 
       # Second call with same signed tx is rejected before broadcast
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "already used"
+    end
+
+    test "static-memo hash path rejects replay of already-used hash (store backstops missing attribution binding)",
+         %{charge: charge} do
+      # Static memo disables per-challenge attribution binding, so the dedup store is the
+      # sole replay defense — this proves it holds on the static-memo path.
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "already used"
@@ -1807,6 +1871,53 @@ defmodule MPP.Methods.TempoTest do
     test "skips fee payer validation when fee_payer is absent" do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url})
     end
+
+    test "accepts a valid fee_payer_allowed_fee_tokens list" do
+      assert :ok =
+               Tempo.validate_config!(%{
+                 "rpc_url" => @rpc_url,
+                 "fee_payer" => true,
+                 "fee_payer_private_key" => @fee_payer_key,
+                 "fee_token" => @fee_payer_token,
+                 "fee_payer_allowed_fee_tokens" => [@fee_payer_token]
+               })
+    end
+
+    test "raises when fee_payer_allowed_fee_tokens contains an invalid address" do
+      assert_raise ArgumentError, ~r/fee_payer_allowed_fee_tokens must be a list of 20-byte hex addresses/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => @fee_payer_key,
+          "fee_token" => @fee_payer_token,
+          "fee_payer_allowed_fee_tokens" => [@fee_payer_token, "0xdead", 123]
+        })
+      end
+    end
+
+    test "raises when fee_payer_allowed_fee_tokens contains a non-binary element" do
+      assert_raise ArgumentError, ~r/fee_payer_allowed_fee_tokens must be a list of 20-byte hex addresses/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => @fee_payer_key,
+          "fee_token" => @fee_payer_token,
+          "fee_payer_allowed_fee_tokens" => [123, @fee_payer_token]
+        })
+      end
+    end
+
+    test "raises when fee_payer_allowed_fee_tokens is not a list" do
+      assert_raise ArgumentError, ~r/fee_payer_allowed_fee_tokens must be a list of hex addresses/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => @fee_payer_key,
+          "fee_token" => @fee_payer_token,
+          "fee_payer_allowed_fee_tokens" => "not-a-list"
+        })
+      end
+    end
   end
 
   describe "verify/2 — hash + fee_payer rejection" do
@@ -2241,6 +2352,31 @@ defmodule MPP.Methods.TempoTest do
 
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.detail =~ "source"
+    end
+
+    test "rejects proof with a non-binary credential_source", %{charge: charge} do
+      charge = put_in(charge.method_details["credential_source"], 12_345)
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "source"
+    end
+
+    test "rejects proof credential missing the signature field", %{charge: charge} do
+      payload = %{"type" => "proof"}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "signature"
+    end
+
+    test "rejects proof credential with a non-binary signature", %{charge: charge} do
+      payload = %{"type" => "proof", "signature" => 42}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "signature"
     end
 
     test "accepts proof signed by an authorized access key for the root source", %{charge: charge} do

@@ -250,7 +250,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url,
       memo_tx_hash: memo_tx_hash
     } do
-      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+      start_supervised!(TempoMemoryStore)
+
+      memo_config =
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
 
       challenge = request_challenge!(memo_config)
 
@@ -277,7 +280,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url,
       tx_hash: tx_hash
     } do
-      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+      start_supervised!(TempoMemoryStore)
+
+      memo_config =
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
 
       body = submit_credential!(memo_config, %{"type" => "hash", "hash" => tx_hash})
       assert body["type"] =~ "verification-failed"
@@ -289,8 +295,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url,
       memo_tx_hash: memo_tx_hash
     } do
+      start_supervised!(TempoMemoryStore)
       wrong_memo = "0x" <> String.duplicate("cd", 32)
-      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => wrong_memo})
+
+      memo_config =
+        tempo_config(recipient_address, rpc_url, %{"memo" => wrong_memo, "store" => TempoMemoryStore})
 
       body = submit_credential!(memo_config, %{"type" => "hash", "hash" => memo_tx_hash})
       assert body["type"] =~ "verification-failed"
@@ -304,7 +313,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url
     } do
       sender = fresh_wallet!(rpc_url)
-      memo_config = tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+      start_supervised!(TempoMemoryStore)
+
+      memo_config =
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
 
       memo_call =
         TempoTestHelpers.build_call(
@@ -1177,7 +1189,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url
     } do
       config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
 
       challenge = request_challenge!(config)
       assert {:ok, request_json} = Base.url_decode64(challenge.request, padding: false)
