@@ -56,6 +56,10 @@ defmodule MPP.Verifier do
   alias MPP.Receipt
   alias MPP.Telemetry
 
+  require Logger
+
+  @verification_failed_detail "Payment verification failed"
+
   @expected_intent "charge"
 
   api(:verify, "Verify a payment credential against endpoint configuration. Transport-neutral.",
@@ -132,7 +136,8 @@ defmodule MPP.Verifier do
           {:error, error}
 
         {:error, reason} ->
-          {:error, Errors.new(:verification_failed, "Payment verification failed: #{inspect(reason)}")}
+          Logger.warning("MPP.Verifier: payment verification failed: #{inspect(reason)}")
+          {:error, Errors.new(:verification_failed, @verification_failed_detail)}
       end
 
     case result do

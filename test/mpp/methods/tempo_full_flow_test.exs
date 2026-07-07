@@ -63,7 +63,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "hash path filters correct Transfer from noisy logs" do
     test "selects correct Transfer event ignoring unrelated logs" do
-      config = init_tempo_config(method_config: %{"memo" => @test_memo})
+      config = init_tempo_config_with_memo_store()
 
       unrelated_log = %{
         "address" => "0x0000000000000000000000000000000000000001",
@@ -94,7 +94,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "transferWithMemo full flow" do
     test "hash path: rejects when log has wrong memo" do
-      config = init_tempo_config(method_config: %{"memo" => @test_memo})
+      config = init_tempo_config_with_memo_store()
 
       wrong_memo = "0x" <> String.duplicate("cd", 32)
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: wrong_memo)]))
@@ -105,7 +105,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end
 
     test "hash path: rejects plain Transfer when memo is configured" do
-      config = init_tempo_config(method_config: %{"memo" => @test_memo})
+      config = init_tempo_config_with_memo_store()
 
       # success_receipt() generates a plain Transfer log (no memo)
       stub_receipt(success_receipt())
@@ -116,7 +116,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end
 
     test "hash path: accepts matching transferWithMemo" do
-      config = init_tempo_config(method_config: %{"memo" => @test_memo})
+      config = init_tempo_config_with_memo_store()
 
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
@@ -134,7 +134,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end
 
     test "transaction path: accepts matching transferWithMemo" do
-      config = init_tempo_config(method_config: %{"memo" => @test_memo})
+      config = init_tempo_config_with_memo_store()
 
       # Build tx with transferWithMemo calldata
       call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
@@ -240,8 +240,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "optimistic multicall simulates the full transaction before broadcast" do
     test "simulates via eth_simulateV1, then broadcasts" do
-      config =
-        init_tempo_config(method_config: %{"wait_for_confirmation" => false, "memo" => @test_memo})
+      config = init_tempo_config_with_memo_store(%{"wait_for_confirmation" => false})
 
       # Build 3-call tx: [approve(dex), swap(dex), transfer(token)]. The full tx is
       # simulated via eth_simulateV1 — there is no per-call eth_call to mis-target.
@@ -337,6 +336,12 @@ defmodule MPP.Methods.TempoFullFlowTest do
   # ============================================================================
 
   # --- Config builders ---
+
+  defp init_tempo_config_with_memo_store(extra \\ %{}) do
+    start_supervised!(TempoMemoryStore)
+
+    init_tempo_config(method_config: Map.merge(%{"store" => TempoMemoryStore, "memo" => @test_memo}, extra))
+  end
 
   defp init_tempo_config(overrides) do
     extra_method_config = Keyword.get(overrides, :method_config, %{})

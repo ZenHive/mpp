@@ -48,7 +48,8 @@ defmodule MPP.Tempo.ConCacheStore do
 
   ## Options
 
-    * `:ttl` — time-to-live for entries in milliseconds. Default: 5 minutes.
+    * `:ttl` — time-to-live for entries in milliseconds. Default: 10 minutes (2× the
+      default Plug `expires_in` of 300 seconds).
     * `:name` — registered name for the ConCache process. Default: `:mpp_tempo_dedup`.
       Override to avoid child ID collisions if your app already supervises other
       ConCache instances.
@@ -60,7 +61,7 @@ defmodule MPP.Tempo.ConCacheStore do
   alias MPP.Tempo.Store
 
   @cache_name :mpp_tempo_dedup
-  @default_ttl_ms to_timeout(minute: 5)
+  @default_ttl_ms to_timeout(minute: 10)
   @default_check_interval_ms to_timeout(second: 30)
 
   @doc """

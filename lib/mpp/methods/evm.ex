@@ -71,9 +71,7 @@ defmodule MPP.Methods.EVM do
 
   ## Dependencies
 
-  Requires the `onchain` package (optional dependency) for address validation
-  and Transfer event parsing. The method checks availability at init time
-  via `validate_config!/1`.
+  Requires the `onchain` package for address validation and Transfer event parsing.
   """
 
   use MPP.Method
@@ -85,6 +83,8 @@ defmodule MPP.Methods.EVM do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
 
+  require Logger
+
   @required_config_keys ~w(rpc_url)
   @zero_address "0x0000000000000000000000000000000000000000"
 
@@ -92,7 +92,9 @@ defmodule MPP.Methods.EVM do
   # "mpp:charge:" keyspace so one shared store can back both methods without
   # cross-method key collisions.
   @dedup_store_error_detail "Dedup store error"
+  @evm_rpc_error_detail "EVM RPC request failed"
   @store_key_prefix "mpp:evm:"
+  @zero_amount_non_proof_detail "Zero-amount challenges require a proof credential"
 
   api(:method_name, "Return the payment method identifier for EVM.")
 
@@ -102,7 +104,7 @@ defmodule MPP.Methods.EVM do
 
   api(
     :validate_config!,
-    "Validate EVM method_config at init time. Raises on missing `rpc_url` or unavailable `onchain` dependency.",
+    "Validate EVM method_config at init time. Raises on missing `rpc_url`.",
     params: [
       config: [kind: :value, description: "method_config map to validate"]
     ],
@@ -144,7 +146,8 @@ defmodule MPP.Methods.EVM do
     config = charge.method_details || %{}
     store = config["store"]
 
-    with {:ok, hash} <- extract_hash(payload),
+    with :ok <- reject_non_proof_for_zero_amount(charge),
+         {:ok, hash} <- extract_hash(payload),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
          :ok <- require_recipient(charge),
          :ok <- check_hash_unused(store, hash),
@@ -259,17 +262,29 @@ defmodule MPP.Methods.EVM do
 
   defp fetch_receipt(hash, rpc_url, config) do
     case Onchain.RPC.get_transaction_receipt(hash, rpc_opts(rpc_url, config)) do
-      {:ok, nil} -> {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
-      {:ok, receipt} -> {:ok, receipt}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, "RPC error fetching receipt: #{inspect(reason)}")}
+      {:ok, nil} ->
+        {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
+
+      {:ok, receipt} ->
+        {:ok, receipt}
+
+      {:error, reason} ->
+        Logger.warning("MPP.Methods.EVM: RPC get_transaction_receipt failed: #{inspect(reason)}")
+        {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
     end
   end
 
   defp fetch_transaction(hash, rpc_url, config) do
     case Onchain.RPC.get_transaction_by_hash(hash, rpc_opts(rpc_url, config)) do
-      {:ok, nil} -> {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
-      {:ok, tx} -> {:ok, tx}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, "RPC error fetching transaction: #{inspect(reason)}")}
+      {:ok, nil} ->
+        {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
+
+      {:ok, tx} ->
+        {:ok, tx}
+
+      {:error, reason} ->
+        Logger.warning("MPP.Methods.EVM: RPC get_transaction_by_hash failed: #{inspect(reason)}")
+        {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
     end
   end
 
@@ -283,9 +298,11 @@ defmodule MPP.Methods.EVM do
 
   # --- Shared helpers ---
 
-  defp extract_hash(%{"hash" => "0x" <> hex = hash}) when is_binary(hash) do
+  defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
+    hex = strip_0x(hash)
+
     if byte_size(hex) == 64 and hex_string?(hex) do
-      {:ok, hash}
+      {:ok, "0x" <> String.downcase(hex)}
     else
       {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
     end
@@ -315,11 +332,17 @@ defmodule MPP.Methods.EVM do
     end
   end
 
+  defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}) do
+    {:error, Errors.new(:verification_failed, @zero_amount_non_proof_detail)}
+  end
+
+  defp reject_non_proof_for_zero_amount(_charge), do: :ok
+
   # Returns true if the currency represents native ETH (not an ERC-20 token).
-  defp native_currency?("ETH"), do: true
-  defp native_currency?("eth"), do: true
-  defp native_currency?(@zero_address), do: true
-  defp native_currency?(_), do: false
+  defp native_currency?(currency) when is_binary(currency) do
+    down = String.downcase(currency)
+    down == "eth" or down == String.downcase(@zero_address)
+  end
 
   defp check_receipt_status(%{status: 1}), do: :ok
 
@@ -328,6 +351,9 @@ defmodule MPP.Methods.EVM do
   end
 
   defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
+
+  defp strip_0x("0x" <> rest), do: rest
+  defp strip_0x(hex), do: hex
 
   # --- Single-use dedup (mirrors MPP.Methods.Tempo's type="hash" path) ---
   # Reuses the MPP.Tempo.Store behaviour: fast-reject read before on-chain

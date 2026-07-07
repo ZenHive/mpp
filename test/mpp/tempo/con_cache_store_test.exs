@@ -29,7 +29,11 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       spec = ConCacheStore.child_spec()
 
       assert spec.id == {ConCacheStore, :mpp_tempo_dedup}
-      assert {ConCache, :start_link, [[name: :mpp_tempo_dedup, ttl_check_interval: _, global_ttl: _]]} = spec.start
+
+      assert {ConCache, :start_link, [[name: :mpp_tempo_dedup, ttl_check_interval: _, global_ttl: global_ttl]]} =
+               spec.start
+
+      assert global_ttl == to_timeout(minute: 10)
     end
 
     test "uses a custom cache id when name is configured" do

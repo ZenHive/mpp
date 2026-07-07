@@ -403,7 +403,8 @@ defmodule MPP.VerifierTest do
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert String.contains?(error.type, "verification-failed")
-      assert String.contains?(error.detail, "some_unknown_reason")
+      assert error.detail == "Payment verification failed"
+      refute error.detail =~ "some_unknown_reason"
     end
   end
 

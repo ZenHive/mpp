@@ -54,6 +54,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   > requires pre-broadcast simulation of the co-signed transaction.
   """
 
+  alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias Onchain.Tempo.Transaction
 
   @moderato_chain_id 42_431
@@ -61,16 +62,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @path_usd "0x20c0000000000000000000000000000000000000"
   @usdc "0x20C000000000000000000000b9537d11c60E8b50"
 
-  # 0x76 RLP envelope field indices (see Onchain.Tempo.Transaction wire format).
-  @max_priority_fee_index 1
-  @max_fee_index 2
-  @gas_limit_index 3
-  @access_list_index 5
-  @nonce_key_index 6
-  @valid_before_index 8
-
-  # The expiring nonce key (U256::MAX) — the sentinel both reference SDKs require
-  # for sponsored transactions so they cannot be replayed under a fixed nonce.
+  # Expiring nonce key (U256::MAX) — sentinel both reference SDKs require for sponsored txs.
   @expiring_nonce_key Bitwise.bsl(1, 256) - 1
 
   # Defaults match mppx/mpp-rs. Gas/fee ceilings are wei;
@@ -204,9 +196,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   """
   @spec validate(Transaction.t(), t(), integer()) :: :ok | {:error, String.t()}
   def validate(%Transaction{} = tx, %__MODULE__{} = policy, now) when is_integer(now) do
-    with {:ok, gas_limit} <- field_int(tx, @gas_limit_index, "gas_limit"),
-         {:ok, max_fee} <- field_int(tx, @max_fee_index, "max_fee_per_gas"),
-         {:ok, max_priority} <- field_int(tx, @max_priority_fee_index, "max_priority_fee_per_gas"),
+    with {:ok, gas_limit} <- field_int(tx, TxFields.gas_limit(), "gas_limit"),
+         {:ok, max_fee} <- field_int(tx, TxFields.max_fee_per_gas(), "max_fee_per_gas"),
+         {:ok, max_priority} <- field_int(tx, TxFields.max_priority_fee_per_gas(), "max_priority_fee_per_gas"),
          :ok <- check_gas(gas_limit, policy),
          :ok <- check_max_fee(max_fee, policy),
          :ok <- check_total_fee(gas_limit, max_fee, policy),
@@ -253,7 +245,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   @spec check_nonce_key(Transaction.t()) :: :ok | {:error, String.t()}
   defp check_nonce_key(tx) do
-    with {:ok, key} <- field_int(tx, @nonce_key_index, "nonce_key") do
+    with {:ok, key} <- field_int(tx, TxFields.nonce_key(), "nonce_key") do
       if key == @expiring_nonce_key,
         do: :ok,
         else: {:error, "fee-payer transaction must use the expiring nonce key"}
@@ -262,7 +254,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   @spec check_validity_window(Transaction.t(), t(), integer()) :: :ok | {:error, String.t()}
   defp check_validity_window(tx, %{max_validity_window_seconds: max}, now) do
-    with {:ok, valid_before} <- field_int(tx, @valid_before_index, "valid_before") do
+    with {:ok, valid_before} <- field_int(tx, TxFields.valid_before(), "valid_before") do
       cond do
         valid_before == 0 ->
           {:error, "fee-payer transaction must declare valid_before"}
@@ -281,7 +273,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   @spec check_access_list(Transaction.t()) :: :ok | {:error, String.t()}
   defp check_access_list(%Transaction{fields: fields}) do
-    case Enum.at(fields, @access_list_index) do
+    case Enum.at(fields, TxFields.access_list()) do
       [] ->
         :ok
 

@@ -4,6 +4,7 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
   import MPP.Test.TempoTestHelpers
 
   alias MPP.Methods.Tempo
+  alias MPP.Methods.Tempo.EnvelopeFields
   alias MPP.Methods.Tempo.HostedFeePayer
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
@@ -116,6 +117,30 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
              HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
   end
 
+  test "build_fill_request rejects unexpected field counts" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    truncated = %{tx | fields: Enum.take(tx.fields, 10)}
+
+    assert {:error, reason} = HostedFeePayer.build_fill_request(truncated)
+    assert reason =~ "unexpected 0x76 field count"
+  end
+
+  test "build_fill_request rejects malformed key_authorization on 15-field envelopes" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+
+    padded_fields =
+      tx.fields
+      |> Enum.take(EnvelopeFields.signed_field_count() - 1)
+      |> Kernel.++([<<>>, List.last(tx.fields)])
+
+    tx = %{tx | fields: padded_fields}
+
+    assert {:error, reason} = HostedFeePayer.build_fill_request(tx)
+    assert reason =~ "malformed key_authorization"
+  end
+
   test "fill surfaces transport failures" do
     {:ok, tx_hex} = build_unsigned_fee_payer_tx()
     {:ok, tx} = Transaction.deserialize(tx_hex)
@@ -125,7 +150,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     end)
 
     assert {:error, reason} = HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
-    assert reason =~ "hosted fee payer request failed"
+    assert reason == "hosted fee payer request failed"
+    refute to_string(reason) =~ "econnrefused"
   end
 
   test "fill rejects invalid feeToken address" do

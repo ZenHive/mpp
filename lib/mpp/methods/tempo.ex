@@ -74,9 +74,8 @@ defmodule MPP.Methods.Tempo do
 
   ## Dependencies
 
-  Requires the `onchain` and `onchain_tempo` packages (optional dependencies)
-  for RPC calls, transfer log parsing, and 0x76 Tempo transaction handling.
-  The method checks availability at init time via `validate_config!/1`.
+  Requires the `onchain` and `onchain_tempo` packages for RPC calls, transfer log
+  parsing, and 0x76 Tempo transaction handling.
   """
 
   use MPP.Method
@@ -86,6 +85,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo.AccessKey
+  alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.Proof
@@ -512,10 +512,8 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  @fee_token_field_index 10
-
   defp fee_token_hex(%Transaction{fields: fields}) do
-    case Enum.at(fields, @fee_token_field_index) do
+    case Enum.at(fields, TxFields.fee_token()) do
       <<token::binary-size(20)>> ->
         {:ok, "0x" <> Base.encode16(token, case: :lower)}
 
@@ -711,8 +709,8 @@ defmodule MPP.Methods.Tempo do
   # The pre-broadcast reserve_hash_atomic is the critical gate; this is
   # supplementary protection against hash malleability.
   # Uses both rescue (exceptions) and catch (process exits from dead Agents/GenServers).
-  # Task 53 tracks replacing Logger.warning with :telemetry.execute/3 as part
-  # of full verify lifecycle telemetry, e.g. [:mpp, :tempo, :store, :error].
+  # Logger.warning is intentional: payment already settled on-chain, so this
+  # supplementary dedup write must never fail the HTTP response.
   defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
 
   defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
@@ -943,7 +941,7 @@ defmodule MPP.Methods.Tempo do
 
       case match do
         nil -> {:error, Errors.new(:verification_failed, "No matching Transfer event found in transaction")}
-        transfer -> check_matched_memo_binding(transfer, charge.method_details || %{}, nil)
+        transfer -> {:ok, transfer}
       end
     end
   end

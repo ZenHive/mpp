@@ -224,10 +224,14 @@ defmodule MPP.Methods.EVMTest do
       assert error.type =~ "invalid-payload"
     end
 
-    test "returns error when hash lacks 0x prefix", %{charge: charge} do
+    test "accepts hash without 0x prefix", %{charge: charge} do
       bare_hash = String.duplicate("ab", 32)
-      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => bare_hash}, charge)
-      assert error.type =~ "invalid-payload"
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{"eth_getTransactionReceipt" => receipt_with_transfer()})
+      end)
+
+      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => bare_hash}, charge)
     end
 
     test "returns error when recipient is nil", %{charge: charge} do
@@ -328,7 +332,16 @@ defmodule MPP.Methods.EVMTest do
 
       payload = %{"hash" => @tx_hash}
       assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
-      assert error.detail =~ "RPC error"
+      assert error.detail == "EVM RPC request failed"
+      refute error.detail =~ "server error"
+    end
+
+    test "rejects hash credential for zero-amount charge", %{charge: charge} do
+      charge = %{charge | amount: "0"}
+      payload = %{"hash" => @tx_hash}
+
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "proof credential"
     end
   end
 
@@ -452,14 +465,15 @@ defmodule MPP.Methods.EVMTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail =~ "RPC error fetching transaction"
+      assert error.detail == "EVM RPC request failed"
     end
 
     test "error when the RPC transport fails", %{charge: charge} do
       Req.Test.stub(EVM, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail =~ "RPC error fetching receipt"
+      assert error.detail == "EVM RPC request failed"
+      refute error.detail =~ "econnrefused"
     end
 
     test "error on an unexpected RPC response shape (no result or error)", %{charge: charge} do
@@ -469,7 +483,7 @@ defmodule MPP.Methods.EVMTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail =~ "invalid JSON-RPC response"
+      assert error.detail == "EVM RPC request failed"
     end
 
     test "error when method_config is missing rpc_url", %{charge: charge} do
