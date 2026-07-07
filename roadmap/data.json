@@ -2218,7 +2218,7 @@
       },
       "eff": 2.13,
       "dep_layer": 0,
-      "unlocks": 2,
+      "unlocks": 3,
       "markers": [
         "security"
       ],
@@ -2259,7 +2259,7 @@
       },
       "eff": 2.0,
       "dep_layer": 1,
-      "unlocks": 1,
+      "unlocks": 2,
       "markers": [
         "security"
       ],
@@ -2440,6 +2440,57 @@
         "lib/mpp/verifier.ex"
       ],
       "body": "Close the residual documented in the published advisory GHSA-34g7-vx6g-82mq. The 0.6.4 fix (static memo now requires a dedup store) closed unlimited passive replay, but on the `type=\"hash\"` / `type=\"transaction\"` Tempo paths the dedup key is the on-chain tx hash alone — nothing binds the credential *presenter* to the wallet that actually broadcast the transfer. With a store configured this leaves a front-running race: a party who observes a victim's settled transfer can submit that tx hash against their own fresh challenge and win if they get there first. The `type=\"proof\"` path already binds presenter identity by verifying a signature from the paying wallet; extend an equivalent binding to the hash/transaction paths so the submitter must prove control of the transfer's sender address.\n\nThis is a deliberate hardening divergence: neither mpp-rs nor mppx requires presenter binding on the hash path today (verified: refs/mpp-rs/src/protocol/methods/tempo/method.rs `verify_hash` defaults the expected sender to the receipt's `from` with no presenter proof). So design for interoperability — do not break clients that legitimately present a hash for their own transfer. Prefer an opt-in server config (e.g. require a presenter signature only when configured) or a mechanism that a compliant client can satisfy, rather than a hard break. Cross-check the sender-recovery / signature-envelope layout against refs/mpp-rs + refs/mppx before pinning any wire detail (wire-format rule).\n\nWhen this lands, update GHSA-34g7-vx6g-82mq to note the residual is fixed in the shipping version, and move docs/security-parity.md's row to a closed state.\n",
+      "created_at": "2026-07-07",
+      "scored_at": "2026-07-07",
+      "cross_repo": []
+    },
+    {
+      "id": "76",
+      "phase": 9,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Replay protection ON by default: app-started default dedup store for Tempo/EVM (closes issue #7)",
+      "scores": {
+        "d": 5,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 1.4,
+      "dep_layer": 2,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [
+        71
+      ],
+      "acceptance_criteria": [
+        "Omitting :store on a Tempo or EVM route enables replay dedup by default — regression test: the same settled tx hash is rejected on a second submission with no store explicitly configured",
+        "An explicit opt-out sentinel (e.g. store: :none/false) restores stateless no-op — regression test: with opt-out set, the same credential is accepted twice",
+        "MPP.Application is wired (mod: uncommented) and starts a default ConCacheStore on boot; MPP consumers get it automatically without editing their supervision tree; default TTL >= challenge expires_in",
+        "validate_memo_store_binding!: a static memo with no store key now succeeds (resolves to default); static memo + explicit opt-out still raises",
+        "Proof / zero-amount credentials are single-use under the default store (mpp-rs parity); the choice vs mppx's opt-in-proof is documented",
+        "nil-vs-default-vs-opt-out is resolved through one shared point in MPP.Tempo.Store; the three validate_store! copies agree; key namespaces mpp:charge:/mpp:evm:/mpp:proof: preserved",
+        "The two tests that currently encode no-dedup-by-default are flipped: test/mpp/plug_test.exs:600-618 and test/mpp/methods/evm_test.exs:630-639 assert dedup-on; existing store-present regression suites stay green",
+        "Per-node-only nature of the default is documented in README + Tempo/EVM/ConCacheStore moduledocs; multi-instance shared-store guidance included",
+        "CHANGELOG marks the breaking default flip and the opt-out; version bumped to 0.7.0",
+        "Issue #7 responded to and closed when the fix lands; con_cache stale 'optional' doc corrected"
+      ],
+      "out_of_scope": [
+        "Presenter-identity binding / front-running race residual (Task 75) — a default store does not close it",
+        "Broad shared-helper extraction and MPP.Headers split (Task 73)",
+        "Making con_cache a genuinely optional dep — it is already a hard dep; only the stale 'optional' doc claim is corrected here"
+      ],
+      "touches": [
+        "mix.exs",
+        "lib/mpp/application.ex",
+        "lib/mpp/plug.ex",
+        "lib/mpp/methods/tempo.ex",
+        "lib/mpp/methods/evm.ex",
+        "lib/mpp/tempo/store.ex",
+        "lib/mpp/tempo/con_cache_store.ex"
+      ],
+      "body": "Make on-chain replay protection secure-by-default, matching both reference SDKs. Public issue #7 (github.com/ZenHive/mpp/issues/7, reporter chenshj73) correctly flags that our on-chain dedup store defaults to nil → no-op, so a stateless default deployment can accept the same tx hash / credential repeatedly within the challenge window (repeated fulfillment for one payment). Both reference SDKs default an in-memory dedup store instead: mpp-rs `tempo()` builder sets `store: Some(Arc::new(MemoryStore::new()))` with an explicit `without_store()` opt-out (refs/mpp-rs/src/server/tempo.rs:186-187,127-131, test `tempo_builder_defaults_to_a_store`); mppx does `parameters.store ?? Store.memory()` for the non-zero charge/hash path (refs/mppx/src/tempo/server/Charge.ts:71-74). We are the outlier — flip the default.\n\nMechanism (con_cache is ALREADY a hard, non-optional dep at mix.exs:83, so this adds no dependency): wire the currently-stub `MPP.Application` — uncomment `mod: {MPP.Application, []}` in mix.exs:38 and start a default `MPP.Tempo.ConCacheStore` child in application.ex — then resolve an absent/nil on-chain method store (`method_config[\"store\"]` for Tempo at tempo.ex and EVM at evm.ex) to that app-started default. Primary target is the per-method on-chain dedup store (that is what the SDKs default and what issue #7 is about); also evaluate whether the plug-level generic credential guard (`MPP.Plug` Config.store / replay_store/2, deliberately skipped for Tempo today) should default too — note that Tempo-skip interaction rather than break it.\n\nThe load-bearing API change: today `store: nil`/absent means \"no-op\" (the ONLY falsy value accepted by the three `validate_store!` copies in plug.ex:153, tempo.ex:292, evm.ex:378, and by replay_store/2 clause 1 at plug.ex:338). Introduce an explicit opt-out sentinel (e.g. `store: :none` or `false`, mirroring mpp-rs `without_store()`) that preserves today's stateless no-op, and free absent/nil to mean \"use the default store.\" Route all three `validate_store!` copies + replay_store/2 through ONE shared resolution point in MPP.Tempo.Store so nil-vs-default-vs-opt-out is decided identically everywhere (do not re-hand-roll it three ways; the broader helper extraction stays Task 73).\n\nInteractions to get right: (1) `validate_memo_store_binding!/1` (tempo.ex:321-331) currently raises on a static memo without a store — under the default it must resolve the EFFECTIVE store first: a static-memo config with no `store` key now SUCCEEDS (defaults), but static-memo + explicit opt-out sentinel must STILL raise (the operator affirmatively chose the unsafe stateless+static-memo combo). (2) Default ConCacheStore TTL must be ≥ challenge expires_in (Task 71 raises it to 600s = 2× the 300s default; depend on that). (3) Zero-amount/proof credentials: mpp-rs shares the same store for proof single-use (mpp:proof: namespace, method.rs:1581) while mppx leaves proof replay opt-in (Charge.ts:75-79, documented gap). Adopt mpp-rs behavior — the default store also makes proof credentials single-use — and document the choice. (4) Preserve the distinct key namespaces (mpp:charge: / mpp:evm: / mpp:proof:) so one default store instance backs all paths without collision.\n\nDeployment caveat to document loudly (both SDKs carry near-identical language): the built-in default is an in-memory per-NODE store — it does NOT dedup across a horizontally-scaled cluster. Multi-instance operators must still pass a shared store (Redis/distributed). README + the Tempo/EVM/ConCacheStore moduledocs must state this.\n\nThis is a BREAKING default flip: every existing deployment that omits `:store` moves from stateless no-op to dedup-on. Ship it in a version bump (0.7.0) with a clear CHANGELOG breaking-change note and the one-line opt-out for anyone who genuinely wants stateless. The flip is toward safety; the only negatively-affected callers are those who deliberately wanted no state, and they get the opt-out sentinel.\n\nAlso correct the stale `con_cache` \"optional dependency\" doc claims (con_cache_store.ex:5, tempo.ex moduledoc) — it is a hard dep today; adjacent to Task 71's onchain/onchain_tempo doc fix but a separate module. On landing: respond to and close issue #7, and note that presenter-identity binding (Task 75) remains the separate front-running residual a default store does not close.\n",
       "created_at": "2026-07-07",
       "scored_at": "2026-07-07",
       "cross_repo": []
