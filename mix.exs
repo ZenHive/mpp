@@ -34,7 +34,7 @@ defmodule MPP.MixProject do
   def application do
     [
       extra_applications: [:logger]
-      # TODO: Uncomment mod if MPP ever needs supervised processes (currently stateless)
+      # Task 76 wires MPP.Application when the default dedup store needs supervision.
       # mod: {MPP.Application, []}
     ]
   end
@@ -178,6 +178,9 @@ defmodule MPP.MixProject do
         "ex_dna --max-clones 0",
         "reach.check --arch --smells",
         "dialyzer.json --quiet"
+      ],
+      "check.dispatch": [
+        "precommit.full"
       ]
     ]
   end

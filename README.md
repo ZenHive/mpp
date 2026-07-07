@@ -108,6 +108,8 @@ end
 
 Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. The client broadcasts a transaction, then sends the hash as a credential.
 
+For replay protection on static-price routes, configure `method_config["store"]` with an `MPP.Tempo.Store` implementation (for example `MPP.Tempo.ConCacheStore`) so each transaction hash is accepted only once.
+
 ### Multi-Method (Stripe + Tempo)
 
 Offer multiple payment options in a single 402 response — the agent picks whichever it can pay with:
@@ -217,7 +219,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.6.2"}
+    {:mpp, "~> 0.6.4"}
   ]
 end
 ```

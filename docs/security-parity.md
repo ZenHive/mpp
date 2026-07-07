@@ -23,8 +23,8 @@ the parity set is well-bounded. Last full audit: 2026-06-30.
 
 | Advisory | Sev | What it covered | Our status |
 |---|---|---|---|
-| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — 10 vectors: charge/session replay, free requests, channel piggyback, fee-payer manipulation, Stripe replay | **Partial — see component rows.** Charge-path replay, Stripe replay, fee-payer drain, proof binding, fee-token allowlist, and hosted fee-payer fills: ✓. Session vectors: 📋 Task 50 (unbuilt). |
-| mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Tempo session close-voucher bypass via settled-amount equality (`<` vs `<=`) | 📋 **Task 50** — sessions not yet implemented; the `<=` boundary is a pinned acceptance criterion for the close handler. |
+| mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — published upstream advisory | **Partial — see component rows.** Charge-path replay, Stripe replay, fee-payer drain, proof binding, fee-token allowlist, and hosted fee-payer fills: ✓. Remaining session work: 📋 Task 50. |
+| mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Published upstream session advisory | 📋 **Task 50** — sessions not yet implemented; detailed acceptance criteria remain out of this public ledger until fixed. |
 | mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 | MEDIUM 5.4 | Stripe charge replay via missing `Idempotent-Replayed` check | ✓ Stripe replay is covered by the `Idempotent-Replayed` rejection plus Plug-level credential dedup (Tasks 35 + 64). |
 
 mpp-specs: no advisories.
@@ -62,7 +62,7 @@ mpp-specs: no advisories.
 | Upstream fix | Where tracked |
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
-| Session integrity — voucher replay (#247) · payee+currency binding (#188) · channel scope (#246) · **close-voucher equality CVE-2026-34209** (`9408824`) · relay-sponsored calls (#494) · sender/fee-payer separation (mppx #247) | **Task 50** (sessions unbuilt) |
+| Session integrity parity for published upstream advisories | 📋 **Task 50** (sessions unbuilt; details stay out of this public ledger until fixed) |
 | Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 
 ---
