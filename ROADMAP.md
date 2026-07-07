@@ -15,7 +15,7 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (24 of 30 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (24 of 30 done · 1 in progress)
 
 **Last shipped:** Task 70 — EVM method: on-chain payment-proof hardening parity with Tempo on 2026-07-06
 
@@ -138,7 +138,7 @@
 | Task 68 | ✅ | 🎁 **utilities** · 🔒 Tempo hosted fee-payer parity [D:5/B:7/U:6 → Eff:1.3] 📋 |
 | Task 69 | ✅ | 🎁 **utilities** · 🔒 Tempo proof access-key authorization parity [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 70 | ✅ | 🎁 **evm** · 🔒 EVM method: on-chain payment-proof hardening parity with Tempo [D:4/B:9/U:8 → Eff:2.12] 🎯 |
-| Task 71 | ⬜ | 🎁 **tempo** · 🔒 EVM/Tempo method-module hardening and doc corrections [D:3/B:6/U:6 → Eff:2.0] 🎯 |
+| Task 71 | 🔄 | 🎁 **tempo** · 🔒 EVM/Tempo method-module hardening and doc corrections [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 | Task 72 | ⬜ | 🎁 **core-protocol** · Parse-time input validation parity for challenge/credential [D:3/B:5/U:6 → Eff:1.83] 🚀 |
 | Task 73 | ⬜ | 🎁 **utilities** · Extract shared helpers and split MPP.Headers (mechanical refactor) [D:3/B:4/U:6 → Eff:1.67] 🚀 |
 | Task 74 | ⬜ | 🎁 **dx** · 📝 Docs hygiene: README modules, ROADMAP focus, SECURITY version [D:1/B:3/U:5 → Eff:4.0] 🎯 |
