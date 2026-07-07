@@ -1,7 +1,8 @@
 # Deterministic Elixir CI gate for pushes and PRs.
 # Mirrors the `mix precommit.full` alias so every push/PR gets format / compile /
-# credo / doctor / sobelow / test+cover / dialyzer evidence as PR checks, instead
-# of needing a local reviewer to fetch the branch and run the suite.
+# credo / doctor / sobelow / test+cover / clone-detection (ex_dna) / arch+smell
+# (reach) / dialyzer evidence as PR checks, instead of needing a local reviewer
+# to fetch the branch and run the suite.
 #
 # Integration tests (`:integration` tag) are NOT run here — they need live
 # Moderato/Stripe/Sepolia credentials and run in integration.yml. The repo's
@@ -80,6 +81,16 @@ jobs:
       # 95% floor — MPP is critical tier (money, signing, wire-format encoding).
       - name: Tests + coverage gate (>=95%)
         run: mix test.json --cover --cover-threshold 95 --summary-only --exclude cross_validation
+
+      # Zero-tolerance clone detection + architecture/smell policy — the two
+      # analyzer steps `mix precommit.full` runs after the base gate (reach policy
+      # in .reach.exs). Without these, a PR introducing a clone or arch smell would
+      # pass CI while failing the local gate.
+      - name: Clone detection (ex_dna, zero clones)
+        run: mix ex_dna --max-clones 0
+
+      - name: Architecture & smell checks (reach)
+        run: mix reach.check --arch --smells
 
       - name: Dialyzer
         run: mix dialyzer
