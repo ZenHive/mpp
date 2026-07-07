@@ -2266,6 +2266,8 @@
       "depends_on": [
         70
       ],
+      "assignee": "cursor",
+      "model": "composer-2.5",
       "acceptance_criteria": [
         "No client-facing 402 detail contains inspect() of an internal error reason",
         "Tempo RLP field indices defined in exactly one module; all consumers alias it",
