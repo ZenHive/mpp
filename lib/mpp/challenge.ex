@@ -152,12 +152,20 @@ defmodule MPP.Challenge do
   # mpp-rs (`chars().all(is_ascii_lowercase)`); mppx's `[a-z][a-z0-9:_-]*` is looser
   # than the spec ABNF, so the spec breaks the tie toward lowercase-letters-only.
   defp validate_method(method) when is_binary(method) do
-    if method != "" and lower_alpha?(method), do: :ok, else: {:error, :invalid_method}
+    if valid_method_name?(method), do: :ok, else: {:error, :invalid_method}
   end
 
   defp validate_method(_method), do: {:error, :invalid_method}
 
-  defp lower_alpha?(method), do: method |> :binary.bin_to_list() |> Enum.all?(&(&1 in ?a..?z))
+  # Non-empty, lowercase ASCII letters only (spec ABNF above). Shared with
+  # `MPP.Plug.init/1` so a non-conformant server config fails at boot instead
+  # of emitting challenges no compliant client (including this library's own
+  # parse paths) can parse.
+  @doc false
+  @spec valid_method_name?(String.t()) :: boolean()
+  def valid_method_name?(method) when is_binary(method) do
+    method != "" and method |> :binary.bin_to_list() |> Enum.all?(&(&1 in ?a..?z))
+  end
 
   # request MUST base64url-decode to a valid JSON object (mpp-rs validates JSON via
   # `serde_json::from_slice`; mppx via `PaymentRequest.deserialize` + `z.record`,

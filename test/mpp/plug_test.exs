@@ -69,6 +69,20 @@ defmodule MPP.PlugTest do
     end
   end
 
+  defmodule MockMethodBadName do
+    @moduledoc false
+    use MPP.Method
+
+    # Deliberately outside the spec ABNF `1*LOWERALPHA` to exercise init-time rejection.
+    @impl MPP.Method
+    def method_name, do: "mock_bad"
+
+    @impl MPP.Method
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "never reached")}
+    end
+  end
+
   defmodule MockMethodB do
     @moduledoc false
     use MPP.Method
@@ -393,6 +407,20 @@ defmodule MPP.PlugTest do
             [method: MockMethod, amount: "1000", currency: "usd"],
             [method: MockMethod, amount: "500", currency: "usd"]
           ]
+        )
+      end
+    end
+
+    test "raises on a method name outside the spec ABNF (1*LOWERALPHA)" do
+      # Challenge parsing rejects such names as :invalid_method, so the
+      # misconfiguration must surface at boot, not as client parse failures.
+      assert_raise ArgumentError, ~r/1\*LOWERALPHA.*mock_bad/s, fn ->
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: MockMethodBadName,
+          amount: "1000",
+          currency: "usd"
         )
       end
     end

@@ -42,6 +42,7 @@ defmodule MPP.Credential do
   defstruct [:challenge, :payload, :source]
 
   @challenge_required_keys ~w(id realm method intent request)
+  @challenge_optional_keys ~w(description digest expires opaque)
 
   api(:decode, "Decode a base64url JSON string into a credential with echoed challenge validation.",
     params: [
@@ -52,6 +53,7 @@ defmodule MPP.Credential do
       :invalid_base64,
       :invalid_json,
       :missing_required_fields,
+      :invalid_optional_field,
       :empty_id,
       :invalid_method,
       :invalid_request,
@@ -103,7 +105,8 @@ defmodule MPP.Credential do
   # Deserializes a string-keyed map into a credential struct.
   defp from_map(%{"challenge" => challenge_map, "payload" => payload} = map)
        when is_map(challenge_map) and is_map(payload) do
-    with {:ok, challenge} <- challenge_from_map(challenge_map) do
+    with :ok <- validate_optional_string(map["source"]),
+         {:ok, challenge} <- challenge_from_map(challenge_map) do
       {:ok, %__MODULE__{challenge: challenge, payload: payload, source: map["source"]}}
     end
   end
@@ -111,10 +114,11 @@ defmodule MPP.Credential do
   defp from_map(_), do: {:error, :missing_required_fields}
 
   # Validates and reconstructs a Challenge struct from the echoed challenge map.
-  # After confirming the required keys are present strings, the shared
-  # `Challenge.validate_fields/1` rejects a malformed echoed field (empty id,
-  # non-lowercase method, non-JSON request, bad digest) at parse time with a
-  # distinct atom rather than deferring to a downstream HMAC mismatch.
+  # After confirming the required keys are present strings and the optional keys
+  # are absent or strings, the shared `Challenge.validate_fields/1` rejects a
+  # malformed echoed field (empty id, non-lowercase method, non-JSON request,
+  # bad digest) at parse time with a distinct atom rather than deferring to a
+  # downstream HMAC mismatch.
   defp challenge_from_map(map) do
     if Enum.all?(@challenge_required_keys, &is_binary(map[&1])) do
       challenge = %Challenge{
@@ -129,13 +133,32 @@ defmodule MPP.Credential do
         opaque: map["opaque"]
       }
 
-      with :ok <- Challenge.validate_fields(challenge) do
+      with :ok <- validate_optional_challenge_fields(map),
+           :ok <- Challenge.validate_fields(challenge) do
         {:ok, challenge}
       end
     else
       {:error, :missing_required_fields}
     end
   end
+
+  # Optional echoed-challenge fields (and the top-level `source`) must be absent
+  # or strings. A non-string value (map, list, number) is never emitted by a
+  # compliant server and would otherwise flow into the HMAC input join /
+  # ISO-8601 parse downstream and crash the verifier on attacker-supplied wire
+  # bytes. mppx (`z.optional(z.string())`) and mpp-rs (`Option<String>` via
+  # serde) both reject these shapes at deserialization.
+  defp validate_optional_challenge_fields(map) do
+    Enum.reduce_while(@challenge_optional_keys, :ok, fn key, :ok ->
+      case validate_optional_string(map[key]) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_optional_string(value) when is_nil(value) or is_binary(value), do: :ok
+  defp validate_optional_string(_value), do: {:error, :invalid_optional_field}
 
   # Serializes credential struct to a map with string keys matching the spec.
   defp to_map(%__MODULE__{} = credential) do

@@ -31,7 +31,7 @@ defmodule MPP.MethodTest do
     use MPP.Method
 
     @impl MPP.Method
-    def method_name, do: "mock_with_details"
+    def method_name, do: "mockwithdetails"
 
     @impl MPP.Method
     def verify(%{"proof" => _proof}, charge) do
@@ -52,7 +52,7 @@ defmodule MPP.MethodTest do
   describe "method_name/0" do
     test "returns a lowercase string identifier" do
       assert MockMethod.method_name() == "mock"
-      assert MockMethodWithDetails.method_name() == "mock_with_details"
+      assert MockMethodWithDetails.method_name() == "mockwithdetails"
     end
   end
 

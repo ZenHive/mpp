@@ -166,6 +166,41 @@ defmodule MPP.CredentialTest do
       encoded = encode_credential(request: Base.url_encode64("not json", padding: false))
       assert {:error, :invalid_request} = Credential.decode(encoded)
     end
+
+    # Non-string optional fields previously passed decode and crashed the
+    # verifier downstream (HMAC input join / ISO-8601 parse) on
+    # attacker-supplied wire bytes.
+    test "rejects an echoed challenge whose expires is not a string" do
+      encoded = encode_credential(expires: %{"malicious" => true})
+      assert {:error, :invalid_optional_field} = Credential.decode(encoded)
+    end
+
+    test "rejects an echoed challenge whose description is not a string" do
+      encoded = encode_credential(description: 42)
+      assert {:error, :invalid_optional_field} = Credential.decode(encoded)
+    end
+
+    test "rejects an echoed challenge whose opaque is not a string" do
+      encoded = encode_credential(opaque: [1, 2, 3])
+      assert {:error, :invalid_optional_field} = Credential.decode(encoded)
+    end
+
+    test "rejects a credential whose top-level source is not a string" do
+      challenge = %{
+        "id" => "ch_123",
+        "realm" => "api.example.com",
+        "method" => "stripe",
+        "intent" => "charge",
+        "request" => "eyJhbW91bnQiOiIxMDAifQ"
+      }
+
+      encoded =
+        %{"challenge" => challenge, "payload" => %{"proof" => "0x"}, "source" => %{"not" => "a string"}}
+        |> Jason.encode!()
+        |> Base.url_encode64(padding: false)
+
+      assert {:error, :invalid_optional_field} = Credential.decode(encoded)
+    end
   end
 
   # Builds a base64url credential wrapping an echoed challenge with the given

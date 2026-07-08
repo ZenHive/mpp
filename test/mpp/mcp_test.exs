@@ -436,6 +436,26 @@ defmodule MPP.McpTest do
       assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
     end
 
+    test "returns error when a native request map has non-string keys" do
+      # `JCS.canonicalize/1` raises on non-string keys (RFC 8785 contract), so
+      # the JCS pre-check must reject them gracefully instead of leaking the raise.
+      error = %{
+        "data" => %{
+          "challenges" => [
+            %{
+              "id" => "ch_1",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{amount: "100"}
+            }
+          ]
+        }
+      }
+
+      assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
+    end
+
     test "returns error when request map contains floats" do
       error = %{
         "data" => %{

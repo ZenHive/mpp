@@ -6,7 +6,7 @@ defmodule MPP.Method do
   (Stripe, Tempo, x402/EVM, etc.). Each method module implements three
   callbacks that the `MPP.Plug` middleware uses during the 402 handshake:
 
-    1. `method_name/0` — lowercase identifier for protocol headers
+    1. `method_name/0` — lowercase-ASCII-letters identifier for protocol headers (spec `1*LOWERALPHA`)
     2. `verify/2` — verify a credential payload against a charge intent
     3. `challenge_method_details/1` — (optional) add method-specific fields to challenges
 
@@ -47,7 +47,10 @@ defmodule MPP.Method do
   Returns the lowercase payment method name (e.g., `"stripe"`, `"tempo"`).
 
   Used in the challenge `method` field and the receipt `method` field.
-  Must be a stable, lowercase string identifier.
+  Must be a stable identifier of lowercase ASCII letters only — the spec ABNF
+  is `payment-method-id = 1*LOWERALPHA`, so digits, dashes, underscores, and
+  colons are rejected by challenge parsing (`:invalid_method`) and by
+  `MPP.Plug.init/1` at boot.
   """
   @callback method_name() :: String.t()
 

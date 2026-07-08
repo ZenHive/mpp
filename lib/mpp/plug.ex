@@ -131,6 +131,7 @@ defmodule MPP.Plug do
   def init(opts) when is_list(opts) do
     method_lists = normalize_methods(opts)
     entries = Enum.map(method_lists, &build_method_entry/1)
+    validate_method_name_format!(entries)
     validate_unique_method_names!(entries)
 
     %Config{
@@ -250,6 +251,24 @@ defmodule MPP.Plug do
       request: request,
       method_config: method_config
     }
+  end
+
+  # Validates that every method name matches the spec ABNF
+  # `payment-method-id = 1*LOWERALPHA`. Challenge parsing (this library's own
+  # client paths included) rejects any other shape as `:invalid_method`, so a
+  # non-conformant name must fail at boot rather than emit unparseable
+  # challenges.
+  defp validate_method_name_format!(entries) do
+    bad =
+      entries
+      |> Enum.map(& &1.method.method_name())
+      |> Enum.reject(&Challenge.valid_method_name?/1)
+
+    if bad != [] do
+      raise ArgumentError,
+            "MPP.Plug: method names must be non-empty lowercase ASCII letters " <>
+              "(spec `payment-method-id = 1*LOWERALPHA`): #{inspect(Enum.uniq(bad))}"
+    end
   end
 
   # Validates that all method entries have unique method names.
