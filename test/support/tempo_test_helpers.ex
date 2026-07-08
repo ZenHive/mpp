@@ -97,8 +97,11 @@ defmodule MPP.Test.TempoTestHelpers do
   @doc "A `valid_before` unix timestamp inside Moderato's 30s-past-block-timestamp expiring-nonce window."
   def future_valid_before, do: System.os_time(:second) + 20
 
-  @doc "Builds a single call tuple [to, value, input] for RLP encoding."
+  @doc "Builds a single call tuple [to, value, input] for RLP encoding (zero value)."
   def build_call(to_hex, input), do: [TIP20.decode_address(to_hex), <<>>, input]
+
+  @doc "Builds a single call tuple [to, value, input] with an explicit native value."
+  def build_call(to_hex, value, input), do: [TIP20.decode_address(to_hex), rlp_uint(value), input]
 
   @doc "Builds ABI-encoded calldata for transfer(address,uint256)."
   def transfer_calldata(recipient_hex, amount) do
@@ -119,9 +122,12 @@ defmodule MPP.Test.TempoTestHelpers do
     TIP20.approve_calldata(TIP20.decode_address(spender_hex), amount)
   end
 
-  @doc "Builds ABI-encoded calldata for swapExactAmountOut with zero-padded args."
+  @doc """
+  Builds canonical calldata for swapExactAmountOut(address,address,uint128,uint128):
+  selector + four zero-padded 32-byte words (132 bytes total).
+  """
   def swap_calldata do
-    TIP20.swap_exact_amount_out_selector() <> :binary.copy(<<0>>, 96)
+    TIP20.swap_exact_amount_out_selector() <> :binary.copy(<<0>>, 128)
   end
 
   @doc "Decodes a hex address (with or without 0x prefix) to a 20-byte binary."

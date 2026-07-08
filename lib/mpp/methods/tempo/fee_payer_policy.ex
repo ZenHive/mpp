@@ -6,9 +6,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   `0x76` envelope, paying the gas from its own wallet. Without bounds, a malicious
   client embeds arbitrary gas parameters and drains that wallet
   (GHSA-vv77-66rf-pm86 — unbounded `max_fee_per_gas`/`max_priority_fee_per_gas`;
-  GHSA-qpxh-ff8m-c62v — access-list padding). This module bounds the
-  client-supplied gas fields, the total fee budget, and the access list before
-  the server co-signs.
+  GHSA-qpxh-ff8m-c62v — access-list padding). The same family covers *intrinsic*
+  gas: padded/non-canonical calldata or a nonzero call `value` inflate what the
+  sponsor pays without changing the decoded payment intent (mppx #602). This
+  module bounds the client-supplied gas fields, the total fee budget, the access
+  list, per-call value, and calldata canonicality before the server co-signs.
 
   The model mirrors the mppx (TypeScript) and mpp-rs (Rust) reference SDKs:
   absolute ceilings with per-chain defaults, overridable per server. Checks
@@ -22,6 +24,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       within `policy.max_validity_window_seconds` of now (bounds how long a
       sponsorship the server co-signs can sit broadcastable)
     * access list empty (fee-payer call scopes never need one)
+    * every call carries zero native `value`
+    * calldata for each recognized TIP-20 / DEX call is byte-exact canonical — no
+      trailing padding or non-canonical high-order bytes that raise intrinsic gas
+      without changing the decoded intent (ports mppx #602; unknown selectors are
+      left to `Transaction.validate_call_scope/1`)
 
   Any field that is not a well-formed RLP scalar (e.g. a list where a number is
   expected, or a truncated envelope) is rejected — the policy fails closed on
@@ -55,6 +62,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   """
 
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
+  alias Onchain.Tempo.TIP20
   alias Onchain.Tempo.Transaction
 
   @moderato_chain_id 42_431
@@ -64,6 +72,13 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   # Expiring nonce key (U256::MAX) — sentinel both reference SDKs require for sponsored txs.
   @expiring_nonce_key Bitwise.bsl(1, 256) - 1
+
+  # Recognized sponsored-call selectors whose calldata must be byte-exact canonical
+  # (ports mppx #602). Single source of truth: onchain_tempo's TIP20 constants.
+  @transfer_selector TIP20.transfer_selector()
+  @approve_selector TIP20.approve_selector()
+  @transfer_with_memo_selector TIP20.transfer_with_memo_selector()
+  @swap_selector TIP20.swap_exact_amount_out_selector()
 
   # Defaults match mppx/mpp-rs. Gas/fee ceilings are wei;
   # `max_validity_window_seconds` is seconds. Only the priority-fee ceiling
@@ -204,8 +219,10 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
          :ok <- check_total_fee(gas_limit, max_fee, policy),
          :ok <- check_priority(max_priority, max_fee, policy),
          :ok <- check_nonce_key(tx),
-         :ok <- check_validity_window(tx, policy, now) do
-      check_access_list(tx)
+         :ok <- check_validity_window(tx, policy, now),
+         :ok <- check_access_list(tx),
+         :ok <- check_call_values(tx) do
+      check_canonical_calls(tx)
     end
   end
 
@@ -284,6 +301,53 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
         {:error, "fee-payer transaction has a malformed access_list field"}
     end
   end
+
+  @spec check_call_values(Transaction.t()) :: :ok | {:error, String.t()}
+  defp check_call_values(%Transaction{calls: calls}) do
+    case Enum.find_index(calls, fn %{value: value} -> value != 0 end) do
+      nil -> :ok
+      index -> {:error, "fee-payer transaction call #{index} value is not allowed (must be zero)"}
+    end
+  end
+
+  @spec check_canonical_calls(Transaction.t()) :: :ok | {:error, String.t()}
+  defp check_canonical_calls(%Transaction{calls: calls}) do
+    case Enum.find_index(calls, &(not canonical_call?(&1))) do
+      nil -> :ok
+      index -> {:error, "fee-payer transaction call #{index} calldata is not canonical"}
+    end
+  end
+
+  # Recognized TIP-20 / stablecoin-DEX calls must carry byte-exact canonical ABI
+  # calldata: exact length, zero high-order padding on address/uint128 words. A client
+  # cannot append trailing bytes or dirty the padding to inflate the sponsor's intrinsic
+  # gas (16 gas/byte) while decoding to the same payment intent. Ports mppx #602
+  # (refs/mppx/src/tempo/internal/fee-payer.ts:330-388, changeset fix-fee-payer-intrinsic-gas),
+  # reproducing its decode→re-encode-and-compare via fixed bitstring patterns since all four
+  # functions take only static ABI args. Unknown selectors pass here — call scope is gated
+  # separately by Transaction.validate_call_scope/1 before this policy runs.
+  @spec canonical_call?(Transaction.call()) :: boolean()
+  defp canonical_call?(%{input: <<@transfer_selector, 0::96, _to::binary-size(20), _amount::binary-size(32)>>}), do: true
+
+  defp canonical_call?(%{input: <<@approve_selector, 0::96, _spender::binary-size(20), _amount::binary-size(32)>>}),
+    do: true
+
+  defp canonical_call?(%{
+         input:
+           <<@transfer_with_memo_selector, 0::96, _to::binary-size(20), _amt::binary-size(32), _memo::binary-size(32)>>
+       }), do: true
+
+  defp canonical_call?(%{
+         input:
+           <<@swap_selector, 0::96, _token_in::binary-size(20), 0::96, _token_out::binary-size(20), 0::128,
+             _amount_out::binary-size(16), 0::128, _max_amount_in::binary-size(16)>>
+       }), do: true
+
+  defp canonical_call?(%{input: <<selector::binary-size(4), _rest::binary>>})
+       when selector not in [@transfer_selector, @approve_selector, @transfer_with_memo_selector, @swap_selector],
+       do: true
+
+  defp canonical_call?(_call), do: false
 
   @spec field_int(Transaction.t(), non_neg_integer(), String.t()) ::
           {:ok, non_neg_integer()} | {:error, String.t()}

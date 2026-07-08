@@ -280,4 +280,99 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       assert expiring_nonce_key_int() == Bitwise.bsl(1, 256) - 1
     end
   end
+
+  describe "validate/2 — call value (mppx #602 intrinsic-gas family)" do
+    test "rejects a call carrying nonzero native value" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      call = build_call(@token, 1, transfer_calldata(@recipient, 1_000_000))
+      tx = valid_tx(calls: [call])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "value is not allowed"
+    end
+
+    test "accepts calls with zero value" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      assert FeePayerPolicy.validate(valid_tx(), policy) == :ok
+    end
+  end
+
+  describe "validate/2 — calldata canonicality (mppx #602)" do
+    @memo "0x" <> String.duplicate("ab", 32)
+
+    test "rejects trailing-padded transfer calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      padded = transfer_calldata(@recipient, 1_000_000) <> <<0::256>>
+      tx = valid_tx(calls: [build_call(@token, padded)])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "not canonical"
+    end
+
+    test "rejects non-canonical high-order padding in an address word" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      # Dirty the first high-pad byte of the address word (canonical requires zero).
+      <<sel::binary-size(4), _first::8, rest::binary>> = transfer_calldata(@recipient, 1_000_000)
+      dirty = <<sel::binary, 0xFF, rest::binary>>
+      tx = valid_tx(calls: [build_call(@token, dirty)])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "not canonical"
+    end
+
+    test "rejects trailing-padded transferWithMemo calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      padded = transfer_with_memo_calldata(@recipient, 1_000_000, @memo) <> <<0::256>>
+      tx = valid_tx(calls: [build_call(@token, padded)])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "not canonical"
+    end
+
+    test "rejects trailing-padded approve calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      padded = approve_calldata(dex_address(), 1_000_000) <> <<0::256>>
+      tx = valid_tx(calls: [build_call(@token, padded)])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "not canonical"
+    end
+
+    test "rejects trailing-padded swapExactAmountOut calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx(calls: [build_call(dex_address(), swap_calldata() <> <<0::256>>)])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "not canonical"
+    end
+
+    test "accepts canonical transfer calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      assert FeePayerPolicy.validate(valid_tx(), policy) == :ok
+    end
+
+    test "accepts canonical transferWithMemo calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      call = build_call(@token, transfer_with_memo_calldata(@recipient, 1_000_000, @memo))
+      assert FeePayerPolicy.validate(valid_tx(calls: [call]), policy) == :ok
+    end
+
+    test "accepts canonical approve calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      call = build_call(@token, approve_calldata(dex_address(), 1_000_000))
+      assert FeePayerPolicy.validate(valid_tx(calls: [call]), policy) == :ok
+    end
+
+    test "accepts canonical swapExactAmountOut calldata" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      call = build_call(dex_address(), swap_calldata())
+      assert FeePayerPolicy.validate(valid_tx(calls: [call]), policy) == :ok
+    end
+
+    test "accepts an unrecognized selector (call scope gated separately)" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      unknown = <<0xDE, 0xAD, 0xBE, 0xEF>> <> <<0::256>>
+      assert FeePayerPolicy.validate(valid_tx(calls: [build_call(@token, unknown)]), policy) == :ok
+    end
+  end
 end

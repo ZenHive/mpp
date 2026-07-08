@@ -14,6 +14,7 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 | Raw `opaque` byte-exact echo | mpp-rs #284 | ✓ | `MPP.Verifier` opaque match — shipped |
 | Expired-challenge rejection (server) | GHSA bundle | ✓ | `MPP.Verifier` expiry gate |
 | Fee-payer gas economics + expiring nonce | GHSA + #497 | ✓ | `MPP.Methods.Tempo.FeePayerPolicy` |
+| **Non-canonical fee-payer tx rejection** (padded calldata / nonzero call value) | mppx #602 | ✓ **new** | `FeePayerPolicy.check_canonical_calls/1` + `check_call_values/1` — byte-exact-canonical TIP-20/DEX calldata + zero per-call value before co-sign (0.9.0; mpp-rs has no equivalent — different inline-envelope architecture) |
 | Pre-broadcast sponsored-tx simulation | mppx #534, mpp-rs #293 | ✓ | `eth_simulateV1` in `tempo.ex` (Task 59) |
 | `hash` + `feePayer` MUST reject | mpp-specs #204 | ✓ | `tempo.ex` rejects hash when `fee_payer: true` |
 | Hash-credential `source` DID validation | mpp-rs `384c4fe` | ✓ | `MPP.DID.parse_evm_did/1` + chain match in hash path |
