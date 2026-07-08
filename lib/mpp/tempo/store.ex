@@ -14,8 +14,10 @@ defmodule MPP.Tempo.Store do
   ## Built-in Store
 
   `MPP.Tempo.ConCacheStore` provides an ETS-based implementation with automatic
-  TTL expiry via ConCache (optional dependency). For most single-node deployments,
-  this is all you need — add it to your supervision tree and pass it in method_config.
+  TTL expiry via ConCache. It is started by `MPP.Application` as the **default**
+  store, so replay protection is on out of the box (issue #7). For most
+  single-node deployments this is all you need; for multi-node, configure a shared
+  backend (Redis/Postgres) as your `:store`.
 
   ## Custom Implementations
 
@@ -54,6 +56,14 @@ defmodule MPP.Tempo.Store do
           :ets.insert(:payment_dedup, {key, value})
           :ok
         end
+
+        def check_and_mark(key, value) do
+          if :ets.insert_new(:payment_dedup, {key, value}) do
+            :ok
+          else
+            {:error, :already_exists}
+          end
+        end
       end
 
   Then pass it in method_config:
@@ -69,6 +79,34 @@ defmodule MPP.Tempo.Store do
   alias MPP.Tempo.ConCacheStore
 
   @type store_ref :: module() | {module(), keyword()}
+
+  # The app-started default dedup store (started by MPP.Application). A bare
+  # module ref resolves to the default ConCache instance (name :mpp_tempo_dedup).
+  @default_store ConCacheStore
+
+  @doc """
+  Return the default dedup store started by `MPP.Application`.
+
+  Replay protection is on by default (issue #7); this is the store
+  used when a method/plug is configured without an explicit `:store`.
+  """
+  @spec default_store() :: module()
+  def default_store, do: @default_store
+
+  @doc """
+  Resolve a configured `:store` option to the store actually used at runtime.
+
+    * `nil` (absent / not configured) → the app-started `default_store/0` (on by default)
+    * `false` → `nil` (explicit opt-out — no replay protection)
+    * any other ref → returned unchanged
+
+  Callers validate the ref separately (see each method's `validate_store!/1`);
+  this only applies the default-on / opt-out policy.
+  """
+  @spec resolve(store_ref() | nil | false) :: store_ref() | nil
+  def resolve(nil), do: @default_store
+  def resolve(false), do: nil
+  def resolve(store), do: store
 
   @doc """
   Look up a key in the store.
@@ -89,21 +127,21 @@ defmodule MPP.Tempo.Store do
   Atomically check if a key exists and mark it if not.
 
   This is the critical operation for preventing concurrent replay attacks.
-  If the store can implement this atomically (Redis SETNX, DB upsert with
-  unique constraint, etc.), concurrent requests with the same key will be
-  serialized — only the first succeeds.
+  The store MUST implement it atomically (Redis SETNX, DB upsert with a unique
+  constraint, ConCache row isolation, etc.) so concurrent requests with the same
+  key are serialized — only the first succeeds.
 
   Returns `:ok` if the key was not present and is now marked,
   `{:error, :already_exists}` if the key was already present,
   or `{:error, reason}` on store failure.
 
-  Optional — when not implemented, the library falls back to sequential
-  `get/1` + `put/2` (smaller race window but not fully atomic).
+  **Required.** A store that does not export `check_and_mark/2` is rejected at
+  `Plug.init` / `validate_config!` — the library never falls back to a
+  non-atomic `get/1` + `put/2`, which would leave a TOCTOU replay window
+  (see GHSA-w8j7-7qc3-5f24).
   """
   @callback check_and_mark(key :: String.t(), value :: term()) ::
               :ok | {:error, :already_exists} | {:error, term()}
-
-  @optional_callbacks [check_and_mark: 2]
 
   @doc """
   Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
@@ -127,11 +165,4 @@ defmodule MPP.Tempo.Store do
           :ok | {:error, :already_exists} | {:error, term()}
   def check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
   def check_and_mark(store, key, value), do: store.check_and_mark(key, value)
-
-  @doc """
-  Return true when the store supports atomic `check_and_mark`.
-  """
-  @spec supports_atomic?(store_ref()) :: boolean()
-  def supports_atomic?({ConCacheStore, _opts}), do: true
-  def supports_atomic?(store), do: function_exported?(store, :check_and_mark, 2)
 end

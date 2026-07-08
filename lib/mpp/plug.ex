@@ -140,7 +140,7 @@ defmodule MPP.Plug do
       expires_in: validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds)),
       digest: Keyword.get(opts, :digest),
       opaque: Keyword.get(opts, :opaque),
-      store: validate_store!(Keyword.get(opts, :store))
+      store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve()
     }
   end
 
@@ -150,9 +150,22 @@ defmodule MPP.Plug do
     raise ArgumentError, "MPP.Plug: :expires_in must be a positive integer"
   end
 
+  # `nil`/absent resolves to the default store (replay protection on by default);
+  # `false` is an explicit opt-out. A configured store MUST implement the atomic
+  # check_and_mark/2 — a non-atomic get/put store is rejected here rather than
+  # silently degrading to a racy fallback (GHSA-w8j7-7qc3-5f24). Resolution to the default /
+  # opt-out is applied by MPP.Tempo.Store.resolve/1 in init/1.
   defp validate_store!(nil), do: nil
+  defp validate_store!(false), do: false
 
-  defp validate_store!({ConCacheStore, opts} = store) when is_list(opts), do: store
+  defp validate_store!({ConCacheStore, opts} = store) do
+    if !Keyword.keyword?(opts) do
+      raise ArgumentError,
+            "MPP.Plug :store opts for {MPP.Tempo.ConCacheStore, opts} must be a keyword list; got: #{inspect(opts)}"
+    end
+
+    store
+  end
 
   defp validate_store!({store, _opts}) do
     raise ArgumentError,
@@ -160,8 +173,11 @@ defmodule MPP.Plug do
   end
 
   defp validate_store!(store) do
-    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
-      raise ArgumentError, "MPP.Plug :store must implement MPP.Tempo.Store (get/1, put/2)"
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2) and
+           function_exported?(store, :check_and_mark, 2)) do
+      raise ArgumentError,
+            "MPP.Plug :store must implement MPP.Tempo.Store (get/1, put/2, check_and_mark/2 — " <>
+              "atomic single-use is required; use `store: false` to disable dedup)"
     end
 
     store
@@ -335,13 +351,17 @@ defmodule MPP.Plug do
     end
   end
 
+  # Skip the plug-level credential store for Tempo — that method self-manages its
+  # own dedup (mpp:charge:/mpp:proof: + attribution binding), which already covers
+  # the credential-replay case. Every other method gets the plug store. EVM
+  # deliberately runs BOTH layers: the plug credential store (challenge-bound) and
+  # its method-level mpp:evm: hash store (cross-challenge single-use) — disjoint
+  # keys, complementary guarantees; do not "fix" this by extending the carve-out.
   defp replay_store(%Config{store: nil}, _entry), do: nil
 
-  defp replay_store(config, %{method_config: %{"store" => store}, method: method}) when not is_nil(store) do
+  defp replay_store(config, %{method: method}) do
     if method.method_name() == "tempo", do: nil, else: config.store
   end
-
-  defp replay_store(config, _entry), do: config.store
 
   defp check_credential_unused(nil, _credential), do: :ok
 
@@ -357,21 +377,16 @@ defmodule MPP.Plug do
 
   defp mark_credential_used(nil, _credential), do: :ok
 
+  # Atomic single-use claim. validate_store!/1 guarantees the store implements
+  # check_and_mark/2, so there is no non-atomic fallback (GHSA-w8j7-7qc3-5f24).
   defp mark_credential_used(store, credential) do
     key = credential_store_key(credential)
     value = System.system_time(:millisecond)
 
-    if Store.supports_atomic?(store) do
-      case Store.check_and_mark(store, key, value) do
-        :ok -> :ok
-        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-      end
-    else
-      case Store.put(store, key, value) do
-        :ok -> :ok
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-      end
+    case Store.check_and_mark(store, key, value) do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 

@@ -2456,7 +2456,7 @@
       "id": "76",
       "phase": 9,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Replay protection ON by default: app-started default dedup store for Tempo/EVM (closes issue #7)",
       "scores": {
         "d": 5,
@@ -2500,14 +2500,16 @@
       ],
       "body": "Make on-chain replay protection secure-by-default, matching both reference SDKs. Public issue #7 (github.com/ZenHive/mpp/issues/7, reporter chenshj73) correctly flags that our on-chain dedup store defaults to nil → no-op, so a stateless default deployment can accept the same tx hash / credential repeatedly within the challenge window (repeated fulfillment for one payment). Both reference SDKs default an in-memory dedup store instead: mpp-rs `tempo()` builder sets `store: Some(Arc::new(MemoryStore::new()))` with an explicit `without_store()` opt-out (refs/mpp-rs/src/server/tempo.rs:186-187,127-131, test `tempo_builder_defaults_to_a_store`); mppx does `parameters.store ?? Store.memory()` for the non-zero charge/hash path (refs/mppx/src/tempo/server/Charge.ts:71-74). We are the outlier — flip the default.\n\nMechanism (con_cache is ALREADY a hard, non-optional dep at mix.exs:83, so this adds no dependency): wire the currently-stub `MPP.Application` — uncomment `mod: {MPP.Application, []}` in mix.exs:38 and start a default `MPP.Tempo.ConCacheStore` child in application.ex — then resolve an absent/nil on-chain method store (`method_config[\"store\"]` for Tempo at tempo.ex and EVM at evm.ex) to that app-started default. Primary target is the per-method on-chain dedup store (that is what the SDKs default and what issue #7 is about); also evaluate whether the plug-level generic credential guard (`MPP.Plug` Config.store / replay_store/2, deliberately skipped for Tempo today) should default too — note that Tempo-skip interaction rather than break it.\n\nThe load-bearing API change: today `store: nil`/absent means \"no-op\" (the ONLY falsy value accepted by the three `validate_store!` copies in plug.ex:153, tempo.ex:292, evm.ex:378, and by replay_store/2 clause 1 at plug.ex:338). Introduce an explicit opt-out sentinel (e.g. `store: :none` or `false`, mirroring mpp-rs `without_store()`) that preserves today's stateless no-op, and free absent/nil to mean \"use the default store.\" Route all three `validate_store!` copies + replay_store/2 through ONE shared resolution point in MPP.Tempo.Store so nil-vs-default-vs-opt-out is decided identically everywhere (do not re-hand-roll it three ways; the broader helper extraction stays Task 73).\n\nInteractions to get right: (1) `validate_memo_store_binding!/1` (tempo.ex:321-331) currently raises on a static memo without a store — under the default it must resolve the EFFECTIVE store first: a static-memo config with no `store` key now SUCCEEDS (defaults), but static-memo + explicit opt-out sentinel must STILL raise (the operator affirmatively chose the unsafe stateless+static-memo combo). (2) Default ConCacheStore TTL must be ≥ challenge expires_in (Task 71 raises it to 600s = 2× the 300s default; depend on that). (3) Zero-amount/proof credentials: mpp-rs shares the same store for proof single-use (mpp:proof: namespace, method.rs:1581) while mppx leaves proof replay opt-in (Charge.ts:75-79, documented gap). Adopt mpp-rs behavior — the default store also makes proof credentials single-use — and document the choice. (4) Preserve the distinct key namespaces (mpp:charge: / mpp:evm: / mpp:proof:) so one default store instance backs all paths without collision.\n\nDeployment caveat to document loudly (both SDKs carry near-identical language): the built-in default is an in-memory per-NODE store — it does NOT dedup across a horizontally-scaled cluster. Multi-instance operators must still pass a shared store (Redis/distributed). README + the Tempo/EVM/ConCacheStore moduledocs must state this.\n\nThis is a BREAKING default flip: every existing deployment that omits `:store` moves from stateless no-op to dedup-on. Ship it in a version bump (0.7.0) with a clear CHANGELOG breaking-change note and the one-line opt-out for anyone who genuinely wants stateless. The flip is toward safety; the only negatively-affected callers are those who deliberately wanted no state, and they get the opt-out sentinel.\n\nAlso correct the stale `con_cache` \"optional dependency\" doc claims (con_cache_store.ex:5, tempo.ex moduledoc) — it is a hard dep today; adjacent to Task 71's onchain/onchain_tempo doc fix but a separate module. On landing: respond to and close issue #7, and note that presenter-identity binding (Task 75) remains the separate front-running residual a default store does not close.\n",
       "created_at": "2026-07-07",
+      "done_at": "2026-07-07",
       "scored_at": "2026-07-07",
+      "implemented": "Replay dedup on by default: MPP.Application starts the default ConCacheStore; Store.resolve/1 maps nil->default, false->opt-out across Plug/Tempo/EVM (0.7.0)",
       "cross_repo": []
     },
     {
       "id": "77",
       "phase": 9,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Harden Tempo dedup-store contract (breaking; see private advisory)",
       "scores": {
         "d": 5,
@@ -2533,7 +2535,9 @@
       ],
       "body": "Tighten the MPP.Tempo.Store replay-dedup contract for configured stores. This is a breaking public-API change: ship it in a versioned release with a CHANGELOG note describing the SHAPE of the change (not the gap it closes), coordinated with publication of a private GitHub Security Advisory per SECURITY.md.\n\nThe full mechanism, affected version range, and remediation detail live ONLY in the private advisory — do NOT restate them in this task, the CHANGELOG, or any committed file (roadmap/tasks.toml and ROADMAP.md are public). This task carries only enough to prioritize and route the work.\n\nSurfaced by audit-review of commit 46c5b0e on 2026-07-08; see .audit/46c5b0e-harden-tempo-hash-credential-d.md. Built-in and default stores are unaffected — this is a contract hardening, not a defect in shipped defaults.\n",
       "created_at": "2026-07-07",
+      "done_at": "2026-07-07",
       "scored_at": "2026-07-07",
+      "implemented": "check_and_mark/2 is a required Store callback; non-atomic get/put stores rejected at init, sequential fallback removed (GHSA-w8j7-7qc3-5f24, 0.7.0)",
       "cross_repo": []
     }
   ]

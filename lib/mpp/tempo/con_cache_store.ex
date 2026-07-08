@@ -2,16 +2,16 @@ defmodule MPP.Tempo.ConCacheStore do
   @moduledoc """
   Built-in ETS-based dedup store using ConCache (TTL-enabled ETS wrapper by Saša Jurić).
 
-  Requires the `con_cache` optional dependency:
+  Backed by the `con_cache` dependency. This store is started automatically by
+  `MPP.Application` as the **default** dedup store (replay protection on by default —
+  issue #7), so most single-node deployments need no setup.
 
-      {:con_cache, "~> 1.1"}
+  ## Setup (custom instances)
 
-  ## Setup
-
-  Add to your supervision tree:
+  To run an additional/renamed instance, add it to your supervision tree:
 
       children = [
-        MPP.Tempo.ConCacheStore.child_spec(ttl: to_timeout(minute: 10))
+        MPP.Tempo.ConCacheStore.child_spec(name: :my_dedup, ttl: to_timeout(minute: 10))
       ]
 
   Then pass in method_config:

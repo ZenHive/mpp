@@ -60,10 +60,13 @@ defmodule MPP.Methods.Tempo do
       `eth_simulateV1` first (same guard as the default path) to reject a tx that would
       revert before broadcast, then broadcasts async and returns an optimistic receipt.
       Default `true`.
-    * `"store"` — (optional) module implementing `MPP.Tempo.Store` behaviour for
-      transaction dedup, or `{MPP.Tempo.ConCacheStore, opts}` to configure the built-in
-      ConCache store (for example a custom cache `:name`). Prevents replay by tracking
-      used tx hashes. When `nil` (default), no dedup is performed — library stays stateless.
+    * `"store"` — (optional) replay-dedup store. **On by default** — when absent, the
+      app-started `MPP.Tempo.ConCacheStore` is used so replay protection is enabled out of
+      the box (issue #7). Pass a module implementing `MPP.Tempo.Store` (Redis,
+      Postgres, etc. — for multi-node deployments) or `{MPP.Tempo.ConCacheStore, opts}` to
+      configure the built-in store (for example a custom cache `:name`). A configured store
+      MUST implement the atomic `check_and_mark/2`. Pass `store: false` to explicitly opt out
+      of dedup (not recommended; incompatible with a static `"memo"`).
 
   ## Credential Payload
 
@@ -187,7 +190,7 @@ defmodule MPP.Methods.Tempo do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "proof"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = config["store"]
+    store = Store.resolve(config["store"])
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with :ok <- require_zero_amount(charge),
@@ -210,7 +213,7 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_hash_credential(payload, charge, config) do
     memo = config["memo"]
-    store = config["store"]
+    store = Store.resolve(config["store"])
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
@@ -227,7 +230,7 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_transaction_credential(payload, charge, config) do
     memo = config["memo"]
-    store = config["store"]
+    store = Store.resolve(config["store"])
     expected_chain_id = config["chain_id"] || @moderato_chain_id
     wait? = config["wait_for_confirmation"] != false
 
@@ -288,10 +291,19 @@ defmodule MPP.Methods.Tempo do
 
   # --- Private helpers ---
 
-  # Validates that the store config is a module implementing the Store behaviour.
+  # Validates the store config. `nil`/absent resolves to the default store (replay
+  # protection on by default); `false` is an explicit opt-out. A configured store
+  # MUST implement the atomic check_and_mark/2 — a non-atomic get/put store is
+  # rejected here rather than silently degrading to a racy fallback (GHSA-w8j7-7qc3-5f24).
   defp validate_store!(nil), do: :ok
+  defp validate_store!(false), do: :ok
 
-  defp validate_store!({ConCacheStore, _opts}) do
+  defp validate_store!({ConCacheStore, opts}) do
+    if !Keyword.keyword?(opts) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo :store opts for {MPP.Tempo.ConCacheStore, opts} must be a keyword list; got: #{inspect(opts)}"
+    end
+
     validate_store!(ConCacheStore)
   end
 
@@ -303,9 +315,11 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp validate_store!(store) do
-    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2) and
+           function_exported?(store, :check_and_mark, 2)) do
       raise ArgumentError,
-            "MPP.Methods.Tempo :store must be a module implementing MPP.Tempo.Store (get/1, put/2)"
+            "MPP.Methods.Tempo :store must be a module implementing MPP.Tempo.Store " <>
+              "(get/1, put/2, check_and_mark/2 — atomic single-use is required; use `store: false` to disable dedup)"
     end
 
     :ok
@@ -316,16 +330,19 @@ defmodule MPP.Methods.Tempo do
   # A static `memo` disables the automatic per-challenge attribution binding that the
   # no-memo path relies on (the memo can't hold both a fixed value and a challenge-bound
   # nonce). Without a dedup `store`, any third party can replay a publicly-observable
-  # matching TransferWithMemo they never signed. Require single-use enforcement in that
-  # configuration, matching mpp-rs's store-on-by-default backstop (refs/mpp-rs/src/server/tempo.rs).
-  defp validate_memo_store_binding!(%{"memo" => memo, "store" => store}) when is_binary(memo) and not is_nil(store),
-    do: :ok
+  # matching TransferWithMemo they never signed. Dedup is on by default, so this only
+  # bites when the operator has explicitly opted out (`store: false`) — reject that
+  # combination. Matches mpp-rs's store-on-by-default backstop (refs/mpp-rs/src/server/tempo.rs).
+  defp validate_memo_store_binding!(%{"memo" => memo} = config) when is_binary(memo) do
+    if is_nil(Store.resolve(config["store"])) do
+      raise ArgumentError,
+            ~s{MPP.Methods.Tempo: a static "memo" requires dedup, but you disabled it with `store: false` — } <>
+              "without single-use enforcement, a publicly-observable matching transfer can be replayed by a " <>
+              "third party. Remove `store: false` (dedup is on by default) or omit the static memo to use " <>
+              "challenge-bound attribution."
+    end
 
-  defp validate_memo_store_binding!(%{"memo" => memo}) when is_binary(memo) do
-    raise ArgumentError,
-          ~s{MPP.Methods.Tempo: a static "memo" requires a "store" (dedup) in method_config — } <>
-            "without it, a publicly-observable matching transfer can be replayed by a third party. " <>
-            "Configure MPP.Tempo.ConCacheStore (or omit the static memo to use challenge-bound attribution)."
+    :ok
   end
 
   defp validate_memo_store_binding!(_config), do: :ok
@@ -605,7 +622,8 @@ defmodule MPP.Methods.Tempo do
   defp decode_hex_address(_), do: {:error, "Missing fee_token"}
 
   # --- Dedup store helpers ---
-  # No-op when store is nil (library stays stateless by default).
+  # Store is on by default (Store.resolve/1); these no-op only when a route opts
+  # out with `store: false` (which resolves to nil).
   #
   # Hash path (type="hash"): check → verify on-chain → atomic commit. The early
   # read is a fast-path reject; the hash is committed via the store's atomic
@@ -635,11 +653,11 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Commits a hash as used AFTER successful on-chain verification. Atomic when the
-  # store supports check_and_mark/2: concurrent same-hash requests collide here, so
-  # exactly one wins and the loser gets "already used" — closing the check→mark race
-  # the plain get/put commit left open. Stores without check_and_mark/2 fall back to a
-  # best-effort put (the early read remains their only, non-atomic, guard).
+  # Commits a hash as used AFTER successful on-chain verification, via the store's
+  # atomic check_and_mark/2. Concurrent same-hash requests collide here, so exactly
+  # one wins and the loser gets "already used". Atomicity is guaranteed by
+  # validate_store!/1 (a non-atomic store is rejected at init), so there is no
+  # non-atomic fallback (GHSA-w8j7-7qc3-5f24).
   defp commit_hash_used(nil, _hash), do: :ok
 
   defp commit_hash_used(store, hash) do
@@ -647,31 +665,15 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp commit_store_mark(store, key) do
-    ts = System.system_time(:millisecond)
-
-    if store_supports_atomic?(store) do
-      claim_atomic(store, key, ts)
-    else
-      case store_put(store, key, ts) do
-        :ok -> :ok
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-      end
-    end
+    claim_atomic(store, key, System.system_time(:millisecond))
   end
 
-  # Atomically checks and reserves a hash before broadcast. Used by transaction path.
-  # Uses check_and_mark/2 when available (atomic); falls back to get + put.
+  # Atomically reserves a hash before broadcast. Used by the transaction path to
+  # prevent concurrent duplicate broadcasts of the same signed tx.
   defp reserve_hash_atomic(nil, _hash), do: :ok
 
   defp reserve_hash_atomic(store, hash) do
-    key = store_key(hash)
-    ts = System.system_time(:millisecond)
-
-    if store_supports_atomic?(store) do
-      claim_atomic(store, key, ts)
-    else
-      reserve_hash_sequential(store, key, ts)
-    end
+    claim_atomic(store, store_key(hash), System.system_time(:millisecond))
   end
 
   # Atomic single-use claim via the store's check_and_mark/2. Shared by the
@@ -682,23 +684,6 @@ defmodule MPP.Methods.Tempo do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-    end
-  end
-
-  # Non-atomic fallback: check then mark as separate steps. Small race window.
-  defp reserve_hash_sequential(store, key, ts) do
-    case store_get(store, key) do
-      :not_found ->
-        case store_put(store, key, ts) do
-          :ok -> :ok
-          {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-        end
-
-      {:ok, _} ->
-        {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-
-      {:error, _reason} ->
-        {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 
@@ -742,8 +727,6 @@ defmodule MPP.Methods.Tempo do
   defp store_put(store, key, value), do: Store.put(store, key, value)
 
   defp store_check_and_mark(store, key, value), do: Store.check_and_mark(store, key, value)
-
-  defp store_supports_atomic?(store), do: Store.supports_atomic?(store)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 

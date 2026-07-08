@@ -5,6 +5,7 @@ defmodule MPP.Methods.EVMTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
 
   @rpc_url "https://mainnet.infura.io/v3/test"
@@ -58,30 +59,6 @@ defmodule MPP.Methods.EVMTest do
     def keys, do: Agent.get(__MODULE__, &Map.keys/1)
   end
 
-  # get/1 + put/2 only — forces the non-atomic commit fallback.
-  defmodule NonAtomicStore do
-    @moduledoc false
-    @behaviour Store
-
-    use Agent
-
-    def start_link(_opts \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
-
-    @impl true
-    def get(key) do
-      case Agent.get(__MODULE__, &Map.get(&1, key)) do
-        nil -> :not_found
-        value -> {:ok, value}
-      end
-    end
-
-    @impl true
-    def put(key, value) do
-      Agent.update(__MODULE__, &Map.put(&1, key, value))
-      :ok
-    end
-  end
-
   # Stateless failure stores exercising each dedup error branch.
   defmodule GetFailStore do
     @moduledoc false
@@ -119,18 +96,6 @@ defmodule MPP.Methods.EVMTest do
     def check_and_mark(_key, _value), do: {:error, :unexpected_store_error}
   end
 
-  # get/1 + put/2 only (no check_and_mark/2), and put always fails — forces the
-  # non-atomic commit fallback's error branch.
-  defmodule NonAtomicPutFailStore do
-    @moduledoc false
-    @behaviour Store
-
-    @impl true
-    def get(_key), do: :not_found
-    @impl true
-    def put(_key, _value), do: {:error, :disk_full}
-  end
-
   setup do
     {:ok, charge} =
       Charge.new(
@@ -139,13 +104,18 @@ defmodule MPP.Methods.EVMTest do
         recipient: @recipient
       )
 
-    # Simulate what Plug does: merge method_config into charge.method_details
+    # Simulate what Plug does: merge method_config into charge.method_details.
+    # Dedup is on by default now; these verification-logic tests opt out
+    # (`store: false`) so the app-started shared default store doesn't carry the
+    # fixed @tx_hash across async tests. Dedup is covered by the dedicated
+    # describes below (which override the store via with_store/2).
     charge = %{
       charge
       | method_details: %{
           "rpc_url" => @rpc_url,
           "chain_id" => @chain_id,
-          "req_options" => [plug: {Req.Test, EVM}]
+          "req_options" => [plug: {Req.Test, EVM}],
+          "store" => false
         }
     }
 
@@ -542,7 +512,7 @@ defmodule MPP.Methods.EVMTest do
       assert :ok =
                EVM.validate_config!(%{
                  "rpc_url" => @rpc_url,
-                 "store" => {MPP.Tempo.ConCacheStore, ttl: 600}
+                 "store" => {ConCacheStore, ttl: 600}
                })
     end
 
@@ -555,6 +525,25 @@ defmodule MPP.Methods.EVMTest do
     test "raises on an unsupported store tuple form" do
       assert_raise ArgumentError, ~r/tuple form is only supported/, fn ->
         EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => {MemoryStore, []}})
+      end
+    end
+
+    test "raises at init when ConCacheStore opts is not a keyword list" do
+      assert_raise ArgumentError, ~r/must be a keyword list/, fn ->
+        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => {ConCacheStore, [1, 2, 3]}})
+      end
+    end
+
+    test "rejects a store missing the atomic check_and_mark/2" do
+      # get/1 + put/2 only — no longer accepted; atomicity is required (GHSA-w8j7-7qc3-5f24).
+      defmodule GetPutOnlyStore do
+        @moduledoc false
+        def get(_key), do: :not_found
+        def put(_key, _value), do: :ok
+      end
+
+      assert_raise ArgumentError, ~r/check_and_mark/, fn ->
+        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => GetPutOnlyStore})
       end
     end
   end
@@ -625,29 +614,26 @@ defmodule MPP.Methods.EVMTest do
     end
   end
 
-  describe "verify/2 — dedup without atomic check_and_mark/2" do
-    setup %{charge: charge} do
-      start_supervised!(NonAtomicStore)
-      {:ok, charge: with_store(charge, NonAtomicStore)}
-    end
-
-    test "sequential fallback still enforces single-use", %{charge: charge} do
+  describe "verify/2 — replay protection on by default" do
+    test "with no configured store, the app-started default store rejects replay", %{charge: charge} do
+      # Drop the base opt-out so the store resolves to the app-started default.
+      # Use a unique hash so the shared default store isn't polluted by other tests.
+      charge = %{charge | method_details: Map.delete(charge.method_details, "store")}
+      hash = "0x" <> String.duplicate("d1", 32)
       stub_success()
-      payload = %{"hash" => @tx_hash}
+      payload = %{"hash" => hash}
 
       assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
       assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
       assert error.detail =~ "already used"
     end
-  end
 
-  describe "verify/2 — no store configured" do
-    test "verification still succeeds (single-use binding is opt-in)", %{charge: charge} do
+    test "store: false opts out — the same hash verifies again", %{charge: charge} do
+      # The base charge already carries store: false.
       stub_success()
       payload = %{"hash" => @tx_hash}
 
       assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
-      # Without a store there is no replay guard — the same hash verifies again.
       assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
     end
   end
@@ -672,14 +658,6 @@ defmodule MPP.Methods.EVMTest do
     test "unexpected atomic commit error surfaces a generic dedup error", %{charge: charge} do
       stub_success()
       charge = with_store(charge, AtomicFailStore)
-
-      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "Dedup store error"
-    end
-
-    test "non-atomic put failure surfaces a generic dedup error", %{charge: charge} do
-      stub_success()
-      charge = with_store(charge, NonAtomicPutFailStore)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
       assert error.detail == "Dedup store error"

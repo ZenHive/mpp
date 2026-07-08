@@ -8,6 +8,17 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-08
+
+**Security (replay protection on by default — issue #7).** Dedup stores are now **on by default** across all three layers (`MPP.Plug` credential store, `MPP.Methods.Tempo`, `MPP.Methods.EVM`). When no `:store` / `"store"` is configured, the app-started `MPP.Tempo.ConCacheStore` is used automatically, so a fresh install rejects replays out of the box instead of silently allowing them — matching the reference SDKs (mpp-rs `store: Some(MemoryStore::new())` in `server/tempo.rs`; mppx `Store.from(store ?? Store.memory())` in `tempo/server/Charge.ts`). `MPP.Application` is now started (via `mod:` in `mix.exs`) to supervise that default store.
+
+**Security (atomic dedup contract required — GHSA-w8j7-7qc3-5f24 residual).** A configured store MUST now implement the atomic `check_and_mark/2`; `check_and_mark/2` is a required `MPP.Tempo.Store` callback and a store lacking it is rejected at `Plug.init` / `validate_config!` with an `ArgumentError`. The previous non-atomic `get/1`+`put/2` fallback — which left a TOCTOU replay window for custom get/put-only stores — has been removed. The built-in `ConCacheStore` (atomic via ConCache row isolation) and both reference SDKs (mpp-rs `put_if_absent` fails closed on `AtomicUnsupported`; mppx atomic `update`) already meet this contract.
+
+**Breaking changes (0.7.0):**
+- Replay protection defaults to ON. Deployments that relied on the previous stateless (no-dedup) default must set `store: false` (Plug opt) / `"store" => false` (method_config) to explicitly opt out. `store: nil`/absent now means "use the default store," not "no dedup."
+- Custom stores implementing only `get/1` + `put/2` are rejected at init — add an atomic `check_and_mark/2`, or use `store: false` to disable dedup.
+- The `:mpp` application now starts a supervised process (the default `ConCacheStore`). A static Tempo `"memo"` combined with `store: false` is rejected (a static memo still requires single-use enforcement).
+
 ## [0.6.4] - 2026-07-07
 
 **Security (Tempo static-memo hardening — GHSA-34g7-vx6g-82mq).** A static `"memo"` in the Tempo `method_config` now requires a dedup `"store"` to be configured — `MPP.Plug` raises `ArgumentError` at init otherwise. A static memo pins attribution independently of the per-challenge nonce, so the dedup store provides the single-use guarantee for that configuration, matching the reference Rust SDK's store-on-by-default backstop. Routes using the default per-challenge attribution (no static memo) are unaffected. Configure `MPP.Tempo.ConCacheStore` (or `{MPP.Tempo.ConCacheStore, opts}`) in your supervision tree, or omit the static memo.

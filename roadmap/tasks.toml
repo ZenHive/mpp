@@ -1715,7 +1715,7 @@ scored_at = "2026-07-07"
 id = "76"
 phase = 9
 bundle = "tempo"
-status = "pending"
+status = "done"
 title = "Replay protection ON by default: app-started default dedup store for Tempo/EVM (closes issue #7)"
 scores = { d = 5, b = 7, u = 7 }
 markers = ["security"]
@@ -1738,14 +1738,16 @@ This is a BREAKING default flip: every existing deployment that omits `:store` m
 
 Also correct the stale `con_cache` "optional dependency" doc claims (con_cache_store.ex:5, tempo.ex moduledoc) — it is a hard dep today; adjacent to Task 71's onchain/onchain_tempo doc fix but a separate module. On landing: respond to and close issue #7, and note that presenter-identity binding (Task 75) remains the separate front-running residual a default store does not close.
 """
+implemented = "Replay dedup on by default: MPP.Application starts the default ConCacheStore; Store.resolve/1 maps nil->default, false->opt-out across Plug/Tempo/EVM (0.7.0)"
 created_at = "2026-07-07"
 scored_at = "2026-07-07"
+done_at = "2026-07-07"
 
 [[task]]
 id = "77"
 phase = 9
 bundle = "tempo"
-status = "pending"
+status = "done"
 title = "Harden Tempo dedup-store contract (breaking; see private advisory)"
 scores = { d = 5, b = 7, u = 6 }
 markers = ["security"]
@@ -1758,5 +1760,7 @@ The full mechanism, affected version range, and remediation detail live ONLY in 
 
 Surfaced by audit-review of commit 46c5b0e on 2026-07-08; see .audit/46c5b0e-harden-tempo-hash-credential-d.md. Built-in and default stores are unaffected — this is a contract hardening, not a defect in shipped defaults.
 """
+implemented = "check_and_mark/2 is a required Store callback; non-atomic get/put stores rejected at init, sequential fallback removed (GHSA-w8j7-7qc3-5f24, 0.7.0)"
 created_at = "2026-07-07"
 scored_at = "2026-07-07"
+done_at = "2026-07-07"

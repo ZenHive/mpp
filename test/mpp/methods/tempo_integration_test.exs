@@ -1313,7 +1313,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
           %{
             "rpc_url" => rpc_url,
             "chain_id" => @chain_id,
-            "fee_payer" => false
+            "fee_payer" => false,
+            # Dedup is on by default now; verification-logic tests opt out so the
+            # app-started shared default store doesn't interfere. Dedup describes
+            # override this with an explicit TempoMemoryStore.
+            "store" => false
           },
           method_config_overrides
         )

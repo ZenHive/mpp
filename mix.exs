@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.6.4"
+  @version "0.7.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -33,9 +33,10 @@ defmodule MPP.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
-      # Task 76 wires MPP.Application when the default dedup store needs supervision.
-      # mod: {MPP.Application, []}
+      extra_applications: [:logger],
+      # Starts the default replay-dedup store (MPP.Tempo.ConCacheStore) so replay
+      # protection is on by default (issue #7).
+      mod: {MPP.Application, []}
     ]
   end
 
@@ -106,12 +107,12 @@ defmodule MPP.MixProject do
     ]
   end
 
-  # Exclude inert/dev-only scaffolding from the 95% critical-tier coverage gate
-  # (money/signing/wire-format). `MPP.Application` is an unwired boot stub (`mod:`
-  # is commented out below); `Mix.Tasks.Mpp.Demo` is the dev demo-server launcher.
-  # Both are out of scope per SECURITY.md — they don't belong in the money-path signal.
+  # Exclude dev-only scaffolding from the 95% critical-tier coverage gate
+  # (money/signing/wire-format). `Mix.Tasks.Mpp.Demo` is the dev demo-server
+  # launcher — out of scope per SECURITY.md. `MPP.Application` now carries real
+  # logic (starts the default dedup store) and is covered by application_test.exs.
   defp test_coverage do
-    [ignore_modules: [MPP.Application, Mix.Tasks.Mpp.Demo]]
+    [ignore_modules: [Mix.Tasks.Mpp.Demo]]
   end
 
   defp dialyzer do

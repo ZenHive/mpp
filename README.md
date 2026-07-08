@@ -108,7 +108,7 @@ end
 
 Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. The client broadcasts a transaction, then sends the hash as a credential.
 
-For replay protection on static-price routes, configure `method_config["store"]` with an `MPP.Tempo.Store` implementation (for example `MPP.Tempo.ConCacheStore`) so each transaction hash is accepted only once.
+**Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
 ### Multi-Method (Stripe + Tempo)
 

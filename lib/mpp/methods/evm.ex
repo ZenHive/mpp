@@ -30,9 +30,12 @@ defmodule MPP.Methods.EVM do
     * `"rpc_url"` — (required) JSON-RPC endpoint URL for the target EVM chain
     * `"chain_id"` — (optional) network chain ID, included in challenge details
       so the client knows which chain to transact on
-    * `"store"` — (optional but **strongly recommended** — see "Replay protection")
-      a module implementing `MPP.Tempo.Store`, or `{MPP.Tempo.ConCacheStore, opts}`,
-      used to enforce single-use of each on-chain transaction hash
+    * `"store"` — (optional) replay-dedup store, **on by default** (see "Replay
+      protection"): when absent, the app-started `MPP.Tempo.ConCacheStore` enforces
+      single-use of each on-chain transaction hash out of the box. Pass a module
+      implementing `MPP.Tempo.Store` (Redis/Postgres for multi-node) or
+      `{MPP.Tempo.ConCacheStore, opts}`; a configured store MUST implement the atomic
+      `check_and_mark/2`. Pass `store: false` to opt out (not recommended)
     * `"req_options"` — (optional) merged into the `Onchain.RPC` call as
       `:req_options` (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
 
@@ -144,7 +147,7 @@ defmodule MPP.Methods.EVM do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = config["store"]
+    store = Store.resolve(config["store"])
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          {:ok, hash} <- extract_hash(payload),
@@ -371,28 +374,17 @@ defmodule MPP.Methods.EVM do
     end
   end
 
-  # Commits a hash as used AFTER successful on-chain verification. Atomic when the
-  # store supports check_and_mark/2: concurrent same-hash requests collide here, so
-  # exactly one wins and the loser gets "already used" — closing the check→mark race
-  # the plain get/put commit left open. Stores without check_and_mark/2 fall back to a
-  # best-effort put (the early read remains their only, non-atomic, guard).
+  # Commits a hash as used AFTER successful on-chain verification, via the store's
+  # atomic check_and_mark/2: concurrent same-hash requests collide here, so exactly
+  # one wins and the loser gets "already used". Atomicity is guaranteed by
+  # validate_store!/1 (a non-atomic store is rejected at init) — no fallback (GHSA-w8j7-7qc3-5f24).
   defp commit_hash_used(nil, _hash), do: :ok
 
   defp commit_hash_used(store, hash) do
-    key = store_key(hash)
-    ts = System.system_time(:millisecond)
-
-    if Store.supports_atomic?(store) do
-      case Store.check_and_mark(store, key, ts) do
-        :ok -> :ok
-        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-      end
-    else
-      case Store.put(store, key, ts) do
-        :ok -> :ok
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
-      end
+    case Store.check_and_mark(store, store_key(hash), System.system_time(:millisecond)) do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
 
@@ -400,10 +392,21 @@ defmodule MPP.Methods.EVM do
   # of the same transaction collapse to one entry.
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
-  # Validates the :store config is a module implementing the Store behaviour.
+  # Validates the :store config. `nil`/absent resolves to the default store (replay
+  # protection on by default); `false` is an explicit opt-out. A configured store MUST
+  # implement the atomic check_and_mark/2 — a non-atomic get/put store is rejected here
+  # rather than silently degrading to a racy fallback (GHSA-w8j7-7qc3-5f24).
   defp validate_store!(nil), do: :ok
+  defp validate_store!(false), do: :ok
 
-  defp validate_store!({ConCacheStore, _opts}), do: validate_store!(ConCacheStore)
+  defp validate_store!({ConCacheStore, opts}) do
+    if !Keyword.keyword?(opts) do
+      raise ArgumentError,
+            "MPP.Methods.EVM :store opts for {MPP.Tempo.ConCacheStore, opts} must be a keyword list; got: #{inspect(opts)}"
+    end
+
+    validate_store!(ConCacheStore)
+  end
 
   defp validate_store!(ConCacheStore), do: :ok
 
@@ -413,9 +416,11 @@ defmodule MPP.Methods.EVM do
   end
 
   defp validate_store!(store) do
-    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2)) do
+    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2) and
+           function_exported?(store, :check_and_mark, 2)) do
       raise ArgumentError,
-            "MPP.Methods.EVM :store must be a module implementing MPP.Tempo.Store (get/1, put/2)"
+            "MPP.Methods.EVM :store must be a module implementing MPP.Tempo.Store " <>
+              "(get/1, put/2, check_and_mark/2 — atomic single-use is required; use `store: false` to disable dedup)"
     end
 
     :ok

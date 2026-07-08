@@ -10,9 +10,6 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.FailingPutStore
-  alias MPP.Test.NonAtomicFailingPutStore
-  alias MPP.Test.NonAtomicGetFailStore
-  alias MPP.Test.NonAtomicStore
   alias MPP.Test.TempoMemoryStore
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
@@ -41,13 +38,18 @@ defmodule MPP.Methods.TempoTest do
         recipient: @recipient
       )
 
-    # Simulate what Plug does: merge method_config into charge.method_details
+    # Simulate what Plug does: merge method_config into charge.method_details.
+    # Dedup is on by default now; these verification-logic tests opt out
+    # (`store: false`) so the app-started shared default store doesn't carry the
+    # fixed @tx_hash across async tests. Dedup is covered by the dedicated dedup
+    # describes below (which set their own store).
     charge = %{
       charge
       | method_details: %{
           "rpc_url" => @rpc_url,
           "chain_id" => 42_431,
-          "req_options" => [plug: {Req.Test, Tempo}]
+          "req_options" => [plug: {Req.Test, Tempo}],
+          "store" => false
         }
     }
 
@@ -91,20 +93,20 @@ defmodule MPP.Methods.TempoTest do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => nil})
     end
 
-    test "raises when a static memo is configured without a store" do
+    test "raises when a static memo is configured with dedup explicitly disabled (store: false)" do
       memo = "0x" <> String.duplicate("ab", 32)
 
-      assert_raise ArgumentError, ~r/static "memo" requires a "store"/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
+      assert_raise ArgumentError, ~r/static "memo" requires dedup/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => false})
       end
     end
 
-    test "raises when a static memo is configured with an explicitly nil store" do
+    test "accepts a static memo with no store configured (dedup is on by default)" do
       memo = "0x" <> String.duplicate("ab", 32)
 
-      assert_raise ArgumentError, ~r/static "memo" requires a "store"/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => nil})
-      end
+      # nil/absent store resolves to the app-started default, so the memo's missing
+      # attribution binding is backstopped by single-use enforcement automatically.
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
     end
 
     test "raises on memo with wrong length" do
@@ -1138,6 +1140,8 @@ defmodule MPP.Methods.TempoTest do
 
         def get(_key), do: {:error, :connection_refused}
         def put(_key, _value), do: :ok
+        # Required by the contract; unreached here (get fails first).
+        def check_and_mark(_key, _value), do: :ok
       end
 
       charge = %{
@@ -1151,49 +1155,6 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Dedup store error"
-    end
-
-    test "hash path falls back to best-effort put for a store without check_and_mark/2", %{
-      charge: charge
-    } do
-      # A store implementing only get/put — no atomic check_and_mark/2. The hash path
-      # must still commit via plain put after verification, and reject replay via the
-      # (non-atomic, best-effort) early read.
-      defmodule PutOnlyStore do
-        @moduledoc false
-        @behaviour Store
-
-        use Agent
-
-        def start_link(_opts \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
-
-        @impl Store
-        def get(key) do
-          case Agent.get(__MODULE__, &Map.get(&1, key)) do
-            nil -> :not_found
-            value -> {:ok, value}
-          end
-        end
-
-        @impl Store
-        def put(key, value) do
-          Agent.update(__MODULE__, &Map.put(&1, key, value))
-          :ok
-        end
-      end
-
-      start_supervised!(PutOnlyStore)
-      charge = %{charge | method_details: Map.put(charge.method_details, "store", PutOnlyStore)}
-
-      stub_receipt(success_receipt())
-      payload = %{"type" => "hash", "hash" => @tx_hash}
-
-      # First call succeeds and marks via the put fallback
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
-
-      # Replay rejected via the early read
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail =~ "already used"
     end
 
     test "concurrent requests with same signed tx — only one succeeds", %{charge: charge} do
@@ -1367,15 +1328,24 @@ defmodule MPP.Methods.TempoTest do
         Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => "not_a_module"})
       end
     end
+
+    test "validate_config! rejects a ConCacheStore tuple whose opts is not a keyword list" do
+      assert_raise ArgumentError, ~r/must be a keyword list/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => {ConCacheStore, [1, 2, 3]}})
+      end
+    end
   end
 
   describe "verify/2 — ConCacheStore" do
     setup %{charge: charge} do
-      start_supervised!(ConCacheStore.child_spec(ttl: to_timeout(second: 10)))
+      # Use a uniquely-named instance — the default :mpp_tempo_dedup is already
+      # started by MPP.Application, so starting another default-named one collides.
+      name = :test_cc_dedup
+      start_supervised!(ConCacheStore.child_spec(name: name, ttl: to_timeout(second: 10)))
 
       charge = %{
         charge
-        | method_details: Map.put(charge.method_details, "store", ConCacheStore)
+        | method_details: Map.put(charge.method_details, "store", {ConCacheStore, name: name})
       }
 
       {:ok, charge: charge}
@@ -1571,84 +1541,28 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
-  describe "verify/2 — non-atomic store (sequential fallback)" do
-    setup %{charge: charge} do
-      start_supervised!(NonAtomicStore)
-
-      charge = %{
-        charge
-        | method_details: Map.put(charge.method_details, "store", NonAtomicStore)
-      }
-
-      {:ok, charge: charge}
-    end
-
-    test "sequential path succeeds and rejects replay", %{charge: charge} do
-      calldata = transfer_calldata(@recipient, 1_000_000)
-      call = build_call(@token_address, calldata)
-      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
-
-      stub_broadcast_and_receipt(success_receipt())
-
-      payload = %{"type" => "transaction", "signature" => tx_hex}
-
-      # First call succeeds via sequential get+put
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
-
-      # Second call rejected via sequential get (already exists)
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail =~ "already used"
-    end
-  end
-
-  describe "verify/2 — non-atomic store put error" do
-    test "sequential put failure surfaces as verification_failed", %{charge: charge} do
-      charge = %{
-        charge
-        | method_details: Map.put(charge.method_details, "store", NonAtomicFailingPutStore)
-      }
-
-      start_supervised!(NonAtomicFailingPutStore)
-
-      calldata = transfer_calldata(@recipient, 1_000_000)
-      call = build_call(@token_address, calldata)
-      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
-
-      stub_broadcast_and_receipt(success_receipt())
-
-      payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Dedup store error"
-    end
-  end
-
-  describe "verify/2 — non-atomic store get error" do
-    test "sequential get failure surfaces as verification_failed", %{charge: charge} do
-      # NonAtomicGetFailStore: get returns {:error, :connection_lost}
-      charge = %{
-        charge
-        | method_details: Map.put(charge.method_details, "store", NonAtomicGetFailStore)
-      }
-
-      calldata = transfer_calldata(@recipient, 1_000_000)
-      call = build_call(@token_address, calldata)
-      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
-
-      stub_broadcast_and_receipt(success_receipt())
-
-      payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Dedup store error"
-    end
-  end
-
   describe "validate_config! — store tuple edge cases" do
     test "rejects unsupported tuple store" do
       assert_raise ArgumentError, ~r/only supported for.*ConCacheStore/, fn ->
         Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => {SomeOtherModule, []}})
       end
+    end
+
+    test "rejects a store missing the atomic check_and_mark/2" do
+      # get/1 + put/2 only — no longer accepted; atomicity is required (GHSA-w8j7-7qc3-5f24).
+      defmodule GetPutOnlyStore do
+        @moduledoc false
+        def get(_key), do: :not_found
+        def put(_key, _value), do: :ok
+      end
+
+      assert_raise ArgumentError, ~r/check_and_mark/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => GetPutOnlyStore})
+      end
+    end
+
+    test "accepts store: false (explicit opt-out of dedup)" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => "https://example.com", "store" => false})
     end
   end
 

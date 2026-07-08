@@ -3,7 +3,6 @@ defmodule MPP.Tempo.StoreTest do
 
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
-  alias MPP.Test.NonAtomicStore
   alias MPP.Test.TempoMemoryStore
 
   @ttl_ms 1_000
@@ -51,11 +50,22 @@ defmodule MPP.Tempo.StoreTest do
     end
   end
 
-  describe "supports_atomic?/1" do
-    test "detects module and tuple support", %{con_cache_store: store} do
-      assert Store.supports_atomic?(TempoMemoryStore)
-      assert Store.supports_atomic?(store)
-      refute Store.supports_atomic?(NonAtomicStore)
+  describe "resolve/1 and default_store/0" do
+    test "default_store/0 is the built-in ConCacheStore" do
+      assert Store.default_store() == ConCacheStore
+    end
+
+    test "nil (absent/unconfigured) resolves to the default store — on by default" do
+      assert Store.resolve(nil) == ConCacheStore
+    end
+
+    test "false resolves to nil — explicit opt-out" do
+      assert Store.resolve(false) == nil
+    end
+
+    test "an explicit store ref is returned unchanged", %{con_cache_store: store} do
+      assert Store.resolve(TempoMemoryStore) == TempoMemoryStore
+      assert Store.resolve(store) == store
     end
   end
 

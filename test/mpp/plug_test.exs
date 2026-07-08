@@ -111,7 +111,13 @@ defmodule MPP.PlugTest do
     realm: "api.test.com",
     method: MockMethod,
     amount: "1000",
-    currency: "usd"
+    currency: "usd",
+    # Dedup is on by default now (resolves to the app-started shared ConCacheStore).
+    # These tests opt out (`store: false`) so the global default store doesn't carry
+    # credentials across this async suite; dedup is covered by the "shared replay
+    # store" describe (which passes an explicit isolated store) and the default-on
+    # assertions in "init/1".
+    store: false
   ]
 
   defp init_config(overrides \\ []) do
@@ -247,12 +253,38 @@ defmodule MPP.PlugTest do
     end
 
     test "optional fields use secure defaults" do
-      config = init_config()
+      # store: nil overrides the suite-wide opt-out to observe the true default —
+      # replay protection is on by default, resolving an unconfigured store to the
+      # app-started ConCacheStore (issue #7).
+      config = init_config(store: nil)
       assert config.expires_in == 300
       assert config.digest == nil
       assert config.opaque == nil
-      assert config.store == nil
+      assert config.store == ConCacheStore
       assert first_entry(config).charge.recipient == nil
+    end
+
+    test "store: false explicitly opts out of the default replay store" do
+      config = init_config(store: false)
+      assert config.store == nil
+    end
+
+    test "raises when the configured store is not atomic (missing check_and_mark/2)" do
+      defmodule GetPutOnlyStore do
+        @moduledoc false
+        def get(_key), do: :not_found
+        def put(_key, _value), do: :ok
+      end
+
+      assert_raise ArgumentError, ~r/check_and_mark/, fn ->
+        init_config(store: GetPutOnlyStore)
+      end
+    end
+
+    test "raises at init when ConCacheStore opts is not a keyword list" do
+      assert_raise ArgumentError, ~r/must be a keyword list/, fn ->
+        init_config(store: {ConCacheStore, [1, 2, 3]})
+      end
     end
 
     test "accepts optional shared replay store" do

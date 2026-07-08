@@ -352,7 +352,12 @@ defmodule MPP.Methods.EVMIntegrationTest do
       recipient: recipient,
       method_details: %{
         "rpc_url" => rpc_url,
-        "chain_id" => @default_chain_id
+        "chain_id" => @default_chain_id,
+        # These transfer-matching tests reuse the same real on-chain hash across
+        # positive and negative cases. Dedup is on by default now, so opt out
+        # (`store: false`) — otherwise the first verify marks the hash and later
+        # cases short-circuit on "already used" before recipient/value are checked.
+        "store" => false
       }
     }
   end
