@@ -24,6 +24,7 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 | Zero-amount requires proof (not hash/tx) | mppx proof flow | ✓ **new** | `reject_non_proof_for_zero_amount/2` |
 | Hosted fee-payer fills (`fillHostedFeePayerTransaction`) | mppx #536, #538, #584 | ✓ | `MPP.Methods.Tempo.HostedFeePayer` + `fee_payer_url` config |
 | Proof access-key / on-chain keychain fallback | mppx `resolveAccount` #579 | ✓ **new** | `recover_authorized_proof_signer` + `AccessKey.active?/3` via AccountKeychain `getKey` — `proof.ex`, `access_key.ex`, `tempo.ex` (Task 69) |
+| **Presenter-identity binding on hash/transaction paths** | — ZenHive extension beyond both SDKs (residual of published `GHSA-34g7-vx6g-82mq`; mpp-rs `verify_hash` / mppx `Charge.ts` default sender to `receipt.from`, no tighten knob) | ✓ **new** | Opt-in `"require_presenter_binding"`: presenter signs the proof EIP-712 envelope (MPP v3 `{account, challengeId, realm}`) with the transfer sender's wallet or an authorized access key; advertised as `presenterBinding` in 402 details — `tempo.ex` (Task 75, 0.8.0) |
 | Client-side Tempo chain pinning | mpp-rs `8880cf7` | N/A | Built-in Tempo provider — tracked in Task 33e |
 
 ---
