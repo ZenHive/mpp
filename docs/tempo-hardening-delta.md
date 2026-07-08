@@ -17,10 +17,10 @@ Audit date: **2026-06-30**. Reference clones: `refs/mppx` (head `8305a05`), `ref
 | Pre-broadcast sponsored-tx simulation | mppx #534, mpp-rs #293 | ✓ | `eth_simulateV1` in `tempo.ex` (Task 59) |
 | `hash` + `feePayer` MUST reject | mpp-specs #204 | ✓ | `tempo.ex` rejects hash when `fee_payer: true` |
 | Hash-credential `source` DID validation | mpp-rs `384c4fe` | ✓ | `MPP.DID.parse_evm_did/1` + chain match in hash path |
-| Atomic replay store (`put_if_absent` / CAS) | mpp-rs #280 | ✓ | `MPP.Tempo.ConCacheStore.check_and_mark/2` (0.6.1) |
+| Atomic replay store (`put_if_absent` / CAS) | mpp-rs #280 | ✓ | `MPP.Tempo.ConCacheStore.check_and_mark/2` — **required + on by default** (0.7.0; was optional in 0.6.1) |
 | **Fee-payer token allowlist** | mpp-rs #286 | ✓ **new** | `FeePayerPolicy.fee_token_allowed?/3`, `default_allowed_fee_tokens/1`; enforced before co-sign |
 | **EIP-712 proof v3 wallet binding** | mppx #532, #253 | ✓ **new** | `MPP.Methods.Tempo.Proof` + `type="proof"` verify path; conformance vector pinned |
-| Proof replay via store | mpp-rs #285 | ✓ **new** | `mpp:proof:<challenge_id>` via `check_and_mark/2` when store configured |
+| Proof replay via store | mpp-rs #285 | ✓ | `mpp:proof:<challenge_id>` via `check_and_mark/2` (store on by default, 0.7.0) |
 | Zero-amount requires proof (not hash/tx) | mppx proof flow | ✓ **new** | `reject_non_proof_for_zero_amount/2` |
 | Hosted fee-payer fills (`fillHostedFeePayerTransaction`) | mppx #536, #538, #584 | ✓ | `MPP.Methods.Tempo.HostedFeePayer` + `fee_payer_url` config |
 | Proof access-key / on-chain keychain fallback | mppx `resolveAccount` #579 | ✓ **new** | `recover_authorized_proof_signer` + `AccessKey.active?/3` via AccountKeychain `getKey` — `proof.ex`, `access_key.ex`, `tempo.ex` (Task 69) |

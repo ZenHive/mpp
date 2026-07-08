@@ -613,6 +613,43 @@ defmodule MPP.HeadersTest do
     end
   end
 
+  describe "Accept-Payment header size cap (DoS, mpp-rs #299)" do
+    test "parse_accept_payment ignores an oversized header" do
+      oversized = String.duplicate("tempo/charge,", 1300)
+      assert byte_size(oversized) > @max_token_len
+      assert Headers.parse_accept_payment(oversized) == []
+    end
+
+    test "apply_accept_payment_header is a no-op for an oversized header (server offers unchanged)" do
+      offers = [{"tempo", "charge"}, {"stripe", "charge"}]
+      method_intent = fn offer -> offer end
+
+      # Valid content that WOULD rank stripe first if parsed — proves the cap
+      # short-circuits before ranking, not merely that malformed input is ignored.
+      oversized = String.duplicate("stripe/charge,", 1300)
+      assert byte_size(oversized) > @max_token_len
+      assert Headers.apply_accept_payment_header(offers, oversized, method_intent) == offers
+    end
+
+    test "a large but sub-limit valid header still parses (guard is not over-eager)" do
+      valid = String.duplicate("tempo/charge,", 1000) <> "tempo/charge"
+      assert byte_size(valid) < @max_token_len
+
+      parsed = Headers.parse_accept_payment(valid)
+      refute parsed == []
+      assert hd(parsed) == {"tempo", "charge", 1.0}
+    end
+
+    test "an exactly-at-limit header still parses (cap is exclusive)" do
+      # "tempo/charge" is 12 bytes; pad with trailing spaces (trimmed by the
+      # part parser) to hit byte_size == @max_token_len exactly.
+      at_limit = "tempo/charge" <> String.duplicate(" ", @max_token_len - 12)
+      assert byte_size(at_limit) == @max_token_len
+
+      assert Headers.parse_accept_payment(at_limit) == [{"tempo", "charge", 1.0}]
+    end
+  end
+
   describe "format_accept_payment/1" do
     test "formats entries and round-trips" do
       header = "tempo/charge, stripe/charge;q=0.5, */session;q=0"

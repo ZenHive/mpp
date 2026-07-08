@@ -36,7 +36,7 @@ mpp-specs: no advisories.
 | Upstream fix | What it guards | Our implementation |
 |---|---|---|
 | mpp-rs #175 / #296 constant-time HMAC | Timing side-channel on challenge-ID compare | `Plug.Crypto.secure_compare/2` — `challenge.ex:85`, `body_digest.ex:71` |
-| mpp-rs #299 / mppx `ec1ad50` (#562) token cap | Memory-exhaustion DoS via oversized header token | `@max_token_len 16 KiB` enforced pre-decode at all 3 parse sites — `headers.ex:53,228,235` (Task 65, done) |
+| mpp-rs #299 / mppx `ec1ad50` (#562) token cap | Memory-exhaustion DoS via oversized header token | `@max_token_len 16 KiB` enforced pre-parse at all 4 client-input sites — credential token, receipt token, challenge `request` param (Task 65, done), and `Accept-Payment` header (2026-07-08) |
 | mpp-specs #204 `hash`+`feePayer` MUST REJECT | Bypass of sponsorship validation via hash credential | `tempo.ex:139` rejects `type="hash"` when `fee_payer: true` |
 | mppx #501 escape challenge quoted strings | Header / CRLF injection in `WWW-Authenticate` | `escape_quoted/1` raises on CR/LF — `headers.ex:369-377`; parser rejects CR/LF in values `headers.ex:478-479` |
 | mppx #497 require expiring nonce for fee payer | Fixed-nonce replay of sponsored tx | `@expiring_nonce_key` checked in `FeePayerPolicy` — `fee_payer_policy.ex:224-230` |

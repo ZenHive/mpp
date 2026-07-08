@@ -245,6 +245,7 @@ defmodule MPP.Headers do
   tokens or `*`, and `q` is `0.0..1.0` (default `1.0`).
 
   Returns `[]` for empty, whitespace-only, or malformed input (spec MAY-ignore).
+  Headers larger than 16 KiB are ignored the same way (DoS cap, applied before parsing).
   """
   @spec parse_accept_payment(String.t()) :: [accept_payment_entry()]
   def parse_accept_payment(header) when is_binary(header) do
@@ -272,8 +273,8 @@ defmodule MPP.Headers do
   @doc """
   Filter and reorder server offers using an `Accept-Payment` header.
 
-  Returns `offers` unchanged when `header` is `nil`, malformed, or matches no
-  offers (spec MAY-ignore).
+  Returns `offers` unchanged when `header` is `nil`, malformed, oversized
+  (> 16 KiB), or matches no offers (spec MAY-ignore).
   """
   @spec apply_accept_payment_header([term()], String.t() | nil, (term() -> {String.t(), String.t()})) ::
           [term()]
@@ -393,6 +394,13 @@ defmodule MPP.Headers do
 
   @spec parse_accept_payment_entries(String.t()) ::
           {:ok, [accept_payment_entry_internal()]} | {:error, :malformed}
+  # DoS guard: an oversized client-supplied Accept-Payment header is ignored
+  # (advisory, spec MAY-ignore) before String.split allocates a parts list,
+  # mirroring the @max_token_len credential/receipt guards (mpp-rs #299). At-limit passes.
+  defp parse_accept_payment_entries(header) when byte_size(header) > @max_token_len do
+    {:error, :malformed}
+  end
+
   defp parse_accept_payment_entries(header) when is_binary(header) do
     parts =
       header
