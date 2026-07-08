@@ -11,7 +11,7 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 9 — Protocol Utilities (28 of 31 done · 0 in progress)
+**Focus phase:** 9 — Protocol Utilities (28 of 31 done · 1 in progress)
 
 **Last shipped:** Task 74 — Docs hygiene: README modules, ROADMAP focus, SECURITY version on 2026-07-08
 
@@ -138,7 +138,7 @@
 | Task 72 | ⬜ | 🎁 **core-protocol** · Parse-time input validation parity for challenge/credential [D:3/B:5/U:6 → Eff:1.83] 🚀 |
 | Task 73 | ⬜ | 🎁 **utilities** · Extract shared helpers and split MPP.Headers (mechanical refactor) [D:3/B:4/U:6 → Eff:1.67] 🚀 |
 | Task 74 | ✅ | 🎁 **dx** · 📝 Docs hygiene: README modules, ROADMAP focus, SECURITY version [D:1/B:3/U:5 → Eff:4.0] 🎯 |
-| Task 75 | ⬜ | 🎁 **tempo** · 🔒 Presenter-identity binding for Tempo hash-credential path (close GHSA-34g7-vx6g-82mq residual) [D:5/B:7/U:6 → Eff:1.3] 📋 |
+| Task 75 | 🔄 | 🎁 **tempo** · 🔒 Presenter-identity binding for Tempo hash-credential path (close GHSA-34g7-vx6g-82mq residual) [D:5/B:7/U:6 → Eff:1.3] 📋 |
 | Task 76 | ✅ | 🎁 **tempo** · 🔒 Replay protection ON by default: app-started default dedup store for Tempo/EVM (closes issue #7) [D:5/B:7/U:7 → Eff:1.4] 📋 |
 | Task 77 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo dedup-store contract (breaking; see private advisory) [D:5/B:7/U:6 → Eff:1.3] 📋 |
 <!-- TASKS:END -->

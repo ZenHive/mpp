@@ -8,6 +8,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-08
+
+**Security (presenter-identity binding — closes the GHSA-34g7-vx6g-82mq residual).** New opt-in Tempo `method_config` key `"require_presenter_binding"`: when `true`, `type="hash"` and `type="transaction"` credentials must carry a `"presenterSignature"` — an EIP-712 signature over the same `Proof` typed data the `type="proof"` path uses (MPP domain v3, `{account, challengeId, realm}`) — produced by the transfer sender's wallet or one of its authorized access keys. This closes the advisory's documented residual: dedup on the hash/transaction paths is keyed on the tx hash alone, so a third party who observed a settled transfer could race its hash against their own fresh challenge; with binding enabled the presenter must prove control of the sender address (hash path: the credential's `source` DID is required and must match the matched transfer's `from`; transaction path: the account is the sender recovered from the signed 0x76 transaction, and a `source`, when present, must agree). The requirement is advertised to clients as `"presenterBinding": true` in the 402 challenge's method details, and a supplied `presenterSignature` is verified even when the flag is off. Off by default for interoperability: neither mpp-rs nor mppx binds the presenter on the hash path (both default the expected sender to the receipt's `from` — mpp-rs `verify_hash`, mppx `Charge.ts` hash branch), so this is a deliberate hardening extension beyond the reference SDKs.
+
 ## [0.7.0] - 2026-07-08
 
 **Security (Accept-Payment DoS cap — mpp-rs #299 parity).** `MPP.Headers.parse_accept_payment/1` and `apply_accept_payment_header/3` now ignore an `Accept-Payment` header larger than 16 KiB (`@max_token_len`) before splitting, extending the credential/receipt/challenge-request token cap to the fourth client-supplied parse surface. Oversized headers are treated as malformed (spec MAY-ignore): parsing returns `[]` and offer ranking is a no-op.

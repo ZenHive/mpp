@@ -56,6 +56,7 @@ mpp-specs: no advisories.
 | mppx #579 proof access-key authorization | Zero-amount proof signed by delegated access key | `recover_authorized_proof_signer` + AccountKeychain `getKey` active check — `proof.ex`, `access_key.ex`, `tempo.ex` (Task 69) |
 | mpp-rs store-on-by-default (`server/tempo.rs`) / mppx `Store.memory()` default | Replay of on-chain tx/credential when no store is configured (issue #7; published `GHSA-vp5h-xh25-44wf`) | `MPP.Tempo.Store.resolve/1` default-on + app-started `ConCacheStore`; `store: false` is the explicit opt-out — `store.ex`, `application.ex` (Task 76, ships 0.7.0) |
 | mpp-rs `put_if_absent` fails closed / mppx atomic `update` | TOCTOU replay window in non-atomic dedup commit (published `GHSA-w8j7-7qc3-5f24`) | `check_and_mark/2` is a required callback; non-atomic stores rejected at init; sequential get+put fallback removed — `store.ex`, `tempo.ex`, `evm.ex`, `plug.ex` (Task 77, ships 0.7.0) |
+| — hardening divergence beyond both SDKs (residual of our published `GHSA-34g7-vx6g-82mq`) | Front-running race on Tempo hash/transaction paths: dedup keyed on tx hash alone, presenter identity never proven (both SDKs default expected sender to `receipt.from` — mpp-rs `verify_hash`, mppx `Charge.ts`) | Opt-in `"require_presenter_binding"`: presenter signs the proof path's EIP-712 envelope (MPP v3 `{account, challengeId, realm}`) with the transfer sender's wallet or an authorized access key; hash path requires a matching `source` DID; advertised as `presenterBinding` in 402 details — `tempo.ex` (Task 75, ships 0.8.0) |
 
 ---
 

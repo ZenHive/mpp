@@ -128,6 +128,17 @@ defmodule MPP.Methods.TempoTest do
         Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => 12_345})
       end
     end
+
+    test "accepts boolean require_presenter_binding" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => true})
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => false})
+    end
+
+    test "raises on non-boolean require_presenter_binding" do
+      assert_raise ArgumentError, ~r/require_presenter_binding.*boolean/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => "yes"})
+      end
+    end
   end
 
   describe "challenge_method_details/1" do
@@ -174,6 +185,20 @@ defmodule MPP.Methods.TempoTest do
 
       assert details["chainId"] == 42_431
       assert details["feePayer"] == false
+    end
+
+    test "includes presenterBinding when required", %{charge: charge} do
+      charge = %{charge | method_details: %{"require_presenter_binding" => true}}
+      details = Tempo.challenge_method_details(charge)
+
+      assert details["presenterBinding"] == true
+    end
+
+    test "omits presenterBinding when not required", %{charge: charge} do
+      refute Map.has_key?(Tempo.challenge_method_details(charge), "presenterBinding")
+
+      charge = %{charge | method_details: %{"require_presenter_binding" => false}}
+      refute Map.has_key?(Tempo.challenge_method_details(charge), "presenterBinding")
     end
   end
 
@@ -2344,6 +2369,224 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — presenter binding (hash credential)" do
+    setup %{charge: charge} do
+      wallet_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
+      attacker_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
+      {:ok, wallet_addr} = Curvy.get_address(wallet_key)
+      {:ok, attacker_addr} = Curvy.get_address(attacker_key)
+
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "challenge_id" => @challenge_id,
+              "realm" => @realm,
+              "require_presenter_binding" => true
+            })
+      }
+
+      {:ok,
+       charge: charge,
+       wallet: %{key: wallet_key, address: wallet_addr, hex: "0x" <> Base.encode16(wallet_addr, case: :lower)},
+       attacker: %{key: attacker_key, address: attacker_addr, hex: "0x" <> Base.encode16(attacker_addr, case: :lower)}}
+    end
+
+    test "accepts a hash credential with a valid presenter signature", %{charge: charge, wallet: wallet} do
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+      signature = sign_access_key_proof!(presenter_params(wallet.hex), wallet.key, wallet.address)
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "regression (GHSA-34g7-vx6g-82mq residual): a third party cannot claim an observed transfer against their own challenge",
+         %{charge: charge, wallet: wallet, attacker: attacker} do
+      # The attacker holds their own wallet and presents a VALID presenter signature
+      # over their own account — but the observed settled transfer was sent by the
+      # victim's wallet, so the source/sender match fails and the claim is rejected.
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{attacker.hex}")
+      signature = sign_access_key_proof!(presenter_params(attacker.hex), attacker.key, attacker.address)
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "rejects a presenter signature that does not recover to the claimed source",
+         %{charge: charge, wallet: wallet, attacker: attacker} do
+      # Attacker claims the victim's wallet as source but can only sign with their own key.
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+      signature = sign_access_key_proof!(presenter_params(wallet.hex), attacker.key, attacker.address)
+      stub_active_access_key_metadata!(revoked: true)
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Presenter signature does not match the transfer sender"
+    end
+
+    test "rejects a presenter signature bound to a different challenge", %{charge: charge, wallet: wallet} do
+      # A signature captured for challenge A is useless for challenge B: challengeId
+      # is inside the signed EIP-712 digest.
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+      signature = sign_access_key_proof!(presenter_params(wallet.hex, "other-challenge"), wallet.key, wallet.address)
+      stub_active_access_key_metadata!(revoked: true)
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Presenter signature does not match the transfer sender"
+    end
+
+    test "rejects a hash credential without presenterSignature when binding is required",
+         %{charge: charge, wallet: wallet} do
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "Presenter binding is required"
+    end
+
+    test "rejects presenterSignature without a credential source", %{charge: charge, wallet: wallet} do
+      signature = sign_access_key_proof!(presenter_params(wallet.hex), wallet.key, wallet.address)
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "requires a credential source"
+    end
+
+    test "rejects a non-binary presenterSignature", %{charge: charge, wallet: wallet} do
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => 42}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "presenterSignature"
+    end
+
+    test "accepts an access-key presenter signature for the transfer sender",
+         %{charge: charge, wallet: wallet, attacker: attacker} do
+      # attacker's key here plays the role of an on-chain-authorized access key
+      # delegated by the wallet (the transfer sender).
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+      signature = sign_access_key_proof!(presenter_params(wallet.hex), attacker.key, attacker.address)
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt_and_access_key!(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "accepts a valid presenter signature when binding is not required", %{charge: charge, wallet: wallet} do
+      charge = put_in(charge.method_details["require_presenter_binding"], false)
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+      signature = sign_access_key_proof!(presenter_params(wallet.hex), wallet.key, wallet.address)
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "rejects an invalid provided presenter signature even when binding is not required",
+         %{charge: charge, wallet: wallet} do
+      charge = put_in(charge.method_details["require_presenter_binding"], false)
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
+
+      payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => "0xdeadbeef"}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Presenter signature does not match the transfer sender"
+    end
+  end
+
+  describe "verify/2 — presenter binding (transaction credential)" do
+    setup %{charge: charge} do
+      memo = attribution_memo(@realm, @challenge_id)
+      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, memo)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "challenge_id" => @challenge_id,
+              "realm" => @realm,
+              "require_presenter_binding" => true
+            })
+      }
+
+      {:ok, charge: charge, tx_hex: tx_hex, memo: memo}
+    end
+
+    test "accepts a transaction credential with a valid presenter signature (source matching sender)",
+         %{charge: charge, tx_hex: tx_hex, memo: memo} do
+      sender_hex = test_sender_address()
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{sender_hex}")
+      signature = sign_presenter_by_test_sender!(presenter_params(sender_hex))
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: sender_hex, memo: memo)]))
+
+      payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "rejects a transaction credential without presenterSignature when binding is required",
+         %{charge: charge, tx_hex: tx_hex} do
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "Presenter binding is required"
+    end
+
+    test "rejects a credential source that does not match the transaction sender",
+         %{charge: charge, tx_hex: tx_hex} do
+      other = "0x2222222222222222222222222222222222222222"
+      charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{other}")
+      signature = sign_presenter_by_test_sender!(presenter_params(test_sender_address()))
+
+      payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Credential source does not match the transaction sender"
+    end
+
+    test "rejects a presenter signature from a wallet other than the transaction sender",
+         %{charge: charge, tx_hex: tx_hex} do
+      attacker_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
+      {:ok, attacker_addr} = Curvy.get_address(attacker_key)
+      signature = sign_access_key_proof!(presenter_params(test_sender_address()), attacker_key, attacker_addr)
+      stub_active_access_key_metadata!(revoked: true)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Presenter signature does not match the transfer sender"
+    end
+
+    test "rejects an invalid provided presenter signature even when binding is not required",
+         %{charge: charge, tx_hex: tx_hex} do
+      charge = put_in(charge.method_details["require_presenter_binding"], false)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => "0xdeadbeef"}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Presenter signature does not match the transfer sender"
+    end
+  end
+
+  defp presenter_params(account_hex, challenge_id \\ @challenge_id) do
+    %{account: account_hex, chain_id: 42_431, challenge_id: challenge_id, realm: @realm}
+  end
+
+  defp sign_presenter_by_test_sender!(params) do
+    key = test_sender_key()
+    {:ok, addr} = Curvy.get_address(key)
+    sign_access_key_proof!(params, key, addr)
+  end
+
   defp sign_access_key_proof!(params, private_key, address) do
     digest = MPP.Methods.Tempo.Proof.hash(params)
     {:ok, sig} = Curvy.sign_payload(digest, private_key)
@@ -2356,23 +2599,7 @@ defmodule MPP.Methods.TempoTest do
   end
 
   defp stub_active_access_key_metadata!(opts \\ []) do
-    revoked? = Keyword.get(opts, :revoked, false)
-    access_key = "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"
-    key = Base.decode16!(String.replace_prefix(access_key, "0x", ""), case: :mixed)
-    expiry_bin = 4_000_000_000 |> :binary.encode_unsigned() |> pad_word32()
-    revoked_bin = if(revoked?, do: pad_word32(1), else: pad_word32(0))
-
-    result =
-      "0x" <>
-        ([
-           pad_word32(0),
-           :binary.copy(<<0>>, 12) <> key,
-           expiry_bin,
-           pad_word32(0),
-           revoked_bin
-         ]
-         |> IO.iodata_to_binary()
-         |> Base.encode16(case: :lower))
+    result = access_key_metadata_result(Keyword.get(opts, :revoked, false))
 
     Req.Test.stub(Tempo, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -2385,6 +2612,45 @@ defmodule MPP.Methods.TempoTest do
 
       Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => rpc_result, "id" => request["id"]})
     end)
+  end
+
+  # Combined stub for flows that verify an access-key signature (eth_call) AND
+  # fetch a tx receipt (eth_getTransactionReceipt) in the same verification.
+  defp stub_receipt_and_access_key!(receipt) do
+    metadata = access_key_metadata_result(false)
+
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      rpc_result =
+        case request["method"] do
+          "eth_call" -> metadata
+          "eth_getTransactionReceipt" -> receipt
+          _other -> nil
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => rpc_result, "id" => request["id"]})
+    end)
+  end
+
+  # ABI-encoded AccountKeychain.getKey metadata blob (key, expiry, revoked flag).
+  defp access_key_metadata_result(revoked?) do
+    access_key = "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"
+    key = Base.decode16!(String.replace_prefix(access_key, "0x", ""), case: :mixed)
+    expiry_bin = 4_000_000_000 |> :binary.encode_unsigned() |> pad_word32()
+    revoked_bin = if(revoked?, do: pad_word32(1), else: pad_word32(0))
+
+    "0x" <>
+      ([
+         pad_word32(0),
+         :binary.copy(<<0>>, 12) <> key,
+         expiry_bin,
+         pad_word32(0),
+         revoked_bin
+       ]
+       |> IO.iodata_to_binary()
+       |> Base.encode16(case: :lower))
   end
 
   defp pad_word32(value) when is_integer(value), do: value |> :binary.encode_unsigned() |> pad_word32()

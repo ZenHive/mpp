@@ -307,6 +307,127 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
+  describe "presenter binding (hash credential path)" do
+    test "full handshake: sender-signed presenter binding succeeds and is advertised", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      config =
+        tempo_config(recipient_address, rpc_url, %{
+          "store" => TempoMemoryStore,
+          "require_presenter_binding" => true
+        })
+
+      challenge = request_challenge!(config)
+
+      # The requirement is advertised in the challenge's method details.
+      assert {:ok, request_json} = Base.url_decode64(challenge.request, padding: false)
+      assert {:ok, request_map} = Jason.decode(request_json)
+      assert request_map["methodDetails"]["presenterBinding"] == true
+
+      sender = fresh_wallet!(rpc_url)
+      tx_hash = broadcast_bound_transfer!(sender, recipient_address, @transfer_amount, rpc_url, challenge)
+
+      digest =
+        Proof.hash(%{
+          account: sender.address_hex,
+          chain_id: @chain_id,
+          challenge_id: challenge.id,
+          realm: @realm
+        })
+
+      presenter_signature = sign_proof_payload!(digest, sender.private_key, sender.address_hex)
+
+      credential = %Credential{
+        challenge: challenge,
+        source: "did:pkh:eip155:#{@chain_id}:#{sender.address_hex}",
+        payload: %{"type" => "hash", "hash" => tx_hash, "presenterSignature" => presenter_signature}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == nil, "Plug should pass through on presenter-bound hash credential"
+      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
+      assert receipt.reference == tx_hash
+    end
+
+    test "regression (GHSA-34g7-vx6g-82mq residual): third party cannot claim an observed static-memo transfer", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      memo_tx_hash: memo_tx_hash
+    } do
+      # The advisory's residual scenario: static memo bypasses per-challenge
+      # attribution, so with a store the hash path degrades to a front-running
+      # race. With presenter binding required, an attacker who merely OBSERVED
+      # the settled transfer (memo_tx_hash, sent by the suite's fixture wallet)
+      # cannot claim it: their presenter signature is valid for their own wallet,
+      # but that wallet is not the transfer's sender.
+      start_supervised!(TempoMemoryStore)
+
+      config =
+        tempo_config(recipient_address, rpc_url, %{
+          "memo" => @test_memo,
+          "store" => TempoMemoryStore,
+          "require_presenter_binding" => true
+        })
+
+      challenge = request_challenge!(config)
+      attacker = fresh_wallet!(rpc_url)
+
+      digest =
+        Proof.hash(%{
+          account: attacker.address_hex,
+          chain_id: @chain_id,
+          challenge_id: challenge.id,
+          realm: @realm
+        })
+
+      presenter_signature = sign_proof_payload!(digest, attacker.private_key, attacker.address_hex)
+
+      credential = %Credential{
+        challenge: challenge,
+        source: "did:pkh:eip155:#{@chain_id}:#{attacker.address_hex}",
+        payload: %{"type" => "hash", "hash" => memo_tx_hash, "presenterSignature" => presenter_signature}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn.status == 402
+      body = Jason.decode!(conn.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "TransferWithMemo"
+    end
+
+    test "rejects a hash credential without presenterSignature when binding is required", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url,
+      memo_tx_hash: memo_tx_hash
+    } do
+      start_supervised!(TempoMemoryStore)
+
+      config =
+        tempo_config(recipient_address, rpc_url, %{
+          "memo" => @test_memo,
+          "store" => TempoMemoryStore,
+          "require_presenter_binding" => true
+        })
+
+      body = submit_credential!(config, %{"type" => "hash", "hash" => memo_tx_hash})
+      assert body["type"] =~ "invalid-payload"
+      assert body["detail"] =~ "Presenter binding is required"
+    end
+  end
+
   describe "transferWithMemo transaction credential path" do
     test "happy path: 402 -> signed transferWithMemo credential -> server broadcasts -> receipt", %{
       recipient: recipient_address,
