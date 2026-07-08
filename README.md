@@ -191,6 +191,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Credential` | Payment credential encoding/decoding |
 | `MPP.Receipt` | Proof-of-payment receipt serialization |
 | `MPP.Headers` | WWW-Authenticate (incl. multi-challenge), Authorization, Payment-Receipt headers |
+| `MPP.AcceptPayment` | Accept-Payment client-preference header: parse, format, rank, apply_header |
 | `MPP.Errors` | RFC 9457 Problem Detail error types (incl. session error types) |
 | `MPP.Verifier` | Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify) |
 | `MPP.JCS` | RFC 8785 JSON Canonicalization (MPP subset) for cross-SDK HMAC interop |
