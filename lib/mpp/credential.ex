@@ -48,7 +48,15 @@ defmodule MPP.Credential do
       encoded: [kind: :value, description: "Base64url-encoded JSON credential string"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, credential}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_base64, :invalid_json, :missing_required_fields],
+    errors: [
+      :invalid_base64,
+      :invalid_json,
+      :missing_required_fields,
+      :empty_id,
+      :invalid_method,
+      :invalid_request,
+      :invalid_digest
+    ],
     composes_with: [:encode]
   )
 
@@ -103,20 +111,27 @@ defmodule MPP.Credential do
   defp from_map(_), do: {:error, :missing_required_fields}
 
   # Validates and reconstructs a Challenge struct from the echoed challenge map.
+  # After confirming the required keys are present strings, the shared
+  # `Challenge.validate_fields/1` rejects a malformed echoed field (empty id,
+  # non-lowercase method, non-JSON request, bad digest) at parse time with a
+  # distinct atom rather than deferring to a downstream HMAC mismatch.
   defp challenge_from_map(map) do
     if Enum.all?(@challenge_required_keys, &is_binary(map[&1])) do
-      {:ok,
-       %Challenge{
-         id: map["id"],
-         realm: map["realm"],
-         method: map["method"],
-         intent: map["intent"],
-         request: map["request"],
-         description: map["description"],
-         digest: map["digest"],
-         expires: map["expires"],
-         opaque: map["opaque"]
-       }}
+      challenge = %Challenge{
+        id: map["id"],
+        realm: map["realm"],
+        method: map["method"],
+        intent: map["intent"],
+        request: map["request"],
+        description: map["description"],
+        digest: map["digest"],
+        expires: map["expires"],
+        opaque: map["opaque"]
+      }
+
+      with :ok <- Challenge.validate_fields(challenge) do
+        {:ok, challenge}
+      end
     else
       {:error, :missing_required_fields}
     end

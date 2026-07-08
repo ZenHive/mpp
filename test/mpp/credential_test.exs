@@ -151,5 +151,40 @@ defmodule MPP.CredentialTest do
       encoded = Base.url_encode64(json, padding: false)
       assert {:error, :missing_required_fields} = Credential.decode(encoded)
     end
+
+    test "rejects an echoed challenge with a non-lowercase method (Task 72)" do
+      encoded = encode_credential(method: "Stripe")
+      assert {:error, :invalid_method} = Credential.decode(encoded)
+    end
+
+    test "rejects an echoed challenge with a bad digest (Task 72)" do
+      encoded = encode_credential(digest: "sha-512=abc")
+      assert {:error, :invalid_digest} = Credential.decode(encoded)
+    end
+
+    test "rejects an echoed challenge whose request is not base64url-JSON (Task 72)" do
+      encoded = encode_credential(request: Base.url_encode64("not json", padding: false))
+      assert {:error, :invalid_request} = Credential.decode(encoded)
+    end
+  end
+
+  # Builds a base64url credential wrapping an echoed challenge with the given
+  # field overrides (defaults are all well-formed).
+  defp encode_credential(overrides) do
+    challenge =
+      Map.merge(
+        %{
+          "id" => "ch_123",
+          "realm" => "api.example.com",
+          "method" => "stripe",
+          "intent" => "charge",
+          "request" => "eyJhbW91bnQiOiIxMDAifQ"
+        },
+        Map.new(overrides, fn {k, v} -> {Atom.to_string(k), v} end)
+      )
+
+    %{"challenge" => challenge, "payload" => %{"proof" => "0x"}}
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
   end
 end

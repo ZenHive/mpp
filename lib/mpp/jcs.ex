@@ -16,8 +16,10 @@ defmodule MPP.JCS do
 
   This implements the subset of RFC 8785 needed by MPP:
 
-    * **Keys**: ASCII-only (all MPP protocol fields). Sorted by Elixir binary
-      comparison, which matches UTF-16 code-unit ordering for ASCII.
+    * **Keys**: string, ASCII-only (all MPP protocol fields). Sorted by Elixir
+      binary comparison, which matches UTF-16 code-unit ordering for ASCII. A
+      non-string map key (atom, integer) violates the JSON/RFC 8785 contract and
+      raises `ArgumentError` rather than emitting non-canonical output.
     * **Values**: strings, integers, booleans, nil, maps, lists.
     * **Not supported**: floats. MPP amounts are strings in base units
       (never floats). Passing a float raises `FunctionClauseError`.
@@ -50,7 +52,7 @@ defmodule MPP.JCS do
     pairs =
       term
       |> Map.to_list()
-      |> Enum.sort_by(fn {k, _v} -> k end)
+      |> Enum.sort_by(fn {k, _v} -> string_key!(k) end)
       |> Enum.map_intersperse(",", fn {k, v} -> [Jason.encode!(k), ":", canonicalize(v)] end)
 
     IO.iodata_to_binary(["{", pairs, "}"])
@@ -66,4 +68,14 @@ defmodule MPP.JCS do
   def canonicalize(true), do: "true"
   def canonicalize(false), do: "false"
   def canonicalize(nil), do: "null"
+
+  # JSON object keys MUST be strings (RFC 8785 / RFC 8259). A non-binary key
+  # (atom, integer) is a contract violation that would otherwise emit
+  # non-canonical output and silently break cross-SDK HMAC reproducibility —
+  # raise instead of encoding it.
+  defp string_key!(key) when is_binary(key), do: key
+
+  defp string_key!(key) do
+    raise ArgumentError, "MPP.JCS.canonicalize/1 requires string map keys (RFC 8785); got: #{inspect(key)}"
+  end
 end

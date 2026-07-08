@@ -361,7 +361,7 @@ defmodule MPP.TelemetryTest do
         Challenge.create(
           [
             realm: config.realm,
-            method: "unknown-method",
+            method: "unknownmethod",
             intent: "charge",
             request: entry.request,
             expires: future_expires()

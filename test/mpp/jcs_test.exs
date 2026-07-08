@@ -133,4 +133,24 @@ defmodule MPP.JCSTest do
       assert decoded == canonical
     end
   end
+
+  describe "binary-key contract (Task 72)" do
+    test "raises ArgumentError on an atom map key" do
+      assert_raise ArgumentError, ~r/string map keys/, fn ->
+        JCS.canonicalize(%{atom_key: "value"})
+      end
+    end
+
+    test "raises ArgumentError on an integer map key" do
+      assert_raise ArgumentError, ~r/string map keys/, fn ->
+        JCS.canonicalize(%{1 => "value"})
+      end
+    end
+
+    test "raises on a non-binary key nested inside a value map" do
+      assert_raise ArgumentError, ~r/string map keys/, fn ->
+        JCS.canonicalize(%{"outer" => %{inner: "value"}})
+      end
+    end
+  end
 end

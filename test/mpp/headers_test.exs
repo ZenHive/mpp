@@ -178,7 +178,7 @@ defmodule MPP.HeadersTest do
 
     test "handles generic backslash escape in quoted string" do
       # \x should be parsed as literal x (generic escape)
-      header = ~s(Payment id="a\\x", realm="b", method="c", intent="d", request="e")
+      header = ~s(Payment id="a\\x", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
       assert {:ok, parsed} = Headers.parse_challenge(header)
       assert parsed.id == "ax"
     end
@@ -487,10 +487,75 @@ defmodule MPP.HeadersTest do
     end
 
     test "at-limit WWW-Authenticate request param still parses" do
-      request = String.duplicate("A", @max_token_len)
+      # A valid base64url-JSON object whose wire length is exactly @max_token_len,
+      # so it clears both the size guard (mpp-rs #299) and the parse-time JSON
+      # validation (Task 72). JSON bytes 12_288 (÷3) → base64url-nopad 16_384.
+      json = Jason.encode!(%{"a" => String.duplicate("A", 12_280)})
+      request = Base.url_encode64(json, padding: false)
+      assert byte_size(request) == @max_token_len
       header = Headers.format_challenge(make_challenge(request: request))
 
       assert {:ok, %Challenge{request: ^request}} = Headers.parse_challenge(header)
+    end
+  end
+
+  describe "parse_challenge/1 field validation (Task 72)" do
+    defp challenge_header(overrides) do
+      Headers.format_challenge(make_challenge(overrides))
+    end
+
+    test "rejects an empty id" do
+      # Challenge.create computes the id, so craft the header directly to force id="".
+      header =
+        ~s(Payment id="", realm="api.example.com", method="stripe", intent="charge", request="eyJhbW91bnQiOiIxMDAifQ")
+
+      assert {:error, :empty_id} = Headers.parse_challenge(header)
+    end
+
+    test "rejects an uppercase method (spec 1*LOWERALPHA)" do
+      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "Stripe"))
+    end
+
+    test "rejects a method with a digit" do
+      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "x402"))
+    end
+
+    test "rejects a method with a dash" do
+      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "tempo-v2"))
+    end
+
+    test "rejects a request that is not base64url-JSON" do
+      request = Base.url_encode64("not json", padding: false)
+      assert {:error, :invalid_request} = Headers.parse_challenge(challenge_header(request: request))
+    end
+
+    test "rejects a request whose JSON is not an object" do
+      request = Base.url_encode64(Jason.encode!([1, 2, 3]), padding: false)
+      assert {:error, :invalid_request} = Headers.parse_challenge(challenge_header(request: request))
+    end
+
+    test "rejects a non-sha-256 digest" do
+      assert {:error, :invalid_digest} = Headers.parse_challenge(challenge_header(digest: "sha-512=abc"))
+    end
+
+    test "accepts a valid sha-256 digest" do
+      assert {:ok, %Challenge{digest: "sha-256=abc123"}} =
+               Headers.parse_challenge(challenge_header(digest: "sha-256=abc123"))
+    end
+  end
+
+  describe "property: parse_challenge/1 rejects malformed methods (Task 72)" do
+    property "any method with a non-lowercase-alpha character is rejected as :invalid_method" do
+      check all(
+              lower <- StreamData.string(?a..?z, min_length: 0, max_length: 8),
+              bad_char <- StreamData.member_of([?A, ?Z, ?0, ?9, ?-, ?_, ?:]),
+              suffix <- StreamData.string(?a..?z, min_length: 0, max_length: 8)
+            ) do
+        # Guaranteed non-conformant: at least one non-lowercase-alpha byte present.
+        method = lower <> <<bad_char>> <> suffix
+        header = Headers.format_challenge(make_challenge(method: method))
+        assert {:error, :invalid_method} = Headers.parse_challenge(header)
+      end
     end
   end
 
@@ -512,7 +577,11 @@ defmodule MPP.HeadersTest do
                   StreamData.constant("tempo"),
                   StreamData.constant("evm")
                 ]),
-              request <- StreamData.string(:alphanumeric, min_length: 8, max_length: 64)
+              request <-
+                StreamData.map(
+                  StreamData.string(:alphanumeric, min_length: 1, max_length: 40),
+                  &Base.url_encode64(Jason.encode!(%{"amount" => &1}), padding: false)
+                )
             ) do
         ch = make_challenge(realm: realm, method: method, request: request)
         h = Headers.format_challenge(ch)

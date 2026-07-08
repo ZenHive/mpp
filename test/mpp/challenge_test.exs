@@ -168,4 +168,80 @@ defmodule MPP.ChallengeTest do
                Challenge.verify_server_binding(challenge, @secret_key, "other.example.com")
     end
   end
+
+  describe "validate_fields/1 (parse-time field shapes, Task 72)" do
+    defp valid_challenge, do: Challenge.create(@base_params, @secret_key)
+
+    test "accepts a well-formed challenge" do
+      assert :ok = Challenge.validate_fields(valid_challenge())
+    end
+
+    test "accepts an optional sha-256 digest" do
+      challenge = %{valid_challenge() | digest: "sha-256=abc123"}
+      assert :ok = Challenge.validate_fields(challenge)
+    end
+
+    test "rejects empty id" do
+      assert {:error, :empty_id} = Challenge.validate_fields(%{valid_challenge() | id: ""})
+    end
+
+    test "rejects nil id" do
+      assert {:error, :empty_id} = Challenge.validate_fields(%{valid_challenge() | id: nil})
+    end
+
+    test "rejects empty method" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: ""})
+    end
+
+    test "rejects uppercase method (spec 1*LOWERALPHA)" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "Stripe"})
+    end
+
+    test "rejects method with a digit" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "x402"})
+    end
+
+    test "rejects method with a dash" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "tempo-v2"})
+    end
+
+    test "rejects method with an underscore" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "mock_b"})
+    end
+
+    test "rejects request that is not base64url" do
+      assert {:error, :invalid_request} = Challenge.validate_fields(%{valid_challenge() | request: "@@not-base64@@"})
+    end
+
+    test "rejects request that decodes to non-JSON" do
+      request = Base.url_encode64("not json at all", padding: false)
+      assert {:error, :invalid_request} = Challenge.validate_fields(%{valid_challenge() | request: request})
+    end
+
+    test "rejects request whose JSON is not an object" do
+      request = Base.url_encode64(Jason.encode!([1, 2, 3]), padding: false)
+      assert {:error, :invalid_request} = Challenge.validate_fields(%{valid_challenge() | request: request})
+    end
+
+    test "rejects a non-sha-256 digest" do
+      assert {:error, :invalid_digest} = Challenge.validate_fields(%{valid_challenge() | digest: "sha-512=abc"})
+    end
+
+    test "rejects a non-binary method (defensive)" do
+      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: 123})
+    end
+
+    test "rejects a non-binary request (defensive)" do
+      assert {:error, :invalid_request} = Challenge.validate_fields(%{valid_challenge() | request: 123})
+    end
+  end
+
+  describe "verify_server_binding/3 nil id" do
+    test "rejects a challenge with a nil id" do
+      challenge = %{Challenge.create(@base_params, @secret_key) | id: nil}
+
+      assert {:error, :invalid_challenge} =
+               Challenge.verify_server_binding(challenge, @secret_key, "api.example.com")
+    end
+  end
 end

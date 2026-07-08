@@ -39,7 +39,7 @@ defmodule MPP.PlugTest do
     use MPP.Method
 
     @impl MPP.Method
-    def method_name, do: "mock_details"
+    def method_name, do: "mockdetails"
 
     @impl MPP.Method
     def verify(%{"proof" => _}, charge) do
@@ -61,7 +61,7 @@ defmodule MPP.PlugTest do
     use MPP.Method
 
     @impl MPP.Method
-    def method_name, do: "mock_unexpected"
+    def method_name, do: "mockunexpected"
 
     @impl MPP.Method
     def verify(_payload, _charge) do
@@ -74,7 +74,7 @@ defmodule MPP.PlugTest do
     use MPP.Method
 
     @impl MPP.Method
-    def method_name, do: "mock_b"
+    def method_name, do: "mockb"
 
     @impl MPP.Method
     def verify(%{"token" => "valid"}, charge) do
@@ -1058,7 +1058,7 @@ defmodule MPP.PlugTest do
         end)
 
       method_names = challenges |> Enum.map(& &1.method) |> Enum.sort()
-      assert method_names == ["mock", "mock_b"]
+      assert method_names == ["mock", "mockb"]
     end
 
     test "all challenges share the same realm", %{config: config} do
@@ -1215,7 +1215,7 @@ defmodule MPP.PlugTest do
 
       refute conn.halted
       {:ok, receipt} = Headers.parse_receipt(get_resp_header(conn, "payment-receipt"))
-      assert receipt.method == "mock_b"
+      assert receipt.method == "mockb"
       assert receipt.reference == "ref_b_500"
     end
 
@@ -1326,7 +1326,7 @@ defmodule MPP.PlugTest do
   end
 
   describe "check_expiration/1 malformed expires" do
-    test "malformed expires timestamp returns 402 payment_expired" do
+    test "malformed expires timestamp is distinguished from expired (credential-mismatch)" do
       config = init_config()
       entry = first_entry(config)
 
@@ -1354,7 +1354,9 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "payment-expired"
+      assert body["type"] =~ "credential-mismatch"
+      refute body["type"] =~ "payment-expired"
+      assert body["detail"] =~ "ISO 8601"
     end
   end
 end

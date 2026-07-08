@@ -39,7 +39,7 @@ defmodule MPP.VerifierTest do
     use MPP.Method
 
     @impl MPP.Method
-    def method_name, do: "mock_unexpected"
+    def method_name, do: "mockunexpected"
 
     @impl MPP.Method
     def verify(_payload, _charge) do
@@ -163,7 +163,7 @@ defmodule MPP.VerifierTest do
 
   describe "verify/2 method mismatch" do
     test "credential for different method returns credential_mismatch" do
-      # Credential was created for "mock" method, but we verify with MockMethodUnexpected ("mock_unexpected")
+      # Credential was created for "mock" method, but we verify with MockMethodUnexpected ("mockunexpected")
       credential = build_credential(method_name: "mock")
       opts = verify_opts(method: MockMethodUnexpected)
 
@@ -219,12 +219,14 @@ defmodule MPP.VerifierTest do
       assert String.contains?(error.type, "payment-expired")
     end
 
-    test "malformed expires returns payment_expired" do
+    test "malformed expires is distinguished from expired (credential_mismatch, not payment_expired)" do
       credential = build_credential(expires: "not-a-date")
       opts = verify_opts()
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
-      assert String.contains?(error.type, "payment-expired")
+      assert String.contains?(error.type, "credential-mismatch")
+      refute String.contains?(error.type, "payment-expired")
+      assert String.contains?(error.detail, "ISO 8601")
     end
 
     test "non-expired challenge passes" do
@@ -398,7 +400,7 @@ defmodule MPP.VerifierTest do
     end
 
     test "method returns unexpected error atom" do
-      credential = build_credential(method_name: "mock_unexpected")
+      credential = build_credential(method_name: "mockunexpected")
       opts = verify_opts(method: MockMethodUnexpected)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)

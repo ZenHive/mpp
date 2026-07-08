@@ -96,7 +96,17 @@ defmodule MPP.Headers do
       header: [kind: :value, description: "Raw WWW-Authenticate header value string"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, challenge}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_scheme, :missing_required_params, :duplicate_param, :invalid_auth_params, :request_too_large],
+    errors: [
+      :invalid_scheme,
+      :missing_required_params,
+      :duplicate_param,
+      :invalid_auth_params,
+      :request_too_large,
+      :empty_id,
+      :invalid_method,
+      :invalid_request,
+      :invalid_digest
+    ],
     composes_with: [:format_challenge]
   )
 
@@ -105,8 +115,10 @@ defmodule MPP.Headers do
     with {:ok, rest} <- strip_scheme(header),
          {:ok, params} <- parse_auth_params(rest),
          :ok <- check_request_size(params),
-         :ok <- validate_required_params(params) do
-      {:ok, params_to_challenge(params)}
+         :ok <- validate_required_params(params),
+         challenge = params_to_challenge(params),
+         :ok <- Challenge.validate_fields(challenge) do
+      {:ok, challenge}
     end
   end
 
@@ -127,7 +139,11 @@ defmodule MPP.Headers do
       :missing_required_params,
       :duplicate_param,
       :invalid_auth_params,
-      :request_too_large
+      :request_too_large,
+      :empty_id,
+      :invalid_method,
+      :invalid_request,
+      :invalid_digest
     ],
     composes_with: [:parse_challenge, :format_challenge]
   )
@@ -589,6 +605,13 @@ defmodule MPP.Headers do
   # Rejects an oversized WWW-Authenticate `request` auth-param before the
   # challenge is built (the request payload is base64url/JCS-decoded downstream
   # during verification). Other params are small by construction.
+  #
+  # Boundary: `>` (at-limit passes, over-limit rejected). This matches mpp-rs's
+  # quoted-value path (`refs/mpp-rs/src/protocol/core/headers.rs:161`): its `>=`
+  # is tested against the running accumulator *before* the current byte is pushed,
+  # so it only fires on the (MAX+1)th content byte — a net `> MAX_TOKEN_LEN`,
+  # identical to this guard and to mppx `request.length > maxRequestParameterLength`
+  # (`refs/mppx/src/Challenge.ts:352`). All three accept exactly 16 KiB, reject 16 KiB + 1.
   @spec check_request_size(%{optional(String.t()) => String.t()}) :: :ok | {:error, :request_too_large}
   defp check_request_size(%{"request" => request}) when byte_size(request) > @max_token_len,
     do: {:error, :request_too_large}

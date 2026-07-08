@@ -118,6 +118,9 @@ defmodule MPP.Verifier do
         {:error, :missing_expires} ->
           {:error, Errors.new(:credential_mismatch, "Challenge missing required expires field")}
 
+        {:error, :invalid_expires} ->
+          {:error, Errors.new(:credential_mismatch, "Challenge expires is not a valid ISO 8601 timestamp")}
+
         {:error, reason}
         when reason in [
                :intent_mismatch,
@@ -235,7 +238,7 @@ defmodule MPP.Verifier do
         end
 
       {:error, _} ->
-        {:error, :payment_expired}
+        {:error, :invalid_expires}
     end
   end
 
@@ -260,8 +263,6 @@ defmodule MPP.Verifier do
   end
 
   defp check_request_recipient(_request, %Charge{recipient: nil}), do: :ok
-
-  defp check_request_recipient(%{"recipient" => _}, %Charge{recipient: _}), do: {:error, :recipient_mismatch}
 
   defp check_request_recipient(_request, %Charge{recipient: _}), do: {:error, :recipient_mismatch}
 

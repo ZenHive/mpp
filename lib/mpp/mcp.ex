@@ -339,18 +339,26 @@ defmodule MPP.Mcp do
 
     with :ok <- if(encoded == :invalid, do: {:error, :invalid_challenge}, else: :ok),
          :ok <- validate_optional_strings(map) do
-      {:ok,
-       %Challenge{
-         id: id,
-         realm: realm,
-         method: method,
-         intent: intent,
-         request: encoded,
-         description: Map.get(map, "description"),
-         digest: Map.get(map, "digest"),
-         expires: Map.get(map, "expires"),
-         opaque: Map.get(map, "opaque")
-       }}
+      challenge = %Challenge{
+        id: id,
+        realm: realm,
+        method: method,
+        intent: intent,
+        request: encoded,
+        description: Map.get(map, "description"),
+        digest: Map.get(map, "digest"),
+        expires: Map.get(map, "expires"),
+        opaque: Map.get(map, "opaque")
+      }
+
+      # Parse-time field-shape rejection (Task 72). MCP's transport error
+      # vocabulary is coarse (JSON-RPC-shaped), so a malformed field collapses to
+      # the existing `:invalid_challenge` rather than surfacing the distinct atom
+      # the header/credential parse paths return.
+      case Challenge.validate_fields(challenge) do
+        :ok -> {:ok, challenge}
+        {:error, _reason} -> {:error, :invalid_challenge}
+      end
     end
   end
 
