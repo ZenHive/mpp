@@ -3,8 +3,8 @@ defmodule MPP.Tempo.ConCacheStore do
   Built-in ETS-based dedup store using ConCache (TTL-enabled ETS wrapper by Saša Jurić).
 
   Backed by the `con_cache` dependency. This store is started automatically by
-  `MPP.Application` as the **default** dedup store (replay protection on by default —
-  issue #7), so most single-node deployments need no setup.
+  the `:mpp` application as the **default** dedup store (replay protection on by
+  default — issue #7), so most single-node deployments need no setup.
 
   ## Setup (custom instances)
 

@@ -14,7 +14,7 @@ defmodule MPP.Tempo.Store do
   ## Built-in Store
 
   `MPP.Tempo.ConCacheStore` provides an ETS-based implementation with automatic
-  TTL expiry via ConCache. It is started by `MPP.Application` as the **default**
+  TTL expiry via ConCache. It is started by the `:mpp` application as the **default**
   store, so replay protection is on out of the box (issue #7). For most
   single-node deployments this is all you need; for multi-node, configure a shared
   backend (Redis/Postgres) as your `:store`.
@@ -85,7 +85,7 @@ defmodule MPP.Tempo.Store do
   @default_store ConCacheStore
 
   @doc """
-  Return the default dedup store started by `MPP.Application`.
+  Return the default dedup store started by the `:mpp` application.
 
   Replay protection is on by default (issue #7); this is the store
   used when a method/plug is configured without an explicit `:store`.
