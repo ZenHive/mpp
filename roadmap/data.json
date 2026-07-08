@@ -2345,7 +2345,7 @@
       "id": "73",
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "done",
       "title": "Extract shared helpers and split MPP.Headers (mechanical refactor)",
       "scores": {
         "d": 3,
@@ -2381,9 +2381,14 @@
         "lib/mpp/methods/tempo/proof.ex",
         "lib/mpp/methods/tempo/hosted_fee_payer.ex"
       ],
+      "shipped_in": "f515928",
       "body": "Two coupled mechanical refactors — no behavior change (good codex candidate; recommend assignee=codex). (a) Extract duplicated internal helpers: `strip_0x/1` (duplicated 5x across did.ex, tempo.ex, signature_envelope.ex, proof.ex, hosted_fee_payer.ex), `hex_string?/1` (3x), and the byte-identical `require_config`/`check_receipt_status`/`parse_charge_amount` shared between evm.ex and tempo.ex into one small `MPP.Hex`-style helper module; and the ~4x base64url->JSON->error-tag decode (credential.ex, receipt.ex, verifier.ex, mcp.ex) into one shared `decode_base64_json/1 :: {:ok, map} | {:error, :invalid_base64 | :invalid_json}`. (b) Split the 870-line `MPP.Headers`: extract the self-contained Accept-Payment parse/rank/format algorithm into `MPP.AcceptPayment` (independently testable) and the byte-level multi-scheme boundary state machine into a private splitter; leave `MPP.Headers` for challenge/credential/receipt wire format. Pure refactor: existing tests pass unchanged (tests move with their code), full suite + Dialyzer green.",
       "created_at": "2026-07-05",
+      "done_at": "2026-07-08",
       "scored_at": "2026-07-05",
+      "implemented": "Extracted MPP.Hex (strip_0x/hex_string?), MPP.Codec (decode_base64_json), MPP.Methods.Shared (require_config/3, check_receipt_status, parse_charge_amount) removing all cross-module duplication (ex_dna clones 0/0); split the 901-line MPP.Headers -> MPP.AcceptPayment (parse/format/rank/apply_header, clean move + api() metadata) + internal MPP.Headers.SchemeSplitter, leaving Headers at 441 lines. Zero behavior change; 995 tests pass, dialyzer clean. Also fixed a pre-existing failure: MPP.Challenge.valid_method_name? public without api(). Version 0.9.0 -> 0.10.0.",
+      "delivered_by": "claude-opus-4-8 (local)",
+      "verified": true,
       "cross_repo": []
     },
     {
