@@ -2303,7 +2303,7 @@
       "id": "72",
       "phase": 9,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "done",
       "title": "Parse-time input validation parity for challenge/credential",
       "scores": {
         "d": 3,
@@ -2331,9 +2331,14 @@
         "lib/mpp/verifier.ex",
         "lib/mpp/jcs.ex"
       ],
+      "shipped_in": "f6b9e10",
       "body": "Add the early input-shape validation the reference SDKs perform but our parser defers. In `MPP.Headers.parse_challenge` and the `challenge_from_map` paths (`MPP.Credential`, `MPP.Mcp`), validate at parse time that `id` is non-empty, `method` is non-empty and lowercase, `request` decodes to valid base64url + JSON, and `digest` (when present) matches `^sha-256=`. Return distinct error atoms per failure rather than deferring to a downstream generic mismatch. Match mpp-rs (refs/mpp-rs/src/protocol/core/headers.rs) and mppx (refs/mppx/src/Challenge.ts) semantics — cross-check both. While in these files, fix adjacent small issues: `MPP.Verifier.check_expiration` reports a malformed (non-ISO-8601) `expires` as `:payment_expired` — give it a distinct invalid-timestamp error; remove the dead clause in `check_request_recipient`; align the 16 KiB `request`-size boundary with mpp-rs's quoted-path `>=`; add a binary-key guard (or documented raise) to `MPP.JCS.canonicalize` per its stated contract.",
       "created_at": "2026-07-05",
+      "done_at": "2026-07-08",
       "scored_at": "2026-07-05",
+      "implemented": "Shared Challenge.validate_fields/1 (id/method/request/digest, spec 1*LOWERALPHA) wired into Headers.parse_challenge + Credential.decode + Mcp with distinct error atoms; Verifier distinguishes malformed expires from expired + drops dead recipient clause; JCS raises on non-string keys. Full suite + 95% cover green.",
+      "delivered_by": "claude-opus-4-8 (local)",
+      "verified": true,
       "cross_repo": []
     },
     {
