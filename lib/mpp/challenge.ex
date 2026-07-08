@@ -161,7 +161,15 @@ defmodule MPP.Challenge do
   # `MPP.Plug.init/1` so a non-conformant server config fails at boot instead
   # of emitting challenges no compliant client (including this library's own
   # parse paths) can parse.
-  @doc false
+  api(
+    :valid_method_name?,
+    "Check whether a string is a valid MPP payment-method name per the spec ABNF `payment-method-id = 1*LOWERALPHA` (non-empty, lowercase ASCII letters only).",
+    params: [
+      method: [kind: :value, description: "Candidate payment-method name"]
+    ],
+    returns: %{type: :boolean, description: "true when the name conforms to the spec ABNF"}
+  )
+
   @spec valid_method_name?(String.t()) :: boolean()
   def valid_method_name?(method) when is_binary(method) do
     method != "" and method |> :binary.bin_to_list() |> Enum.all?(&(&1 in ?a..?z))

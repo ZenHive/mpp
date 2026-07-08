@@ -37,6 +37,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
 
   use Descripex, namespace: "/methods/tempo"
 
+  alias MPP.Codec
+
   @type t :: %__MODULE__{
           method: String.t(),
           intent: String.t(),
@@ -142,14 +144,8 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
     token = String.trim(encoded)
 
     with :ok <- check_token_size(token),
-         {:ok, json} <- Base.url_decode64(token, padding: false),
-         {:ok, map} <- Jason.decode(json),
-         {:ok, receipt} <- from_map(map) do
-      {:ok, receipt}
-    else
-      :error -> {:error, :invalid_base64}
-      {:error, %Jason.DecodeError{}} -> {:error, :invalid_json}
-      {:error, reason} -> {:error, reason}
+         {:ok, map} <- Codec.decode_base64_json(token) do
+      from_map(map)
     end
   end
 

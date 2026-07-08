@@ -1,6 +1,7 @@
 defmodule MPP.Client.Transport.HTTPTest do
   use ExUnit.Case, async: true
 
+  alias MPP.AcceptPayment
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentProvider
@@ -177,7 +178,7 @@ defmodule MPP.Client.Transport.HTTPTest do
     test "ranks by Accept-Payment before picking supported challenge" do
       challenges = [make_challenge("stripe"), make_challenge("tempo")]
       multi = MultiProvider.new([{TempoProvider, %{}}, {StripeProvider, %{}}])
-      prefs = Headers.parse_accept_payment("stripe/charge, tempo/charge;q=0.5")
+      prefs = AcceptPayment.parse("stripe/charge, tempo/charge;q=0.5")
 
       assert {:ok, c} = Transport.select_challenge(challenges, multi, accept_payment: prefs)
       assert c.method == "stripe"
@@ -187,7 +188,7 @@ defmodule MPP.Client.Transport.HTTPTest do
   describe "set_accept_payment/2" do
     test "sets Accept-Payment header from entries" do
       request = %Req.Request{}
-      entries = Headers.parse_accept_payment("tempo/charge, stripe/charge;q=0.5")
+      entries = AcceptPayment.parse("tempo/charge, stripe/charge;q=0.5")
 
       updated = HTTP.set_accept_payment(request, entries)
 

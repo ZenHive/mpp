@@ -81,7 +81,9 @@ defmodule MPP.Methods.EVM do
   use Descripex, namespace: "/methods"
 
   alias MPP.Errors
+  alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -151,7 +153,7 @@ defmodule MPP.Methods.EVM do
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          {:ok, hash} <- extract_hash(payload),
-         {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          :ok <- require_recipient(charge),
          :ok <- check_hash_unused(store, hash),
          {:ok, receipt} <- verify_transfer(hash, charge, rpc_url, config),
@@ -201,7 +203,7 @@ defmodule MPP.Methods.EVM do
   # Fetches the transaction receipt, parses Transfer logs, and finds a matching transfer.
   defp verify_erc20_transfer(hash, charge, rpc_url, config) do
     with {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
-         :ok <- check_receipt_status(receipt),
+         :ok <- Shared.check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge) do
       {:ok, Receipt.new(method: "evm", reference: hash, external_id: charge.external_id)}
     end
@@ -212,7 +214,7 @@ defmodule MPP.Methods.EVM do
   # Fetches the transaction, checks value matches charge amount, and verifies recipient.
   defp verify_native_transfer(hash, charge, rpc_url, config) do
     with {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
-         :ok <- check_receipt_status(receipt),
+         :ok <- Shared.check_receipt_status(receipt),
          {:ok, tx} <- fetch_transaction(hash, rpc_url, config),
          :ok <- check_native_transfer(tx, charge) do
       {:ok, Receipt.new(method: "evm", reference: hash, external_id: charge.external_id)}
@@ -221,7 +223,7 @@ defmodule MPP.Methods.EVM do
 
   # Verifies a native ETH transfer: recipient and value must match the charge.
   defp check_native_transfer(tx, charge) do
-    with {:ok, expected_amount} <- parse_charge_amount(charge.amount) do
+    with {:ok, expected_amount} <- Shared.parse_charge_amount(charge.amount) do
       cond do
         !Onchain.Address.equal?(tx.to, charge.recipient) ->
           {:error, Errors.new(:verification_failed, "Transaction recipient does not match charge recipient")}
@@ -243,7 +245,7 @@ defmodule MPP.Methods.EVM do
 
   # Parses Transfer events from receipt logs and finds one matching the charge.
   defp find_matching_transfer(%{logs: logs}, %Charge{} = charge) do
-    with {:ok, amount_int} <- parse_charge_amount(charge.amount),
+    with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       match =
         Enum.find(transfers, fn transfer ->
@@ -302,9 +304,9 @@ defmodule MPP.Methods.EVM do
   # --- Shared helpers ---
 
   defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
-    hex = strip_0x(hash)
+    hex = Hex.strip_0x(hash)
 
-    if byte_size(hex) == 64 and hex_string?(hex) do
+    if byte_size(hex) == 64 and Hex.hex_string?(hex) do
       {:ok, "0x" <> String.downcase(hex)}
     else
       {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
@@ -315,25 +317,11 @@ defmodule MPP.Methods.EVM do
     {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
   end
 
-  defp require_config(config, key) do
-    case config[key] do
-      nil -> {:error, Errors.new(:verification_failed, "EVM method missing required config: #{key}")}
-      value -> {:ok, value}
-    end
-  end
-
   # EVM verification requires a recipient address — fail fast if nil.
   defp require_recipient(%Charge{recipient: nil}),
     do: {:error, Errors.new(:verification_failed, "EVM method requires a recipient address")}
 
   defp require_recipient(%Charge{}), do: :ok
-
-  defp parse_charge_amount(amount) do
-    case Integer.parse(amount) do
-      {int, ""} -> {:ok, int}
-      _ -> {:error, Errors.new(:verification_failed, "Invalid charge amount: not a valid integer")}
-    end
-  end
 
   defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}) do
     {:error, Errors.new(:verification_failed, @zero_amount_non_proof_detail)}
@@ -346,17 +334,6 @@ defmodule MPP.Methods.EVM do
     down = String.downcase(currency)
     down == "eth" or down == String.downcase(@zero_address)
   end
-
-  defp check_receipt_status(%{status: 1}), do: :ok
-
-  defp check_receipt_status(%{status: _}) do
-    {:error, Errors.new(:verification_failed, "Transaction failed on-chain (reverted)")}
-  end
-
-  defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
-
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
 
   # --- Single-use dedup (mirrors MPP.Methods.Tempo's type="hash" path) ---
   # Reuses the MPP.Tempo.Store behaviour: fast-reject read before on-chain

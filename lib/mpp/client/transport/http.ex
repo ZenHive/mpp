@@ -21,6 +21,7 @@ defmodule MPP.Client.Transport.HTTP do
   use MPP.Client.Transport
   use Descripex, namespace: "/client"
 
+  alias MPP.AcceptPayment
   alias MPP.Challenge
   alias MPP.Client.AcceptPolicy
   alias MPP.Client.Transport
@@ -100,13 +101,13 @@ defmodule MPP.Client.Transport.HTTP do
 
   Does not overwrite an existing `Accept-Payment` header on the request.
   """
-  @spec set_accept_payment(Req.Request.t(), [Headers.accept_payment_entry() | map()]) ::
+  @spec set_accept_payment(Req.Request.t(), [AcceptPayment.entry() | map()]) ::
           Req.Request.t()
   def set_accept_payment(%Req.Request{} = request, entries) when is_list(entries) do
     if entries == [] or has_accept_payment_header?(request) do
       request
     else
-      Req.Request.put_header(request, "accept-payment", Headers.format_accept_payment(entries))
+      Req.Request.put_header(request, "accept-payment", AcceptPayment.format(entries))
     end
   end
 

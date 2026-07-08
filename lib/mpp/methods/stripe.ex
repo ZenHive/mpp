@@ -42,6 +42,7 @@ defmodule MPP.Methods.Stripe do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.Shared
   alias MPP.Receipt
 
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
@@ -98,7 +99,7 @@ defmodule MPP.Methods.Stripe do
 
     with :ok <- check_external_id_binding(payload, charge),
          {:ok, spt} <- extract_spt(payload),
-         {:ok, stripe_secret_key} <- require_config(config, "stripe_secret_key"),
+         {:ok, stripe_secret_key} <- Shared.require_config(config, "stripe_secret_key", "Stripe"),
          {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config) do
       check_status(pi, charge)
     end
@@ -145,14 +146,6 @@ defmodule MPP.Methods.Stripe do
     case payload["externalId"] do
       cred_id when cred_id == request_id -> :ok
       _ -> {:error, Errors.new(:invalid_challenge, "credential externalId does not match this route request")}
-    end
-  end
-
-  # Validates that a required config key is present.
-  defp require_config(config, key) do
-    case config[key] do
-      nil -> {:error, Errors.new(:verification_failed, "Stripe method missing required config: #{key}")}
-      value -> {:ok, value}
     end
   end
 

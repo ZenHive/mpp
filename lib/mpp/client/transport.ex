@@ -32,10 +32,10 @@ defmodule MPP.Client.Transport do
 
   use Descripex, namespace: "/client"
 
+  alias MPP.AcceptPayment
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
   alias MPP.Credential
-  alias MPP.Headers
 
   @doc """
   Return `true` if the response signals that a payment is required.
@@ -98,7 +98,7 @@ defmodule MPP.Client.Transport do
     ranked =
       case Keyword.get(opts, :accept_payment, []) do
         [] -> challenges
-        preferences -> Headers.rank_by_accept_payment(challenges, preferences)
+        preferences -> AcceptPayment.rank(challenges, preferences)
       end
 
     case Enum.find(ranked, fn %Challenge{method: m, intent: i} ->

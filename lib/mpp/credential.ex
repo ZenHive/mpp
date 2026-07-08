@@ -31,6 +31,7 @@ defmodule MPP.Credential do
   use Descripex, namespace: "/protocol"
 
   alias MPP.Challenge
+  alias MPP.Codec
 
   @type t :: %__MODULE__{
           challenge: Challenge.t(),
@@ -64,9 +65,9 @@ defmodule MPP.Credential do
 
   @spec decode(String.t()) :: {:ok, t()} | {:error, atom()}
   def decode(encoded) when is_binary(encoded) do
-    with {:ok, json} <- url_decode64(encoded),
-         {:ok, map} <- json_decode(json) do
-      from_map(map)
+    case Codec.decode_base64_json(encoded) do
+      {:ok, map} -> from_map(map)
+      {:error, _reason} = error -> error
     end
   end
 
@@ -84,22 +85,6 @@ defmodule MPP.Credential do
     |> to_map()
     |> Jason.encode!()
     |> Base.url_encode64(padding: false)
-  end
-
-  # Decodes base64url, returning a tagged error on failure.
-  defp url_decode64(encoded) do
-    case Base.url_decode64(encoded, padding: false) do
-      {:ok, json} -> {:ok, json}
-      :error -> {:error, :invalid_base64}
-    end
-  end
-
-  # Decodes JSON, returning a tagged error on failure.
-  defp json_decode(json) do
-    case Jason.decode(json) do
-      {:ok, map} -> {:ok, map}
-      {:error, %Jason.DecodeError{}} -> {:error, :invalid_json}
-    end
   end
 
   # Deserializes a string-keyed map into a credential struct.

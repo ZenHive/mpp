@@ -28,6 +28,7 @@ defmodule MPP do
     * `MPP.Credential` — Payment credential encoding/decoding
     * `MPP.Receipt` — Proof-of-payment receipt serialization
     * `MPP.Headers` — WWW-Authenticate, Authorization, Payment-Receipt header formatting
+    * `MPP.AcceptPayment` — Accept-Payment client-preference header parse/format/rank
     * `MPP.Errors` — RFC 9457 Problem Detail error types
     * `MPP.Method` — Behaviour for pluggable payment methods
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
@@ -60,6 +61,7 @@ defmodule MPP do
       MPP.Credential,
       MPP.Receipt,
       MPP.Headers,
+      MPP.AcceptPayment,
       MPP.Errors,
       MPP.Intents.Charge,
       MPP.Methods.Stripe,

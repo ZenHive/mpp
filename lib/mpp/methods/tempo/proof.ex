@@ -15,6 +15,7 @@ defmodule MPP.Methods.Tempo.Proof do
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
   alias Curvy.Signature, as: CurvySignature
+  alias MPP.Hex
   alias MPP.Methods.Tempo.SignatureEnvelope
 
   @domain_name "MPP"
@@ -137,7 +138,7 @@ defmodule MPP.Methods.Tempo.Proof do
 
   @spec decode_address!(String.t()) :: <<_::160>>
   defp decode_address!(address) do
-    hex = strip_0x(address)
+    hex = Hex.strip_0x(address)
 
     case Base.decode16(hex, case: :mixed) do
       {:ok, <<addr::binary-size(20)>>} -> addr
@@ -147,7 +148,7 @@ defmodule MPP.Methods.Tempo.Proof do
 
   @spec decode_signature(String.t()) :: {:ok, CurvySignature.t()} | {:error, String.t()}
   defp decode_signature(signature_hex) when is_binary(signature_hex) do
-    hex = strip_0x(signature_hex)
+    hex = Hex.strip_0x(signature_hex)
 
     with {:ok, <<r::binary-size(32), s::binary-size(32), _v>> = bytes} <- Base.decode16(hex, case: :mixed),
          true <- byte_size(bytes) == 65 do
@@ -178,7 +179,4 @@ defmodule MPP.Methods.Tempo.Proof do
   rescue
     ArgumentError -> {:error, "invalid proof account address"}
   end
-
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
 end

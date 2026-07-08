@@ -7,6 +7,7 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   transaction from the returned fee token and fee-payer signature.
   """
 
+  alias MPP.Hex
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias Onchain.Tempo.Transaction
 
@@ -169,7 +170,7 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   end
 
   defp decode_address(hex) do
-    case Base.decode16(strip_0x(hex), case: :mixed) do
+    case Base.decode16(Hex.strip_0x(hex), case: :mixed) do
       {:ok, <<addr::binary-size(20)>>} -> {:ok, addr}
       _ -> {:error, "hosted fee payer did not return a feeToken"}
     end
@@ -223,7 +224,4 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   end
 
   defp decode_quantity("0x"), do: {:ok, 0}
-
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(rest), do: rest
 end

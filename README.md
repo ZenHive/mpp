@@ -222,7 +222,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.9.0"}
+    {:mpp, "~> 0.10.0"}
   ]
 end
 ```

@@ -7,6 +7,8 @@ defmodule MPP.DID do
 
   use Descripex, namespace: "/protocol"
 
+  alias MPP.Hex
+
   @did_prefix "did:pkh:eip155:"
   @address_hex_length 40
 
@@ -67,17 +69,12 @@ defmodule MPP.DID do
 
   @spec normalize_address(String.t()) :: {:ok, String.t()} | :error
   defp normalize_address(address) when is_binary(address) do
-    hex = strip_0x(address)
+    hex = Hex.strip_0x(address)
 
-    if byte_size(hex) == @address_hex_length and hex_string?(hex) do
+    if byte_size(hex) == @address_hex_length and Hex.hex_string?(hex) do
       {:ok, "0x" <> String.downcase(hex)}
     else
       :error
     end
   end
-
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
-
-  defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
 end

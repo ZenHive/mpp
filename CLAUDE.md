@@ -71,7 +71,11 @@ MPP                        — Root module, Discoverable entry point (describe/0
 MPP.Challenge              — Challenge struct, HMAC-SHA256 ID binding, create/verify
 MPP.Credential             — Credential parsing, challenge echo validation, payload extraction
 MPP.Receipt                — Receipt struct, base64url JSON serialization
-MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Payment-Receipt
+MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Payment-Receipt wire format (SchemeSplitter = internal multi-scheme boundary state machine)
+MPP.AcceptPayment          — Accept-Payment client-preference header: parse/format/rank/apply_header
+MPP.Hex                    — Internal hex-string helpers (strip_0x, hex_string?) shared across method/wire modules
+MPP.Codec                  — Internal base64url→JSON decode (decode_base64_json) shared by credential/receipt/session_receipt
+MPP.Methods.Shared         — Internal method-verification helpers (require_config, check_receipt_status, parse_charge_amount)
 MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding

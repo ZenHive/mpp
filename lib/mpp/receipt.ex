@@ -19,6 +19,8 @@ defmodule MPP.Receipt do
 
   use Descripex, namespace: "/protocol"
 
+  alias MPP.Codec
+
   @type t :: %__MODULE__{
           status: String.t(),
           method: String.t(),
@@ -79,14 +81,8 @@ defmodule MPP.Receipt do
 
   @spec decode(String.t()) :: {:ok, t()} | {:error, atom()}
   def decode(encoded) when is_binary(encoded) do
-    with {:ok, json} <- Base.url_decode64(encoded, padding: false),
-         {:ok, map} <- Jason.decode(json),
-         {:ok, receipt} <- from_map(map) do
-      {:ok, receipt}
-    else
-      :error -> {:error, :invalid_base64}
-      {:error, %Jason.DecodeError{}} -> {:error, :invalid_json}
-      {:error, reason} -> {:error, reason}
+    with {:ok, map} <- Codec.decode_base64_json(encoded) do
+      from_map(map)
     end
   end
 

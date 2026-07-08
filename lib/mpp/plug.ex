@@ -64,6 +64,7 @@ defmodule MPP.Plug do
 
   @behaviour Plug
 
+  alias MPP.AcceptPayment
   alias MPP.Challenge
   alias MPP.Errors
   alias MPP.Headers
@@ -452,7 +453,7 @@ defmodule MPP.Plug do
         [value | _] -> value
       end
 
-    Headers.apply_accept_payment_header(method_entries, header, fn entry ->
+    AcceptPayment.apply_header(method_entries, header, fn entry ->
       {entry.method.method_name(), "charge"}
     end)
   end

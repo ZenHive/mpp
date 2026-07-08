@@ -11,6 +11,7 @@ defmodule MPP.DescripexTest do
     MPP.Credential,
     MPP.Receipt,
     MPP.Headers,
+    MPP.AcceptPayment,
     MPP.Errors,
     Charge,
     Stripe,

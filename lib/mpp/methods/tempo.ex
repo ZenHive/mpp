@@ -120,7 +120,9 @@ defmodule MPP.Methods.Tempo do
 
   alias MPP.DID
   alias MPP.Errors
+  alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
@@ -255,9 +257,9 @@ defmodule MPP.Methods.Tempo do
          {:ok, hash} <- extract_hash(payload),
          :ok <- check_hash_unused(store, hash),
          :ok <- verify_hash_presenter_binding(payload, source, expected_chain_id, config),
-         {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
-         :ok <- check_receipt_status(receipt),
+         :ok <- Shared.check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source),
          :ok <- commit_hash_used(store, hash) do
       {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
@@ -285,7 +287,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
          :ok <- reserve_hash_atomic(store, tx.raw),
-         {:ok, rpc_url} <- require_config(config, "rpc_url"),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
       safe_dedup_post_broadcast(store, tx_hash, tx.raw)
       {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
@@ -412,12 +414,12 @@ defmodule MPP.Methods.Tempo do
     key = config["fee_payer_private_key"]
     token = config["fee_token"]
 
-    if !is_binary(key) or byte_size(strip_0x(key)) != 64 or !hex_string?(strip_0x(key)) do
+    if !is_binary(key) or byte_size(Hex.strip_0x(key)) != 64 or !Hex.hex_string?(Hex.strip_0x(key)) do
       raise ArgumentError,
             "MPP.Methods.Tempo fee_payer requires \"fee_payer_private_key\" (32-byte hex string) in method_config"
     end
 
-    if !is_binary(token) or byte_size(strip_0x(token)) != 40 or !hex_string?(strip_0x(token)) do
+    if !is_binary(token) or byte_size(Hex.strip_0x(token)) != 40 or !Hex.hex_string?(Hex.strip_0x(token)) do
       raise ArgumentError,
             "MPP.Methods.Tempo fee_payer requires \"fee_token\" (20-byte hex address) in method_config"
     end
@@ -452,8 +454,8 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp valid_fee_token_address?(token) when is_binary(token) do
-    hex = strip_0x(token)
-    byte_size(hex) == 40 and hex_string?(hex)
+    hex = Hex.strip_0x(token)
+    byte_size(hex) == 40 and Hex.hex_string?(hex)
   end
 
   defp valid_fee_token_address?(_), do: false
@@ -545,7 +547,7 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp verify_proof_access_key_authorization(proof_params, config, signature, source_address, mismatch_detail) do
-    with {:ok, rpc_url} <- require_config(config, "rpc_url"),
+    with {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          rpc_opts = Keyword.merge([rpc_url: rpc_url], rpc_options(config)),
          {:ok, access_key} <- Proof.recover_authorized_proof_signer(proof_params, signature, source_address),
          true <- AccessKey.active?(source_address, access_key, rpc_opts) do
@@ -766,7 +768,7 @@ defmodule MPP.Methods.Tempo do
 
   # Decodes a hex private key string to 32-byte binary.
   defp decode_hex_key(hex) when is_binary(hex) do
-    case Base.decode16(strip_0x(hex), case: :mixed) do
+    case Base.decode16(Hex.strip_0x(hex), case: :mixed) do
       {:ok, <<key::binary-size(32)>>} -> {:ok, key}
       _ -> {:error, "Invalid fee_payer_private_key format"}
     end
@@ -776,7 +778,7 @@ defmodule MPP.Methods.Tempo do
 
   # Decodes a hex address string to 20-byte binary.
   defp decode_hex_address(hex) when is_binary(hex) do
-    case Base.decode16(strip_0x(hex), case: :mixed) do
+    case Base.decode16(Hex.strip_0x(hex), case: :mixed) do
       {:ok, <<addr::binary-size(20)>>} -> {:ok, addr}
       _ -> {:error, "Invalid fee_token address format"}
     end
@@ -897,9 +899,9 @@ defmodule MPP.Methods.Tempo do
   defp validate_memo!(nil), do: :ok
 
   defp validate_memo!(memo) when is_binary(memo) do
-    hex = strip_0x(memo)
+    hex = Hex.strip_0x(memo)
 
-    if !(byte_size(hex) == @memo_hex_length and hex_string?(hex)) do
+    if !(byte_size(hex) == @memo_hex_length and Hex.hex_string?(hex)) do
       raise ArgumentError,
             "memo must be a 32-byte hex string (#{@memo_hex_length} hex chars), got: #{inspect(memo)}"
     end
@@ -914,9 +916,9 @@ defmodule MPP.Methods.Tempo do
 
   # Extracts and validates the tx hash from a hash credential payload.
   defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
-    hex = strip_0x(hash)
+    hex = Hex.strip_0x(hash)
 
-    if byte_size(hex) == 64 and hex_string?(hex) do
+    if byte_size(hex) == 64 and Hex.hex_string?(hex) do
       {:ok, hash}
     else
       {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
@@ -965,7 +967,7 @@ defmodule MPP.Methods.Tempo do
 
     with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config),
          {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
-         :ok <- check_receipt_status(receipt),
+         :ok <- Shared.check_receipt_status(receipt),
          {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil) do
       {:ok, tx_hash}
     end
@@ -1016,14 +1018,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Gets a required key from the method_details config map.
-  defp require_config(config, key) do
-    case config[key] do
-      nil -> {:error, Errors.new(:verification_failed, "Tempo method missing required config: #{key}")}
-      value -> {:ok, value}
-    end
-  end
-
   # --- Onchain.Tempo.RPC adapter functions ---
   # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
 
@@ -1057,13 +1051,6 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Verifies that the transaction succeeded (status 0x1).
-  defp check_receipt_status(%{status: 1}), do: :ok
-
-  defp check_receipt_status(%{status: _}) do
-    {:error, Errors.new(:verification_failed, "Transaction failed on-chain (reverted)")}
-  end
-
   # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
   # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.
   # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
@@ -1071,7 +1058,7 @@ defmodule MPP.Methods.Tempo do
 
   defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil, source) do
     # No memo configured — accept Transfer OR TransferWithMemo matching token/recipient/amount.
-    with {:ok, amount_int} <- parse_charge_amount(charge.amount),
+    with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       # Also check TransferWithMemo events (onchain only parses standard Transfer)
       memo_transfers = Transfer.parse_transfer_with_memo_logs(logs)
@@ -1094,8 +1081,8 @@ defmodule MPP.Methods.Tempo do
 
   defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo, source) when is_binary(memo) do
     # Memo configured — MUST match TransferWithMemo with matching memo value.
-    with {:ok, amount_int} <- parse_charge_amount(charge.amount) do
-      normalized_memo = String.downcase(strip_0x(memo))
+    with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount) do
+      normalized_memo = String.downcase(Hex.strip_0x(memo))
 
       match =
         logs
@@ -1104,7 +1091,7 @@ defmodule MPP.Methods.Tempo do
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
             transfer.amount == amount_int and
-            String.downcase(strip_0x(transfer.memo)) == normalized_memo and
+            String.downcase(Hex.strip_0x(transfer.memo)) == normalized_memo and
             transfer_source_matches?(transfer, source)
         end)
 
@@ -1179,26 +1166,11 @@ defmodule MPP.Methods.Tempo do
   defp decode_attribution_parts(_bytes), do: :error
 
   defp decode_memo(memo) when is_binary(memo) do
-    case Base.decode16(strip_0x(memo), case: :mixed) do
+    case Base.decode16(Hex.strip_0x(memo), case: :mixed) do
       {:ok, <<_::binary-size(@attribution_memo_length)>> = bytes} -> {:ok, bytes}
       _ -> :error
     end
   end
 
   defp decode_memo(_memo), do: :error
-
-  # Parses charge amount string to integer safely.
-  defp parse_charge_amount(amount) do
-    case Integer.parse(amount) do
-      {int, ""} -> {:ok, int}
-      _ -> {:error, Errors.new(:verification_failed, "Invalid charge amount: not a valid integer")}
-    end
-  end
-
-  # Strips the optional "0x" prefix from a hex string.
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
-
-  # Checks if a string contains only hex characters.
-  defp hex_string?(str), do: Regex.match?(~r/\A[0-9a-fA-F]+\z/, str)
 end

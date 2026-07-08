@@ -5,6 +5,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelope do
 
   alias Cartouche.Recover
   alias Curvy.Signature, as: CurvySignature
+  alias MPP.Hex
 
   @magic_suffix :binary.copy(<<0x77>>, 32)
 
@@ -117,14 +118,11 @@ defmodule MPP.Methods.Tempo.SignatureEnvelope do
   end
 
   defp decode_hex_bytes(hex) do
-    stripped = strip_0x(hex)
+    stripped = Hex.strip_0x(hex)
 
     case Base.decode16(stripped, case: :mixed) do
       {:ok, bytes} when byte_size(bytes) > 0 -> {:ok, bytes}
       _ -> {:error, "invalid proof signature"}
     end
   end
-
-  defp strip_0x("0x" <> rest), do: rest
-  defp strip_0x(hex), do: hex
 end
