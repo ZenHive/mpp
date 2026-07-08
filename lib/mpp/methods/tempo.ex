@@ -67,6 +67,10 @@ defmodule MPP.Methods.Tempo do
       configure the built-in store (for example a custom cache `:name`). A configured store
       MUST implement the atomic `check_and_mark/2`. Pass `store: false` to explicitly opt out
       of dedup (not recommended; incompatible with a static `"memo"`).
+    * `"require_presenter_binding"` — (optional) require `type="hash"` and
+      `type="transaction"` credential presenters to prove control of the transfer's
+      sender wallet via a `"presenterSignature"` payload field (see *Presenter
+      binding* below). Defaults to `false`.
 
   ## Credential Payload
 
@@ -74,6 +78,36 @@ defmodule MPP.Methods.Tempo do
 
     * `"type" => "hash"`, `"hash" => "0x..."` — transaction hash for receipt verification
     * `"type" => "transaction"`, `"signature" => "..."` — RLP-serialized signed Tempo Transaction
+
+  Both may additionally carry `"presenterSignature" => "0x..."` (see below).
+
+  ## Presenter Binding
+
+  On the hash/transaction paths, dedup is keyed on the tx hash alone — nothing in the
+  base protocol proves the credential *presenter* controls the wallet that broadcast
+  the transfer, so a third party who observes a settled transfer can race its hash
+  against their own fresh challenge (the residual documented in GHSA-34g7-vx6g-82mq).
+  Setting `"require_presenter_binding" => true` closes that race: the presenter must
+  include `"presenterSignature"`, an EIP-712 signature over the same `Proof` typed
+  data the `type="proof"` path uses (domain `{name: "MPP", version: "3", chainId}`,
+  struct `{account, challengeId, realm}` — see `MPP.Methods.Tempo.Proof`), signed by
+  the transfer sender's wallet or one of its authorized access keys.
+
+    * `type="hash"` — the credential's top-level `source` (a `did:pkh:eip155:` DID)
+      is required and names the account; the signature must recover to it, and the
+      matched transfer's `from` must equal it.
+    * `type="transaction"` — the account is the sender recovered from the signed
+      transaction itself; a `source`, when present, must match it.
+
+  When the flag is off (default) a supplied `"presenterSignature"` is still verified
+  (an invalid one is rejected), so compliant clients can send it unconditionally.
+  The requirement is advertised to clients as `"presenterBinding" => true` in the
+  402 challenge's method details.
+
+  This is a deliberate hardening extension beyond the reference SDKs: neither mpp-rs
+  nor mppx binds the presenter on the hash path (both default the expected sender to
+  the receipt's `from` — `refs/mpp-rs/src/protocol/methods/tempo/method.rs` `verify_hash`,
+  `refs/mppx/src/tempo/server/Charge.ts` hash branch), which is why it is opt-in.
 
   ## Dependencies
 
@@ -147,6 +181,7 @@ defmodule MPP.Methods.Tempo do
     validate_memo_store_binding!(config)
     validate_fee_payer!(config)
     validate_fee_payer_allowed_tokens!(config)
+    validate_presenter_binding!(config["require_presenter_binding"])
     :ok
   end
 
@@ -217,6 +252,7 @@ defmodule MPP.Methods.Tempo do
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
+         :ok <- verify_hash_presenter_binding(payload, source, expected_chain_id, config),
          {:ok, hash} <- extract_hash(payload),
          :ok <- check_hash_unused(store, hash),
          {:ok, rpc_url} <- require_config(config, "rpc_url"),
@@ -237,6 +273,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, signature} <- extract_signature(payload),
          {:ok, tx} <- Transaction.deserialize(signature),
          :ok <- verify_chain_id(tx, expected_chain_id),
+         :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
          {:ok, payment} <-
            Transaction.find_payment_call(tx, charge.currency,
              amount: charge.amount,
@@ -260,7 +297,7 @@ defmodule MPP.Methods.Tempo do
 
   api(
     :challenge_method_details,
-    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`) for the 402 challenge.",
+    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `presenterBinding`) for the 402 challenge.",
     params: [
       charge: [
         kind: :value,
@@ -269,7 +306,8 @@ defmodule MPP.Methods.Tempo do
     ],
     returns: %{
       type: :map,
-      description: "Map with `chainId` (default 42431), `feePayer` (default false), and optional `memo`"
+      description:
+        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, and `presenterBinding` (present and `true` only when required)"
     }
   )
 
@@ -283,9 +321,16 @@ defmodule MPP.Methods.Tempo do
       "feePayer" => fee_payer_enabled?(config)
     }
 
-    case config["memo"] do
-      nil -> details
-      memo -> Map.put(details, "memo", memo)
+    details =
+      case config["memo"] do
+        nil -> details
+        memo -> Map.put(details, "memo", memo)
+      end
+
+    if presenter_binding_required?(config) do
+      Map.put(details, "presenterBinding", true)
+    else
+      details
     end
   end
 
@@ -471,7 +516,11 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp verify_proof_signature(%{address: address, chain_id: chain_id}, config, signature) do
+  defp verify_proof_signature(parsed, config, signature) do
+    verify_proof_signature(parsed, config, signature, "Proof signature does not match source")
+  end
+
+  defp verify_proof_signature(%{address: address, chain_id: chain_id}, config, signature, mismatch_detail) do
     challenge_id = config["challenge_id"]
     realm = config["realm"]
 
@@ -488,21 +537,135 @@ defmodule MPP.Methods.Tempo do
           :ok
 
         {:error, _} ->
-          verify_proof_access_key_authorization(proof_params, config, signature, address)
+          verify_proof_access_key_authorization(proof_params, config, signature, address, mismatch_detail)
       end
     else
       {:error, Errors.new(:verification_failed, "Proof verification missing challenge binding")}
     end
   end
 
-  defp verify_proof_access_key_authorization(proof_params, config, signature, source_address) do
+  defp verify_proof_access_key_authorization(proof_params, config, signature, source_address, mismatch_detail) do
     with {:ok, rpc_url} <- require_config(config, "rpc_url"),
          rpc_opts = Keyword.merge([rpc_url: rpc_url], rpc_options(config)),
          {:ok, access_key} <- Proof.recover_authorized_proof_signer(proof_params, signature, source_address),
          true <- AccessKey.active?(source_address, access_key, rpc_opts) do
       :ok
     else
-      _ -> {:error, Errors.new(:verification_failed, "Proof signature does not match source")}
+      _ -> {:error, Errors.new(:verification_failed, mismatch_detail)}
+    end
+  end
+
+  # --- Presenter binding helpers (hash/transaction paths) ---
+  #
+  # Deliberate hardening divergence, opt-in via "require_presenter_binding": neither
+  # reference SDK binds the credential presenter to the transfer sender on the hash
+  # path — both default the expected sender to the receipt's `from` with no presenter
+  # proof (refs/mpp-rs/src/protocol/methods/tempo/method.rs verify_hash, expected_sender
+  # fallback; refs/mppx/src/tempo/server/Charge.ts hash branch, `source?.address ??
+  # receipt.from`). The signature envelope reuses the proof path's EIP-712 typed data
+  # (MPP domain v3 {account, challengeId, realm}, refs/mppx/src/tempo/internal/proof.ts),
+  # so no new wire format is introduced and existing proof-capable clients can satisfy
+  # the requirement. challengeId inside the signed digest makes a captured presenter
+  # signature useless against any other challenge.
+
+  defp presenter_binding_required?(config), do: config["require_presenter_binding"] == true
+
+  defp validate_presenter_binding!(nil), do: :ok
+  defp validate_presenter_binding!(flag) when is_boolean(flag), do: :ok
+
+  defp validate_presenter_binding!(other) do
+    raise ArgumentError,
+          ~s{MPP.Methods.Tempo "require_presenter_binding" must be a boolean, got: #{inspect(other)}}
+  end
+
+  # Hash path: the account being proven is named by the credential's top-level
+  # `source` DID; the matched transfer's `from` is then enforced against the same
+  # address by transfer_source_matches?/2 (source is guaranteed non-nil here when
+  # the binding verifies).
+  defp verify_hash_presenter_binding(payload, source, expected_chain_id, config) do
+    case {payload["presenterSignature"], presenter_binding_required?(config)} do
+      {nil, false} ->
+        :ok
+
+      {nil, true} ->
+        {:error, missing_presenter_signature_error()}
+
+      {sig, _required?} when is_binary(sig) and byte_size(sig) > 0 ->
+        if is_binary(source) do
+          verify_presenter_signature(source, expected_chain_id, config, sig)
+        else
+          {:error,
+           Errors.new(
+             :invalid_payload,
+             "'presenterSignature' requires a credential source (did:pkh) naming the transfer sender"
+           )}
+        end
+
+      {_other, _required?} ->
+        {:error, Errors.new(:invalid_payload, "Missing or invalid 'presenterSignature' field in credential payload")}
+    end
+  end
+
+  # Transaction path: the account is the sender recovered from the signed 0x76
+  # transaction itself; a credential `source`, when present, must agree.
+  defp verify_transaction_presenter_binding(payload, tx, expected_chain_id, config) do
+    case {payload["presenterSignature"], presenter_binding_required?(config)} do
+      {nil, false} ->
+        :ok
+
+      {nil, true} ->
+        {:error, missing_presenter_signature_error()}
+
+      {sig, _required?} when is_binary(sig) and byte_size(sig) > 0 ->
+        with {:ok, sender} <- recover_transaction_sender(tx),
+             :ok <- check_source_matches_sender(config["credential_source"], sender, expected_chain_id) do
+          verify_presenter_signature(sender, expected_chain_id, config, sig)
+        end
+
+      {_other, _required?} ->
+        {:error, Errors.new(:invalid_payload, "Missing or invalid 'presenterSignature' field in credential payload")}
+    end
+  end
+
+  defp missing_presenter_signature_error do
+    Errors.new(
+      :invalid_payload,
+      "Presenter binding is required — credential payload must include 'presenterSignature'"
+    )
+  end
+
+  defp verify_presenter_signature(account, chain_id, config, signature) do
+    verify_proof_signature(
+      %{address: account, chain_id: chain_id},
+      config,
+      signature,
+      "Presenter signature does not match the transfer sender"
+    )
+  end
+
+  defp recover_transaction_sender(tx) do
+    case Transaction.sender(tx) do
+      {:ok, <<_::binary-size(20)>> = addr} ->
+        {:ok, "0x" <> Base.encode16(addr, case: :lower)}
+
+      {:error, _reason} ->
+        {:error, Errors.new(:verification_failed, "Could not recover transaction sender for presenter binding")}
+    end
+  end
+
+  defp check_source_matches_sender(nil, _sender, _expected_chain_id), do: :ok
+
+  defp check_source_matches_sender(source, sender, expected_chain_id) do
+    case parse_hash_credential_source(source, expected_chain_id) do
+      {:ok, address} when is_binary(address) ->
+        if Onchain.Address.equal?(address, sender) do
+          :ok
+        else
+          {:error, Errors.new(:verification_failed, "Credential source does not match the transaction sender")}
+        end
+
+      {:error, %Errors{}} = error ->
+        error
     end
   end
 

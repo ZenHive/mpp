@@ -18,6 +18,9 @@ defmodule MPP.Test.TempoTestHelpers do
     "0x" <> Base.encode16(addr, case: :lower)
   end
 
+  @doc "The raw 32-byte private key of the fixed test sender (for signing presenter proofs in tests)."
+  def test_sender_key, do: @test_sender_key
+
   @doc """
   Builds a hex-encoded 0x76 Tempo Transaction with the given calls and chain_id.
 
