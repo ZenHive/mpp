@@ -1680,15 +1680,17 @@ scored_at = "2026-07-05"
 id = "74"
 phase = 9
 bundle = "dx"
-status = "pending"
+status = "done"
 title = "Docs hygiene: README modules, ROADMAP focus, SECURITY version"
 scores = { d = 1, b = 3, u = 5 }
 markers = ["docs"]
 acceptance_criteria = ["README Modules table lists all public modules", "ROADMAP.md has no stale hand-written focus prose conflicting with the generated block", "SECURITY.md supported version matches current (0.6.x)"]
 touches = ["README.md", "ROADMAP.md", "SECURITY.md"]
 body = "Small repo-doc corrections (inline-sized — no full dispatch really needed). Add the 5 shipped-but-unlisted modules to the README Modules table: `MPP.Client.AcceptPolicy`, `MPP.Client.Transport` + `MPP.Client.Transport.HTTP`, `MPP.Methods.Tempo.AccessKey`, `MPP.Methods.Tempo.SignatureEnvelope`. Replace or remove the ~2.5-month-stale free-text 'Current Focus' paragraph in ROADMAP.md in favor of the auto-generated FOCUS marker block directly below it. Bump SECURITY.md supported-versions from 0.5.x to 0.6.x. Regenerate AGENTS.md if any CLAUDE.md-adjacent content changes."
+implemented = "README modules table lists all public client transport modules; stale Current Focus prose removed from ROADMAP; SECURITY.md bumped to 0.7.x (0.7.0 release docs pass)"
 created_at = "2026-07-05"
 scored_at = "2026-07-05"
+done_at = "2026-07-08"
 
 [[task]]
 id = "75"
