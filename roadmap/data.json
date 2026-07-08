@@ -2420,7 +2420,7 @@
       "id": "75",
       "phase": 9,
       "bundle": "tempo",
-      "status": "in_progress",
+      "status": "done",
       "title": "Presenter-identity binding for Tempo hash-credential path (close GHSA-34g7-vx6g-82mq residual)",
       "scores": {
         "d": 5,
@@ -2449,10 +2449,15 @@
         "lib/mpp/methods/tempo.ex",
         "lib/mpp/verifier.ex"
       ],
+      "shipped_in": "22c1cf9",
       "body": "Close the residual documented in the published advisory GHSA-34g7-vx6g-82mq. The 0.6.4 fix (static memo now requires a dedup store) closed unlimited passive replay, but on the `type=\"hash\"` / `type=\"transaction\"` Tempo paths the dedup key is the on-chain tx hash alone — nothing binds the credential *presenter* to the wallet that actually broadcast the transfer. With a store configured this leaves a front-running race: a party who observes a victim's settled transfer can submit that tx hash against their own fresh challenge and win if they get there first. The `type=\"proof\"` path already binds presenter identity by verifying a signature from the paying wallet; extend an equivalent binding to the hash/transaction paths so the submitter must prove control of the transfer's sender address.\n\nThis is a deliberate hardening divergence: neither mpp-rs nor mppx requires presenter binding on the hash path today (verified: refs/mpp-rs/src/protocol/methods/tempo/method.rs `verify_hash` defaults the expected sender to the receipt's `from` with no presenter proof). So design for interoperability — do not break clients that legitimately present a hash for their own transfer. Prefer an opt-in server config (e.g. require a presenter signature only when configured) or a mechanism that a compliant client can satisfy, rather than a hard break. Cross-check the sender-recovery / signature-envelope layout against refs/mpp-rs + refs/mppx before pinning any wire detail (wire-format rule).\n\nWhen this lands, update GHSA-34g7-vx6g-82mq to note the residual is fixed in the shipping version, and move docs/security-parity.md's row to a closed state.\n",
       "created_at": "2026-07-07",
       "started_at": "2026-07-08",
+      "done_at": "2026-07-08",
       "scored_at": "2026-07-07",
+      "implemented": "Opt-in require_presenter_binding: hash/transaction credentials must carry an EIP-712 presenterSignature (proof-path envelope, MPP v3 {account,challengeId,realm}) recovering to the transfer sender or an authorized access key; hash path requires a matching source DID. Advertised as presenterBinding in 402 details. Off by default (SDK-divergent hardening). lib/mpp/methods/tempo.ex + tempo_test.exs (19 unit) + tempo_integration_test.exs (3 Moderato). 0.8.0.",
+      "delivered_by": "claude-fable-5 (hand-built)",
+      "verified": true,
       "cross_repo": []
     },
     {
