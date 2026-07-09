@@ -1254,7 +1254,7 @@ model = "grok-build"
 body = """
 Extend `MPP.Methods.Stripe` with Stripe Connect settlement options (destination charge / direct charge / application fee routing). Read `paymentauth.org` Stripe charge spec + `refs/mpp-specs/specs/methods/stripe/` + the latest Stripe Connect handling in `refs/mppx` (search for `connect` / `settlement` in `src/methods/stripe/`) at implementation time — the spec and reference impl define which fields land in `methodDetails` and how the server routes the resulting PaymentIntent. Wire the `method_config` knobs for server-side Connect credentials separately from public `method_details`.
 """
-implemented = "Landed by grok via merge-train; reviewer-approved (run run-1783571058611-d23068b2, c12eaa9abf167829dd6b515e959a6ea6e0bf74de)."
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1783571058611-d23068b2, c12eaa9abf16). Criterion 1 adjusted by audit-review 2026-07-09: Connect settlement fields are deliberately server-only method_config and are NEVER serialized into challenge method_details — the discovery the task body mandated (mppx src/stripe/server/Charge.ts documents connect as 'Not included in MPP challenges'); tests pin the non-leak. Audit also added the Stripe-Version SPT preview pin + transfer_group type validation."
 delivered_by = "grok"
 verified = true
 created_at = "2026-05-27"

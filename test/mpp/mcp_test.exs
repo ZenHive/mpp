@@ -732,6 +732,76 @@ defmodule MPP.McpTest do
       assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
     end
 
+    test "emits verify start/fail telemetry when a replayed credential is rejected — parity with MPP.Plug" do
+      config = server_config(store: start_replay_store!())
+      request = json_rpc_request_with_credential()
+      challenge_id = get_in(request, ["params", "_meta", "org.paymentauth/credential", "challenge", "id"])
+
+      handler_id = {:mcp_replay_telemetry, make_ref()}
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:mpp, :verify, :fail],
+        fn event, _measurements, metadata, _config -> send(test_pid, {:telemetry, event, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      first =
+        Mcp.call(request, config, fn req ->
+          %{"jsonrpc" => "2.0", "id" => req["id"], "result" => %{"content" => []}}
+        end)
+
+      assert first["result"], "first call must verify"
+
+      second = Mcp.call(request, config, fn _req -> flunk("handler must not run when the credential is replayed") end)
+      assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
+
+      assert_receive {:telemetry, [:mpp, :verify, :fail], %{challenge_id: ^challenge_id} = metadata}
+      assert metadata.error_type == "https://paymentauth.org/problems/verification-failed"
+    end
+
+    test "treats non-map JSON-RPC params as carrying no credential" do
+      # JSON-RPC params may legally be an array or an explicit null.
+      for params <- [[1, 2], nil, "positional"] do
+        request = Map.put(sample_json_rpc_request(), "params", params)
+
+        response =
+          Mcp.call(request, server_config(), fn _request ->
+            flunk("handler must not run without a credential (params: #{inspect(params)})")
+          end)
+
+        assert response["error"]["code"] == -32_042
+        assert [_challenge] = response["error"]["data"]["challenges"]
+      end
+    end
+
+    test "rejects a credential whose payload the JCS subset cannot canonicalize instead of crashing" do
+      config = server_config(store: start_replay_store!())
+      request = json_rpc_request_with_credential(%{"proof" => "valid", "x" => 1.5})
+
+      response = Mcp.call(request, config, fn _request -> flunk("handler must not run") end)
+
+      assert response["error"]["code"] == -32_602
+      assert response["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/malformed-credential"
+    end
+
+    test "client helpers accept the full JSON-RPC error envelope emitted by call/3" do
+      response =
+        Mcp.call(sample_json_rpc_request(), server_config(), fn _request ->
+          flunk("handler must not run without a credential")
+        end)
+
+      assert Mcp.payment_required?(response)
+      assert {:ok, [challenge]} = Mcp.extract_challenges(response)
+      assert challenge.realm == @realm
+
+      refute Mcp.payment_required?(%{"jsonrpc" => "2.0", "id" => 1, "error" => %{"code" => -32_000}})
+      assert {:error, :no_challenges} = Mcp.extract_challenges(%{"jsonrpc" => "2.0", "error" => %{"code" => -32_000}})
+    end
+
     test "returns invalid params error when credential metadata is malformed" do
       request =
         Map.update!(sample_json_rpc_request(), "params", fn params ->

@@ -212,7 +212,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
-| `MPP.Mcp` | MCP (JSON-RPC) transport: error codes, meta keys, server/client helpers |
+| `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
 | `MPP.Client.Transport` | Client transport behaviour — 402 detection, challenge fetch, credential attach |

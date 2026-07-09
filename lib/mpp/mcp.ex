@@ -16,6 +16,16 @@ defmodule MPP.Mcp do
     * `payment_required_meta_key/0` — `"org.paymentauth/payment-required"`
     * `receipt_meta_key/0` — `"org.paymentauth/receipt"`
 
+  ## Server Transport Adapter
+
+  A full server-side transport: run JSON-RPC requests through payment
+  verification (including the default credential replay dedup shared with
+  `MPP.Plug`) before invoking your handler:
+
+    * `init/1` — build transport config from the same options as `MPP.Plug`
+    * `call/3` — verify the request's credential, invoke the handler, attach
+      the receipt (or return a `-32042`/`-32602`/`-32043` error with challenges)
+
   ## Server Helpers
 
   Build JSON-RPC error responses and extract/attach payment data:
@@ -43,6 +53,7 @@ defmodule MPP.Mcp do
   alias MPP.Plug.Config
   alias MPP.Receipt
   alias MPP.Replay
+  alias MPP.Telemetry
   alias MPP.Verifier
 
   # JSON-RPC error code: payment required (no credential provided)
@@ -284,15 +295,21 @@ defmodule MPP.Mcp do
 
   api(
     :payment_required?,
-    "Check whether a JSON-RPC error map indicates payment is required.",
+    "Check whether a JSON-RPC error map (or full JSON-RPC response) indicates payment is required.",
     params: [
-      error: [kind: :value, description: "JSON-RPC error map with `code` field"]
+      error: [kind: :value, description: "JSON-RPC error map with `code` field, or a full response envelope"]
     ],
     returns: %{type: :boolean, description: "`true` if error code is `-32042`"}
   )
 
   @spec payment_required?(map()) :: boolean()
   def payment_required?(%{"code" => @payment_required_code}), do: true
+
+  # Full JSON-RPC envelopes unwrap to their error/result member, so a response
+  # from `call/3` can be fed back in directly (mppx's `paymentRequiredData`
+  # accepts the full message the same way).
+  @spec payment_required?(map()) :: boolean()
+  def payment_required?(%{"error" => error}) when is_map(error), do: payment_required?(error)
 
   @spec payment_required?(map()) :: boolean()
   def payment_required?(%{"result" => result}) when is_map(result), do: payment_required?(result)
@@ -307,9 +324,9 @@ defmodule MPP.Mcp do
 
   api(
     :extract_challenges,
-    "Extract and parse payment challenges from a JSON-RPC error map.",
+    "Extract and parse payment challenges from a JSON-RPC error map or full JSON-RPC response.",
     params: [
-      error: [kind: :value, description: "JSON-RPC error map with `data.challenges`"]
+      error: [kind: :value, description: "JSON-RPC error map with `data.challenges`, or a full response envelope"]
     ],
     returns: %{
       type: :tagged_tuple,
@@ -329,6 +346,9 @@ defmodule MPP.Mcp do
 
   @spec extract_challenges(map()) :: {:error, :invalid_challenge}
   def extract_challenges(%{"data" => %{"challenges" => _}}), do: {:error, :invalid_challenge}
+
+  @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
+  def extract_challenges(%{"error" => error}) when is_map(error), do: extract_challenges(error)
 
   @spec extract_challenges(map()) :: {:ok, [Challenge.t()]} | {:error, :no_challenges | :invalid_challenge}
   def extract_challenges(%{"result" => result}) when is_map(result), do: extract_challenges(result)
@@ -367,7 +387,14 @@ defmodule MPP.Mcp do
   # -------------------------------------------------------------------
 
   defp authorize_request(request, config) do
-    params = Map.get(request, "params", %{})
+    # JSON-RPC params may legally be an array (or an explicit null) — treat any
+    # non-map shape as carrying no credential, mirroring mppx's optional-chained
+    # `request.params?._meta` (refs/mppx/src/server/Transport.ts `getCredential`).
+    params =
+      case Map.get(request, "params", %{}) do
+        %{} = map -> map
+        _other -> %{}
+      end
 
     case extract_credential(params) do
       {:ok, credential} -> verify_mcp_credential(request, config, credential)
@@ -418,15 +445,24 @@ defmodule MPP.Mcp do
 
     # Same default replay dedup MPP.Plug applies — check before verify, claim
     # after — so a verified MCP credential cannot be replayed across JSON-RPC
-    # requests for store-backed methods.
-    with :ok <- Replay.check_unused(store, credential),
-         {:ok, receipt} <- Verifier.verify(credential, opts),
-         :ok <- Replay.mark_used(store, credential) do
-      {:ok, receipt, credential.challenge.id}
-    else
+    # requests for store-backed methods. A replay rejection never reaches
+    # Verifier.verify, so emit the same verify start/fail telemetry MPP.Plug
+    # emits for that branch (lib/mpp/plug.ex verify_credential).
+    case Replay.check_unused(store, credential) do
       {:error, %Errors{} = error} ->
-        challenges = generate_challenges(config)
-        {:error, error_response(request, mcp_error_code(error), error.title, challenges, error)}
+        start_time = Telemetry.verify_start(credential, entry.charge, %{realm: config.realm})
+        Telemetry.verify_fail(credential, entry.charge, start_time, error, %{realm: config.realm})
+        {:error, error_response(request, mcp_error_code(error), error.title, generate_challenges(config), error)}
+
+      :ok ->
+        with {:ok, receipt} <- Verifier.verify(credential, opts),
+             :ok <- Replay.mark_used(store, credential) do
+          {:ok, receipt, credential.challenge.id}
+        else
+          {:error, %Errors{} = error} ->
+            challenges = generate_challenges(config)
+            {:error, error_response(request, mcp_error_code(error), error.title, challenges, error)}
+        end
     end
   end
 

@@ -40,10 +40,12 @@ defmodule MPP.Replay do
   def check_unused(nil, _credential), do: :ok
 
   def check_unused(store, credential) do
-    case Store.get(store, key(credential)) do
-      :not_found -> :ok
-      {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+    with {:ok, key} <- safe_key(credential) do
+      case Store.get(store, key) do
+        :not_found -> :ok
+        {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+      end
     end
   end
 
@@ -60,15 +62,25 @@ defmodule MPP.Replay do
   def mark_used(store, credential) do
     value = System.system_time(:millisecond)
 
-    case Store.check_and_mark(store, key(credential), value) do
-      :ok -> :ok
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+    with {:ok, key} <- safe_key(credential) do
+      case Store.check_and_mark(store, key, value) do
+        :ok -> :ok
+        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+      end
     end
   end
 
-  defp key(credential) do
-    @store_key_prefix <> credential.challenge.id <> ":" <> payload_hash(credential.payload)
+  # The payload is attacker-supplied wire JSON, and the dedup key hashes it via
+  # the deliberate MPP JCS subset (no floats — MPP amounts are strings). A
+  # payload JCS cannot canonicalize must reject the credential cleanly instead
+  # of leaking the raise to the transport (same class as the 0.10.0 JCS
+  # pre-check hardening in MPP.Mcp).
+  defp safe_key(credential) do
+    {:ok, @store_key_prefix <> credential.challenge.id <> ":" <> payload_hash(credential.payload)}
+  rescue
+    FunctionClauseError ->
+      {:error, Errors.new(:malformed_credential, "Credential payload contains an unsupported JSON value")}
   end
 
   defp payload_hash(payload) do

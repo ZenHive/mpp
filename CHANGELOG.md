@@ -6,9 +6,17 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## Unreleased
+## [Unreleased]
 
 **Session intent schema.** Added `MPP.Intents.Session` — pay-as-you-go / metered session request schema parallel to `MPP.Intents.Charge`, with `new/1` validation, camelCase `to_request/1` / `from_request/1` matching mpp-rs `SessionRequest` (`unitType`, `suggestedDeposit`, transient `decimals` stripped from wire). `MPP.Method` callbacks now accept `MPP.Method.intent()` (`Charge.t() | Session.t()`).
+
+**MCP server transport adapter (Task 32b).** `MPP.Mcp` is now a mountable server-side transport, not just constants and helpers: `MPP.Mcp.init/1` accepts the same endpoint options as `MPP.Plug`, and `MPP.Mcp.call/3` runs a JSON-RPC request through payment verification before invoking the handler — reading the credential from `params._meta["org.paymentauth/credential"]`, emitting `-32042` payment-required / `-32602` malformed-credential / `-32043` verification-failed errors with challenges and RFC 9457 problem details (mppx `mcpErrorCode` parity), and attaching the receipt (+ `challengeId`) to `result._meta` on success. Challenge generation is shared with `MPP.Plug`, so both transports emit byte-identical challenges from the same config.
+
+**Credential replay dedup shared across transports (`MPP.Replay`).** The plug-level credential single-use dedup (key `mpp:credential:<challenge-id>:<payload-hash>`, Tempo carve-out, atomic `check_and_mark/2` only — GHSA-w8j7-7qc3-5f24) moved to an internal `MPP.Replay` module used by both `MPP.Plug` and the MCP transport, so a verified MCP credential cannot be replayed across JSON-RPC requests for store-backed methods.
+
+**Stripe Connect settlement options (Task 52).** `MPP.Methods.Stripe` accepts an optional server-only `"connect"` map in `method_config` — destination charges (`transfer_data` destination/amount), direct charges (`stripe_account` → `Stripe-Account` header), application-fee splits (`application_fee_amount`), plus `on_behalf_of` and `transfer_group` — validated against the charge amount before PaymentIntent creation and never serialized into the public 402 challenge, matching mppx (`validateConnectSettlement` / `createWithSecretKey`).
+
+**Audit hardening on the above (dual-reviewer pass).** Stripe PaymentIntent requests now pin `Stripe-Version: 2026-02-25.preview` (required for SPT private preview; mppx `stripePreviewVersion` parity) and reject a non-string Connect `transfer_group` cleanly instead of raising at request time. The MCP transport treats non-map JSON-RPC `params` (arrays, explicit null) as carrying no credential instead of crashing; its client helpers `payment_required?/1` and `extract_challenges/1` now also accept the full JSON-RPC response envelope (mppx `paymentRequiredData` parity); and a replayed MCP credential emits the same `[:mpp, :verify, :start]`/`:fail` telemetry as the HTTP path. `MPP.Replay` rejects a credential whose payload the JCS subset cannot canonicalize (e.g. floats) as `malformed-credential` instead of leaking a `FunctionClauseError` — also fixing the pre-existing crash on the HTTP path for store-backed methods.
 
 ## [0.10.0] - 2026-07-08
 

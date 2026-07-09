@@ -102,4 +102,27 @@ defmodule MPP.ReplayTest do
       assert error.detail == "Dedup store error"
     end
   end
+
+  describe "payloads the JCS subset cannot canonicalize" do
+    # A float in the attacker-supplied payload must reject the credential as
+    # malformed, not leak the JCS raise. Using ErroringStore proves the key
+    # failure short-circuits before any store access (a store hit would surface
+    # "Dedup store error" instead).
+    @float_credential %Credential{
+      challenge: %Challenge{id: "ch_replay_2", realm: "api.example.com", method: "mock", intent: "charge", request: "e30"},
+      payload: %{"proof" => "valid", "x" => 1.5}
+    }
+
+    test "check_unused rejects a float-bearing payload as a malformed credential" do
+      assert {:error, error} = Replay.check_unused(ErroringStore, @float_credential)
+      assert error.type == "https://paymentauth.org/problems/malformed-credential"
+      assert error.detail == "Credential payload contains an unsupported JSON value"
+    end
+
+    test "mark_used rejects a float-bearing payload as a malformed credential" do
+      assert {:error, error} = Replay.mark_used(ErroringStore, @float_credential)
+      assert error.type == "https://paymentauth.org/problems/malformed-credential"
+      assert error.detail == "Credential payload contains an unsupported JSON value"
+    end
+  end
 end

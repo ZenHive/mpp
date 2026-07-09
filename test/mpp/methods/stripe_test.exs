@@ -446,6 +446,10 @@ defmodule MPP.Methods.StripeTest do
       refute Map.has_key?(params, "transfer_data[destination]")
       refute Map.has_key?(params, "transfer_group")
       assert List.keyfind(headers, "stripe-account", 0) == nil
+
+      # The SPT preview version pin is sent on every PaymentIntent request,
+      # Connect or not (mppx stripePreviewVersion).
+      assert {_, "2026-02-25.preview"} = List.keyfind(headers, "stripe-version", 0)
     end
 
     test "rejects application_fee_amount exceeding the payment amount", %{charge: charge} do
@@ -510,6 +514,13 @@ defmodule MPP.Methods.StripeTest do
       assert error.detail =~ "transfer_data must be a map"
     end
 
+    test "rejects non-string transfer_group", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"transfer_group" => %{}})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "transfer_group must be a string"
+    end
+
     test "rejects settlement when the charge amount is not a valid integer", %{charge: charge} do
       charge = %{
         charge
@@ -569,6 +580,10 @@ defmodule MPP.Methods.StripeTest do
       # stripe_account routes to the Stripe-Account header, never the body.
       assert {_, "acct_platform"} = List.keyfind(headers, "stripe-account", 0)
       refute Map.has_key?(params, "stripe_account")
+
+      # SPT preview version pin — mppx stripePreviewVersion
+      # (refs/mppx/src/stripe/internal/constants.ts).
+      assert {_, "2026-02-25.preview"} = List.keyfind(headers, "stripe-version", 0)
 
       # Base PaymentIntent params remain intact alongside settlement.
       assert params["amount"] == "5000"

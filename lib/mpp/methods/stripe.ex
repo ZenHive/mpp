@@ -84,6 +84,11 @@ defmodule MPP.Methods.Stripe do
 
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
 
+  # Stripe API version with `.preview` suffix — required for
+  # `shared_payment_granted_token` (SPTs are in private preview). Keep in sync
+  # with mppx's `stripePreviewVersion` (refs/mppx/src/stripe/internal/constants.ts).
+  @stripe_preview_version "2026-02-25.preview"
+
   @required_config_keys ~w(stripe_secret_key network_id)
 
   api(:method_name, "Return the payment method identifier for Stripe.")
@@ -208,10 +213,18 @@ defmodule MPP.Methods.Stripe do
          :ok <- validate_account(settlement["stripe_account"], "stripe_account"),
          :ok <- validate_account(settlement["on_behalf_of"], "on_behalf_of"),
          :ok <- validate_settlement_amount(settlement["application_fee_amount"], payment_amount, "application_fee_amount"),
+         :ok <- validate_transfer_group(settlement["transfer_group"]),
          :ok <- validate_transfer_data(settlement["transfer_data"], payment_amount) do
       {:ok, settlement}
     end
   end
+
+  # mppx enforces `transferGroup: string` via its TS types; the runtime
+  # equivalent here keeps a misconfigured non-string value from raising in
+  # URI.encode_query at request time.
+  defp validate_transfer_group(nil), do: :ok
+  defp validate_transfer_group(value) when is_binary(value), do: :ok
+  defp validate_transfer_group(_value), do: {:error, connect_error("Stripe Connect transfer_group must be a string.")}
 
   defp parse_amount(amount) when is_binary(amount) do
     case Integer.parse(amount) do
@@ -274,7 +287,8 @@ defmodule MPP.Methods.Stripe do
       [
         {"authorization", "Basic #{auth}"},
         {"idempotency-key", idempotency_key},
-        {"content-type", "application/x-www-form-urlencoded"}
+        {"content-type", "application/x-www-form-urlencoded"},
+        {"stripe-version", @stripe_preview_version}
       ] ++ stripe_account_header(settlement)
 
     result =
