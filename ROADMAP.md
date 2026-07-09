@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 72 — Parse-time input validation parity for challenge/credential, Task 73 — Extract shared helpers and split MPP.Headers (mechanical refactor), Task 74 — Docs hygiene: README modules, ROADMAP focus, SECURITY version, Task 75 — Presenter-identity binding for Tempo hash-credential path (close GHSA-34g7-vx6g-82mq residual) on 2026-07-08
 
-**Up next:** Task 32b — MCP server transport [D:3/B:7/U:8 → Eff:2.5] 🎯
+**Up next:** Task 55 — Hash credential type audit + spec backfill [D:2/B:5/U:5 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -170,7 +170,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 32 | ✅ | 🎁 **mcp** · MCP types and constants [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
-| Task 32b | ⬜ | 🎁 **mcp** · MCP server transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
+| Task 32b | 🔄 | 🎁 **mcp** · MCP server transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 <!-- TASKS:END -->
 
 ---

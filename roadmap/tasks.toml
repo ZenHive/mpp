@@ -852,13 +852,10 @@ implemented = "Shipped the MPP.Mcp module with MCP/JSON-RPC transport helpers �
 id = "32b"
 phase = 11
 bundle = "mcp"
+status = "in_progress"
 title = "MCP server transport"
-status = "pending"
 scores = { d = 3, b = 7, u = 8 }
 depends_on = [32, 34]
-body = """
-Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta["org.paymentauth/credential"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta["org.paymentauth/receipt"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.
-"""
 acceptance_criteria = [
   "Server-side MCP transport/adapter bridging MPP.Verifier into JSON-RPC handler inputs/outputs",
   "Reads credential from `_meta[\"org.paymentauth/credential\"]`; emits -32042 payment-required errors with challenges + RFC 9457 problem details; attaches receipts into `_meta[\"org.paymentauth/receipt\"]` on success",
@@ -866,9 +863,13 @@ acceptance_criteria = [
   "Tier-2 wire-contract test: a :cross_validation test pins our _meta envelope (key names, -32042 code, challenge + receipt shape) to mppx's server transport output for an equivalent challenge/credential",
   "Does NOT re-test chain/API verification through the MCP layer — MPP.Verifier's existing :integration tests own that; MCP tests cover the _meta plumbing only"
 ]
+touches = ["lib/mpp/mcp.ex", "lib/mpp/mcp/server.ex"]
 assignee = "codex"
 model = "gpt-5.5"
-touches = ["lib/mpp/mcp.ex", "lib/mpp/mcp/server.ex"]
+body = """
+Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta["org.paymentauth/credential"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta["org.paymentauth/receipt"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.
+"""
+started_at = "2026-07-09"
 
 # ============================================================================
 # Tasks — Phase 12: Client SDK
