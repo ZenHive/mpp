@@ -40,6 +40,16 @@ defmodule MPP.Tempo.Store do
   the transaction hash (for `type="hash"`) or the full serialized transaction
   hex (for `type="transaction"`).
 
+  ## Multi-tenant key prefixes
+
+  When several endpoints share one `ConCacheStore` instance, pass a distinct
+  `:key_prefix` in the store opts so identical transaction hashes do not collide:
+
+      "store" => {MPP.Tempo.ConCacheStore, name: :shared_dedup, key_prefix: "billing:"}
+
+  Prefixes are prepended to every backing key (mppx `Store.from/2` parity).
+  Default is no prefix — behavior is unchanged when omitted.
+
   ## Example
 
       defmodule MyApp.PaymentStore do
@@ -107,6 +117,20 @@ defmodule MPP.Tempo.Store do
   def resolve(nil), do: @default_store
   def resolve(false), do: nil
   def resolve(store), do: store
+
+  @doc """
+  Apply an optional `:key_prefix` from store opts to a logical dedup key.
+
+  Used by `MPP.Tempo.ConCacheStore`; custom stores may call this for parity with
+  mppx's `Store.from(store, { keyPrefix })` wrapper. Default is no prefix.
+  """
+  @spec storage_key(String.t(), keyword()) :: String.t()
+  def storage_key(key, opts \\ []) do
+    case Keyword.get(opts, :key_prefix, "") do
+      "" -> key
+      prefix when is_binary(prefix) -> prefix <> key
+    end
+  end
 
   @doc """
   Look up a key in the store.

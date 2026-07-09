@@ -67,6 +67,31 @@ defmodule MPP.Tempo.ConCacheStoreTest do
     end
   end
 
+  describe "key_prefix" do
+    test "same tx hash under two prefixes is independent", %{store_opts: store_opts} do
+      tx_key = "mpp:charge:0xabc123"
+      tenant_a_opts = Keyword.put(store_opts, :key_prefix, "tenant-a:")
+      tenant_b_opts = Keyword.put(store_opts, :key_prefix, "tenant-b:")
+
+      assert :ok = ConCacheStore.check_and_mark(tx_key, :tenant_a, tenant_a_opts)
+      assert :ok = ConCacheStore.check_and_mark(tx_key, :tenant_b, tenant_b_opts)
+
+      assert {:ok, :tenant_a} = ConCacheStore.get(tx_key, tenant_a_opts)
+      assert {:ok, :tenant_b} = ConCacheStore.get(tx_key, tenant_b_opts)
+
+      assert {:error, :already_exists} =
+               ConCacheStore.check_and_mark(tx_key, :tenant_a_retry, tenant_a_opts)
+    end
+
+    test "omitting key_prefix leaves keys unchanged", %{store_opts: store_opts} do
+      key = "mpp:charge:0xno-prefix"
+
+      assert :ok = ConCacheStore.put(key, :value, store_opts)
+      assert {:ok, :value} = ConCacheStore.get(key, store_opts)
+      assert {:error, :already_exists} = ConCacheStore.check_and_mark(key, :other, store_opts)
+    end
+  end
+
   describe "check_and_mark/3" do
     test "marks a new key and rejects an existing key", %{store_opts: store_opts} do
       key = "mpp:charge:single"

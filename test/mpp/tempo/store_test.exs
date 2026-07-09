@@ -50,6 +50,17 @@ defmodule MPP.Tempo.StoreTest do
     end
   end
 
+  describe "storage_key/2" do
+    test "returns the key unchanged when no prefix is configured" do
+      assert Store.storage_key("mpp:charge:0xabc", []) == "mpp:charge:0xabc"
+    end
+
+    test "prepends key_prefix from opts" do
+      assert Store.storage_key("mpp:charge:0xabc", key_prefix: "billing:") ==
+               "billing:mpp:charge:0xabc"
+    end
+  end
+
   describe "resolve/1 and default_store/0" do
     test "default_store/0 is the built-in ConCacheStore" do
       assert Store.default_store() == ConCacheStore

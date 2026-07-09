@@ -54,6 +54,8 @@ defmodule MPP.Tempo.ConCacheStore do
       Override to avoid child ID collisions if your app already supervises other
       ConCache instances.
     * `:ttl_check_interval` — how often to sweep expired entries. Default: 30 seconds.
+    * `:key_prefix` — string prepended to every backing key for multi-tenant
+      namespacing when sharing one cache. Default: `""` (no prefix).
   """
 
   @behaviour MPP.Tempo.Store
@@ -101,7 +103,7 @@ defmodule MPP.Tempo.ConCacheStore do
   """
   @spec get(String.t(), keyword()) :: {:ok, term()} | :not_found
   def get(key, opts) do
-    case ConCache.get(cache_name(opts), key) do
+    case ConCache.get(cache_name(opts), Store.storage_key(key, opts)) do
       nil -> :not_found
       value -> {:ok, value}
     end
@@ -121,7 +123,7 @@ defmodule MPP.Tempo.ConCacheStore do
   """
   @spec put(String.t(), term(), keyword()) :: :ok
   def put(key, value, opts) do
-    ConCache.put(cache_name(opts), key, value)
+    ConCache.put(cache_name(opts), Store.storage_key(key, opts), value)
     :ok
   end
 
@@ -140,11 +142,12 @@ defmodule MPP.Tempo.ConCacheStore do
   @spec check_and_mark(String.t(), term(), keyword()) :: :ok | {:error, :already_exists}
   def check_and_mark(key, value, opts) do
     cache_name = cache_name(opts)
+    storage_key = Store.storage_key(key, opts)
 
-    ConCache.isolated(cache_name, key, fn ->
-      case ConCache.get(cache_name, key) do
+    ConCache.isolated(cache_name, storage_key, fn ->
+      case ConCache.get(cache_name, storage_key) do
         nil ->
-          ConCache.put(cache_name, key, value)
+          ConCache.put(cache_name, storage_key, value)
           :ok
 
         _existing ->
