@@ -4,10 +4,48 @@ defmodule MPP.McpTest do
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Errors
+  alias MPP.Intents.Charge
+  alias MPP.JCS
   alias MPP.Mcp
   alias MPP.Receipt
 
+  defmodule MockMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mock"
+
+    @impl MPP.Method
+    def verify(%{"proof" => "valid"}, _charge) do
+      {:ok, Receipt.new(method: method_name(), reference: "ref_mcp", timestamp: "2026-04-04T12:00:00Z")}
+    end
+
+    @impl MPP.Method
+    def verify(%{"proof" => "invalid"}, _charge) do
+      {:error, Errors.new(:verification_failed, "Invalid proof")}
+    end
+
+    @impl MPP.Method
+    def verify(%{"proof" => "required"}, _charge) do
+      {:error, Errors.new(:payment_required, "Payment still required")}
+    end
+
+    @impl MPP.Method
+    def verify(%{"proof" => "malformed"}, _charge) do
+      {:error, Errors.new(:malformed_credential, "Malformed proof")}
+    end
+
+    @impl MPP.Method
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "Missing proof field")}
+    end
+  end
+
   # Shared test fixtures
+  @secret_key "test-secret-key-for-mcp"
+  @realm "api.example.com"
+
   defp sample_challenge do
     %Challenge{
       id: "ch_test_123",
@@ -28,12 +66,103 @@ defmodule MPP.McpTest do
     }
   end
 
+  defp sample_json_rpc_request do
+    %{
+      "jsonrpc" => "2.0",
+      "id" => "req-1",
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "premium_lookup",
+        "arguments" => %{"query" => "alpha"}
+      }
+    }
+  end
+
   defp sample_receipt do
     Receipt.new(
       method: "tempo",
       reference: "0xtx789",
       timestamp: "2026-04-04T12:00:00Z"
     )
+  end
+
+  defp server_config do
+    Mcp.init(
+      secret_key: @secret_key,
+      realm: @realm,
+      method: MockMethod,
+      amount: "1000",
+      currency: "usd",
+      store: false
+    )
+  end
+
+  defp json_rpc_request_with_credential(payload \\ %{"proof" => "valid"}) do
+    request = sample_json_rpc_request()
+    challenge = mock_challenge()
+    credential = %Credential{challenge: challenge, payload: payload}
+
+    Map.update!(request, "params", &Mcp.attach_credential(&1, credential))
+  end
+
+  defp mock_challenge do
+    mock_challenge(method: "mock")
+  end
+
+  defp mock_challenge(opts) do
+    charge = mock_charge()
+
+    Challenge.create(
+      [
+        realm: @realm,
+        method: Keyword.fetch!(opts, :method),
+        intent: "charge",
+        request: encode_request(charge),
+        expires: future_expires()
+      ],
+      @secret_key
+    )
+  end
+
+  defp mock_charge do
+    {:ok, charge} = Charge.new(amount: "1000", currency: "usd")
+    charge
+  end
+
+  defp encode_request(charge) do
+    charge
+    |> Charge.to_request()
+    |> JCS.canonicalize()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp future_expires do
+    DateTime.utc_now()
+    |> DateTime.add(300, :second)
+    |> DateTime.to_iso8601()
+  end
+
+  defp read_mppx_transport_source! do
+    [
+      "refs/mppx/src/server/Transport.ts",
+      "refs/mppx/src/mcp/server/Transport.ts",
+      "node_modules/mppx/src/server/Transport.ts"
+    ]
+    |> Enum.find(&File.exists?/1)
+    |> case do
+      nil ->
+        flunk("""
+        Missing mppx reference source for MCP cross-validation.
+
+        Expected one of:
+          refs/mppx/src/server/Transport.ts
+          refs/mppx/src/mcp/server/Transport.ts
+          node_modules/mppx/src/server/Transport.ts
+        """)
+
+      path ->
+        File.read!(path)
+    end
   end
 
   # -------------------------------------------------------------------
@@ -543,6 +672,250 @@ defmodule MPP.McpTest do
 
       cred_map = params["_meta"]["org.paymentauth/credential"]
       refute Map.has_key?(cred_map, "source")
+    end
+  end
+
+  describe "server-side MCP transport adapter" do
+    test "returns mppx-shaped payment-required JSON-RPC error when credential is missing" do
+      response =
+        Mcp.call(sample_json_rpc_request(), server_config(), fn _request ->
+          flunk("handler must not run without a credential")
+        end)
+
+      assert response["jsonrpc"] == "2.0"
+      assert response["id"] == "req-1"
+      assert response["error"]["code"] == -32_042
+      assert response["error"]["message"] == "Payment Required"
+
+      data = response["error"]["data"]
+      assert data["httpStatus"] == 402
+      assert data["problem"]["type"] == "https://paymentauth.org/problems/payment-required"
+      assert data["problem"]["title"] == "Payment Required"
+      assert data["problem"]["detail"] == "No payment credential provided"
+
+      [challenge] = data["challenges"]
+      assert challenge["realm"] == @realm
+      assert challenge["method"] == "mock"
+      assert challenge["intent"] == "charge"
+      assert challenge["request"] == %{"amount" => "1000", "currency" => "usd"}
+      assert is_binary(challenge["expires"])
+    end
+
+    test "returns invalid params error when credential metadata is malformed" do
+      request =
+        Map.update!(sample_json_rpc_request(), "params", fn params ->
+          Map.put(params, "_meta", %{"org.paymentauth/credential" => %{"not" => "a credential"}})
+        end)
+
+      response =
+        Mcp.call(request, server_config(), fn _request ->
+          flunk("handler must not run with malformed credential metadata")
+        end)
+
+      assert response["error"]["code"] == -32_602
+      assert response["error"]["message"] == "Malformed Credential"
+      assert response["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/malformed-credential"
+      assert [_challenge] = response["error"]["data"]["challenges"]
+    end
+
+    test "verifies credential then attaches receipt to successful JSON-RPC result metadata" do
+      request = json_rpc_request_with_credential()
+
+      response =
+        Mcp.call(request, server_config(), fn verified_request ->
+          assert get_in(verified_request, ["params", "_meta", "org.paymentauth/credential"])
+
+          %{
+            "jsonrpc" => "2.0",
+            "id" => verified_request["id"],
+            "result" => %{
+              "content" => [%{"type" => "text", "text" => "premium data"}],
+              "_meta" => %{"existing" => "kept"}
+            }
+          }
+        end)
+
+      assert response["jsonrpc"] == "2.0"
+      assert response["id"] == "req-1"
+      assert response["result"]["content"] == [%{"type" => "text", "text" => "premium data"}]
+      assert response["result"]["_meta"]["existing"] == "kept"
+
+      receipt = response["result"]["_meta"]["org.paymentauth/receipt"]
+      assert receipt["status"] == "success"
+      assert receipt["method"] == "mock"
+      assert receipt["reference"] == "ref_mcp"
+      assert receipt["timestamp"] == "2026-04-04T12:00:00Z"
+
+      assert receipt["challengeId"] ==
+               get_in(request, ["params", "_meta", "org.paymentauth/credential", "challenge", "id"])
+    end
+
+    test "does not attach a receipt when verified handler returns a JSON-RPC error" do
+      response =
+        Mcp.call(json_rpc_request_with_credential(), server_config(), fn request ->
+          %{
+            "jsonrpc" => "2.0",
+            "id" => request["id"],
+            "error" => %{"code" => -32_000, "message" => "handler failed"}
+          }
+        end)
+
+      assert response["error"]["message"] == "handler failed"
+      refute Map.has_key?(response, "result")
+    end
+
+    test "returns verification failure error when credential proof is rejected" do
+      response =
+        %{"proof" => "invalid"}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request ->
+          flunk("handler must not run when verifier rejects the credential")
+        end)
+
+      assert response["error"]["code"] == -32_043
+      assert response["error"]["message"] == "Verification Failed"
+      assert response["error"]["data"]["httpStatus"] == 402
+      assert response["error"]["data"]["problem"]["detail"] == "Invalid proof"
+      assert [_challenge] = response["error"]["data"]["challenges"]
+    end
+
+    test "returns verification failure error when credential method is unsupported" do
+      request = sample_json_rpc_request()
+      credential = %Credential{challenge: mock_challenge(method: "other"), payload: %{"proof" => "valid"}}
+      request = Map.update!(request, "params", &Mcp.attach_credential(&1, credential))
+
+      response =
+        Mcp.call(request, server_config(), fn _request ->
+          flunk("handler must not run when credential method is unsupported")
+        end)
+
+      assert response["error"]["code"] == -32_043
+      assert response["error"]["message"] == "Method Unsupported"
+      assert response["error"]["data"]["problem"]["detail"] == "Unknown payment method: other"
+    end
+
+    test "maps verifier payment-required and malformed-credential errors to mppx JSON-RPC codes" do
+      payment_required =
+        %{"proof" => "required"}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+
+      malformed =
+        %{"proof" => "malformed"}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+
+      assert payment_required["error"]["code"] == -32_042
+      assert payment_required["error"]["message"] == "Payment Required"
+      assert malformed["error"]["code"] == -32_602
+      assert malformed["error"]["message"] == "Malformed Credential"
+    end
+
+    test "normalizes handler result maps and tagged tuples before attaching receipt" do
+      bare_result =
+        Mcp.call(json_rpc_request_with_credential(), server_config(), fn _request -> %{"content" => []} end)
+
+      ok_tuple =
+        Mcp.call(json_rpc_request_with_credential(), server_config(), fn _request ->
+          {:ok, %{"result" => %{"content" => []}}}
+        end)
+
+      error_tuple =
+        Mcp.call(json_rpc_request_with_credential(), server_config(), fn _request ->
+          {:error, %{"error" => %{"code" => -32_000}}}
+        end)
+
+      assert bare_result["jsonrpc"] == "2.0"
+      assert bare_result["result"]["_meta"]["org.paymentauth/receipt"]["reference"] == "ref_mcp"
+      assert ok_tuple["jsonrpc"] == "2.0"
+      assert ok_tuple["id"] == "req-1"
+      assert ok_tuple["result"]["_meta"]["org.paymentauth/receipt"]["reference"] == "ref_mcp"
+      assert error_tuple["jsonrpc"] == "2.0"
+      assert error_tuple["id"] == "req-1"
+      assert error_tuple["error"]["code"] == -32_000
+      refute Map.has_key?(error_tuple, "result")
+    end
+
+    test "rejects malformed challenge fields from MCP metadata without raising" do
+      assert {:error, :invalid_challenge} =
+               Mcp.extract_challenges(%{
+                 "_meta" => %{
+                   "org.paymentauth/payment-required" => %{
+                     "challenges" => [
+                       %{
+                         "id" => "",
+                         "realm" => "api.example.com",
+                         "method" => "mock",
+                         "intent" => "charge",
+                         "request" => %{"amount" => "1000", "currency" => "usd"}
+                       }
+                     ]
+                   }
+                 }
+               })
+
+      assert {:error, :invalid_challenge} =
+               Mcp.extract_challenges(%{
+                 "_meta" => %{"org.paymentauth/payment-required" => %{"challenges" => "bad"}}
+               })
+
+      assert {:error, :no_challenges} =
+               Mcp.extract_challenges(%{
+                 "_meta" => %{"org.paymentauth/payment-required" => %{}}
+               })
+    end
+
+    @tag :cross_validation
+    test "raw JSON-RPC envelope matches mppx server transport contract" do
+      # Contract source: refs/mppx/src/server/Transport.ts `mcp()`.
+      # The fixture asserts the same top-level envelope, error code field,
+      # data.challenge placement, and result._meta receipt placement.
+      source = read_mppx_transport_source!()
+
+      assert source =~ "export function mcp()"
+      assert source =~ "jsonrpc: '2.0'"
+      assert source =~ "id: input.id"
+      assert source =~ "code: mcpErrorCode(error)"
+      assert source =~ "challenges: [challenge]"
+      assert source =~ "[core_Mcp.receiptMetaKey]: mcpReceipt"
+
+      error_response =
+        Mcp.call(sample_json_rpc_request(), server_config(), fn _request ->
+          flunk("handler must not run without payment")
+        end)
+
+      assert %{
+               "jsonrpc" => "2.0",
+               "id" => "req-1",
+               "error" => %{
+                 "code" => -32_042,
+                 "data" => %{
+                   "httpStatus" => 402,
+                   "challenges" => [_],
+                   "problem" => %{"type" => "https://paymentauth.org/problems/payment-required"}
+                 }
+               }
+             } = error_response
+
+      receipt_response =
+        Mcp.call(json_rpc_request_with_credential(), server_config(), fn request ->
+          %{"jsonrpc" => "2.0", "id" => request["id"], "result" => %{"content" => []}}
+        end)
+
+      assert %{
+               "jsonrpc" => "2.0",
+               "id" => "req-1",
+               "result" => %{
+                 "_meta" => %{
+                   "org.paymentauth/receipt" => %{
+                     "status" => "success",
+                     "method" => "mock",
+                     "reference" => "ref_mcp",
+                     "challengeId" => _
+                   }
+                 }
+               }
+             } = receipt_response
     end
   end
 
