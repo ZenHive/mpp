@@ -843,6 +843,19 @@ The mpp.dev docs site ([tempoxyz/mpp](https://github.com/tempoxyz/mpp)) lists SD
 - Reference impl: `refs/mppx/` (local) or [wevm/mppx](https://github.com/wevm/mppx) (TypeScript)
 - Reference impl: `refs/mpp-rs/` (local) or [tempoxyz/mpp-rs](https://github.com/tempoxyz/mpp-rs) (Rust)
 
+### Testing: three tiers of ground truth
+
+Before writing tests for any module, ask **one question: what is ground truth for this code?** The trap all three tiers guard against is identical — *coverage green, reality wrong* — and a self-built fixture can never break that tie, because the golden test builds the fixture with the same wrong assumption it's meant to catch. Only reality (a live call) or an independent implementation (a reference SDK) can.
+
+1. **Code that calls an external service** (Stripe API, chain RPC via `onchain`/`onchain_tempo`) → **the live endpoint is the only truth.** A mock encodes your *guess* of the response shape; it passes green while the real call 400s on a field you misremembered. Tag `:integration`, hit Moderato/Sepolia/Stripe-test. This is the "Integration tests are mandatory" bullet above — Task 13g's `eth_call` params bug is the proof (every stub passed, Moderato rejected the request).
+2. **Code that must match a wire format or another implementation** (HMAC input layout, JCS ordering, RLP field indices, the MCP `_meta` envelope, error codes, fee-payer constants) → **the reference SDKs are truth, cross-checked when `mpp-rs` and `mppx` agree.** Tag `:cross_validation`, run via QuickBEAM/OXC against `refs/`. This is the "Verify wire-format constants" bullet above.
+3. **Pure glue / transforms / adapters** (MCP transport shaping, header formatting) → no external truth, so fixtures are fine — but **derive the fixtures from tier 1 or 2** (a captured real response, a reference-SDK snapshot), never invent them.
+
+**Operationalizing it:**
+- **Explore then pin.** Hit reality *first* via Tidewave `project_eval`, observe the actual shape, *then* write the `:integration` test that asserts it, *then* mock only what you've now seen for the fast unit tests. A real call + one assertion is cheaper than a debug loop against a wrong mental model — integration tests are the time-*saver*, not the tax.
+- **Tiers 1 and 2 stay out of the default `precommit.full` gate** (need live creds / JS toolchain) but run explicitly before landing anything touching those surfaces (`mix test.json --include integration` / `--include cross_validation`).
+- **Never skip silently.** Missing creds → the test runs and `flunk()`s loudly with the exact `export` vars, not a green `:skip`. "0 failures" from 0 tests is a lie (global `critical-rules.md` § "NEVER HIDE TEST FAILURES").
+
 ## GitHub Check Routine
 
 When asked to "check GitHub" (comments, PRs, security), sweep **all** of these surfaces — they are independent and a finding in one does not show up in the others:
