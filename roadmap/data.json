@@ -1028,7 +1028,7 @@
       "id": "32b",
       "phase": 11,
       "bundle": "mcp",
-      "status": "in_progress",
+      "status": "done",
       "title": "MCP server transport",
       "scores": {
         "d": 3,
@@ -1056,8 +1056,13 @@
         "lib/mpp/mcp.ex",
         "lib/mpp/mcp/server.ex"
       ],
+      "shipped_in": "91c9d322b69bc55e68bf89d1db407b490a366bdc",
       "body": "Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta[\"org.paymentauth/credential\"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta[\"org.paymentauth/receipt\"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.\n",
       "started_at": "2026-07-09",
+      "done_at": "2026-07-09",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1783571050387-e0d6d4cb, 91c9d322b69bc55e68bf89d1db407b490a366bdc).",
+      "delivered_by": "codex",
+      "verified": true,
       "cross_repo": []
     },
     {

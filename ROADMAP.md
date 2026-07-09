@@ -170,7 +170,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 32 | ✅ | 🎁 **mcp** · MCP types and constants [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
-| Task 32b | 🔄 | 🎁 **mcp** · MCP server transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
+| Task 32b | ✅ | 🎁 **mcp** · MCP server transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 <!-- TASKS:END -->
 
 ---
