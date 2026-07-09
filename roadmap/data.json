@@ -1043,12 +1043,18 @@
         32,
         34
       ],
+      "assignee": "codex",
+      "model": "gpt-5.5",
       "acceptance_criteria": [
-        "Server-side MCP transport/adapter for JSON-RPC handler inputs and outputs",
-        "Reads credentials from request _meta",
-        "Emits payment-required errors with challenges and RFC 9457 problem details",
-        "Attaches receipts to successful result _meta",
-        "Unit tests with mock MCP handler exchanges"
+        "Server-side MCP transport/adapter bridging MPP.Verifier into JSON-RPC handler inputs/outputs",
+        "Reads credential from `_meta[\"org.paymentauth/credential\"]`; emits -32042 payment-required errors with challenges + RFC 9457 problem details; attaches receipts into `_meta[\"org.paymentauth/receipt\"]` on success",
+        "Tier-3 glue tests: fixture-based unit tests over synthetic JSON-RPC exchanges, with fixtures DERIVED from refs/mppx/src/mcp/server/Transport.ts snapshots — not invented (CLAUDE.md § Testing: three tiers of ground truth)",
+        "Tier-2 wire-contract test: a :cross_validation test pins our _meta envelope (key names, -32042 code, challenge + receipt shape) to mppx's server transport output for an equivalent challenge/credential",
+        "Does NOT re-test chain/API verification through the MCP layer — MPP.Verifier's existing :integration tests own that; MCP tests cover the _meta plumbing only"
+      ],
+      "touches": [
+        "lib/mpp/mcp.ex",
+        "lib/mpp/mcp/server.ex"
       ],
       "body": "Add a server-side MCP transport/adapter that bridges the transport-neutral verifier into JSON-RPC handler environments. Mirror the reference SDK behavior: read credentials from `_meta[\"org.paymentauth/credential\"]`, emit payment-required errors with code `-32042` and challenge data, and attach receipts into `_meta[\"org.paymentauth/receipt\"]` on successful responses. This turns Phase 11 from a types/helpers layer into an actually mountable MCP server integration.\n",
       "cross_repo": []
@@ -1567,11 +1573,16 @@
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-build",
       "acceptance_criteria": [
         "Challenge `method_details` carries Connect settlement fields per the latest discovery + Stripe method spec",
         "Charge verification honors Connect routing (destination charge / direct charge / application fee)",
         "Cross-validated against mppx's Stripe Connect output for an equivalent config",
         "Integration test against Stripe test API using a Connect account"
+      ],
+      "touches": [
+        "lib/mpp/methods/stripe.ex"
       ],
       "body": "Extend `MPP.Methods.Stripe` with Stripe Connect settlement options (destination charge / direct charge / application fee routing). Read `paymentauth.org` Stripe charge spec + `refs/mpp-specs/specs/methods/stripe/` + the latest Stripe Connect handling in `refs/mppx` (search for `connect` / `settlement` in `src/methods/stripe/`) at implementation time — the spec and reference impl define which fields land in `methodDetails` and how the server routes the resulting PaymentIntent. Wire the `method_config` knobs for server-side Connect credentials separately from public `method_details`.\n",
       "created_at": "2026-05-27",
@@ -1628,11 +1639,17 @@
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
+      "assignee": "cursor",
+      "model": "composer-2.5",
       "acceptance_criteria": [
         "`MPP.Tempo.Store` behaviour (and `ConCacheStore` impl) accept a configurable key prefix",
         "Default behavior unchanged when no prefix configured",
         "Cross-tenant key collisions impossible when prefixes differ",
         "Unit test: same tx hash under two prefixes treated as independent"
+      ],
+      "touches": [
+        "lib/mpp/tempo/store.ex",
+        "lib/mpp/tempo/con_cache_store.ex"
       ],
       "body": "Multi-tenant ergonomics for the Tempo dedup store — let consumers namespace dedup keys with a configurable prefix so two endpoints sharing a single store don't collide on identical tx hashes. Read the latest mppx Tempo store key-prefix pattern in `refs/mppx` (look in the proxy/tempo store code) at pickup time. Wire prefix through `MPP.Tempo.Store` behaviour and `MPP.Tempo.ConCacheStore` impl; default is no prefix (backward compatible).\n",
       "created_at": "2026-05-27",
