@@ -2,6 +2,7 @@ defmodule MPP.DescripexTest do
   use ExUnit.Case, async: true
 
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.Methods.EVM
   alias MPP.Methods.Stripe
   alias MPP.Methods.Tempo
@@ -14,6 +15,7 @@ defmodule MPP.DescripexTest do
     MPP.AcceptPayment,
     MPP.Errors,
     Charge,
+    Session,
     Stripe,
     Tempo,
     EVM,

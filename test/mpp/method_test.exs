@@ -3,6 +3,7 @@ defmodule MPP.MethodTest do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.Receipt
 
   defmodule MockMethod do
@@ -13,15 +14,15 @@ defmodule MPP.MethodTest do
     def method_name, do: "mock"
 
     @impl MPP.Method
-    def verify(%{"proof" => "valid"}, charge) do
-      {:ok, Receipt.new(method: method_name(), reference: "ref_#{charge.amount}")}
+    def verify(%{"proof" => "valid"}, %{amount: amount}) do
+      {:ok, Receipt.new(method: method_name(), reference: "ref_#{amount}")}
     end
 
-    def verify(%{"proof" => "invalid"}, _charge) do
+    def verify(%{"proof" => "invalid"}, _intent) do
       {:error, Errors.new(:verification_failed, "Invalid proof")}
     end
 
-    def verify(_payload, _charge) do
+    def verify(_payload, _intent) do
       {:error, Errors.new(:invalid_payload, "Missing proof field")}
     end
   end
@@ -46,7 +47,11 @@ defmodule MPP.MethodTest do
 
   setup do
     {:ok, charge} = Charge.new(amount: "1000", currency: "usd", recipient: "acct_test")
-    {:ok, charge: charge}
+
+    {:ok, session} =
+      Session.new(amount: "1000", currency: "usd", unit_type: "second", recipient: "acct_test")
+
+    {:ok, charge: charge, session: session}
   end
 
   describe "method_name/0" do
@@ -65,6 +70,12 @@ defmodule MPP.MethodTest do
       assert receipt.timestamp
     end
 
+    test "accepts session intent alongside charge", %{session: session} do
+      assert {:ok, %Receipt{} = receipt} = MockMethod.verify(%{"proof" => "valid"}, session)
+      assert receipt.method == "mock"
+      assert receipt.reference == "ref_1000"
+    end
+
     test "returns {:error, Errors.t()} on failed verification", %{charge: charge} do
       assert {:error, %Errors{} = error} = MockMethod.verify(%{"proof" => "invalid"}, charge)
       assert error.status == 402
@@ -80,13 +91,21 @@ defmodule MPP.MethodTest do
   end
 
   describe "challenge_method_details/1" do
-    test "default implementation returns nil", %{charge: charge} do
+    test "default implementation returns nil", %{charge: charge, session: session} do
       assert MockMethod.challenge_method_details(charge) == nil
+      assert MockMethod.challenge_method_details(session) == nil
     end
 
     test "can be overridden to return method-specific fields", %{charge: charge} do
       details = MockMethodWithDetails.challenge_method_details(charge)
       assert details == %{"networkId" => "net_test123", "paymentMethodTypes" => ["card"]}
+    end
+  end
+
+  describe "MPP.Method.intent/0 type" do
+    test "Charge and Session are both valid intent structs" do
+      assert %Charge{} = struct!(Charge, amount: "1", currency: "usd")
+      assert %Session{} = struct!(Session, amount: "1", currency: "usd")
     end
   end
 end

@@ -1,0 +1,169 @@
+defmodule MPP.Intents.SessionTest do
+  use ExUnit.Case, async: true
+
+  alias MPP.Intents.Session
+
+  describe "new/1" do
+    test "creates session with required fields" do
+      assert {:ok, session} = Session.new(amount: "1000", currency: "usd")
+
+      assert session.amount == "1000"
+      assert session.currency == "usd"
+      assert session.unit_type == nil
+      assert session.recipient == nil
+      assert session.suggested_deposit == nil
+      assert session.decimals == nil
+      assert session.external_id == nil
+      assert session.method_details == nil
+    end
+
+    test "normalizes currency to lowercase" do
+      assert {:ok, session} = Session.new(amount: "500", currency: "USD")
+      assert session.currency == "usd"
+
+      assert {:ok, session2} = Session.new(amount: "500", currency: "Eur")
+      assert session2.currency == "eur"
+    end
+
+    test "accepts all optional fields" do
+      assert {:ok, session} =
+               Session.new(
+                 amount: "1000",
+                 currency: "usd",
+                 unit_type: "second",
+                 recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2",
+                 suggested_deposit: "60000",
+                 decimals: 6,
+                 external_id: "sess-42",
+                 method_details: %{"chainId" => 42_431, "feePayer" => true}
+               )
+
+      assert session.unit_type == "second"
+      assert session.recipient == "0x742d35Cc6634C0532925a3b844Bc9e7595f1B0F2"
+      assert session.suggested_deposit == "60000"
+      assert session.decimals == 6
+      assert session.external_id == "sess-42"
+      assert session.method_details == %{"chainId" => 42_431, "feePayer" => true}
+    end
+
+    test "returns error when amount is missing" do
+      assert {:error, :amount_required} = Session.new(currency: "usd")
+    end
+
+    test "returns error when amount is empty string" do
+      assert {:error, :invalid_amount} = Session.new(amount: "", currency: "usd")
+    end
+
+    test "returns error when amount is not a string" do
+      assert {:error, :invalid_amount} = Session.new(amount: 1000, currency: "usd")
+    end
+
+    test "returns error when currency is missing" do
+      assert {:error, :currency_required} = Session.new(amount: "1000")
+    end
+
+    test "returns error when currency is empty string" do
+      assert {:error, :invalid_currency} = Session.new(amount: "1000", currency: "")
+    end
+  end
+
+  describe "to_request/1 and from_request/1" do
+    test "roundtrip preserves wire fields" do
+      assert {:ok, session} =
+               Session.new(
+                 amount: "1000",
+                 currency: "usd",
+                 unit_type: "second",
+                 recipient: "0x456",
+                 suggested_deposit: "60000",
+                 external_id: "ext-1",
+                 method_details: %{"chainId" => 42_431}
+               )
+
+      request = Session.to_request(session)
+      assert {:ok, restored} = Session.from_request(request)
+
+      assert restored.amount == session.amount
+      assert restored.currency == session.currency
+      assert restored.unit_type == session.unit_type
+      assert restored.recipient == session.recipient
+      assert restored.suggested_deposit == session.suggested_deposit
+      assert restored.external_id == session.external_id
+      assert restored.method_details == session.method_details
+    end
+
+    test "to_request uses camelCase keys matching mpp-rs SessionRequest" do
+      assert {:ok, session} =
+               Session.new(
+                 amount: "1000",
+                 currency: "0x123",
+                 unit_type: "second",
+                 suggested_deposit: "60000",
+                 external_id: "abc",
+                 method_details: %{"chainId" => 42_431, "feePayer" => true}
+               )
+
+      request = Session.to_request(session)
+
+      assert request["amount"] == "1000"
+      assert request["currency"] == "0x123"
+      assert request["unitType"] == "second"
+      assert request["suggestedDeposit"] == "60000"
+      assert request["externalId"] == "abc"
+      assert request["methodDetails"] == %{"chainId" => 42_431, "feePayer" => true}
+
+      refute Map.has_key?(request, "unit_type")
+      refute Map.has_key?(request, "suggested_deposit")
+      refute Map.has_key?(request, "external_id")
+      refute Map.has_key?(request, "method_details")
+    end
+
+    test "to_request omits nil optional fields and transient decimals" do
+      assert {:ok, session} = Session.new(amount: "500", currency: "usd", decimals: 6)
+      request = Session.to_request(session)
+
+      assert request == %{"amount" => "500", "currency" => "usd"}
+      refute Map.has_key?(request, "decimals")
+      refute Map.has_key?(request, "unitType")
+      refute Map.has_key?(request, "suggestedDeposit")
+      refute Map.has_key?(request, "recipient")
+      refute Map.has_key?(request, "methodDetails")
+    end
+
+    test "from_request accepts mpp-rs SessionRequest JSON shape" do
+      # Matches mpp-rs test_session_request_deserialization fixture
+      json = %{"amount" => "2000", "unitType" => "minute", "currency" => "0xabc"}
+
+      assert {:ok, session} = Session.from_request(json)
+      assert session.amount == "2000"
+      assert session.unit_type == "minute"
+      assert session.currency == "0xabc"
+      assert session.recipient == nil
+      assert session.suggested_deposit == nil
+      assert session.method_details == nil
+    end
+
+    test "from_request accepts session without unitType" do
+      # Matches mpp-rs test_session_request_without_unit_type
+      json = %{"amount" => "2000", "currency" => "0xabc"}
+
+      assert {:ok, session} = Session.from_request(json)
+      assert session.amount == "2000"
+      assert session.unit_type == nil
+    end
+
+    test "from_request returns error for missing required fields" do
+      assert {:error, :missing_required_fields} = Session.from_request(%{"amount" => "100"})
+      assert {:error, :missing_required_fields} = Session.from_request(%{})
+    end
+
+    test "roundtrip does not restore transient decimals" do
+      assert {:ok, session} =
+               Session.new(amount: "1.5", currency: "usd", unit_type: "second", decimals: 6)
+
+      assert session.decimals == 6
+      restored = session |> Session.to_request() |> Session.from_request()
+      assert {:ok, %Session{decimals: nil}} = restored
+    end
+  end
+end

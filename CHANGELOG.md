@@ -6,6 +6,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## Unreleased
+
+**Session intent schema.** Added `MPP.Intents.Session` — pay-as-you-go / metered session request schema parallel to `MPP.Intents.Charge`, with `new/1` validation, camelCase `to_request/1` / `from_request/1` matching mpp-rs `SessionRequest` (`unitType`, `suggestedDeposit`, transient `decimals` stripped from wire). `MPP.Method` callbacks now accept `MPP.Method.intent()` (`Charge.t() | Session.t()`).
+
 ## [0.10.0] - 2026-07-08
 
 **Internal refactor — shared-helper de-duplication and `MPP.Headers` split (no runtime behavior change; the Accept-Payment API move below is the one breaking surface).** Extracted copy-pasted internal helpers into three small modules: `MPP.Hex` (`strip_0x/1`, `hex_string?/1`), `MPP.Methods.Shared` (`require_config/3`, `check_receipt_status/1`, `parse_charge_amount/1`), and `MPP.Codec` (`decode_base64_json/1`), removing the duplication across the payment-method and wire-format modules. The 900-line `MPP.Headers` was split: the `Accept-Payment` parse/format/rank algorithm moved to its own `MPP.AcceptPayment` module, and the byte-level multi-scheme boundary state machine moved to an internal `MPP.Headers.SchemeSplitter`, leaving `MPP.Headers` focused on the challenge/credential/receipt wire format.

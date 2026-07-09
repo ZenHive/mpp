@@ -78,6 +78,7 @@ MPP.Codec                  — Internal base64url→JSON decode (decode_base64_j
 MPP.Methods.Shared         — Internal method-verification helpers (require_config, check_receipt_status, parse_charge_amount)
 MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
+MPP.Intents.Session        — Session intent request schema (per-unit rate, unit_type, suggested_deposit, ...)
 MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding
 MPP.Amount                 — Amount/decimals helpers: parse_units, with_base_units, parse_dollar_amount
 MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset: ASCII keys, no floats) for cross-SDK HMAC interop
@@ -105,7 +106,7 @@ MPP.Demo.Router            — Plug.Router demo server with protected /resource 
 ### Design decisions
 
 - **Stateless HMAC-bound challenges.** Challenge ID = `base64url(HMAC-SHA256(secret, realm|method|intent|request|expires|digest|opaque))`. No challenge store needed — the server recomputes and does constant-time comparison on verification.
-- **Intent = Schema, Method = Implementation.** `MPP.Intents.Charge` defines the shared request schema (amount, currency, recipient). `MPP.Method` implementations only handle verification. All methods share the same intent structs.
+- **Intent = Schema, Method = Implementation.** `MPP.Intents.Charge` and `MPP.Intents.Session` define the shared request schemas (amount, currency, recipient, …). `MPP.Method` implementations only handle verification. Methods accept either intent struct via `MPP.Method.intent()`.
 - **Explicit credentials.** Per `library-design.md`: no `Application.get_env`, no ENV fallback. Pass `secret_key`, `realm`, `method` module, and pricing explicitly via Plug opts.
 - **Per-route pricing via Plug opts.** Each route mounts `MPP.Plug` with its own amount/currency. No global pricing config.
 - **Base64url encoding preserves original bytes.** Critical for HMAC verification — never re-serialize, always use the raw base64url string from the original challenge.

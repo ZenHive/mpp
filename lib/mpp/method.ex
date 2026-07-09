@@ -7,7 +7,7 @@ defmodule MPP.Method do
   callbacks that the `MPP.Plug` middleware uses during the 402 handshake:
 
     1. `method_name/0` — lowercase-ASCII-letters identifier for protocol headers (spec `1*LOWERALPHA`)
-    2. `verify/2` — verify a credential payload against a charge intent
+    2. `verify/2` — verify a credential payload against a charge or session intent
     3. `challenge_method_details/1` — (optional) add method-specific fields to challenges
 
   ## Usage
@@ -35,13 +35,20 @@ defmodule MPP.Method do
 
   ## Design
 
-  **Intent = Schema, Method = Implementation.** All methods share the same
-  `MPP.Intents.Charge` struct — methods only handle verification. The `payload`
-  argument is the raw map from the credential (method-specific proof), not the
-  full `MPP.Credential` struct. Methods don't need to know about protocol framing.
+  **Intent = Schema, Method = Implementation.** Methods share the same intent
+  schemas (`MPP.Intents.Charge` for `"charge"`, `MPP.Intents.Session` for
+  `"session"`) — methods only handle verification. The `payload` argument is
+  the raw map from the credential (method-specific proof), not the full
+  `MPP.Credential` struct. Methods don't need to know about protocol framing.
   """
 
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
+
+  @typedoc """
+  Intent struct passed to method callbacks — charge (one-shot) or session (metered).
+  """
+  @type intent :: Charge.t() | Session.t()
 
   @doc """
   Returns the lowercase payment method name (e.g., `"stripe"`, `"tempo"`).
@@ -55,33 +62,33 @@ defmodule MPP.Method do
   @callback method_name() :: String.t()
 
   @doc """
-  Verifies a payment credential payload against a charge intent.
+  Verifies a payment credential payload against a charge or session intent.
 
   ## Arguments
 
     * `payload` — method-specific proof map from the credential
       (e.g., `%{"spt" => "spt_..."}` for Stripe)
-    * `charge` — the `MPP.Intents.Charge` struct from the challenge,
-      containing amount, currency, recipient, etc.
+    * `intent` — the `MPP.Intents.Charge` or `MPP.Intents.Session` struct from
+      the challenge, containing amount, currency, recipient, etc.
 
   ## Returns
 
     * `{:ok, MPP.Receipt.t()}` — payment verified successfully
     * `{:error, MPP.Errors.t()}` — verification failed with a typed RFC 9457 error
   """
-  @callback verify(payload :: map(), charge :: Charge.t()) ::
+  @callback verify(payload :: map(), intent :: intent()) ::
               {:ok, MPP.Receipt.t()} | {:error, MPP.Errors.t()}
 
   @doc """
   Returns method-specific fields to include in the challenge request.
 
   Called when generating a 402 challenge. The returned map is merged into
-  `charge.method_details` so the client knows method-specific requirements
+  the intent's `method_details` so the client knows method-specific requirements
   (e.g., Stripe's `networkId` and `paymentMethodTypes`).
 
   The default implementation returns `nil` (no extra fields).
   """
-  @callback challenge_method_details(charge :: Charge.t()) :: map() | nil
+  @callback challenge_method_details(intent :: intent()) :: map() | nil
 
   @doc """
   Validates method_config at init time. Raises on missing required keys.
@@ -102,9 +109,9 @@ defmodule MPP.Method do
     quote do
       @behaviour MPP.Method
 
-      @spec challenge_method_details(MPP.Intents.Charge.t()) :: map() | nil
+      @spec challenge_method_details(MPP.Method.intent()) :: map() | nil
       @impl MPP.Method
-      def challenge_method_details(_charge), do: nil
+      def challenge_method_details(_intent), do: nil
 
       @spec validate_config!(map()) :: :ok
       @impl MPP.Method

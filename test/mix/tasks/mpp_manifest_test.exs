@@ -53,6 +53,7 @@ defmodule Mix.Tasks.Mpp.ManifestTest do
       assert namespaces["MPP.Challenge"] == "/protocol"
       assert namespaces["MPP.Headers"] == "/protocol"
       assert namespaces["MPP.Intents.Charge"] == "/intents"
+      assert namespaces["MPP.Intents.Session"] == "/intents"
       assert namespaces["MPP.Methods.Stripe"] == "/methods"
     end
   end

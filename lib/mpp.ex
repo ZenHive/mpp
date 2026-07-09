@@ -35,6 +35,7 @@ defmodule MPP do
     * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Intents.Charge` — Charge intent request schema
+    * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Expires` — Expiration timestamp helpers (duration offsets, assert!)
@@ -64,6 +65,7 @@ defmodule MPP do
       MPP.AcceptPayment,
       MPP.Errors,
       MPP.Intents.Charge,
+      MPP.Intents.Session,
       MPP.Methods.Stripe,
       MPP.Methods.Tempo,
       MPP.Methods.EVM,

@@ -201,6 +201,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.DID` | DID helpers for EVM credential sources |
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
+| `MPP.Intents.Session` | Session intent request schema (pay-as-you-go) |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
