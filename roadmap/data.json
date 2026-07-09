@@ -1628,7 +1628,7 @@
       "id": 54,
       "phase": 4,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Tempo store key prefixes (multi-tenant dedup)",
       "scores": {
         "d": 2,
@@ -1654,6 +1654,7 @@
       ],
       "body": "Multi-tenant ergonomics for the Tempo dedup store — let consumers namespace dedup keys with a configurable prefix so two endpoints sharing a single store don't collide on identical tx hashes. Read the latest mppx Tempo store key-prefix pattern in `refs/mppx` (look in the proxy/tempo store code) at pickup time. Wire prefix through `MPP.Tempo.Store` behaviour and `MPP.Tempo.ConCacheStore` impl; default is no prefix (backward compatible).\n",
       "created_at": "2026-05-27",
+      "started_at": "2026-07-09",
       "scored_at": "2026-05-27",
       "cross_repo": []
     },

@@ -1276,7 +1276,7 @@ shipped_in = "778161899b66d2cfec3ef3f8364f55616d202fd7"
 id = 54
 phase = 4
 bundle = "tempo"
-status = "pending"
+status = "in_progress"
 title = "Tempo store key prefixes (multi-tenant dedup)"
 scores = { d = 2, b = 4, u = 4 }
 acceptance_criteria = [
@@ -1285,13 +1285,14 @@ acceptance_criteria = [
   "Cross-tenant key collisions impossible when prefixes differ",
   "Unit test: same tx hash under two prefixes treated as independent"
 ]
+touches = ["lib/mpp/tempo/store.ex", "lib/mpp/tempo/con_cache_store.ex"]
+assignee = "cursor"
+model = "composer-2.5"
 body = """
 Multi-tenant ergonomics for the Tempo dedup store — let consumers namespace dedup keys with a configurable prefix so two endpoints sharing a single store don't collide on identical tx hashes. Read the latest mppx Tempo store key-prefix pattern in `refs/mppx` (look in the proxy/tempo store code) at pickup time. Wire prefix through `MPP.Tempo.Store` behaviour and `MPP.Tempo.ConCacheStore` impl; default is no prefix (backward compatible).
 """
-assignee = "cursor"
-model = "composer-2.5"
-touches = ["lib/mpp/tempo/store.ex", "lib/mpp/tempo/con_cache_store.ex"]
 created_at = "2026-05-27"
+started_at = "2026-07-09"
 scored_at = "2026-05-27"
 
 [[task]]
