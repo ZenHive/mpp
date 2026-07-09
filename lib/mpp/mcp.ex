@@ -42,6 +42,7 @@ defmodule MPP.Mcp do
   alias MPP.JCS
   alias MPP.Plug.Config
   alias MPP.Receipt
+  alias MPP.Replay
   alias MPP.Verifier
 
   # JSON-RPC error code: payment required (no credential provided)
@@ -403,6 +404,8 @@ defmodule MPP.Mcp do
   end
 
   defp verify_with_entry(request, config, credential, entry) do
+    store = Replay.store_for(config, entry)
+
     opts = [
       secret_key: config.secret_key,
       realm: config.realm,
@@ -413,10 +416,14 @@ defmodule MPP.Mcp do
       opaque: config.opaque
     ]
 
-    case Verifier.verify(credential, opts) do
-      {:ok, receipt} ->
-        {:ok, receipt, credential.challenge.id}
-
+    # Same default replay dedup MPP.Plug applies — check before verify, claim
+    # after — so a verified MCP credential cannot be replayed across JSON-RPC
+    # requests for store-backed methods.
+    with :ok <- Replay.check_unused(store, credential),
+         {:ok, receipt} <- Verifier.verify(credential, opts),
+         :ok <- Replay.mark_used(store, credential) do
+      {:ok, receipt, credential.challenge.id}
+    else
       {:error, %Errors{} = error} ->
         challenges = generate_challenges(config)
         {:error, error_response(request, mcp_error_code(error), error.title, challenges, error)}

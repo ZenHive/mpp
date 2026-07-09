@@ -8,6 +8,7 @@ defmodule MPP.McpTest do
   alias MPP.JCS
   alias MPP.Mcp
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
 
   defmodule MockMethod do
     @moduledoc false
@@ -86,15 +87,24 @@ defmodule MPP.McpTest do
     )
   end
 
-  defp server_config do
-    Mcp.init(
+  defp server_config(overrides \\ []) do
+    [
       secret_key: @secret_key,
       realm: @realm,
       method: MockMethod,
       amount: "1000",
       currency: "usd",
       store: false
-    )
+    ]
+    |> Keyword.merge(overrides)
+    |> Mcp.init()
+  end
+
+  # Fresh, uniquely-named ConCache replay store per test (async isolation).
+  defp start_replay_store! do
+    cache_name = :"mcp_replay_#{System.unique_integer([:positive])}"
+    start_supervised!({ConCacheStore, name: cache_name})
+    {ConCacheStore, name: cache_name}
   end
 
   defp json_rpc_request_with_credential(payload \\ %{"proof" => "valid"}) do
@@ -699,6 +709,27 @@ defmodule MPP.McpTest do
       assert challenge["intent"] == "charge"
       assert challenge["request"] == %{"amount" => "1000", "currency" => "usd"}
       assert is_binary(challenge["expires"])
+    end
+
+    test "rejects a replayed credential — store-backed replay parity with MPP.Plug" do
+      config = server_config(store: start_replay_store!())
+      request = json_rpc_request_with_credential()
+
+      first =
+        Mcp.call(request, config, fn req ->
+          %{"jsonrpc" => "2.0", "id" => req["id"], "result" => %{"content" => []}}
+        end)
+
+      assert first["result"]["_meta"]["org.paymentauth/receipt"],
+             "first call must verify and attach a receipt"
+
+      second =
+        Mcp.call(request, config, fn _req ->
+          flunk("handler must not run when the credential is replayed")
+        end)
+
+      assert second["error"]["code"] == -32_043
+      assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
     end
 
     test "returns invalid params error when credential metadata is malformed" do
