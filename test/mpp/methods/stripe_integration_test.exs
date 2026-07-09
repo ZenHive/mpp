@@ -10,6 +10,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
   alias MPP.Credential
   alias MPP.Headers
+  alias MPP.Methods.Stripe
   alias MPP.Receipt
 
   @moduletag :integration
@@ -204,13 +205,76 @@ defmodule MPP.Methods.StripeIntegrationTest do
     end
   end
 
+  describe "Stripe Connect settlement" do
+    test "destination charge routes funds to a connected account", %{stripe_secret_key: stripe_secret_key} do
+      connect_account =
+        System.get_env("STRIPE_CONNECT_ACCOUNT") ||
+          flunk("""
+          Missing Stripe Connect test account!
+
+          Set this environment variable to a connected account id (acct_...) that
+          exists under your platform's Stripe test mode:
+            export STRIPE_CONNECT_ACCOUNT="acct_..."
+
+          Create one at: https://dashboard.stripe.com/test/connect/accounts/overview
+          Then run:
+            STRIPE_SECRET_KEY=sk_test_... STRIPE_CONNECT_ACCOUNT=acct_... mix test --include integration
+          """)
+
+      # Route the full payment (@amount) to the connected account as a destination charge.
+      config =
+        MPP.Plug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Stripe,
+          amount: @amount,
+          currency: @currency,
+          method_config: %{
+            "stripe_secret_key" => stripe_secret_key,
+            "network_id" => "internal",
+            "connect" => %{"transfer_data" => %{"destination" => connect_account}}
+          }
+        )
+
+      conn_402 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> MPP.Plug.call(config)
+
+      assert conn_402.status == 402
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+
+      # Connect topology must not leak into the public challenge.
+      refute challenge_header =~ connect_account
+
+      spt = create_test_spt!(stripe_secret_key, @amount, @currency)
+      credential = %Credential{challenge: challenge, payload: %{"spt" => spt}}
+      auth_header = Headers.format_credential(credential)
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> MPP.Plug.call(config)
+
+      assert conn_200.status == nil,
+             "Destination charge should verify and pass through — got #{inspect(conn_200.resp_body)}"
+
+      receipt = conn_200.assigns[:mpp_receipt]
+      assert %Receipt{} = receipt
+      assert receipt.status == "success"
+      assert String.starts_with?(receipt.reference, "pi_")
+    end
+  end
+
   defp plug_config(stripe_secret_key, opts \\ []) do
     plug_opts =
       Keyword.merge(
         [
           secret_key: @hmac_secret,
           realm: @realm,
-          method: MPP.Methods.Stripe,
+          method: Stripe,
           amount: @amount,
           currency: @currency,
           method_config: %{"stripe_secret_key" => stripe_secret_key, "network_id" => "internal"}

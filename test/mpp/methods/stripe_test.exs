@@ -362,6 +362,252 @@ defmodule MPP.Methods.StripeTest do
     end
   end
 
+  describe "Stripe Connect settlement" do
+    # Capture the outgoing PaymentIntent request (body params + headers) so we can
+    # assert the exact wire mapping against the mppx reference.
+    defp capture_request(charge, connect, payload \\ %{"spt" => @spt}) do
+      test_pid = self()
+
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", connect)}
+
+      Req.Test.stub(Stripe, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:captured, URI.decode_query(body), conn.req_headers})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      result = Stripe.verify(payload, charge)
+      {result, receive_captured()}
+    end
+
+    defp receive_captured do
+      receive do
+        {:captured, params, headers} -> {params, headers}
+      after
+        0 -> {nil, nil}
+      end
+    end
+
+    test "destination charge sends transfer_data[destination] and amount", %{charge: charge} do
+      {result, {params, _headers}} =
+        capture_request(charge, %{"transfer_data" => %{"destination" => "acct_seller", "amount" => 4000}})
+
+      assert {:ok, %Receipt{}} = result
+      assert params["transfer_data[destination]"] == "acct_seller"
+      assert params["transfer_data[amount]"] == "4000"
+    end
+
+    test "destination charge without transfer amount omits transfer_data[amount]", %{charge: charge} do
+      {result, {params, _headers}} =
+        capture_request(charge, %{"transfer_data" => %{"destination" => "acct_seller"}})
+
+      assert {:ok, %Receipt{}} = result
+      assert params["transfer_data[destination]"] == "acct_seller"
+      refute Map.has_key?(params, "transfer_data[amount]")
+    end
+
+    test "direct charge sends Stripe-Account header", %{charge: charge} do
+      {result, {_params, headers}} = capture_request(charge, %{"stripe_account" => "acct_seller"})
+
+      assert {:ok, %Receipt{}} = result
+      assert {_, "acct_seller"} = List.keyfind(headers, "stripe-account", 0)
+    end
+
+    test "application fee routing sends application_fee_amount", %{charge: charge} do
+      {result, {params, _headers}} = capture_request(charge, %{"application_fee_amount" => 500})
+
+      assert {:ok, %Receipt{}} = result
+      assert params["application_fee_amount"] == "500"
+    end
+
+    test "sends on_behalf_of and transfer_group", %{charge: charge} do
+      {result, {params, _headers}} =
+        capture_request(charge, %{"on_behalf_of" => "acct_seller", "transfer_group" => "order_42"})
+
+      assert {:ok, %Receipt{}} = result
+      assert params["on_behalf_of"] == "acct_seller"
+      assert params["transfer_group"] == "order_42"
+    end
+
+    test "no connect config leaves the body free of Connect params", %{charge: charge} do
+      test_pid = self()
+
+      Req.Test.stub(Stripe, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:request_body, URI.decode_query(body), conn.req_headers})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:ok, _} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert_received {:request_body, params, headers}
+
+      refute Map.has_key?(params, "application_fee_amount")
+      refute Map.has_key?(params, "on_behalf_of")
+      refute Map.has_key?(params, "transfer_data[destination]")
+      refute Map.has_key?(params, "transfer_group")
+      assert List.keyfind(headers, "stripe-account", 0) == nil
+    end
+
+    test "rejects application_fee_amount exceeding the payment amount", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"application_fee_amount" => 6000})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "less than or equal to"
+    end
+
+    test "rejects negative application_fee_amount", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"application_fee_amount" => -1})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "non-negative integer"
+    end
+
+    test "rejects transfer_data.amount exceeding the payment amount", %{charge: charge} do
+      connect = %{"transfer_data" => %{"destination" => "acct_seller", "amount" => 9999}}
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", connect)}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "transfer_data.amount"
+      assert error.detail =~ "less than or equal to"
+    end
+
+    test "rejects transfer_data missing a destination", %{charge: charge} do
+      connect = %{"transfer_data" => %{"amount" => 100}}
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", connect)}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "transfer_data.destination"
+    end
+
+    test "rejects empty stripe_account", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"stripe_account" => ""})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "stripe_account"
+      assert error.detail =~ "non-empty"
+    end
+
+    test "rejects empty on_behalf_of", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"on_behalf_of" => ""})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "on_behalf_of"
+      assert error.detail =~ "non-empty"
+    end
+
+    test "rejects non-map connect config", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", "acct_seller")}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "must be a map"
+    end
+
+    test "rejects non-map transfer_data", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", %{"transfer_data" => "acct"})}
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "transfer_data must be a map"
+    end
+
+    test "rejects settlement when the charge amount is not a valid integer", %{charge: charge} do
+      charge = %{
+        charge
+        | amount: "not-a-number",
+          method_details: Map.put(charge.method_details, "connect", %{"application_fee_amount" => 1})
+      }
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.detail =~ "Stripe amount must be a non-negative integer"
+    end
+
+    test "invalid settlement is rejected before any Stripe API call", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "connect", %{"application_fee_amount" => 99_999})
+      }
+
+      # A stub that flunks proves no HTTP request is issued when settlement is invalid.
+      Req.Test.stub(Stripe, fn _conn -> flunk("Stripe API must not be called for invalid settlement") end)
+
+      assert {:error, %Errors{}} = Stripe.verify(%{"spt" => @spt}, charge)
+    end
+  end
+
+  describe "cross-validation with mppx Stripe Connect output (src/stripe/server/Charge.ts)" do
+    test "full settlement config produces the exact mppx form body + header", %{charge: charge} do
+      test_pid = self()
+
+      # Equivalent to the mppx ConnectSettlement:
+      #   { stripeAccount, applicationFeeAmount, onBehalfOf, transferData: {destination, amount}, transferGroup }
+      connect = %{
+        "stripe_account" => "acct_platform",
+        "application_fee_amount" => 500,
+        "on_behalf_of" => "acct_merchant",
+        "transfer_data" => %{"destination" => "acct_seller", "amount" => 4000},
+        "transfer_group" => "order_42"
+      }
+
+      charge = %{charge | method_details: Map.put(charge.method_details, "connect", connect)}
+
+      Req.Test.stub(Stripe, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:captured, URI.decode_query(body), conn.req_headers})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:ok, _} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert_received {:captured, params, headers}
+
+      # Body params — mppx createWithSecretKey (form-encoded) mapping.
+      assert params["application_fee_amount"] == "500"
+      assert params["on_behalf_of"] == "acct_merchant"
+      assert params["transfer_data[destination]"] == "acct_seller"
+      assert params["transfer_data[amount]"] == "4000"
+      assert params["transfer_group"] == "order_42"
+
+      # stripe_account routes to the Stripe-Account header, never the body.
+      assert {_, "acct_platform"} = List.keyfind(headers, "stripe-account", 0)
+      refute Map.has_key?(params, "stripe_account")
+
+      # Base PaymentIntent params remain intact alongside settlement.
+      assert params["amount"] == "5000"
+      assert params["confirm"] == "true"
+      assert params["shared_payment_granted_token"] == @spt
+    end
+
+    test "Connect settlement never leaks into the public 402 challenge" do
+      config =
+        PaymentPlug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          method: Stripe,
+          amount: "5000",
+          currency: "usd",
+          method_config: %{
+            "stripe_secret_key" => @stripe_secret_key,
+            "network_id" => @network_id,
+            "connect" => %{"transfer_data" => %{"destination" => "acct_secret"}}
+          }
+        )
+
+      conn =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> PaymentPlug.call(config)
+
+      [challenge_header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      {:ok, request_map} = decode_challenge_request(challenge)
+
+      # Public challenge advertises only networkId/paymentMethodTypes — no connect topology.
+      assert request_map["methodDetails"]["networkId"] == @network_id
+      refute Map.has_key?(request_map["methodDetails"], "connect")
+      refute Map.has_key?(request_map["methodDetails"], "transfer_data")
+      refute challenge_header =~ "acct_secret"
+    end
+  end
+
   describe "validate_config!/1" do
     test "accepts config with all required keys" do
       config = %{"stripe_secret_key" => "sk_test_...", "network_id" => "profile_..."}

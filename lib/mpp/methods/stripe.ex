@@ -27,7 +27,44 @@ defmodule MPP.Methods.Stripe do
     * `"stripe_secret_key"` — (required) Stripe secret key for PaymentIntent creation
     * `"network_id"` — (required) Stripe Business Network profile ID
     * `"payment_method_types"` — (optional) accepted payment methods, defaults to `["card"]`
+    * `"connect"` — (optional) server-side Stripe Connect settlement policy (see below)
     * `"realm"` — (optional, injected by Plug) server realm for analytics metadata
+
+  ## Stripe Connect settlement
+
+  Pass a `"connect"` map in `method_config` to route the resulting PaymentIntent
+  to a connected account (destination charge, direct charge, or application-fee
+  split). Connect settlement is a **server-only credential** — it is merged into
+  the charge at verify time and is **never serialized into the public 402
+  challenge**, matching the mppx reference (`src/stripe/server/Charge.ts`, where
+  `connect` is documented as "Not included in MPP challenges").
+
+      method_config: %{
+        "stripe_secret_key" => "sk_test_...",
+        "network_id" => "profile_1Mqx...",
+        "connect" => %{
+          # Destination charge: platform is merchant of record, funds routed on.
+          "transfer_data" => %{"destination" => "acct_seller", "amount" => 4000},
+          "application_fee_amount" => 500,
+          "on_behalf_of" => "acct_seller",
+          "transfer_group" => "order_42",
+          # Direct charge: run the PaymentIntent on the connected account itself.
+          "stripe_account" => "acct_seller"
+        }
+      }
+
+  Wire mapping applied to the PaymentIntent (form-encoded), per the mppx reference:
+
+    * `"application_fee_amount"` (integer) → `application_fee_amount`
+    * `"on_behalf_of"` (string) → `on_behalf_of`
+    * `"transfer_data"` `%{"destination" => ..., "amount" => ...}` →
+      `transfer_data[destination]` / `transfer_data[amount]`
+    * `"transfer_group"` (string) → `transfer_group`
+    * `"stripe_account"` (string) → `Stripe-Account` request header
+
+  Settlement is validated against the charge amount before the PaymentIntent is
+  created: account ids must be non-empty, fee/transfer amounts must be
+  non-negative integers not exceeding the payment amount.
 
   ## Credential Payload
 
@@ -100,7 +137,8 @@ defmodule MPP.Methods.Stripe do
     with :ok <- check_external_id_binding(payload, charge),
          {:ok, spt} <- extract_spt(payload),
          {:ok, stripe_secret_key} <- Shared.require_config(config, "stripe_secret_key", "Stripe"),
-         {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config) do
+         {:ok, settlement} <- resolve_connect_settlement(config, charge),
+         {:ok, pi} <- create_payment_intent(spt, charge, stripe_secret_key, config, settlement) do
       check_status(pi, charge)
     end
   end
@@ -149,9 +187,79 @@ defmodule MPP.Methods.Stripe do
     end
   end
 
+  # Resolves the optional Stripe Connect settlement policy from server-only
+  # method_config. Returns {:ok, nil} when no `connect` map is configured, or an
+  # error when the configured settlement is invalid for this charge amount.
+  # Connect settlement is never carried in the public challenge — it is merged
+  # into method_details at verify time (see MPP.Plug / MPP.Verifier).
+  defp resolve_connect_settlement(config, %Charge{} = charge) do
+    case config["connect"] do
+      nil -> {:ok, nil}
+      settlement when is_map(settlement) -> validate_connect_settlement(settlement, charge.amount)
+      _ -> {:error, connect_error("Stripe Connect settlement must be a map.")}
+    end
+  end
+
+  # Validates Connect settlement fields against the payment amount, mirroring the
+  # mppx reference (`validateConnectSettlement` in src/stripe/server/Charge.ts):
+  # account ids non-empty; fee/transfer amounts non-negative integers ≤ amount.
+  defp validate_connect_settlement(settlement, amount) do
+    with {:ok, payment_amount} <- parse_amount(amount),
+         :ok <- validate_account(settlement["stripe_account"], "stripe_account"),
+         :ok <- validate_account(settlement["on_behalf_of"], "on_behalf_of"),
+         :ok <- validate_settlement_amount(settlement["application_fee_amount"], payment_amount, "application_fee_amount"),
+         :ok <- validate_transfer_data(settlement["transfer_data"], payment_amount) do
+      {:ok, settlement}
+    end
+  end
+
+  defp parse_amount(amount) when is_binary(amount) do
+    case Integer.parse(amount) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> {:error, connect_error("Stripe amount must be a non-negative integer.")}
+    end
+  end
+
+  defp parse_amount(_), do: {:error, connect_error("Stripe amount must be a non-negative integer.")}
+
+  defp validate_account(nil, _name), do: :ok
+  defp validate_account(value, _name) when is_binary(value) and byte_size(value) > 0, do: :ok
+  defp validate_account(_value, name), do: {:error, connect_error("Stripe Connect #{name} must be non-empty.")}
+
+  defp validate_settlement_amount(nil, _payment_amount, _name), do: :ok
+
+  defp validate_settlement_amount(value, payment_amount, name) when is_integer(value) and value >= 0 do
+    if value <= payment_amount do
+      :ok
+    else
+      {:error, connect_error("Stripe Connect #{name} must be less than or equal to the PaymentIntent amount.")}
+    end
+  end
+
+  defp validate_settlement_amount(_value, _payment_amount, name) do
+    {:error, connect_error("Stripe Connect #{name} must be a non-negative integer.")}
+  end
+
+  defp validate_transfer_data(nil, _payment_amount), do: :ok
+
+  defp validate_transfer_data(%{"destination" => dest} = transfer_data, payment_amount)
+       when is_binary(dest) and byte_size(dest) > 0 do
+    validate_settlement_amount(transfer_data["amount"], payment_amount, "transfer_data.amount")
+  end
+
+  defp validate_transfer_data(transfer_data, _payment_amount) when is_map(transfer_data) do
+    {:error, connect_error("Stripe Connect transfer_data.destination must be non-empty.")}
+  end
+
+  defp validate_transfer_data(_transfer_data, _payment_amount) do
+    {:error, connect_error("Stripe Connect transfer_data must be a map.")}
+  end
+
+  defp connect_error(detail), do: Errors.new(:verification_failed, detail)
+
   # Creates a Stripe PaymentIntent with the SPT and returns the response body.
-  defp create_payment_intent(spt, charge, stripe_secret_key, config) do
-    body = build_request_body(spt, charge, config)
+  defp create_payment_intent(spt, charge, stripe_secret_key, config, settlement) do
+    body = build_request_body(spt, charge, config, settlement)
     auth = Base.encode64(stripe_secret_key <> ":")
 
     idempotency_key =
@@ -162,16 +270,19 @@ defmodule MPP.Methods.Stripe do
 
     req_options = config["req_options"] || []
 
+    headers =
+      [
+        {"authorization", "Basic #{auth}"},
+        {"idempotency-key", idempotency_key},
+        {"content-type", "application/x-www-form-urlencoded"}
+      ] ++ stripe_account_header(settlement)
+
     result =
       Req.request(
         [
           url: @stripe_api_url,
           method: :post,
-          headers: [
-            {"authorization", "Basic #{auth}"},
-            {"idempotency-key", idempotency_key},
-            {"content-type", "application/x-www-form-urlencoded"}
-          ],
+          headers: headers,
           body: URI.encode_query(body, :www_form)
         ],
         req_options
@@ -194,7 +305,7 @@ defmodule MPP.Methods.Stripe do
   end
 
   # Builds the form-encoded body for PaymentIntent creation.
-  defp build_request_body(spt, charge, config) do
+  defp build_request_body(spt, charge, config, settlement) do
     base = [
       {"amount", charge.amount},
       {"currency", charge.currency},
@@ -204,8 +315,45 @@ defmodule MPP.Methods.Stripe do
       {"automatic_payment_methods[allow_redirects]", "never"}
     ]
 
-    metadata = build_metadata(config)
-    base ++ metadata
+    base ++ build_metadata(config) ++ connect_body_params(settlement)
+  end
+
+  # Maps the Connect settlement policy to form-encoded PaymentIntent params, in
+  # the same field order as the mppx reference (`createWithSecretKey`).
+  defp connect_body_params(nil), do: []
+
+  defp connect_body_params(settlement) do
+    []
+    |> put_int_param("application_fee_amount", settlement["application_fee_amount"])
+    |> put_str_param("on_behalf_of", settlement["on_behalf_of"])
+    |> put_transfer_data_params(settlement["transfer_data"])
+    |> put_str_param("transfer_group", settlement["transfer_group"])
+  end
+
+  defp put_str_param(params, _key, nil), do: params
+  defp put_str_param(params, key, value), do: params ++ [{key, value}]
+
+  defp put_int_param(params, _key, nil), do: params
+  defp put_int_param(params, key, value), do: params ++ [{key, Integer.to_string(value)}]
+
+  defp put_transfer_data_params(params, nil), do: params
+
+  defp put_transfer_data_params(params, %{"destination" => destination} = transfer_data) do
+    put_int_param(
+      params ++ [{"transfer_data[destination]", destination}],
+      "transfer_data[amount]",
+      transfer_data["amount"]
+    )
+  end
+
+  # Routes a direct charge onto the connected account via the Stripe-Account header.
+  defp stripe_account_header(nil), do: []
+
+  defp stripe_account_header(settlement) do
+    case settlement["stripe_account"] do
+      nil -> []
+      account -> [{"stripe-account", account}]
+    end
   end
 
   # Builds analytics metadata key-value pairs for Stripe PaymentIntent.
