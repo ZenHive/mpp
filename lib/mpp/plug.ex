@@ -458,8 +458,12 @@ defmodule MPP.Plug do
     end)
   end
 
-  # Generates a fresh challenge for a specific method entry.
-  defp generate_challenge(config, entry) do
+  # Generates a fresh challenge for a specific method entry. Public (but
+  # undocumented) so the MCP server adapter (`MPP.Mcp`) can reuse the exact same
+  # challenge-generation logic instead of duplicating it.
+  @doc false
+  @spec generate_challenge(Config.t(), MethodEntry.t()) :: Challenge.t()
+  def generate_challenge(config, entry) do
     params =
       [
         realm: config.realm,

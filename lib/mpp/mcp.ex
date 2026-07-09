@@ -429,33 +429,11 @@ defmodule MPP.Mcp do
     end)
   end
 
+  # Reuses `MPP.Plug`'s challenge generation so the MCP and HTTP transports emit
+  # byte-identical challenges from the same config.
   defp generate_challenges(%Config{} = config) do
-    Enum.map(config.method_entries, &generate_challenge(config, &1))
+    Enum.map(config.method_entries, &MPP.Plug.generate_challenge(config, &1))
   end
-
-  defp generate_challenge(config, entry) do
-    params =
-      [
-        realm: config.realm,
-        method: entry.method.method_name(),
-        intent: "charge",
-        request: entry.request
-      ]
-      |> maybe_add(:expires, compute_expires(config.expires_in))
-      |> maybe_add(:digest, config.digest)
-      |> maybe_add(:opaque, config.opaque)
-
-    Challenge.create(params, config.secret_key)
-  end
-
-  defp compute_expires(seconds) when is_integer(seconds) do
-    DateTime.utc_now()
-    |> DateTime.add(seconds, :second)
-    |> DateTime.to_iso8601()
-  end
-
-  defp maybe_add(params, _key, nil), do: params
-  defp maybe_add(params, key, value), do: Keyword.put(params, key, value)
 
   defp error_response(request, code, message, challenges, %Errors{} = error) do
     %{
