@@ -153,7 +153,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 28 | ✅ | 🎁 **session** · Session error types [D:2/B:5/U:7 → Eff:3.0?] 🎯 |
-| Task 29 | ⬜ | 🎁 **session** · Session intent schema [D:4/B:7/U:8 → Eff:1.88?] 🚀 |
+| Task 29 | ✅ | 🎁 **session** · Session intent schema [D:4/B:7/U:8 → Eff:1.88?] 🚀 |
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
 | Task 30 | ⬜ | 🎁 **session** · Channel state and voucher types [D:5/B:6/U:7 → Eff:1.3?] 📋 |
 | Task 31 | ⬜ | 🎁 **session** · Session credential actions [D:5/B:6/U:6 → Eff:1.2?] 📋 |
