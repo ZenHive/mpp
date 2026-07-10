@@ -738,7 +738,7 @@ implemented = "Extended MPP.Errors with 8 new RFC 9457 problem types cross-valid
 id = 29
 phase = 10
 bundle = "session"
-status = "done"
+status = "blocked"
 title = "Session intent schema"
 scores = { d = 4, b = 7, u = 8 }
 depends_on = [26]
@@ -749,6 +749,7 @@ acceptance_criteria = [
   "Descripex annotations",
   "MPP.Method behaviour updated to support intent: \"session\" alongside \"charge\""
 ]
+blocked_reason = 'land conflict retained for repair (task 29, run run-1783641170353-ea992998, branch harness/run-1783641170353-ea992998); resolver already attempted and the branch still conflicted. resolver witness: agent spawned: codex model=gpt-5.5; rebase continue failed: "[detached HEAD f6830d8] harness: agent delivery — task 29 Session intent schema (run run-1783641170353-ea992998)\n Author: harness <harness@localhost>\n 5 files changed, 49 insertions(+), 11 deletions(-)\nRebasing (2/2)\rAuto-merging lib/mpp/intents/session.ex\nCONFLICT (content): Merge conflict in lib/mpp/intents/session.ex\nAuto-merging test/mpp/intents/session_test.exs\nCONFLICT (content): Merge conflict in test/mpp/intents/session_test.exs\nerror: could not apply de115db... Fix session intent wire shape\nhint: Resolve all conflicts manually, mark them as resolved with\nhint: \"git add/rm <conflicted_files>\", then run \"git rebase --continue\".\nhint: You can instead skip this commit: run \"git rebase --skip\".\nhint: To abort and get back to the state before \"git rebase\", run \"git rebase --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\nCould not apply de115db... # Fix session intent wire shape\n". Repair: rebase the retained branch onto the target branch, resolve all conflict markers while keeping both reviewed intents, commit the resolved branch, move harness/run-1783641170353-ea992998 to that commit if you used a scratch branch, then run dispatch-reland run-1783641170353-ea992998.'
 body = """
 Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. "second", "minute", "request"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `external_id` (optional string, per mpp-rs `SessionRequest`), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.
 """
