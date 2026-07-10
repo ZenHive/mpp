@@ -27,6 +27,8 @@ defmodule MPP.Intents.Session do
 
   use Descripex, namespace: "/intents"
 
+  alias MPP.Intents.Shared
+
   @type t :: %__MODULE__{
           amount: String.t(),
           currency: String.t(),
@@ -69,8 +71,8 @@ defmodule MPP.Intents.Session do
 
   @spec new(keyword()) :: {:ok, t()} | {:error, atom()}
   def new(opts) when is_list(opts) do
-    with {:ok, amount} <- validate_amount(opts[:amount]),
-         {:ok, currency} <- validate_currency(opts[:currency]) do
+    with {:ok, amount} <- Shared.validate_amount(opts[:amount]),
+         {:ok, currency} <- Shared.validate_currency(opts[:currency]) do
       {:ok,
        %__MODULE__{
          amount: amount,
@@ -101,11 +103,11 @@ defmodule MPP.Intents.Session do
   @spec to_request(t()) :: map()
   def to_request(%__MODULE__{} = session) do
     %{"amount" => session.amount, "currency" => session.currency}
-    |> put_optional("unitType", session.unit_type)
-    |> put_optional("recipient", session.recipient)
-    |> put_optional("suggestedDeposit", session.suggested_deposit)
-    |> put_optional("externalId", session.external_id)
-    |> put_optional("methodDetails", session.method_details)
+    |> Shared.put_optional("unitType", session.unit_type)
+    |> Shared.put_optional("recipient", session.recipient)
+    |> Shared.put_optional("suggestedDeposit", session.suggested_deposit)
+    |> Shared.put_optional("externalId", session.external_id)
+    |> Shared.put_optional("methodDetails", session.method_details)
   end
 
   api(
@@ -134,22 +136,4 @@ defmodule MPP.Intents.Session do
 
   @spec from_request(term()) :: {:error, :missing_required_fields}
   def from_request(_), do: {:error, :missing_required_fields}
-
-  # Validates that amount is a non-empty string. Numeric validation is intentionally
-  # deferred to MPP.Method.verify/2 which checks against the payment provider.
-  defp validate_amount(nil), do: {:error, :amount_required}
-  defp validate_amount(amount) when is_binary(amount) and byte_size(amount) > 0, do: {:ok, amount}
-  defp validate_amount(_), do: {:error, :invalid_amount}
-
-  # Validates that currency is present and normalizes to lowercase.
-  defp validate_currency(nil), do: {:error, :currency_required}
-
-  defp validate_currency(currency) when is_binary(currency) and byte_size(currency) > 0,
-    do: {:ok, String.downcase(currency)}
-
-  defp validate_currency(_), do: {:error, :invalid_currency}
-
-  # Adds an optional field to the map only if the value is non-nil.
-  defp put_optional(map, _key, nil), do: map
-  defp put_optional(map, key, value), do: Map.put(map, key, value)
 end
