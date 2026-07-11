@@ -752,11 +752,11 @@ acceptance_criteria = [
 body = """
 Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. "second", "minute", "request"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `external_id` (optional string, per mpp-rs `SessionRequest`), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.
 """
-implemented = "Landed by claude via merge-train; reviewer-approved (run run-1783732241303-6ddeb5e4, 290be9dff392e9f8909e08bd7d07fa7aba3d05e1)."
+implemented = "Landed by claude via merge-train; reviewer-approved (run run-1783732241302-a343b1b7, a38172eb285d7c3a8edaa55d01bf40877cbda27c)."
 delivered_by = "claude"
 verified = true
 done_at = "2026-07-10"
-shipped_in = "290be9dff392e9f8909e08bd7d07fa7aba3d05e1"
+shipped_in = "a38172eb285d7c3a8edaa55d01bf40877cbda27c"
 
 [[task]]
 id = 41
