@@ -88,17 +88,19 @@ defmodule MPP.Intents.SessionTest do
       assert restored.unit_type == session.unit_type
       assert restored.recipient == session.recipient
       assert restored.suggested_deposit == session.suggested_deposit
-      assert restored.external_id == session.external_id
+      # external_id is transient (not on mpp-rs SessionRequest wire)
+      assert restored.external_id == nil
       assert restored.method_details == session.method_details
     end
 
-    test "to_request uses camelCase keys matching mpp-rs SessionRequest" do
+    test "to_request uses camelCase keys matching mpp-rs SessionRequest and omits transient fields" do
       assert {:ok, session} =
                Session.new(
                  amount: "1000",
                  currency: "0x123",
                  unit_type: "second",
                  suggested_deposit: "60000",
+                 decimals: 6,
                  external_id: "abc",
                  method_details: %{"chainId" => 42_431, "feePayer" => true}
                )
@@ -109,21 +111,26 @@ defmodule MPP.Intents.SessionTest do
       assert request["currency"] == "0x123"
       assert request["unitType"] == "second"
       assert request["suggestedDeposit"] == "60000"
-      assert request["externalId"] == "abc"
       assert request["methodDetails"] == %{"chainId" => 42_431, "feePayer" => true}
 
+      # mpp-rs SessionRequest has no externalId; decimals is #[serde(skip)]
+      refute Map.has_key?(request, "decimals")
+      refute Map.has_key?(request, "externalId")
       refute Map.has_key?(request, "unit_type")
       refute Map.has_key?(request, "suggested_deposit")
       refute Map.has_key?(request, "external_id")
       refute Map.has_key?(request, "method_details")
     end
 
-    test "to_request omits nil optional fields and transient decimals" do
-      assert {:ok, session} = Session.new(amount: "500", currency: "usd", decimals: 6)
+    test "to_request omits nil optional fields and transient decimals/external_id" do
+      assert {:ok, session} =
+               Session.new(amount: "500", currency: "usd", decimals: 6, external_id: "ext")
+
       request = Session.to_request(session)
 
       assert request == %{"amount" => "500", "currency" => "usd"}
       refute Map.has_key?(request, "decimals")
+      refute Map.has_key?(request, "externalId")
       refute Map.has_key?(request, "unitType")
       refute Map.has_key?(request, "suggestedDeposit")
       refute Map.has_key?(request, "recipient")
@@ -152,18 +159,38 @@ defmodule MPP.Intents.SessionTest do
       assert session.unit_type == nil
     end
 
+    test "from_request ignores transient fields present on the map" do
+      assert {:ok, session} =
+               Session.from_request(%{
+                 "amount" => "100",
+                 "currency" => "usd",
+                 "decimals" => 6,
+                 "externalId" => "ext-1"
+               })
+
+      assert session.decimals == nil
+      assert session.external_id == nil
+    end
+
     test "from_request returns error for missing required fields" do
       assert {:error, :missing_required_fields} = Session.from_request(%{"amount" => "100"})
       assert {:error, :missing_required_fields} = Session.from_request(%{})
     end
 
-    test "roundtrip does not restore transient decimals" do
+    test "roundtrip does not restore transient decimals or external_id" do
       assert {:ok, session} =
-               Session.new(amount: "1.5", currency: "usd", unit_type: "second", decimals: 6)
+               Session.new(
+                 amount: "1.5",
+                 currency: "usd",
+                 unit_type: "second",
+                 decimals: 6,
+                 external_id: "sess-1"
+               )
 
       assert session.decimals == 6
+      assert session.external_id == "sess-1"
       restored = session |> Session.to_request() |> Session.from_request()
-      assert {:ok, %Session{decimals: nil}} = restored
+      assert {:ok, %Session{decimals: nil, external_id: nil}} = restored
     end
   end
 end

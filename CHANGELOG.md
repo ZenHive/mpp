@@ -8,7 +8,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
-**Session intent schema.** Added `MPP.Intents.Session` — pay-as-you-go / metered session request schema parallel to `MPP.Intents.Charge`, with `new/1` validation, camelCase `to_request/1` / `from_request/1` matching mpp-rs `SessionRequest` (`unitType`, `suggestedDeposit`, transient `decimals` stripped from wire). `MPP.Method` callbacks now accept `MPP.Method.intent()` (`Charge.t() | Session.t()`).
+**Session intent schema.** Added `MPP.Intents.Session` — pay-as-you-go / metered session request schema parallel to `MPP.Intents.Charge`, with `new/1` validation, camelCase `to_request/1` / `from_request/1` matching mpp-rs `SessionRequest` (`unitType`, `suggestedDeposit`, `methodDetails`; transient `decimals` / `external_id` stripped from wire — mpp-rs session has no `externalId`). `MPP.Method` callbacks now accept `MPP.Method.intent()` (`Charge.t() | Session.t()`).
 
 **MCP server transport adapter (Task 32b).** `MPP.Mcp` is now a mountable server-side transport, not just constants and helpers: `MPP.Mcp.init/1` accepts the same endpoint options as `MPP.Plug`, and `MPP.Mcp.call/3` runs a JSON-RPC request through payment verification before invoking the handler — reading the credential from `params._meta["org.paymentauth/credential"]`, emitting `-32042` payment-required / `-32602` malformed-credential / `-32043` verification-failed errors with challenges and RFC 9457 problem details (mppx `mcpErrorCode` parity), and attaching the receipt (+ `challengeId`) to `result._meta` on success. Challenge generation is shared with `MPP.Plug`, so both transports emit byte-identical challenges from the same config.
 

@@ -12,6 +12,11 @@ defmodule MPP.Intents.Session do
   and `from_request/1` to convert to/from the spec's camelCase JSON format
   (matching mpp-rs `SessionRequest`).
 
+  Wire shape (mpp-rs `SessionRequest`): `amount`, `currency`, optional
+  `unitType` / `recipient` / `suggestedDeposit` / `methodDetails`. Transient
+  fields `decimals` and `external_id` are never serialized (mpp-rs has no
+  `externalId` on session requests; `decimals` is `#[serde(skip)]`).
+
   ## Fields
 
     * `amount` — (required) per-unit rate in base units (string). Never a float.
@@ -21,7 +26,8 @@ defmodule MPP.Intents.Session do
     * `suggested_deposit` — (optional) suggested channel deposit in base units
     * `decimals` — (optional, transient) token decimals for human-readable → base-unit conversion;
       stripped from wire serialization (mpp-rs `#[serde(skip)]`)
-    * `external_id` — (optional) caller-provided correlation ID
+    * `external_id` — (optional, transient) caller-provided correlation ID; not on the wire
+      (unlike charge intent — mpp-rs `SessionRequest` has no `externalId`)
     * `method_details` — (optional) method-specific fields
   """
 
@@ -95,18 +101,19 @@ defmodule MPP.Intents.Session do
     ],
     returns: %{
       type: :map,
-      description: "Map with camelCase string keys for JSON encoding into challenge `request` (`decimals` omitted)"
+      description:
+        "Map with camelCase string keys for JSON encoding into challenge `request` (transient `decimals`/`external_id` omitted)"
     },
     composes_with: [:new, :from_request]
   )
 
   @spec to_request(t()) :: map()
   def to_request(%__MODULE__{} = session) do
+    # Match mpp-rs SessionRequest wire keys only — omit transient decimals/external_id.
     %{"amount" => session.amount, "currency" => session.currency}
     |> Shared.put_optional("unitType", session.unit_type)
     |> Shared.put_optional("recipient", session.recipient)
     |> Shared.put_optional("suggestedDeposit", session.suggested_deposit)
-    |> Shared.put_optional("externalId", session.external_id)
     |> Shared.put_optional("methodDetails", session.method_details)
   end
 
@@ -129,7 +136,6 @@ defmodule MPP.Intents.Session do
       unit_type: map["unitType"],
       recipient: map["recipient"],
       suggested_deposit: map["suggestedDeposit"],
-      external_id: map["externalId"],
       method_details: map["methodDetails"]
     )
   end
