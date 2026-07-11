@@ -139,7 +139,13 @@ defmodule MPP.Intents.SessionTest do
 
     test "from_request accepts mpp-rs SessionRequest JSON shape" do
       # Matches mpp-rs test_session_request_deserialization fixture
-      json = %{"amount" => "2000", "unitType" => "minute", "currency" => "0xabc"}
+      json = %{
+        "amount" => "2000",
+        "unitType" => "minute",
+        "currency" => "0xabc",
+        "decimals" => 6,
+        "externalId" => "ext-1"
+      }
 
       assert {:ok, session} = Session.from_request(json)
       assert session.amount == "2000"
@@ -147,6 +153,8 @@ defmodule MPP.Intents.SessionTest do
       assert session.currency == "0xabc"
       assert session.recipient == nil
       assert session.suggested_deposit == nil
+      assert session.decimals == nil
+      assert session.external_id == nil
       assert session.method_details == nil
     end
 

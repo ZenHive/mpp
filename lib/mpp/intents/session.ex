@@ -10,7 +10,8 @@ defmodule MPP.Intents.Session do
 
   The struct uses Elixir snake_case conventions internally. Use `to_request/1`
   and `from_request/1` to convert to/from the spec's camelCase JSON format
-  (matching mpp-rs `SessionRequest`).
+  (matching mpp-rs `SessionRequest`). `decimals` and `external_id` are transient
+  and are never serialized into the request map.
 
   Wire shape (mpp-rs `SessionRequest`): `amount`, `currency`, optional
   `unitType` / `recipient` / `suggestedDeposit` / `methodDetails`. Transient
