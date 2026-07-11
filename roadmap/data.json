@@ -922,10 +922,10 @@
         "Descripex annotations",
         "MPP.Method behaviour updated to support intent: \"session\" alongside \"charge\""
       ],
-      "shipped_in": "4eebb5cc964d87df6d70fd16cf70ffcbc37effad",
+      "shipped_in": "290be9dff392e9f8909e08bd7d07fa7aba3d05e1",
       "body": "Add `MPP.Intents.Session` as the session intent request schema, parallel to `MPP.Intents.Charge`. Fields: `amount` (required, per-unit rate in base units), `unit_type` (optional, e.g. \"second\", \"minute\", \"request\"), `currency` (required), `recipient` (optional), `suggested_deposit` (optional), `decimals` (optional, transient), `external_id` (optional string, per mpp-rs `SessionRequest`), `method_details` (optional map). Validate with same pattern as `Charge` — struct with `new/1` validation, `to_request/1` and `from_request/1` serialization.\n",
       "done_at": "2026-07-10",
-      "implemented": "Landed by claude via merge-train; reviewer-approved (run run-1783732241302-3d9e5e2d, 4eebb5cc964d87df6d70fd16cf70ffcbc37effad).",
+      "implemented": "Landed by claude via merge-train; reviewer-approved (run run-1783732241303-6ddeb5e4, 290be9dff392e9f8909e08bd7d07fa7aba3d05e1).",
       "delivered_by": "claude",
       "verified": true,
       "cross_repo": []
