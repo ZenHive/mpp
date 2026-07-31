@@ -44,7 +44,7 @@ defmodule MPP.MixProject do
     [
       {:plug, "~> 1.19"},
       {:jason, "~> 1.4.5"},
-      {:req, "~> 0.6.1"},
+      {:req, "~> 0.6.1 or ~> 0.7"},
       {:telemetry, "~> 1.4"},
 
       # Dev/test tooling
