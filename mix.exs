@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.10.0"
+  @version "0.11.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -71,20 +71,24 @@ defmodule MPP.MixProject do
       {:oxc, "~> 0.16", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
-      # On-chain verification (Tempo and EVM methods) — 0.10 for the
-      # Onchain.RPC surface the EVM method delegates to.
-      {:onchain, "~> 0.10"},
+      # On-chain verification (Tempo and EVM methods) — 0.11 for the
+      # Onchain.RPC surface the EVM method delegates to, and because 0.11.0 is
+      # the release carrying `cartouche ~> 0.6`. A lower bound would permit
+      # 0.11.0 without requiring it, leaving an existing lock on cartouche 0.5.x
+      # (and therefore req 0.6.x) in place indefinitely.
+      {:onchain, "~> 0.11"},
 
-      # Tempo chain primitives (Tempo method) — 0.7 for the sender-recovery +
+      # Tempo chain primitives (Tempo method) — 0.8 for the sender-recovery +
       # Onchain.Tempo.RPC.simulate/3 primitives the fee-payer pre-broadcast
-      # simulation (MPP.Methods.Tempo) calls directly.
-      {:onchain_tempo, "~> 0.7"},
+      # simulation (MPP.Methods.Tempo) calls directly, and for the same
+      # cartouche-floor reason as onchain above.
+      {:onchain_tempo, "~> 0.8"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
 
-      # Self-describing APIs
-      {:descripex, "~> 0.9"}
+      # Self-describing APIs — 0.11 matches what cartouche 0.6 already forces.
+      {:descripex, "~> 0.11"}
     ]
   end
 
