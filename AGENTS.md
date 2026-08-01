@@ -595,7 +595,7 @@ restarts it after suspend or network loss, so **normally there is nothing to set
 
 | Forwarded port | Serves |
 |---|---|
-| `http://localhost:8545` | JSON-RPC (namespaces: `trace`, `web3`, `eth`, `net` — `debug` is off) |
+| `http://localhost:8545` | JSON-RPC (namespaces: `trace`, `web3`, `eth`, `net`, `debug`) |
 | `ws://localhost:8546` | JSON-RPC over WebSocket (`eth_subscribe`) |
 | `http://localhost:9002/metrics` | reth metrics |
 | `http://localhost:5054/metrics` | lighthouse metrics |
