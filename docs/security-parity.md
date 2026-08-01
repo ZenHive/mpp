@@ -50,13 +50,14 @@ mpp-specs: no advisories.
 | mpp-specs #285 / mppx #570 non-empty challenge id | Empty `id` undermining HMAC binding | Rejected via HMAC recomputation — empty `id` never matches a real MAC — `challenge.ex:82-85` |
 | (defense-in-depth) JCS recursion | Stack-exhaustion via deeply nested input | Not attacker-reachable: `JCS.canonicalize/1` runs only on server-controlled data (`charge`); the credential's echoed `request` stays a raw string, never re-canonicalized — `verifier.ex:151-156`, `jcs.ex` |
 | mpp-rs #286 fee-payer token allowlist | Sponsor co-signing arbitrary TIP-20 fee tokens | `FeePayerPolicy.fee_token_allowed?/3` + `default_allowed_fee_tokens/1`; enforced before co-sign — `fee_payer_policy.ex`, `tempo.ex` (Task 46) |
-| mppx #532 / #253 EIP-712 proof v3 wallet binding | Zero-amount bypass / proof replay across wallets | `MPP.Methods.Tempo.Proof` + `type="proof"` verify; store dedup `mpp:proof:<challenge_id>` — `proof.ex`, `tempo.ex` (Task 46) |
+| mppx #532 / #253 + mpp-rs #318 EIP-712 proof v3 wallet binding | Zero-amount bypass / proof replay across wallets | `MPP.Methods.Tempo.Proof` — domain version `"3"` with the `account` field in the `Proof` struct, matching `refs/mpp-rs/src/protocol/methods/tempo/proof.rs` (`DOMAIN_VERSION = "3"`, `struct Proof { address account; string challengeId; string realm; }`); store dedup `mpp:proof:<challenge_id>` — `proof.ex:22-43`, `tempo.ex` (Task 46) |
 | mpp-rs `384c4fe` hash-credential source DID | Forged / wrong-chain `did:pkh` source | `MPP.DID.parse_evm_did/1` + chain match — `did.ex`, `tempo.ex` (Task 46) |
 | mppx #537 Stripe charge externalId binding | Credential externalId overriding route correlation | `check_external_id_binding/2` — `stripe.ex` (Task 46) |
 | mpp-specs #266 PaymentWitness externalId | Session receipt wire field | Optional `external_id` / `externalId` on `SessionReceipt` — `session_receipt.ex` (Task 46) |
 | mppx #579 proof access-key authorization | Zero-amount proof signed by delegated access key | `recover_authorized_proof_signer` + AccountKeychain `getKey` active check — `proof.ex`, `access_key.ex`, `tempo.ex` (Task 69) |
 | mpp-rs store-on-by-default (`server/tempo.rs`) / mppx `Store.memory()` default | Replay of on-chain tx/credential when no store is configured (issue #7; published `GHSA-vp5h-xh25-44wf`) | `MPP.Tempo.Store.resolve/1` default-on + app-started `ConCacheStore`; `store: false` is the explicit opt-out — `store.ex`, `application.ex` (Task 76, ships 0.7.0) |
 | mpp-rs `put_if_absent` fails closed / mppx atomic `update` | TOCTOU replay window in non-atomic dedup commit (published `GHSA-w8j7-7qc3-5f24`) | `check_and_mark/2` is a required callback; non-atomic stores rejected at init; sequential get+put fallback removed — `store.ex`, `tempo.ex`, `evm.ex`, `plug.ex` (Task 77, ships 0.7.0) |
+| mppx #646 hosted fee-payer signature normalization | Sponsor cosignature mis-encoded when the hosted fee payer returns `yParity` as a hex string rather than a number, yielding an invalid or wrong-recovery co-signed tx | `parse_y_parity/1` already accepts integer, hex-string, and legacy `v` forms and validates the recovery id before RLP encoding — `hosted_fee_payer.ex:195-209` (broader than mppx's `Number()` coercion) |
 | — hardening divergence beyond both SDKs (residual of our published `GHSA-34g7-vx6g-82mq`) | Front-running race on Tempo hash/transaction paths: dedup keyed on tx hash alone, presenter identity never proven (both SDKs default expected sender to `receipt.from` — mpp-rs `verify_hash`, mppx `Charge.ts`) | Opt-in `"require_presenter_binding"`: presenter signs the proof path's EIP-712 envelope (MPP v3 `{account, challengeId, realm}`) with the transfer sender's wallet or an authorized access key; hash path requires a matching `source` DID; advertised as `presenterBinding` in 402 details — `tempo.ex` (Task 75, ships 0.8.0) |
 
 ---
@@ -76,7 +77,7 @@ mpp-specs: no advisories.
 A small number of secure-defaults / defense-in-depth parity items from the upstream audit remain
 open. Per the disclosure policy above, their detail is tracked in **private draft security
 advisories** (Security → Advisories), not enumerated here. Each moves to the ✓ table when its fix
-ships. As of the last audit: **4 open items** (none a confirmed standalone critical; the
+ships. As of the last audit: **5 open items** (none a confirmed standalone critical; the
 exploitable-replay facets are already covered by Tasks 35/46/50 above).
 
 ---

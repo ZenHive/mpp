@@ -1,21 +1,21 @@
 {
   "_doc": "Watermark for the daily SDK-delta watch routine (see CLAUDE.md § Reference implementations). The routine clones each ref, runs `git log <last_seen>..HEAD` over the critical paths, triages new commits for parity gaps vs our Elixir lib, files/updates rmap tasks, then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
-  "checked_at": "2026-07-08",
+  "checked_at": "2026-08-01",
   "refs": {
     "mppx": {
       "url": "https://github.com/wevm/mppx.git",
       "branch": "main",
-      "last_seen": "264f0799dcc8768df618f8a12e580cfb93c48617"
+      "last_seen": "75c84536e5ba170bf1298da733f1f128cc27c04f"
     },
     "mpp-rs": {
       "url": "https://github.com/tempoxyz/mpp-rs.git",
       "branch": "main",
-      "last_seen": "5d4e072efc58f8c8eed4559e17d6fa945fa29742"
+      "last_seen": "3e37469bb19434982b433ae44ea8c713f7ea923a"
     },
     "mpp-specs": {
       "url": "https://github.com/tempoxyz/mpp-specs.git",
       "branch": "main",
-      "last_seen": "d0901f31c492a4f41af827b604e0cecc5b40f387"
+      "last_seen": "b2609815ff7816275409d6925643499325ef2df5"
     }
   },
   "critical_paths": {
