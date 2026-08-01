@@ -610,6 +610,13 @@ ssh -f blockwatch-one-rpc                                    # manual raise (onl
 The agent runs `ssh` with multiplexing forced off, so `ssh -O check/exit` does **not**
 see it — use `launchctl`. Both paths bind the same ports, so only one can be up at a time.
 
+**Keys** (rotated 2026-08-01): the tunnel authenticates with `~/.ssh/id_ed25519_tunnel`,
+a forward-only key — the server pins it to the four ports above and denies it a shell.
+Interactive `ssh blockwatch-one` uses a Secure Enclave key held by Secretive and asks for
+Touch ID. Because `IdentitiesOnly` only offers agent keys that match a configured
+`IdentityFile`, the config pins `~/.ssh/id_secretive_blockwatch.pub`; drop that line and
+ssh silently falls back to another key instead of failing.
+
 **For integration tests:**
 ```bash
 ETHEREUM_API_URL=http://localhost:8545 mix test.json --quiet --include integration
