@@ -1819,7 +1819,7 @@ done_at = "2026-07-07"
 id = "78"
 phase = 9
 bundle = "tempo"
-status = "pending"
+status = "in_progress"
 title = "Add aggregate in-flight sponsor budgets for Tempo fee sponsorship"
 scores = { d = 8, b = 10, u = 9 }
 markers = ["security"]
@@ -1836,4 +1836,5 @@ Add a fail-closed aggregate in-flight budget to Tempo fee-payer sponsorship so o
 Keep reserve-before-signing, three-phase ownership, state-derived TTL, fail-closed pinned limits, explicit hosted sponsor identity, bounded receipt reconciliation, and generic client-facing misconfiguration errors. Local sponsor identity may be validated at initialization but must be derived where request-time configuration is consumed because validate_config!/1 does not normalize config. Treat the live Moderato endpoint and official Tempo transaction specification as the provider-owned authority; mppx #699/#707 are implementation reference material. Preserve the disclosure embargo: committed files and commit messages describe only the capability and fix shape; full vulnerability detail remains outside git.
 """
 created_at = "2026-08-01"
+started_at = "2026-08-01"
 scored_at = "2026-08-01"
