@@ -13,7 +13,7 @@
 <!-- FOCUS:BEGIN -->
 **Focus phase:** 9 — Protocol Utilities (31 of 31 done · 0 in progress)
 
-**Last shipped:** Task 72 — Parse-time input validation parity for challenge/credential, Task 73 — Extract shared helpers and split MPP.Headers (mechanical refactor), Task 74 — Docs hygiene: README modules, ROADMAP focus, SECURITY version, Task 75 — Presenter-identity binding for Tempo hash-credential path (close GHSA-34g7-vx6g-82mq residual) on 2026-07-08
+**Last shipped:** no recent shipments
 
 **Up next:** Task 55 — Hash credential type audit + spec backfill [D:2/B:5/U:5 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
@@ -120,19 +120,19 @@
 | Task 45 | ✅ | 🎁 **utilities** · Tier-2 pinned-field verification [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 46 | ✅ | 🎁 **utilities** · Tempo + session hardening audit vs. latest reference impls [D:5/B:8/U:7 → Eff:1.5?] 🚀 |
 | Task 53 | ✅ | 🎁 **utilities** · Payment event hooks (server-side observability surface) [D:3/B:5/U:6 → Eff:1.83?] 🚀 |
-| Task 56 `[P]` | ✅ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33] 🎯 |
-| Task 57 `[P]` | ✅ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75] 🎯 |
-| Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 59 | ✅ | 🎁 **tempo** · 🔒 Fee-payer pre-broadcast simulation of co-signed Tempo transactions [D:6/B:8/U:7 → Eff:1.25] 📋 |
-| Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83] 🚀 |
-| Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25] 🎯 |
-| Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
-| Task 63 `[P]` | ✅ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67] 🚀 |
-| Task 65 `[P]` | ✅ | 🎁 **utilities** · 🔒 Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) [D:2/B:7/U:6 → Eff:3.25] 🎯 |
-| Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17] 🎯 |
-| Task 67 | ✅ | 🎁 **utilities** · Align cold check scope with Tempo JS cross-validation dependencies [D:3/B:7/U:5 → Eff:2.0] 🎯 |
-| Task 68 | ✅ | 🎁 **utilities** · 🔒 Tempo hosted fee-payer parity [D:5/B:7/U:6 → Eff:1.3] 📋 |
-| Task 69 | ✅ | 🎁 **utilities** · 🔒 Tempo proof access-key authorization parity [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 56 `[P]` | ✅ | 🎁 **utilities** · GitHub Actions CI workflow [D:3/B:7/U:7 → Eff:2.33?] 🎯 |
+| Task 57 `[P]` | ✅ | 🎁 **utilities** · Unit tests for MultiProvider and ConCacheStore [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
+| Task 58 | ✅ | 🎁 **utilities** · 📝 Public API @doc + missing @spec pass [D:3/B:4/U:4 → Eff:1.33?] 📋 |
+| Task 59 | ✅ | 🎁 **tempo** · 🔒 Fee-payer pre-broadcast simulation of co-signed Tempo transactions [D:6/B:8/U:7 → Eff:1.25?] 📋 |
+| Task 60 | ✅ | 🎁 **utilities** · Credential-gated integration CI: nightly cron + pre-merge gate [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
+| Task 61 | ✅ | 🎁 **utilities** · GitHub security/CI hardening: Sobelow SARIF code-scanning, Dependabot, SECURITY.md scope [D:2/B:5/U:4 → Eff:2.25?] 🎯 |
+| Task 62 | ✅ | 🎁 **utilities** · Fix CI coverage gate to green (repair precommit alias + restore 95%) [D:3/B:6/U:6 → Eff:2.0?] 🎯 |
+| Task 63 `[P]` | ✅ | 🎁 **utilities** · Header parser property/fuzz tests [D:3/B:5/U:5 → Eff:1.67?] 🚀 |
+| Task 65 `[P]` | ✅ | 🎁 **utilities** · 🔒 Cap header token size before decode (memory-exhaustion DoS, mpp-rs #299) [D:2/B:7/U:6 → Eff:3.25?] 🎯 |
+| Task 66 | ✅ | 🎁 **tempo** · 🔒 Harden Tempo hash-credential dedup to an atomic commit [D:3/B:7/U:6 → Eff:2.17?] 🎯 |
+| Task 67 | ✅ | 🎁 **utilities** · Align cold check scope with Tempo JS cross-validation dependencies [D:3/B:7/U:5 → Eff:2.0?] 🎯 |
+| Task 68 | ✅ | 🎁 **utilities** · 🔒 Tempo hosted fee-payer parity [D:5/B:7/U:6 → Eff:1.3?] 📋 |
+| Task 69 | ✅ | 🎁 **utilities** · 🔒 Tempo proof access-key authorization parity [D:4/B:6/U:5 → Eff:1.38?] 📋 |
 | Task 70 | ✅ | 🎁 **evm** · 🔒 EVM method: on-chain payment-proof hardening parity with Tempo [D:4/B:9/U:8 → Eff:2.12] 🎯 |
 | Task 71 | ✅ | 🎁 **tempo** · 🔒 EVM/Tempo method-module hardening and doc corrections [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 | Task 72 | ✅ | 🎁 **core-protocol** · Parse-time input validation parity for challenge/credential [D:3/B:5/U:6 → Eff:1.83] 🚀 |
