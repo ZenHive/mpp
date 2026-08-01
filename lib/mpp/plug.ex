@@ -389,6 +389,12 @@ defmodule MPP.Plug do
         conn
       end
 
+    conn =
+      case error.retry_after do
+        seconds when is_integer(seconds) -> Plug.Conn.put_resp_header(conn, "retry-after", Integer.to_string(seconds))
+        nil -> conn
+      end
+
     conn
     |> Plug.Conn.put_resp_header("cache-control", "no-store")
     |> Plug.Conn.put_resp_content_type("application/problem+json")

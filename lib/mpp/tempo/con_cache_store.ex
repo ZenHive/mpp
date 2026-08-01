@@ -1,6 +1,6 @@
 defmodule MPP.Tempo.ConCacheStore do
   @moduledoc """
-  Built-in ETS-based dedup store using ConCache (TTL-enabled ETS wrapper by Saša Jurić).
+  Built-in ETS-based atomic store using ConCache (TTL-enabled ETS wrapper by Saša Jurić).
 
   Backed by the `con_cache` dependency. This store is started automatically by
   the `:mpp` application as the **default** dedup store (replay protection on by
@@ -45,6 +45,13 @@ defmodule MPP.Tempo.ConCacheStore do
 
   Example: if your Plug uses `expires_in: 300` (5 min), set the store TTL to
   at least `to_timeout(minute: 10)`.
+
+  ## Sponsor-budget scope
+
+  A ConCache instance is process-local and therefore provides a sponsor-wide
+  bound only inside one BEAM node. Every endpoint in that node sponsoring the
+  same wallet must select the same cache `:name`. Horizontally scaled nodes must
+  instead select one shared store backend implementing `MPP.Tempo.Store.update/3`.
 
   ## Options
 
@@ -154,6 +161,75 @@ defmodule MPP.Tempo.ConCacheStore do
           {:error, :already_exists}
       end
     end)
+  end
+
+  @impl Store
+  @doc """
+  Atomically updates a value in the default ConCache.
+  """
+  @spec update(String.t(), (term() | :not_found -> term()), keyword()) ::
+          {:ok, term()} | {:error, term()}
+  def update(key, fun, opts) when is_function(fun, 1) do
+    cache_name = cache_name(opts)
+    storage_key = storage_key(key, opts)
+
+    ConCache.isolated(cache_name, storage_key, fn ->
+      current =
+        case ConCache.get(cache_name, storage_key) do
+          nil -> :not_found
+          value -> value
+        end
+
+      apply_update(cache_name, storage_key, fun.(current), opts)
+    end)
+  end
+
+  @spec apply_update(ConCache.t(), term(), term(), keyword()) :: {:ok, term()} | {:error, term()}
+  defp apply_update(cache_name, storage_key, {:put, value, result}, opts) do
+    case stored_value(value, opts) do
+      {:ok, stored} ->
+        ConCache.dirty_put(cache_name, storage_key, stored)
+        {:ok, result}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp apply_update(cache_name, storage_key, {:delete, result}, _opts) do
+    ConCache.dirty_delete(cache_name, storage_key)
+    {:ok, result}
+  end
+
+  defp apply_update(_cache_name, _storage_key, {:noop, result}, _opts), do: {:ok, result}
+
+  defp apply_update(_cache_name, _storage_key, other, _opts), do: {:error, {:invalid_update_result, other}}
+
+  @spec stored_value(term(), keyword()) :: {:ok, term()} | {:error, term()}
+  defp stored_value(value, opts) do
+    case Keyword.fetch(opts, :ttl_ms) do
+      :error ->
+        {:ok, value}
+
+      {:ok, ttl_fun} when is_function(ttl_fun, 1) ->
+        wrap_ttl(value, ttl_fun.(value))
+
+      {:ok, ttl_ms} ->
+        wrap_ttl(value, ttl_ms)
+    end
+  end
+
+  @spec wrap_ttl(term(), term()) :: {:ok, ConCache.Item.t()} | {:error, term()}
+  defp wrap_ttl(value, ttl_ms) when is_integer(ttl_ms) and ttl_ms > 0,
+    do: {:ok, %ConCache.Item{value: value, ttl: ttl_ms}}
+
+  defp wrap_ttl(_value, ttl_ms), do: {:error, {:invalid_ttl_ms, ttl_ms}}
+
+  @spec storage_key(String.t(), keyword()) :: String.t()
+  defp storage_key(key, opts) do
+    if Keyword.get(opts, :ignore_key_prefix, false),
+      do: key,
+      else: Store.storage_key(key, opts)
   end
 
   defp cache_name(opts), do: Keyword.get(opts, :name, @cache_name)

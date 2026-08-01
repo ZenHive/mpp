@@ -14,6 +14,9 @@ defmodule MPP.Client.Transport.HTTP do
       single comma-separated header value; both forms are handled.
     * Credential attachment: `Authorization: Payment <base64url-json>`,
       produced via `MPP.Headers.format_credential/1`.
+    * Sponsor-capacity responses remain payable 402 challenges. Call
+      `retry_after/1` to consume their delta-seconds backoff signal; retry policy
+      remains with the caller.
     * Optional `Accept-Payment` advertisement via `set_accept_payment/2` or
       `set_accept_payment_from_providers/3` (gated by `MPP.Client.AcceptPolicy`).
   """
@@ -41,6 +44,27 @@ defmodule MPP.Client.Transport.HTTP do
 
   @spec payment_required?(Req.Response.t()) :: false
   def payment_required?(%Req.Response{}), do: false
+
+  api(:retry_after, "Read a Retry-After delta-seconds value from an HTTP response.",
+    params: [response: [kind: :value, description: "Req.Response struct"]],
+    returns: %{type: :tagged_tuple, description: "`{:ok, seconds}` or `:error`"}
+  )
+
+  @doc "Read a positive `Retry-After` delta-seconds header from a response."
+  @spec retry_after(Req.Response.t()) :: {:ok, pos_integer()} | :error
+  def retry_after(%Req.Response{} = response) do
+    case Req.Response.get_header(response, "retry-after") do
+      [value] -> parse_retry_after(value)
+      _values -> :error
+    end
+  end
+
+  defp parse_retry_after(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {seconds, ""} when seconds > 0 -> {:ok, seconds}
+      _other -> :error
+    end
+  end
 
   api(:get_challenges, "Parse the Payment challenges from a 402 response's WWW-Authenticate headers.",
     params: [

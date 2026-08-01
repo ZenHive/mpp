@@ -37,6 +37,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       assert p.max_priority_fee_per_gas == 10_000_000_000
       assert p.max_total_fee == 50_000_000_000_000_000
       assert p.max_validity_window_seconds == 900
+      assert p.max_in_flight_total_fee == 500_000_000_000_000_000
+      assert p.max_in_flight_reservations == 100
     end
 
     test "raises the priority-fee ceiling on Moderato testnet" do
@@ -48,11 +50,15 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       p =
         FeePayerPolicy.resolve(@mainnet_chain_id, %{
           "max_gas" => 500_000,
-          "max_total_fee" => 1_000
+          "max_total_fee" => 1_000,
+          "max_in_flight_total_fee" => 10_000,
+          "max_in_flight_reservations" => 4
         })
 
       assert p.max_gas == 500_000
       assert p.max_total_fee == 1_000
+      assert p.max_in_flight_total_fee == 10_000
+      assert p.max_in_flight_reservations == 4
       # untouched keys keep chain defaults
       assert p.max_fee_per_gas == 100_000_000_000
     end
@@ -71,6 +77,26 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     test "treats nil overrides as no overrides" do
       assert FeePayerPolicy.resolve(@mainnet_chain_id, nil) ==
                FeePayerPolicy.resolve(@mainnet_chain_id, %{})
+    end
+  end
+
+  describe "measure/3" do
+    test "returns the validated worst-case fee and valid_before" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      valid_before = @now + 30
+      tx = valid_tx(gas_limit: 51_299, max_fee_per_gas: 1_000_000_000, valid_before: valid_before)
+
+      assert {:ok, %{total_fee: 51_299_000_000_000, valid_before: ^valid_before}} =
+               FeePayerPolicy.measure(tx, policy, @now)
+    end
+
+    test "returns the same policy error as validate/3" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx(valid_before: @now)
+
+      assert {:error, reason} = FeePayerPolicy.measure(tx, policy, @now)
+      assert reason =~ "already expired"
+      assert FeePayerPolicy.validate(tx, policy, @now) == {:error, reason}
     end
   end
 

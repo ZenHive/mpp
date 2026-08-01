@@ -43,6 +43,27 @@ defmodule MPP.ErrorsTest do
         Errors.new(:nonexistent, "detail")
       end
     end
+
+    test "uses the ZenHive-owned sponsor-capacity URI" do
+      error = Errors.new(:sponsor_capacity_exhausted, "Sponsor capacity is temporarily unavailable")
+
+      assert error.type == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+      assert error.status == 402
+      assert error.title == "Sponsor Capacity Exhausted"
+    end
+  end
+
+  describe "put_retry_after/2" do
+    test "attaches a positive delta without changing the problem body" do
+      error =
+        :sponsor_capacity_exhausted
+        |> Errors.new("Sponsor capacity is temporarily unavailable")
+        |> Errors.put_retry_after(17)
+
+      assert error.retry_after == 17
+      refute Map.has_key?(Errors.to_map(error), "retry_after")
+      assert Errors.put_retry_after(error, 0).retry_after == 1
+    end
   end
 
   describe "to_map/1" do
@@ -97,10 +118,10 @@ defmodule MPP.ErrorsTest do
       end
     end
 
-    test "returns all 18 problem types" do
+    test "returns all 19 problem types" do
       types = Errors.types()
 
-      assert Enum.count(types) == 18
+      assert Enum.count(types) == 19
       assert :payment_required in types
       assert :malformed_credential in types
       # Session types
@@ -108,6 +129,7 @@ defmodule MPP.ErrorsTest do
       assert :channel_closed in types
       # 3DS flow
       assert :payment_action_required in types
+      assert :sponsor_capacity_exhausted in types
     end
   end
 end

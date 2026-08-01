@@ -32,11 +32,15 @@ defmodule MPP.Methods.Tempo do
     * `"fee_payer"` — (optional) enable server-side fee sponsorship, defaults to `false`.
       When `true`, the server co-signs client transactions with domain `0x78` to pay
       transaction fees. Requires `"fee_payer_private_key"` and `"fee_token"`, unless
-      `"fee_payer_url"` is set for hosted sponsorship.
+      `"fee_payer_url"` is set for hosted sponsorship. Sponsorship also requires an
+      explicitly selected atomic `"store"`.
     * `"fee_payer_url"` — (optional) URL of a hosted fee-payer service that implements
       `eth_fillTransaction`. When set, the server delegates co-signing to the remote
       endpoint instead of using `"fee_payer_private_key"`. Mutually exclusive with the
       local key path.
+    * `"sponsor_budget_id"` — required with `"fee_payer_url"`; stable identity shared
+      by every endpoint using the same hosted sponsor wallet. It is normalized before
+      use and should normally be that wallet's address.
     * `"fee_payer_private_key"` — (required when `fee_payer: true` and no `fee_payer_url`)
       hex-encoded 32-byte
       secp256k1 private key for the fee payer account
@@ -53,7 +57,12 @@ defmodule MPP.Methods.Tempo do
       gas fields and validity window before the server co-signs so a malicious
       client cannot drain the fee-payer wallet via inflated gas price, total fee
       budget, or a padded access list, nor hold a co-signed sponsorship
-      broadcastable far into the future. See `MPP.Methods.Tempo.FeePayerPolicy`.
+      broadcastable far into the future. The same map accepts
+      `"max_in_flight_total_fee"` and `"max_in_flight_reservations"` for aggregate
+      worst-case exposure. See `MPP.Methods.Tempo.FeePayerPolicy`.
+    * `"sponsor_budget_reconcile"` — (optional, defaults to `false`) when `true`, an
+      at-capacity request checks a bounded set of pending async transaction receipts
+      before rejecting.
     * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Pre-simulates the full co-signed transaction via
@@ -67,6 +76,10 @@ defmodule MPP.Methods.Tempo do
       configure the built-in store (for example a custom cache `:name`). A configured store
       MUST implement the atomic `check_and_mark/2`. Pass `store: false` to explicitly opt out
       of dedup (not recommended; incompatible with a static `"memo"`).
+      Fee sponsorship is stricter: the store must be selected explicitly and implement
+      atomic `update/3`. `MPP.Tempo.ConCacheStore` provides a single-node bound. Every
+      node and endpoint sponsoring the same wallet must use the same physical shared
+      atomic backend for a cluster-wide bound.
     * `"require_presenter_binding"` — (optional) require `type="hash"` and
       `type="transaction"` credential presenters to prove control of the transfer's
       sender wallet via a `"presenterSignature"` payload field (see *Presenter
@@ -128,9 +141,11 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.Proof
+  alias MPP.Methods.Tempo.SponsorBudget
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias Onchain.Signer
   alias Onchain.Tempo.RPC
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transfer
@@ -152,6 +167,8 @@ defmodule MPP.Methods.Tempo do
   @tempo_rpc_error_detail "Tempo RPC request failed"
   @simulation_rejected_detail "Pre-broadcast simulation rejected the transaction"
   @simulation_failed_detail "Pre-broadcast simulation failed"
+  @sponsor_budget_unavailable_detail "Tempo sponsorship is temporarily unavailable"
+  @sponsor_capacity_detail "Tempo sponsor capacity is temporarily unavailable"
 
   api(:method_name, "Return the payment method identifier for Tempo.")
 
@@ -182,6 +199,7 @@ defmodule MPP.Methods.Tempo do
     validate_store!(config["store"])
     validate_memo_store_binding!(config)
     validate_fee_payer!(config)
+    validate_sponsor_budget!(config)
     validate_fee_payer_allowed_tokens!(config)
     validate_presenter_binding!(config["require_presenter_binding"])
     :ok
@@ -272,28 +290,26 @@ defmodule MPP.Methods.Tempo do
     expected_chain_id = config["chain_id"] || @moderato_chain_id
     wait? = config["wait_for_confirmation"] != false
 
-    with {:ok, signature} <- extract_signature(payload),
-         {:ok, tx} <- Transaction.deserialize(signature),
-         :ok <- verify_chain_id(tx, expected_chain_id),
-         :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
-         {:ok, payment} <-
-           Transaction.find_payment_call(tx, charge.currency,
-             amount: charge.amount,
-             recipient: charge.recipient,
-             memo: memo
-           ),
-         :ok <- maybe_validate_call_scope(tx, config),
-         :ok <- maybe_validate_fee_payer_economics(tx, config, expected_chain_id),
-         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
-         {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
-         :ok <- reserve_hash_atomic(store, tx.raw),
-         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
-         {:ok, tx_hash} <- broadcast_and_verify(tx, rpc_url, config, charge, memo, wait?) do
-      safe_dedup_post_broadcast(store, tx_hash, tx.raw)
-      {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
-    else
+    result =
+      with {:ok, signature} <- extract_signature(payload),
+           {:ok, tx} <- Transaction.deserialize(signature),
+           :ok <- verify_chain_id(tx, expected_chain_id),
+           :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
+           {:ok, payment} <-
+             Transaction.find_payment_call(tx, charge.currency,
+               amount: charge.amount,
+               recipient: charge.recipient,
+               memo: memo
+             ),
+           :ok <- maybe_validate_call_scope(tx, config),
+           {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id) do
+        verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget)
+      end
+
+    case result do
       {:error, %Errors{} = error} -> {:error, error}
       {:error, reason} when is_binary(reason) -> {:error, Errors.new(:verification_failed, reason)}
+      other -> other
     end
   end
 
@@ -428,6 +444,79 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp validate_fee_payer!(_config), do: :ok
+
+  defp validate_sponsor_budget!(config) do
+    if fee_payer_enabled?(config) do
+      validate_explicit_sponsor_store!(config)
+      validate_sponsor_budget_limits!(config)
+      validate_sponsor_identity!(config)
+    else
+      :ok
+    end
+  end
+
+  defp validate_explicit_sponsor_store!(config) do
+    case Map.fetch(config, "store") do
+      {:ok, store_config} when not is_nil(store_config) and store_config != false ->
+        store = Store.resolve(store_config)
+
+        if !sponsor_store_supports_update?(store) do
+          raise ArgumentError,
+                "MPP.Methods.Tempo sponsorship requires an explicitly selected atomic store implementing update/3"
+        end
+
+      _other ->
+        raise ArgumentError,
+              "MPP.Methods.Tempo sponsorship requires an explicit store; select MPP.Tempo.ConCacheStore for one node or a shared atomic backend for multiple nodes"
+    end
+  end
+
+  defp sponsor_store_supports_update?({ConCacheStore, _opts}), do: function_exported?(ConCacheStore, :update, 3)
+  defp sponsor_store_supports_update?(store) when is_atom(store), do: function_exported?(store, :update, 3)
+  defp sponsor_store_supports_update?(_store), do: false
+
+  defp validate_sponsor_budget_limits!(config) do
+    overrides = config["fee_payer_policy"]
+
+    if !is_nil(overrides) and !is_map(overrides) do
+      raise ArgumentError, "MPP.Methods.Tempo fee_payer_policy must be a map"
+    end
+
+    overrides = overrides || %{}
+
+    Enum.each(~w(max_in_flight_total_fee max_in_flight_reservations), fn key ->
+      if Map.has_key?(overrides, key) and !(is_integer(overrides[key]) and overrides[key] > 0) do
+        raise ArgumentError, "MPP.Methods.Tempo fee_payer_policy #{key} must be a positive integer"
+      end
+    end)
+
+    chain_id = config["chain_id"] || @moderato_chain_id
+    policy = FeePayerPolicy.resolve(chain_id, overrides)
+
+    if policy.max_total_fee > policy.max_in_flight_total_fee do
+      raise ArgumentError,
+            "MPP.Methods.Tempo max_in_flight_total_fee must be greater than or equal to max_total_fee"
+    end
+  end
+
+  defp validate_sponsor_identity!(%{"fee_payer_url" => url} = config) when is_binary(url) do
+    case normalize_sponsor_id(config["sponsor_budget_id"]) do
+      {:ok, _sponsor_id} ->
+        :ok
+
+      {:error, _reason} ->
+        raise ArgumentError, "MPP.Methods.Tempo hosted sponsorship requires a non-empty sponsor_budget_id"
+    end
+  end
+
+  defp validate_sponsor_identity!(%{"fee_payer" => true} = config) do
+    case local_sponsor_id(config) do
+      {:ok, _sponsor_id} -> :ok
+      {:error, _reason} -> raise ArgumentError, "MPP.Methods.Tempo could not derive the local sponsor identity"
+    end
+  end
+
+  defp validate_sponsor_identity!(_config), do: :ok
 
   defp validate_fee_payer_allowed_tokens!(config) do
     if fee_payer_enabled?(config) do
@@ -710,17 +799,178 @@ defmodule MPP.Methods.Tempo do
     if fee_payer_enabled?(config), do: Transaction.validate_call_scope(tx), else: :ok
   end
 
-  # Bounds client-supplied gas economics when fee_payer is enabled, so a
-  # malicious client cannot drain the server's wallet by embedding inflated
-  # gas price / total fee / access list in the signed envelope the server
-  # co-signs (GHSA-vv77-66rf-pm86, GHSA-qpxh-ff8m-c62v).
-  # No-op when fee_payer is falsy — the client pays its own gas.
-  defp maybe_validate_fee_payer_economics(tx, config, chain_id) do
+  defp maybe_reserve_sponsor_budget(tx, config, chain_id) do
     if fee_payer_enabled?(config) do
       policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
-      FeePayerPolicy.validate(tx, policy)
+
+      with {:ok, measurement} <- FeePayerPolicy.measure(tx, policy),
+           {:ok, store} <- sponsor_store(config),
+           {:ok, sponsor_id} <- sponsor_identity(config) do
+        reserve_sponsor_budget(store, config, chain_id, sponsor_id, policy, measurement)
+      else
+        {:error, reason} when is_binary(reason) -> {:error, reason}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+      end
     else
-      :ok
+      {:ok, nil}
+    end
+  end
+
+  defp reserve_sponsor_budget(store, config, chain_id, sponsor_id, policy, measurement) do
+    params = %{
+      chain_id: chain_id,
+      sponsor_id: sponsor_id,
+      fee: measurement.total_fee,
+      valid_before: measurement.valid_before,
+      limits: %{
+        max_in_flight_total_fee: policy.max_in_flight_total_fee,
+        max_in_flight_reservations: policy.max_in_flight_reservations
+      }
+    }
+
+    case SponsorBudget.reserve(store, params, sponsor_budget_options(config)) do
+      {:ok, handle} ->
+        {:ok, %{handle: handle, store: store}}
+
+      {:error, {:capacity_exhausted, retry_after}} ->
+        error =
+          :sponsor_capacity_exhausted
+          |> Errors.new(@sponsor_capacity_detail)
+          |> Errors.put_retry_after(retry_after)
+
+        {:error, error}
+
+      {:error, _reason} ->
+        {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+    end
+  end
+
+  defp sponsor_budget_options(%{"sponsor_budget_reconcile" => true} = config) do
+    receipt_fetcher = fn tx_hash -> rpc_fetch_receipt(tx_hash, config["rpc_url"], rpc_options(config)) end
+    [reconcile: receipt_fetcher]
+  end
+
+  defp sponsor_budget_options(_config), do: []
+
+  defp sponsor_store(config) do
+    with {:ok, configured} when configured not in [nil, false] <- Map.fetch(config, "store"),
+         store = Store.resolve(configured),
+         true <- sponsor_store_supports_update?(store) do
+      {:ok, store}
+    else
+      _other -> {:error, :invalid_store}
+    end
+  end
+
+  defp sponsor_identity(%{"fee_payer_url" => url} = config) when is_binary(url),
+    do: normalize_sponsor_id(config["sponsor_budget_id"])
+
+  defp sponsor_identity(%{"fee_payer" => true} = config), do: local_sponsor_id(config)
+  defp sponsor_identity(_config), do: {:error, :missing_identity}
+
+  defp local_sponsor_id(config) do
+    case Signer.address_from_key(config["fee_payer_private_key"]) do
+      {:ok, address} -> normalize_sponsor_id(address)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp normalize_sponsor_id(sponsor_id) when is_binary(sponsor_id) do
+    normalized = sponsor_id |> String.trim() |> String.downcase()
+    if normalized == "", do: {:error, :missing_identity}, else: {:ok, normalized}
+  end
+
+  defp normalize_sponsor_id(_sponsor_id), do: {:error, :missing_identity}
+
+  defp verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget) do
+    case prepare_sponsored_transaction(tx, payment, config, memo, store) do
+      {:ok, tx, rpc_url} ->
+        broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, store, budget)
+
+      {:error, _reason} = error ->
+        safe_budget_release(budget)
+        error
+    end
+  end
+
+  defp prepare_sponsored_transaction(tx, payment, config, memo, store) do
+    with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+         {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
+         :ok <- reserve_hash_atomic(store, tx.raw),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
+         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
+      {:ok, tx, rpc_url}
+    end
+  end
+
+  defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, store, budget) do
+    with :ok <- begin_budget_broadcast(budget),
+         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
+      safe_dedup_post_broadcast(store, tx_hash, tx.raw)
+      {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
+    else
+      {:error, :budget_transition_failed} ->
+        safe_budget_release(budget)
+        {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp begin_budget_broadcast(nil), do: :ok
+
+  defp begin_budget_broadcast(%{store: store, handle: handle}) do
+    case SponsorBudget.transition(store, handle, :broadcasting) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :budget_transition_failed}
+    end
+  end
+
+  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true, budget) do
+    case rpc_broadcast_sync(raw_hex, rpc_url, rpc_options(config)) do
+      {:ok, tx_hash, receipt} ->
+        safe_budget_release(budget)
+
+        with :ok <- Shared.check_receipt_status(receipt),
+             {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil) do
+          {:ok, tx_hash}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false, budget) do
+    case rpc_broadcast_async(raw_hex, rpc_url, rpc_options(config)) do
+      {:ok, tx_hash} ->
+        safe_budget_pending(budget, tx_hash)
+        {:ok, tx_hash}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp safe_budget_release(nil), do: :ok
+
+  defp safe_budget_release(%{store: store, handle: handle}) do
+    case SponsorBudget.release(store, handle) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("MPP.Methods.Tempo: sponsor budget release failed: #{inspect(reason)}")
+    end
+  end
+
+  defp safe_budget_pending(nil, _tx_hash), do: :ok
+
+  defp safe_budget_pending(%{store: store, handle: handle}, tx_hash) do
+    case SponsorBudget.transition(store, handle, {:pending, tx_hash}) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("MPP.Methods.Tempo: sponsor budget pending transition failed: #{inspect(reason)}")
     end
   end
 
@@ -954,31 +1204,6 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_chain_id(%Transaction{chain_id: actual}, expected) do
     {:error, "Chain ID mismatch: expected #{expected}, got #{actual}"}
-  end
-
-  # Dispatches between confirmation and optimistic broadcast paths. Both paths
-  # simulate the full co-signed transaction before broadcasting (see
-  # simulate_cosigned_tx/3) so a fee payer never pays gas for a transaction that
-  # would revert.
-  # Confirmation (default): simulate → broadcast sync → verify receipt logs.
-  # Optimistic: simulate → broadcast async → return tx hash without receipt verification.
-  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true = _wait?) do
-    rpc_opts = rpc_options(config)
-
-    with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config),
-         {:ok, tx_hash, receipt} <- rpc_broadcast_sync(raw_hex, rpc_url, rpc_opts),
-         :ok <- Shared.check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil) do
-      {:ok, tx_hash}
-    end
-  end
-
-  defp broadcast_and_verify(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false = _wait?) do
-    rpc_opts = rpc_options(config)
-
-    with :ok <- simulate_cosigned_tx(raw_hex, rpc_url, config) do
-      rpc_broadcast_async(raw_hex, rpc_url, rpc_opts)
-    end
   end
 
   # Simulates the FULL co-signed 0x76 transaction via eth_simulateV1 before

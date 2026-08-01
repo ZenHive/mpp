@@ -1,6 +1,6 @@
 defmodule MPP.Tempo.Store do
   @moduledoc """
-  Behaviour for transaction dedup stores used by `MPP.Methods.Tempo`.
+  Behaviour for atomic Tempo state stores used by `MPP.Methods.Tempo`.
 
   Prevents replay attacks by tracking which transaction hashes have already
   been used. HMAC-bound challenges prevent cross-request replay; this store
@@ -23,6 +23,12 @@ defmodule MPP.Tempo.Store do
 
   Implement this behaviour with your choice of backend (Redis, database, etc.)
   for custom needs. Store lifecycle and cleanup are the consumer's responsibility.
+
+  Fee sponsorship additionally requires `update/3`. The update callback must be
+  atomic for one key and must honor `:ttl_ms` without expiring the value earlier.
+  All nodes and endpoints sponsoring the same wallet must select the same physical
+  backend. Separate store instances provide separate bounds even when their module
+  and configuration are otherwise identical.
 
   ## Deployment Strategies
 
@@ -168,6 +174,33 @@ defmodule MPP.Tempo.Store do
               :ok | {:error, :already_exists} | {:error, term()}
 
   @doc """
+  Atomically update one key and return a caller-defined result.
+
+  The callback receives `:not_found` or the current value and returns one of:
+
+    * `{:put, new_value, result}` — store `new_value`
+    * `{:delete, result}` — delete the key
+    * `{:noop, result}` — leave the key unchanged
+
+  Options used by sponsor budgets:
+
+    * `:ttl_ms` — a positive millisecond TTL or a function deriving it from the
+      exact new value inside the atomic update
+    * `:ignore_key_prefix` — bypass caller-specific replay prefixes
+
+  This callback is optional for replay-only stores, but a sponsorship-enabled
+  configuration is rejected unless the explicitly selected store exports it.
+  """
+  @callback update(
+              key :: String.t(),
+              fun :: (term() | :not_found -> {:put, term(), result} | {:delete, result} | {:noop, result}),
+              opts :: keyword()
+            ) :: {:ok, result} | {:error, term()}
+            when result: term()
+
+  @optional_callbacks update: 3
+
+  @doc """
   Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
   """
   @spec get(store_ref(), String.t()) ::
@@ -189,4 +222,17 @@ defmodule MPP.Tempo.Store do
           :ok | {:error, :already_exists} | {:error, term()}
   def check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
   def check_and_mark(store, key, value), do: store.check_and_mark(key, value)
+
+  @doc """
+  Atomically update a key using either a store module or configured `ConCacheStore`.
+  """
+  @spec update(store_ref(), String.t(), (term() | :not_found -> term()), keyword()) ::
+          {:ok, term()} | {:error, term()}
+  def update(store, key, fun, opts \\ [])
+
+  def update({ConCacheStore, store_opts}, key, fun, opts) do
+    ConCacheStore.update(key, fun, Keyword.merge(store_opts, opts))
+  end
+
+  def update(store, key, fun, opts), do: store.update(key, fun, opts)
 end

@@ -368,7 +368,8 @@ defmodule MPP.Methods.TempoFullFlowTest do
       method_config: %{
         "fee_payer" => true,
         "fee_payer_private_key" => @fee_payer_private_key,
-        "fee_token" => @token_address
+        "fee_token" => @token_address,
+        "store" => MPP.Tempo.ConCacheStore
       }
     ]
   end

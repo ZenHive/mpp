@@ -51,7 +51,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
         "max_fee_per_gas" => 100_000_000_000,
         "max_priority_fee_per_gas" => 10_000_000_000,
         "max_total_fee" => 50_000_000_000_000_000,
-        "max_validity_window_seconds" => 900
+        "max_validity_window_seconds" => 900,
+        "max_in_flight_total_fee" => 500_000_000_000_000_000,
+        "max_in_flight_reservations" => 100
       }
 
   > #### Not a substitute for simulation {: .warning}
@@ -89,6 +91,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @max_priority_fee_per_gas_moderato 50_000_000_000
   @max_total_fee_default 50_000_000_000_000_000
   @max_validity_window_seconds_default 15 * 60
+  @max_in_flight_total_fee_default @max_total_fee_default * 10
+  @max_in_flight_reservations_default 100
 
   @typedoc "Resolved sponsor gas-economics and validity-window ceilings."
   @type t :: %__MODULE__{
@@ -96,7 +100,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
           max_fee_per_gas: non_neg_integer(),
           max_priority_fee_per_gas: non_neg_integer(),
           max_total_fee: non_neg_integer(),
-          max_validity_window_seconds: non_neg_integer()
+          max_validity_window_seconds: non_neg_integer(),
+          max_in_flight_total_fee: non_neg_integer(),
+          max_in_flight_reservations: non_neg_integer()
         }
 
   defstruct [
@@ -104,7 +110,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
     :max_fee_per_gas,
     :max_priority_fee_per_gas,
     :max_total_fee,
-    :max_validity_window_seconds
+    :max_validity_window_seconds,
+    :max_in_flight_total_fee,
+    :max_in_flight_reservations
   ]
 
   @doc """
@@ -169,7 +177,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       max_fee_per_gas: @max_fee_per_gas_default,
       max_priority_fee_per_gas: priority,
       max_total_fee: @max_total_fee_default,
-      max_validity_window_seconds: @max_validity_window_seconds_default
+      max_validity_window_seconds: @max_validity_window_seconds_default,
+      max_in_flight_total_fee: @max_in_flight_total_fee_default,
+      max_in_flight_reservations: @max_in_flight_reservations_default
     }
   end
 
@@ -180,7 +190,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       max_fee_per_gas: override(overrides, "max_fee_per_gas", policy.max_fee_per_gas),
       max_priority_fee_per_gas: override(overrides, "max_priority_fee_per_gas", policy.max_priority_fee_per_gas),
       max_total_fee: override(overrides, "max_total_fee", policy.max_total_fee),
-      max_validity_window_seconds: override(overrides, "max_validity_window_seconds", policy.max_validity_window_seconds)
+      max_validity_window_seconds: override(overrides, "max_validity_window_seconds", policy.max_validity_window_seconds),
+      max_in_flight_total_fee: override(overrides, "max_in_flight_total_fee", policy.max_in_flight_total_fee),
+      max_in_flight_reservations: override(overrides, "max_in_flight_reservations", policy.max_in_flight_reservations)
     }
   end
 
@@ -202,7 +214,10 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   """
   @spec validate(Transaction.t(), t()) :: :ok | {:error, String.t()}
   def validate(%Transaction{} = tx, %__MODULE__{} = policy) do
-    validate(tx, policy, System.os_time(:second))
+    case measure(tx, policy) do
+      {:ok, _measurement} -> :ok
+      {:error, _reason} = error -> error
+    end
   end
 
   @doc """
@@ -211,6 +226,30 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   """
   @spec validate(Transaction.t(), t(), integer()) :: :ok | {:error, String.t()}
   def validate(%Transaction{} = tx, %__MODULE__{} = policy, now) when is_integer(now) do
+    case measure(tx, policy, now) do
+      {:ok, _measurement} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  Validate a sponsored transaction and return its worst-case fee and expiry.
+
+  The returned values are derived from the same envelope fields accepted by
+  `validate/2`, so aggregate budgeting and per-transaction policy cannot drift.
+  """
+  @spec measure(Transaction.t(), t()) ::
+          {:ok, %{total_fee: pos_integer(), valid_before: pos_integer()}} | {:error, String.t()}
+  def measure(%Transaction{} = tx, %__MODULE__{} = policy) do
+    measure(tx, policy, System.os_time(:second))
+  end
+
+  @doc """
+  Like `measure/2`, evaluated against an explicit unix timestamp.
+  """
+  @spec measure(Transaction.t(), t(), integer()) ::
+          {:ok, %{total_fee: pos_integer(), valid_before: pos_integer()}} | {:error, String.t()}
+  def measure(%Transaction{} = tx, %__MODULE__{} = policy, now) when is_integer(now) do
     with {:ok, gas_limit} <- field_int(tx, TxFields.gas_limit(), "gas_limit"),
          {:ok, max_fee} <- field_int(tx, TxFields.max_fee_per_gas(), "max_fee_per_gas"),
          {:ok, max_priority} <- field_int(tx, TxFields.max_priority_fee_per_gas(), "max_priority_fee_per_gas"),
@@ -219,10 +258,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
          :ok <- check_total_fee(gas_limit, max_fee, policy),
          :ok <- check_priority(max_priority, max_fee, policy),
          :ok <- check_nonce_key(tx),
-         :ok <- check_validity_window(tx, policy, now),
+         {:ok, valid_before} <- check_validity_window(tx, policy, now),
          :ok <- check_access_list(tx),
-         :ok <- check_call_values(tx) do
-      check_canonical_calls(tx)
+         :ok <- check_call_values(tx),
+         :ok <- check_canonical_calls(tx) do
+      {:ok, %{total_fee: gas_limit * max_fee, valid_before: valid_before}}
     end
   end
 
@@ -269,7 +309,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
     end
   end
 
-  @spec check_validity_window(Transaction.t(), t(), integer()) :: :ok | {:error, String.t()}
+  @spec check_validity_window(Transaction.t(), t(), integer()) ::
+          {:ok, pos_integer()} | {:error, String.t()}
   defp check_validity_window(tx, %{max_validity_window_seconds: max}, now) do
     with {:ok, valid_before} <- field_int(tx, TxFields.valid_before(), "valid_before") do
       cond do
@@ -283,7 +324,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
           {:error, "fee-payer validity window #{valid_before - now}s exceeds maximum #{max}s"}
 
         true ->
-          :ok
+          {:ok, valid_before}
       end
     end
   end

@@ -40,6 +40,20 @@ defmodule MPP.Test.TempoMemoryStore do
     end)
   end
 
+  @impl Store
+  def update(key, fun, _opts) do
+    Agent.get_and_update(__MODULE__, fn state ->
+      current = Map.get(state, key, :not_found)
+
+      case fun.(current) do
+        {:put, value, result} -> {{:ok, result}, Map.put(state, key, value)}
+        {:delete, result} -> {{:ok, result}, Map.delete(state, key)}
+        {:noop, result} -> {{:ok, result}, state}
+        other -> {{:error, {:invalid_update_result, other}}, state}
+      end
+    end)
+  end
+
   @doc "Returns all stored keys (for test assertions)."
   def keys do
     Agent.get(__MODULE__, &Map.keys/1)

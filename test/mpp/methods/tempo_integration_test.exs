@@ -22,6 +22,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Methods.Tempo
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Test.TempoAccessKey
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
@@ -62,6 +63,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Polling config for tx confirmation
   @confirmation_poll_interval_ms 2_000
   @confirmation_max_attempts 30
+  @sponsor_budget_gas_limit 1_000_000
+  @sponsor_budget_max_fee_per_gas 25_000_000_000
+  @sponsor_budget_total_fee @sponsor_budget_gas_limit * @sponsor_budget_max_fee_per_gas
 
   setup_all do
     if !Code.ensure_loaded?(Onchain) do
@@ -853,7 +857,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "chain_id" => @chain_id,
             "fee_payer" => true,
             "fee_payer_private_key" => fee_payer_key_hex,
-            "fee_token" => @path_usd
+            "fee_token" => @path_usd,
+            "store" => ConCacheStore
           }
         )
 
@@ -911,7 +916,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "chain_id" => @chain_id,
             "fee_payer" => true,
             "fee_payer_private_key" => fee_payer_key_hex,
-            "fee_token" => @path_usd
+            "fee_token" => @path_usd,
+            "store" => ConCacheStore
           }
         )
 
@@ -952,7 +958,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           %{
             "fee_payer" => true,
             "fee_payer_private_key" => fee_payer_key_hex,
-            "fee_token" => @path_usd
+            "fee_token" => @path_usd,
+            "store" => ConCacheStore
           },
           extra
         )
@@ -1209,6 +1216,105 @@ defmodule MPP.Methods.TempoIntegrationTest do
       on_chain_receipt = wait_for_receipt!(receipt.reference, rpc_url: rpc_url)
       assert on_chain_receipt.status == 1
     end
+
+    test "enforces live capacity and reconciles a confirmed async reservation", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      start_supervised!(TempoMemoryStore)
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+
+      method_config = %{
+        "fee_payer" => true,
+        "fee_payer_private_key" => fee_payer_key_hex,
+        "fee_token" => @path_usd,
+        "wait_for_confirmation" => false,
+        "store" => TempoMemoryStore,
+        "fee_payer_policy" => %{
+          "max_total_fee" => @sponsor_budget_total_fee,
+          "max_in_flight_total_fee" => @sponsor_budget_total_fee,
+          "max_in_flight_reservations" => 1
+        }
+      }
+
+      config = tempo_config(recipient_address, rpc_url, method_config)
+      first_sender = fresh_wallet!(rpc_url)
+      first_challenge = request_challenge!(config)
+
+      {:ok, first_tx} =
+        build_bound_fee_payer_tx(
+          first_sender,
+          recipient_address,
+          @transfer_amount,
+          rpc_url,
+          first_challenge,
+          gas_limit: @sponsor_budget_gas_limit
+        )
+
+      first_conn =
+        submit_credential_conn(config, first_challenge, %{"type" => "transaction", "signature" => first_tx})
+
+      assert first_conn.status == nil,
+             "First async sponsorship should pass through, got #{first_conn.status}: #{first_conn.resp_body}"
+
+      assert %Receipt{} = first_receipt = first_conn.assigns[:mpp_receipt]
+
+      second_sender = fresh_wallet!(rpc_url)
+      second_challenge = request_challenge!(config)
+
+      {:ok, second_tx} =
+        build_bound_fee_payer_tx(
+          second_sender,
+          recipient_address,
+          @transfer_amount,
+          rpc_url,
+          second_challenge,
+          gas_limit: @sponsor_budget_gas_limit
+        )
+
+      second_conn =
+        submit_credential_conn(config, second_challenge, %{"type" => "transaction", "signature" => second_tx})
+
+      assert second_conn.status == 402
+      assert [retry_after] = Plug.Conn.get_resp_header(second_conn, "retry-after")
+      assert {seconds, ""} = Integer.parse(retry_after)
+      assert seconds > 0
+
+      capacity_problem = Jason.decode!(second_conn.resp_body)
+      assert capacity_problem["type"] == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+      refute capacity_problem["detail"] =~ Integer.to_string(@sponsor_budget_total_fee)
+
+      confirmed = wait_for_receipt!(first_receipt.reference, rpc_url: rpc_url)
+      assert confirmed.status == 1
+
+      reconcile_config =
+        tempo_config(recipient_address, rpc_url, Map.put(method_config, "sponsor_budget_reconcile", true))
+
+      third_sender = fresh_wallet!(rpc_url)
+      third_challenge = request_challenge!(reconcile_config)
+
+      {:ok, third_tx} =
+        build_bound_fee_payer_tx(
+          third_sender,
+          recipient_address,
+          @transfer_amount,
+          rpc_url,
+          third_challenge,
+          gas_limit: @sponsor_budget_gas_limit
+        )
+
+      third_conn =
+        submit_credential_conn(
+          reconcile_config,
+          third_challenge,
+          %{"type" => "transaction", "signature" => third_tx}
+        )
+
+      assert third_conn.status == nil,
+             "Reconciled sponsorship should pass through, got #{third_conn.status}: #{third_conn.resp_body}"
+
+      assert %Receipt{} = third_conn.assigns[:mpp_receipt]
+    end
   end
 
   describe "optimistic broadcast + dedup store" do
@@ -1351,6 +1457,12 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   defp submit_credential!(config, challenge, payload) do
+    conn = submit_credential_conn(config, challenge, payload)
+    assert conn.status == 402
+    Jason.decode!(conn.resp_body)
+  end
+
+  defp submit_credential_conn(config, challenge, payload) do
     credential = %Credential{
       challenge: challenge,
       payload: payload
@@ -1358,14 +1470,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     auth_header = Headers.format_credential(credential)
 
-    conn =
-      :get
-      |> Plug.Test.conn("/api/data")
-      |> Plug.Conn.put_req_header("authorization", auth_header)
-      |> MPP.Plug.call(config)
-
-    assert conn.status == 402
-    Jason.decode!(conn.resp_body)
+    :get
+    |> Plug.Test.conn("/api/data")
+    |> Plug.Conn.put_req_header("authorization", auth_header)
+    |> MPP.Plug.call(config)
   end
 
   defp broadcast_bound_transfer!(sender, recipient_address, amount, rpc_url, challenge) do
@@ -1676,7 +1784,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
           method_config: %{
             "rpc_url" => rpc_url,
             "chain_id" => @chain_id,
-            "fee_payer_url" => @default_hosted_fee_payer_url
+            "fee_payer_url" => @default_hosted_fee_payer_url,
+            "sponsor_budget_id" => "moderato-hosted-fee-payer",
+            "store" => ConCacheStore
           }
         )
 
@@ -1730,6 +1840,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "rpc_url" => rpc_url,
             "chain_id" => @chain_id,
             "fee_payer_url" => @default_hosted_fee_payer_url,
+            "sponsor_budget_id" => "moderato-hosted-fee-payer",
+            "store" => ConCacheStore,
             "fee_payer_allowed_fee_tokens" => [@rogue_token]
           }
         )
@@ -1767,7 +1879,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
           "chain_id" => @chain_id,
           "fee_payer" => true,
           "fee_payer_private_key" => fee_payer_key_hex,
-          "fee_token" => rogue_token
+          "fee_token" => rogue_token,
+          "store" => ConCacheStore
         }
       }
 

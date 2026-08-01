@@ -77,11 +77,20 @@ pipeline :paid_tempo do
       "rpc_url" => "https://rpc.tempo.xyz",
       "chain_id" => 4217,
       "fee_payer" => true,
+      # Sponsorship requires an explicitly selected atomic store.
+      # ConCache is single-node; use one shared backend across nodes that sponsor
+      # the same wallet.
+      "store" => MPP.Tempo.ConCacheStore,
       # Either use a local fee-payer key...
       "fee_payer_private_key" => "0x...",
       # ...or delegate co-signing to a hosted eth_fillTransaction endpoint.
       # "fee_payer_url" => "https://sponsor.example.com",
+      # "sponsor_budget_id" => "0x...hosted-sponsor-wallet",
       "fee_token" => "0x...(fee token address)",
+      "fee_payer_policy" => %{
+        "max_in_flight_total_fee" => 500_000_000_000_000_000,
+        "max_in_flight_reservations" => 100
+      },
       "wait_for_confirmation" => false,
       "memo" => "0x...(optional 32-byte memo)"
     }

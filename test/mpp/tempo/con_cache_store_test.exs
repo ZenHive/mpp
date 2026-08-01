@@ -135,6 +135,70 @@ defmodule MPP.Tempo.ConCacheStoreTest do
     end
   end
 
+  describe "update/3" do
+    test "supports put, noop, and delete while returning callback results", %{store_opts: store_opts} do
+      key = "mpp:sponsor-budget:update"
+
+      assert {:ok, :created} =
+               ConCacheStore.update(key, fn :not_found -> {:put, %{count: 1}, :created} end, store_opts)
+
+      assert {:ok, %{count: 1}} = ConCacheStore.get(key, store_opts)
+
+      assert {:ok, :unchanged} =
+               ConCacheStore.update(key, fn _current -> {:noop, :unchanged} end, store_opts)
+
+      assert {:ok, %{count: 1}} = ConCacheStore.get(key, store_opts)
+
+      assert {:ok, :deleted} =
+               ConCacheStore.update(key, fn _current -> {:delete, :deleted} end, store_opts)
+
+      assert :not_found = ConCacheStore.get(key, store_opts)
+    end
+
+    test "derives TTL from the exact value written", %{store_opts: store_opts} do
+      key = "mpp:sponsor-budget:derived-ttl"
+      derived_ttl_ms = @ttl_ms * 3
+
+      assert {:ok, :stored} =
+               ConCacheStore.update(
+                 key,
+                 fn :not_found -> {:put, %{ttl_ms: derived_ttl_ms}, :stored} end,
+                 Keyword.put(store_opts, :ttl_ms, & &1.ttl_ms)
+               )
+
+      assert {:ok, %{ttl_ms: ^derived_ttl_ms}} = ConCacheStore.get(key, store_opts)
+      assert_eventually_not_found(key, store_opts)
+    end
+
+    test "rejects invalid callback results and TTLs without overwriting", %{store_opts: store_opts} do
+      key = "mpp:sponsor-budget:invalid"
+      assert :ok = ConCacheStore.put(key, :original, store_opts)
+
+      assert {:error, {:invalid_update_result, :bad}} =
+               ConCacheStore.update(key, fn _current -> :bad end, store_opts)
+
+      assert {:error, {:invalid_ttl_ms, 0}} =
+               ConCacheStore.update(key, fn _current -> {:put, :changed, :ok} end, Keyword.put(store_opts, :ttl_ms, 0))
+
+      assert {:ok, :original} = ConCacheStore.get(key, store_opts)
+    end
+
+    test "ignore_key_prefix addresses the shared physical row", %{store_opts: store_opts} do
+      key = "mpp:sponsor-budget:42431:wallet"
+      prefixed_opts = Keyword.put(store_opts, :key_prefix, "tenant-a:")
+
+      assert {:ok, :stored} =
+               ConCacheStore.update(
+                 key,
+                 fn :not_found -> {:put, :shared, :stored} end,
+                 Keyword.put(prefixed_opts, :ignore_key_prefix, true)
+               )
+
+      assert {:ok, :shared} = ConCacheStore.get(key, store_opts)
+      assert :not_found = ConCacheStore.get(key, prefixed_opts)
+    end
+  end
+
   defp assert_eventually_not_found(key, store_opts) do
     deadline = System.monotonic_time(:millisecond) + @expiry_timeout_ms
     wait_until_not_found(key, store_opts, deadline)

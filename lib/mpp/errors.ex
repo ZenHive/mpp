@@ -21,6 +21,7 @@ defmodule MPP.Errors do
     * `:invalid_payload` — credential payload doesn't match schema (402)
     * `:bad_request` — malformed request (400)
     * `:payment_action_required` — payment requires additional action, e.g. 3DS (402)
+    * `:sponsor_capacity_exhausted` — fee sponsor capacity is temporarily unavailable (402)
 
   ### Session
 
@@ -51,6 +52,11 @@ defmodule MPP.Errors do
     payment_action_required: %{
       suffix: "payment-action-required",
       title: "Payment Action Required",
+      status: 402
+    },
+    sponsor_capacity_exhausted: %{
+      uri: "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted",
+      title: "Sponsor Capacity Exhausted",
       status: 402
     },
     # Session error types (Phase 10)
@@ -91,6 +97,7 @@ defmodule MPP.Errors do
           | :invalid_payload
           | :bad_request
           | :payment_action_required
+          | :sponsor_capacity_exhausted
           | :insufficient_balance
           | :invalid_signature
           | :signer_mismatch
@@ -103,11 +110,12 @@ defmodule MPP.Errors do
           type: String.t(),
           title: String.t(),
           status: pos_integer(),
-          detail: String.t()
+          detail: String.t(),
+          retry_after: pos_integer() | nil
         }
 
   @enforce_keys [:type, :title, :status, :detail]
-  defstruct [:type, :title, :status, :detail]
+  defstruct [:type, :title, :status, :detail, retry_after: nil]
 
   api(:new, "Create an RFC 9457 Problem Detail error for the given problem type.",
     params: [
@@ -123,7 +131,7 @@ defmodule MPP.Errors do
     case Map.fetch(@problem_types, type) do
       {:ok, problem} ->
         %__MODULE__{
-          type: @base_uri <> problem.suffix,
+          type: Map.get(problem, :uri, @base_uri <> Map.get(problem, :suffix, "")),
           title: problem.title,
           status: problem.status,
           detail: detail
@@ -165,6 +173,14 @@ defmodule MPP.Errors do
       "status" => error.status,
       "detail" => error.detail
     }
+  end
+
+  api(:put_retry_after, "Attach a positive Retry-After delta in seconds to an error.")
+
+  @doc "Attach a positive `Retry-After` delta-seconds value to an error."
+  @spec put_retry_after(t(), integer()) :: t()
+  def put_retry_after(%__MODULE__{} = error, seconds) when is_integer(seconds) do
+    %{error | retry_after: max(seconds, 1)}
   end
 
   api(:types, "Return the list of known problem type atoms.")

@@ -29,6 +29,15 @@ defmodule MPP.PlugTest do
       {:error, Errors.new(:verification_failed, "Invalid proof")}
     end
 
+    def verify(%{"proof" => "capacity"}, _charge) do
+      error =
+        :sponsor_capacity_exhausted
+        |> Errors.new("Sponsor capacity is temporarily unavailable")
+        |> Errors.put_retry_after(17)
+
+      {:error, error}
+    end
+
     def verify(_payload, _charge) do
       {:error, Errors.new(:invalid_payload, "Missing proof field")}
     end
@@ -888,6 +897,25 @@ defmodule MPP.PlugTest do
       body = decode_json_body(conn)
       assert body["type"] =~ "verification-failed"
       assert body["detail"] == "Invalid proof"
+    end
+
+    test "sponsor capacity returns a generic 402 with Retry-After", %{config: config} do
+      auth_header = build_authorization_header(config, %{"proof" => "capacity"})
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      assert Plug.Conn.get_resp_header(conn, "retry-after") == ["17"]
+      assert [_challenge] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+
+      body = decode_json_body(conn)
+      assert body["type"] == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+      refute Map.has_key?(body, "retry_after")
+      refute body["detail"] =~ "store"
     end
 
     test "missing payload fields returns 402 with method's error", %{config: config} do

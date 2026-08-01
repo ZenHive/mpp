@@ -38,6 +38,16 @@ defmodule MPP.McpTest do
     end
 
     @impl MPP.Method
+    def verify(%{"proof" => "capacity"}, _charge) do
+      error =
+        :sponsor_capacity_exhausted
+        |> Errors.new("Sponsor capacity is temporarily unavailable")
+        |> Errors.put_retry_after(23)
+
+      {:error, error}
+    end
+
+    @impl MPP.Method
     def verify(_payload, _charge) do
       {:error, Errors.new(:invalid_payload, "Missing proof field")}
     end
@@ -910,6 +920,21 @@ defmodule MPP.McpTest do
       assert payment_required["error"]["message"] == "Payment Required"
       assert malformed["error"]["code"] == -32_602
       assert malformed["error"]["message"] == "Malformed Credential"
+    end
+
+    test "maps sponsor capacity to payment-required with retry timing" do
+      response =
+        %{"proof" => "capacity"}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+
+      assert response["error"]["code"] == -32_042
+      assert response["error"]["data"]["httpStatus"] == 402
+      assert response["error"]["data"]["retryAfter"] == 23
+
+      problem = response["error"]["data"]["problem"]
+      assert problem["type"] == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+      refute Map.has_key?(problem, "retryAfter")
     end
 
     test "normalizes handler result maps and tagged tuples before attaching receipt" do

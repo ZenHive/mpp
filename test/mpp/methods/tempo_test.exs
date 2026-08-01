@@ -22,10 +22,81 @@ defmodule MPP.Methods.TempoTest do
   @realm "api.test.com"
   @challenge_id "challenge-test-1"
 
-  # ERC-20 Transfer(address,address,uint256) topic
-  @transfer_topic "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+  defmodule SponsorLifecycleStore do
+    @moduledoc false
+    @behaviour MPP.Tempo.Store
 
-  # TIP-20 TransferWithMemo(address,address,uint256,bytes32) topic
+    alias MPP.Tempo.Store
+
+    @state_key {__MODULE__, :state}
+    @update_count_key {__MODULE__, :update_count}
+    @fail_on_update_key {__MODULE__, :fail_on_update}
+
+    @spec configure(pos_integer()) :: :ok
+    def configure(fail_on_update) do
+      Process.put(@state_key, %{})
+      Process.put(@update_count_key, 0)
+      Process.put(@fail_on_update_key, fail_on_update)
+      :ok
+    end
+
+    @impl Store
+    def get(key) do
+      case Map.fetch(state(), key) do
+        {:ok, value} -> {:ok, value}
+        :error -> :not_found
+      end
+    end
+
+    @impl Store
+    def put(key, value) do
+      Process.put(@state_key, Map.put(state(), key, value))
+      :ok
+    end
+
+    @impl Store
+    def check_and_mark(key, value) do
+      if Map.has_key?(state(), key) do
+        {:error, :already_exists}
+      else
+        put(key, value)
+      end
+    end
+
+    @impl Store
+    def update(key, fun, _opts) do
+      update_count = Process.get(@update_count_key, 0) + 1
+      Process.put(@update_count_key, update_count)
+
+      if update_count == Process.get(@fail_on_update_key) do
+        {:error, :forced_failure}
+      else
+        # ERC-20 Transfer(address,address,uint256) topic
+        apply_update(key, fun.(Map.get(state(), key, :not_found)))
+      end
+    end
+
+    # TIP-20 TransferWithMemo(address,address,uint256,bytes32) topic
+    defp apply_update(key, {:put, value, result}) do
+      Process.put(@state_key, Map.put(state(), key, value))
+      {:ok, result}
+    end
+
+    defp apply_update(key, {:delete, result}) do
+      Process.put(@state_key, Map.delete(state(), key))
+      {:ok, result}
+    end
+
+    # Simulate what Plug does: merge method_config into charge.method_details.
+    # Dedup is on by default now; these verification-logic tests opt out
+    # (`store: false`) so the app-started shared default store doesn't carry the
+    # fixed @tx_hash across async tests. Dedup is covered by the dedicated dedup
+    # describes below (which set their own store).
+    defp apply_update(_key, {:noop, result}), do: {:ok, result}
+    defp state, do: Process.get(@state_key, %{})
+  end
+
+  @transfer_topic "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
   @transfer_with_memo_topic "0x57bc7354aa85aed339e000bccffabbc529466af35f0772c8f8ee1145927de7f0"
 
   @test_memo "0x" <> String.duplicate("ab", 32)
@@ -38,11 +109,6 @@ defmodule MPP.Methods.TempoTest do
         recipient: @recipient
       )
 
-    # Simulate what Plug does: merge method_config into charge.method_details.
-    # Dedup is on by default now; these verification-logic tests opt out
-    # (`store: false`) so the app-started shared default store doesn't carry the
-    # fixed @tx_hash across async tests. Dedup is covered by the dedicated dedup
-    # describes below (which set their own store).
     charge = %{
       charge
       | method_details: %{
@@ -137,6 +203,23 @@ defmodule MPP.Methods.TempoTest do
     test "raises on non-boolean require_presenter_binding" do
       assert_raise ArgumentError, ~r/require_presenter_binding.*boolean/, fn ->
         Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => "yes"})
+      end
+    end
+
+    test "rejects malformed sponsorship store references and policy containers" do
+      sponsor_config = %{
+        "rpc_url" => @rpc_url,
+        "fee_payer" => true,
+        "fee_payer_private_key" => "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        "fee_token" => @token_address
+      }
+
+      assert_raise ArgumentError, ~r/:store tuple form/, fn ->
+        Tempo.validate_config!(Map.put(sponsor_config, "store", {TempoMemoryStore, []}))
+      end
+
+      assert_raise ArgumentError, ~r/fee_payer_policy must be a map/, fn ->
+        Tempo.validate_config!(Map.merge(sponsor_config, %{"store" => ConCacheStore, "fee_payer_policy" => :invalid}))
       end
     end
   end
@@ -1526,8 +1609,6 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
-  # --- Coverage: store error paths and edge cases ---
-
   describe "verify/2 — store put error (mark_hash_used)" do
     test "put failure surfaces as verification_failed", %{charge: charge} do
       # FailingPutStore: get returns :not_found (no dedup hit), put returns {:error, :store_failure}
@@ -1680,6 +1761,7 @@ defmodule MPP.Methods.TempoTest do
       "status" => "0x1",
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1a",
+      # --- Coverage: store error paths and edge cases ---
       "blockHash" => "0x" <> String.duplicate("00", 32),
       "logs" => logs
     }
@@ -1757,8 +1839,70 @@ defmodule MPP.Methods.TempoTest do
                  "rpc_url" => @rpc_url,
                  "fee_payer" => true,
                  "fee_payer_private_key" => @fee_payer_key,
-                 "fee_token" => @fee_payer_token
+                 "fee_token" => @fee_payer_token,
+                 "store" => ConCacheStore
                })
+    end
+
+    test "requires an explicitly selected atomic sponsor store" do
+      base = %{
+        "rpc_url" => @rpc_url,
+        "fee_payer" => true,
+        "fee_payer_private_key" => @fee_payer_key,
+        "fee_token" => @fee_payer_token
+      }
+
+      assert_raise ArgumentError, ~r/requires an explicit store/, fn ->
+        Tempo.validate_config!(base)
+      end
+
+      assert_raise ArgumentError, ~r/requires an explicit store/, fn ->
+        Tempo.validate_config!(Map.put(base, "store", false))
+      end
+
+      assert_raise ArgumentError, ~r/atomic store implementing update\/3/, fn ->
+        Tempo.validate_config!(Map.put(base, "store", FailingPutStore))
+      end
+    end
+
+    test "rejects invalid or inconsistent aggregate limits" do
+      base = %{
+        "rpc_url" => @rpc_url,
+        "fee_payer" => true,
+        "fee_payer_private_key" => @fee_payer_key,
+        "fee_token" => @fee_payer_token,
+        "store" => ConCacheStore
+      }
+
+      for value <- [0, -1, "100"] do
+        config = put_in(base["fee_payer_policy"], %{"max_in_flight_reservations" => value})
+
+        assert_raise ArgumentError, ~r/max_in_flight_reservations must be a positive integer/, fn ->
+          Tempo.validate_config!(config)
+        end
+      end
+
+      config =
+        put_in(base["fee_payer_policy"], %{
+          "max_total_fee" => 10,
+          "max_in_flight_total_fee" => 9
+        })
+
+      assert_raise ArgumentError, ~r/max_in_flight_total_fee must be greater than or equal/, fn ->
+        Tempo.validate_config!(config)
+      end
+    end
+
+    test "requires the local sponsor identity to be derivable" do
+      assert_raise ArgumentError, ~r/could not derive the local sponsor identity/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer" => true,
+          "fee_payer_private_key" => String.duplicate("00", 32),
+          "fee_token" => @fee_payer_token,
+          "store" => ConCacheStore
+        })
+      end
     end
 
     test "raises when fee_payer true but missing fee_payer_private_key" do
@@ -1818,6 +1962,7 @@ defmodule MPP.Methods.TempoTest do
                  "fee_payer" => true,
                  "fee_payer_private_key" => @fee_payer_key,
                  "fee_token" => @fee_payer_token,
+                 "store" => ConCacheStore,
                  "fee_payer_allowed_fee_tokens" => [@fee_payer_token]
                })
     end
@@ -1829,6 +1974,7 @@ defmodule MPP.Methods.TempoTest do
           "fee_payer" => true,
           "fee_payer_private_key" => @fee_payer_key,
           "fee_token" => @fee_payer_token,
+          "store" => ConCacheStore,
           "fee_payer_allowed_fee_tokens" => [@fee_payer_token, "0xdead", 123]
         })
       end
@@ -1841,6 +1987,7 @@ defmodule MPP.Methods.TempoTest do
           "fee_payer" => true,
           "fee_payer_private_key" => @fee_payer_key,
           "fee_token" => @fee_payer_token,
+          "store" => ConCacheStore,
           "fee_payer_allowed_fee_tokens" => [123, @fee_payer_token]
         })
       end
@@ -1853,6 +2000,7 @@ defmodule MPP.Methods.TempoTest do
           "fee_payer" => true,
           "fee_payer_private_key" => @fee_payer_key,
           "fee_token" => @fee_payer_token,
+          "store" => ConCacheStore,
           "fee_payer_allowed_fee_tokens" => "not-a-list"
         })
       end
@@ -1892,7 +2040,8 @@ defmodule MPP.Methods.TempoTest do
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
               "fee_payer_private_key" => @fee_payer_private_key,
-              "fee_token" => @fee_token_address
+              "fee_token" => @fee_token_address,
+              "store" => start_sponsor_store()
             })
       }
 
@@ -1943,6 +2092,7 @@ defmodule MPP.Methods.TempoTest do
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
       assert broadcast_hex != tx_hex
       assert String.starts_with?(broadcast_hex, "0x76")
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
 
     test "rejects a reverting CO-SIGNED sponsored tx before the fee payer broadcasts", %{charge: charge} do
@@ -1993,6 +2143,7 @@ defmodule MPP.Methods.TempoTest do
       assert_received {:rpc_call, "eth_simulateV1"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       refute_received {:rpc_call, "eth_sendRawTransaction"}
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
 
     test "rejects transaction without fee_payer_signature placeholder", %{charge: charge} do
@@ -2017,6 +2168,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "placeholder"
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
 
     test "rejects transaction with non-empty fee_token", %{charge: charge} do
@@ -2050,6 +2202,135 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "fee_token"
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "retains a broadcasting reservation when the broadcast response is lost", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 7)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
+          "eth_sendRawTransactionSync" -> Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{detail: "Tempo RPC request failed"}} = Tempo.verify(payload, charge)
+      assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
+      assert [%{phase: :broadcasting}] = Map.values(state.reservations)
+    end
+
+    test "releases on a terminal receipt before payment-domain validation", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 8)
+      stub_broadcast_and_receipt(reverted_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "reverted"
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "retains async sponsorship and rejects the next request with retry timing", %{charge: charge} do
+      limit = 25_000_000_000_000_000
+
+      charge = %{
+        charge
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "wait_for_confirmation" => false,
+              "fee_payer_policy" => %{
+                "max_total_fee" => limit,
+                "max_in_flight_total_fee" => limit,
+                "max_in_flight_reservations" => 1
+              }
+            })
+      }
+
+      {:ok, first_tx} = build_sponsored_client_tx(nonce: 9)
+      stub_optimistic_flow(@tx_hash)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => first_tx}, charge)
+      assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
+      assert [%{phase: :pending, tx_hash: @tx_hash}] = Map.values(state.reservations)
+
+      {:ok, second_tx} = build_sponsored_client_tx(nonce: 10)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "sponsor_budget_reconcile", true)
+      }
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
+          other ->
+            flunk("Unexpected RPC method while reconciling sponsor capacity: #{other}")
+        end
+      end)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => second_tx}, charge)
+
+      assert error.type == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+      assert error.retry_after > 0
+      refute error.detail =~ "25000000000000000"
+    end
+
+    test "enforces fail-closed accounting before broadcast and retains ownership afterward", %{charge: charge} do
+      {:ok, reserve_failure_tx} = build_sponsored_client_tx(nonce: 11)
+      :ok = SponsorLifecycleStore.configure(1)
+      reserve_failure_charge = put_in(charge.method_details["store"], SponsorLifecycleStore)
+
+      assert {:error, %Errors{} = reserve_error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => reserve_failure_tx}, reserve_failure_charge)
+
+      assert reserve_error.detail == "Tempo sponsorship is temporarily unavailable"
+
+      {:ok, store_failure_tx} = build_sponsored_client_tx(nonce: 12)
+      missing_store_charge = put_in(charge.method_details["store"], false)
+
+      assert {:error, %Errors{} = store_error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => store_failure_tx}, missing_store_charge)
+
+      assert store_error.detail == "Tempo sponsorship is temporarily unavailable"
+
+      {:ok, transition_failure_tx} = build_sponsored_client_tx(nonce: 13)
+      :ok = SponsorLifecycleStore.configure(2)
+      transition_failure_charge = put_in(charge.method_details["store"], SponsorLifecycleStore)
+      stub_broadcast_and_receipt(success_receipt())
+
+      assert {:error, %Errors{} = transition_error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => transition_failure_tx}, transition_failure_charge)
+
+      assert transition_error.detail == "Tempo sponsorship is temporarily unavailable"
+
+      {:ok, release_failure_tx} = build_sponsored_client_tx(nonce: 14)
+      :ok = SponsorLifecycleStore.configure(3)
+      release_failure_charge = put_in(charge.method_details["store"], SponsorLifecycleStore)
+      stub_broadcast_and_receipt(success_receipt())
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => release_failure_tx}, release_failure_charge)
+
+      {:ok, pending_failure_tx} = build_sponsored_client_tx(nonce: 15)
+      :ok = SponsorLifecycleStore.configure(3)
+
+      pending_failure_charge =
+        charge
+        |> put_in([Access.key(:method_details), "store"], SponsorLifecycleStore)
+        |> put_in([Access.key(:method_details), "wait_for_confirmation"], false)
+
+      stub_optimistic_flow(@tx_hash)
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => pending_failure_tx}, pending_failure_charge)
     end
 
     test "passes through when fee_payer is false (no co-signing)", %{charge: charge} do
@@ -2078,7 +2359,8 @@ defmodule MPP.Methods.TempoTest do
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
               "fee_payer_private_key" => @fee_payer_private_key_econ,
-              "fee_token" => @fee_token_address_econ
+              "fee_token" => @fee_token_address_econ,
+              "store" => start_sponsor_store()
             })
       }
 
@@ -2152,7 +2434,8 @@ defmodule MPP.Methods.TempoTest do
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
               "fee_payer_private_key" => @fee_payer_private_key_scope,
-              "fee_token" => @fee_token_address_scope
+              "fee_token" => @fee_token_address_scope,
+              "store" => start_sponsor_store()
             })
       }
 
@@ -2667,7 +2950,8 @@ defmodule MPP.Methods.TempoTest do
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
               "fee_payer_private_key" => @fee_payer_key_allow,
-              "fee_token" => @rogue_token
+              "fee_token" => @rogue_token,
+              "store" => start_sponsor_store()
             })
       }
 
@@ -2703,8 +2987,20 @@ defmodule MPP.Methods.TempoTest do
       assert :ok =
                Tempo.validate_config!(%{
                  "rpc_url" => @rpc_url,
-                 "fee_payer_url" => @hosted_url
+                 "fee_payer_url" => @hosted_url,
+                 "sponsor_budget_id" => "Hosted-Wallet",
+                 "store" => ConCacheStore
                })
+    end
+
+    test "requires an explicit hosted sponsor budget identity" do
+      assert_raise ArgumentError, ~r/requires a non-empty sponsor_budget_id/, fn ->
+        Tempo.validate_config!(%{
+          "rpc_url" => @rpc_url,
+          "fee_payer_url" => @hosted_url,
+          "store" => ConCacheStore
+        })
+      end
     end
 
     test "raises when fee_payer_url is combined with fee_payer_private_key" do
@@ -2736,7 +3032,12 @@ defmodule MPP.Methods.TempoTest do
     setup %{charge: charge} do
       charge = %{
         charge
-        | method_details: Map.put(charge.method_details, "fee_payer_url", @hosted_url)
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer_url" => @hosted_url,
+              "sponsor_budget_id" => "hosted-wallet",
+              "store" => start_sponsor_store()
+            })
       }
 
       {:ok, charge: charge}
@@ -2801,7 +3102,20 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
-  defp build_hosted_client_tx do
+  defp start_sponsor_store do
+    cache_name = :"#{__MODULE__}.SponsorBudget.#{System.unique_integer([:positive])}"
+    start_supervised!(ConCacheStore.child_spec(name: cache_name))
+    {ConCacheStore, name: cache_name}
+  end
+
+  defp sponsor_budget_state(charge, private_key) do
+    {:ok, sponsor_id} = Onchain.Signer.address_from_key(private_key)
+    {ConCacheStore, opts} = charge.method_details["store"]
+    key = "mpp:sponsor-budget:42431:#{String.downcase(sponsor_id)}"
+    ConCacheStore.get(key, opts)
+  end
+
+  defp build_sponsored_client_tx(opts) do
     TempoTxBuilder.build_fee_payer_transfer(
       private_key: @client_private_key,
       token: @token_address,
@@ -2810,10 +3124,14 @@ defmodule MPP.Methods.TempoTest do
       chain_id: 42_431,
       rpc_url: @rpc_url,
       gas_limit: 1_000_000,
-      nonce: 0,
+      nonce: Keyword.fetch!(opts, :nonce),
       nonce_key: expiring_nonce_key_int(),
       valid_before: future_valid_before()
     )
+  end
+
+  defp build_hosted_client_tx do
+    build_sponsored_client_tx(nonce: 0)
   end
 
   defp hosted_fill_tx_map(tx) do

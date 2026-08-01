@@ -66,6 +66,22 @@ defmodule MPP.Client.Transport.HTTPTest do
     end
   end
 
+  describe "retry_after/1" do
+    test "parses the emitted delta-seconds form" do
+      response = Req.Response.new(status: 402, headers: %{"retry-after" => [" 17 "]})
+      assert {:ok, 17} = HTTP.retry_after(response)
+    end
+
+    test "rejects missing, repeated, non-integer, and non-positive values" do
+      assert :error = HTTP.retry_after(Req.Response.new(status: 402))
+
+      for values <- [["1", "2"], ["tomorrow"], ["0"], ["-1"], ["12 seconds"]] do
+        response = Req.Response.new(status: 402, headers: %{"retry-after" => values})
+        assert :error = HTTP.retry_after(response)
+      end
+    end
+  end
+
   # -- get_challenges/1 -----------------------------------------------------------
 
   describe "get_challenges/1" do
@@ -231,6 +247,21 @@ defmodule MPP.Client.Transport.HTTPTest do
         )
 
       assert Req.Request.get_header(updated, "accept-payment") == []
+    end
+
+    test "supports binary and absent request URLs" do
+      binary_url_request = %Req.Request{url: "https://app.example.com/api"}
+      absent_url_request = %Req.Request{url: nil}
+
+      assert ["tempo/charge"] =
+               binary_url_request
+               |> HTTP.set_accept_payment_from_providers([{"tempo", "charge"}])
+               |> Req.Request.get_header("accept-payment")
+
+      assert ["tempo/charge"] =
+               absent_url_request
+               |> HTTP.set_accept_payment_from_providers([{"tempo", "charge"}])
+               |> Req.Request.get_header("accept-payment")
     end
   end
 

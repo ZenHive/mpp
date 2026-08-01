@@ -479,22 +479,34 @@ defmodule MPP.Mcp do
   end
 
   defp error_response(request, code, message, challenges, %Errors{} = error) do
+    data = %{
+      "httpStatus" => error.status,
+      "challenges" => Enum.map(challenges, &challenge_to_map/1),
+      "problem" => Errors.to_map(error)
+    }
+
+    data =
+      case error.retry_after do
+        seconds when is_integer(seconds) -> Map.put(data, "retryAfter", seconds)
+        nil -> data
+      end
+
     %{
       "jsonrpc" => "2.0",
       "id" => Map.get(request, "id"),
       "error" => %{
         "code" => code,
         "message" => message,
-        "data" => %{
-          "httpStatus" => error.status,
-          "challenges" => Enum.map(challenges, &challenge_to_map/1),
-          "problem" => Errors.to_map(error)
-        }
+        "data" => data
       }
     }
   end
 
   defp mcp_error_code(%Errors{type: "https://paymentauth.org/problems/payment-required"}), do: @payment_required_code
+
+  defp mcp_error_code(%Errors{type: "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"}),
+    do: @payment_required_code
+
   defp mcp_error_code(%Errors{type: "https://paymentauth.org/problems/malformed-credential"}), do: @invalid_params_code
   defp mcp_error_code(%Errors{}), do: @verification_failed_code
 

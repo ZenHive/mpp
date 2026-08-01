@@ -50,8 +50,35 @@ defmodule MPP.Tempo.StoreTest do
     end
   end
 
+  describe "update/4" do
+    test "dispatches to a store module" do
+      update = fn :not_found -> {:put, 1, :created} end
+
+      assert {:ok, :created} = Store.update(TempoMemoryStore, "module-update", update)
+      assert {:ok, 1} = Store.get(TempoMemoryStore, "module-update")
+    end
+
+    test "merges configured ConCache opts with call opts", %{con_cache_store: store} do
+      {ConCacheStore, store_opts} = store
+      prefixed_store = {ConCacheStore, Keyword.put(store_opts, :key_prefix, "tenant:")}
+      update = fn :not_found -> {:put, :budget, :created} end
+
+      assert {:ok, :created} =
+               Store.update(prefixed_store, "mpp:sponsor-budget:1:wallet", update,
+                 ignore_key_prefix: true,
+                 ttl_ms: @ttl_ms
+               )
+
+      assert {:ok, :budget} = ConCacheStore.get("mpp:sponsor-budget:1:wallet", store_opts)
+
+      assert :not_found =
+               ConCacheStore.get("mpp:sponsor-budget:1:wallet", Keyword.put(store_opts, :key_prefix, "tenant:"))
+    end
+  end
+
   describe "storage_key/2" do
     test "returns the key unchanged when no prefix is configured" do
+      assert Store.storage_key("mpp:charge:0xabc") == "mpp:charge:0xabc"
       assert Store.storage_key("mpp:charge:0xabc", []) == "mpp:charge:0xabc"
     end
 
