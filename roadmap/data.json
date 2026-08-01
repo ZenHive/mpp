@@ -2602,7 +2602,7 @@
       "id": "78",
       "phase": 9,
       "bundle": "tempo",
-      "status": "in_progress",
+      "status": "done",
       "title": "Add aggregate in-flight sponsor budgets for Tempo fee sponsorship",
       "scores": {
         "d": 8,
@@ -2692,10 +2692,17 @@
         "otp",
         "external-api"
       ],
+      "shipped_in": "ddc46868fba57ccebb567c04709812b466123076",
       "body": "Add a fail-closed aggregate in-flight budget to Tempo fee-payer sponsorship so one sponsor identity has explicit worst-case fee and reservation-count ceilings across concurrent requests. Follow the reviewed local implementation plan at ~/.claude/plans/write-einen-plan-fluttering-adleman.md, but incorporate its final review corrections as load-bearing requirements: sponsorship must explicitly select an atomic store and the guarantee is scoped to the physical shared store; horizontally scaled nodes sponsoring the same wallet must use that same backend. Expiry must remain conservative relative to Tempo chain validity by applying a named clock-skew margin, and TTL must cover every still-chain-valid reservation plus that margin.\n\nKeep reserve-before-signing, three-phase ownership, state-derived TTL, fail-closed pinned limits, explicit hosted sponsor identity, bounded receipt reconciliation, and generic client-facing misconfiguration errors. Local sponsor identity may be validated at initialization but must be derived where request-time configuration is consumed because validate_config!/1 does not normalize config. Treat the live Moderato endpoint and official Tempo transaction specification as the provider-owned authority; mppx #699/#707 are implementation reference material. Preserve the disclosure embargo: committed files and commit messages describe only the capability and fix shape; full vulnerability detail remains outside git.\n",
       "created_at": "2026-08-01",
       "started_at": "2026-08-01",
+      "done_at": "2026-08-01",
       "scored_at": "2026-08-01",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1785584454314-e492fd90, ddc46868fba57ccebb567c04709812b466123076).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1785584454314-e492fd90",
       "cross_repo": []
     }
   ]
