@@ -38,7 +38,7 @@ defmodule MPP.VerifierPinnedPropertyTest do
 
   defp future_expires do
     DateTime.utc_now()
-    |> DateTime.add(600, :second)
+    |> DateTime.shift(minute: 10)
     |> DateTime.to_iso8601()
   end
 

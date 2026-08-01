@@ -431,7 +431,7 @@ defmodule MPP.Plug do
   # Computes an RFC 3339 expiration timestamp from a TTL in seconds.
   defp compute_expires(seconds) when is_integer(seconds) do
     DateTime.utc_now()
-    |> DateTime.add(seconds, :second)
+    |> DateTime.shift(second: seconds)
     |> DateTime.to_iso8601()
   end
 

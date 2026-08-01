@@ -17,8 +17,8 @@ defmodule MPP.ExpiresTest do
 
       assert {:ok, expires_dt, _} = DateTime.from_iso8601(expires)
 
-      lower = DateTime.add(before, 5 * 60 - 1, :second)
-      upper = DateTime.add(after_, 5 * 60 + 1, :second)
+      lower = DateTime.shift(before, second: 5 * 60 - 1)
+      upper = DateTime.shift(after_, second: 5 * 60 + 1)
 
       assert DateTime.compare(expires_dt, lower) in [:gt, :eq]
       assert DateTime.compare(expires_dt, upper) in [:lt, :eq]
@@ -43,8 +43,8 @@ defmodule MPP.ExpiresTest do
 
       assert {:ok, expires_dt, _} = DateTime.from_iso8601(expires)
 
-      lower = DateTime.add(before, 30 * 86_400 - 1, :second)
-      upper = DateTime.add(after_, 30 * 86_400 + 1, :second)
+      lower = DateTime.shift(before, second: 30 * 86_400 - 1)
+      upper = DateTime.shift(after_, second: 30 * 86_400 + 1)
 
       assert DateTime.compare(expires_dt, lower) in [:gt, :eq]
       assert DateTime.compare(expires_dt, upper) in [:lt, :eq]
@@ -63,7 +63,7 @@ defmodule MPP.ExpiresTest do
     test "accepts timezone-aware timestamps with explicit offset" do
       future =
         DateTime.utc_now()
-        |> DateTime.add(300, :second)
+        |> DateTime.shift(minute: 5)
         |> Calendar.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
       assert :ok = Expires.assert!(future)
@@ -84,7 +84,7 @@ defmodule MPP.ExpiresTest do
     end
 
     test "raises on expired timestamps" do
-      expired = DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -60, :second))
+      expired = DateTime.to_iso8601(DateTime.shift(DateTime.utc_now(), minute: -1))
 
       assert_raise PaymentExpiredError, ~r/Payment expired at #{expired}/, fn ->
         Expires.assert!(expired)

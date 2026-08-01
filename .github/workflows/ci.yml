@@ -1,8 +1,11 @@
 # Deterministic Elixir CI gate for pushes and PRs.
-# Mirrors the `mix precommit.full` alias so every push/PR gets format / compile /
-# credo / doctor / sobelow / test+cover / clone-detection (ex_dna) / arch+smell
-# (reach) / dialyzer evidence as PR checks, instead of needing a local reviewer
-# to fetch the branch and run the suite.
+# Invokes the `mix ci` (= `mix precommit.full`) alias directly so every push/PR
+# gets format / compile / credo / doctor / sobelow / test+cover /
+# clone-detection (ex_dna) / arch+smell (reach) / deps.audit / dialyzer /
+# AGENTS.md-freshness evidence as PR checks, instead of needing a local
+# reviewer to fetch the branch and run the suite. CI and local dev share one
+# gate definition (mix.exs `aliases/0`) instead of a hand-maintained step list
+# that can drift from it.
 #
 # Integration tests (`:integration` tag) are NOT run here — they need live
 # Moderato/Stripe/Sepolia credentials and run in integration.yml. The repo's
@@ -34,8 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     # No job-level MIX_ENV: like `mix precommit.full`, format/compile/credo/doctor/
     # sobelow run in :dev (so test/support/ — which lacks @spec on test helpers — is
-    # NOT compiled and graded by Doctor). The test step self-selects :test via cli/0
-    # preferred_envs (`"test.json": :test`), and `mix dialyzer` runs in :dev as local.
+    # NOT compiled and graded by Doctor). preferred_envs (cli/0) does NOT apply to
+    # alias steps, so the test step sets MIX_ENV=test explicitly via `mix cmd env`
+    # (see mix.exs `precommit`); dialyzer runs in :dev as it does locally.
     steps:
       - uses: actions/checkout@v7
 
@@ -59,38 +63,9 @@ jobs:
 
       - run: mix deps.get
 
-      - name: Compile (warnings as errors)
-        run: mix compile --warnings-as-errors
-
-      - name: Format check
-        run: mix format --check-formatted
-
-      # TODO/FIXME tags are tracked-debt visibility, not regressions — exclude
-      # so CI only fails on real Credo issues (development-philosophy.md
-      # § "TODO Comment Requirements").
-      - name: Credo (strict, excluding TODO/FIXME design tags)
-        run: mix credo --strict --ignore TagTODO,TagFIXME
-
-      - name: Doctor (--raise gates CI on doc/spec coverage)
-        run: mix doctor --raise
-
-      # --skip honors inline `# sobelow_skip` annotations (MPP is Plug-facing).
-      - name: Sobelow (honors inline skips)
-        run: mix sobelow --skip
-
-      # 95% floor — MPP is critical tier (money, signing, wire-format encoding).
-      - name: Tests + coverage gate (>=95%)
-        run: mix test.json --cover --cover-threshold 95 --summary-only --exclude cross_validation
-
-      # Zero-tolerance clone detection + architecture/smell policy — the two
-      # analyzer steps `mix precommit.full` runs after the base gate (reach policy
-      # in .reach.exs). Without these, a PR introducing a clone or arch smell would
-      # pass CI while failing the local gate.
-      - name: Clone detection (ex_dna, zero clones)
-        run: mix ex_dna --max-clones 0
-
-      - name: Architecture & smell checks (reach)
-        run: mix reach.check --arch --smells
-
-      - name: Dialyzer
-        run: mix dialyzer
+      # mix.exs `aliases/0` `ci: ["precommit.full"]` — see mix.exs for the
+      # step list (precommit: format, compile, credo, doctor, test+cover,
+      # sobelow; then ex_dna, reach.check, dialyzer.json, agents.check,
+      # deps.audit.gated).
+      - name: mix ci
+        run: mix ci

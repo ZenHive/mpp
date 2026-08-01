@@ -39,15 +39,19 @@ mix format                 # auto-format (Styler runs as plugin)
 mix docs                   # generate ExDoc
 
 mix ex_dna --max-clones 0          # clone detection (folded into precommit.full)
-mix reach.check --arch --smells    # architecture/smell checks (folded into precommit.full)
-mix precommit.full                 # canonical gate (see "Toolchain & check commands")
+mix reach.check --arch --smells --path lib   # architecture/smell checks (folded into precommit.full)
+mix deps.audit.gated               # advisory-freshness proof + deps.audit (folded into precommit.full)
+mix ci                             # canonical gate = mix precommit.full (see "Toolchain & check commands")
 ```
 
 ## Toolchain & check commands
 
 For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's Claude Code hooks or skills:
 
-- **Canonical gate:** `mix precommit.full` — runs format-check, compile (warnings-as-errors), credo `--strict` (with the `ex_slop` plugin via `.credo.exs`), doctor, the test+cover gate (95% — MPP is critical-tier: money, signing, wire-format encoding), sobelow, then the vibe_kit analyzer steps `ex_dna --max-clones 0` (zero-tolerance clone detection) and `reach.check --arch --smells` (architecture/smell checks, policy in `.reach.exs`), and finally dialyzer. `mix precommit` is the same minus those three trailing steps; `mix check.fast` is the seconds-long inner-loop (format + compile + credo).
+- **Canonical gate:** `mix ci` (= `mix precommit.full`) — runs format-check, compile (warnings-as-errors), credo `--strict` (with the `ex_slop` plugin via `.credo.exs`), doctor, the test+cover gate (95% — MPP is critical-tier: money, signing, wire-format encoding), sobelow, then the vibe_kit analyzer steps `ex_dna --max-clones 0` (zero-tolerance clone detection) and `reach.check --arch --smells --path lib` (architecture/smell checks, policy in `.reach.exs`), dialyzer, `agents.check`, and finally `deps.audit.gated`. `mix precommit` is the same minus those trailing steps; `mix check.fast` is the seconds-long inner-loop (format + compile + credo).
+- **`mix reach.check --arch --smells --path lib` gates from `.reach.exs`** (`smells: [strict: true]`). Smell findings must be **fixed, never added to an ignore list**. `--path lib` is load-bearing: reach otherwise auto-discovers roots via `*/lib` + `*/src` wildcards and picks up gitignored sibling checkouts (`mpp-docs-fork/src`) that don't exist on a CI runner, so the gate would grade different file sets locally and in CI.
+- **`deps.audit.gated`** proves the local advisory mirror is fresh (`bin/advisory-freshness.sh` in the onchain-stack coordination home) before running `deps.audit --ignore-file .mix_audit_ignore`, and asserts the mirror is populated afterward — `mix_audit` silently discards its own sync failure, so a stale *or absent* mirror would otherwise report false-green (the freshness script is a developer-host script and skips on CI, which is exactly where the post-audit count matters). It also fails if `MIX_AUDIT_ADVISORY_PATH` diverges from `MixAudit.Repo`'s hardcoded path, and if `cowboy` enters `mix.lock` while `.mix_audit_ignore` still ignores `GHSA-w4f7-4cxr-rv3c` (the ignore file takes advisory IDs only, never a package scope, and that advisory is genuine for cowboy `< 2.16.0`).
+- **`agents.check`** fails when `AGENTS.md` has drifted from this file (`sync-agents-md.sh --check`) — cross-family reviewers (codex/cursor/grok) read `AGENTS.md`, not this file directly.
 - **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
 - When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
 - Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules.
@@ -258,10 +262,7 @@ Also available:
 - Developer docs: https://mpp.dev/ (llms-full.txt for complete docs)
 - SDK index: https://mpp.dev/sdk — lists four official SDKs (TypeScript `mppx`, Python `pympp`, Rust `mpp-rs`, Go `mpp-go`) plus community SDKs (Elixir/ZenHive, Go/cp0x-org)
 - Non-cloned SDKs (`pympp`, `mpp-go`, community `cp0x-org/mppx`) — fetch on demand via `gh repo view` / MCP / WebFetch when cross-referencing
-- MCP server at `.mcp.json` — `mcp__mpp__*` tools for cross-referencing SDK source code:
-  - `search_source` / `read_source_file` / `get_file_tree` — work for **mppx**, **mpp-rs**, **pympp**, **tempo**
-  - `list_pages` / `search_docs` — not functional (docs not indexed); use WebFetch for mpp.dev content
-  - `mpp-specs` source — empty via MCP; use local `refs/mpp-specs/` instead
+- The `mpp` MCP server (`https://mpp.dev/api/mcp`, formerly `mcp__mpp__*`) is **no longer configured** in `.mcp.json` / `.cursor/mcp.json` / `.grok/config.toml`. Cross-reference SDK source from the local `refs/` clones (Read + OXC + QuickBEAM, above); use WebFetch for mpp.dev docs content.
 
 ### Upstream docs (mpp.dev)
 

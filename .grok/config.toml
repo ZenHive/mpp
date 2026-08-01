@@ -1,25 +1,11 @@
-# Project-scoped MCP configuration for Grok
-#
-# This complements .mcp.json (Claude Code), .cursor/mcp.json (Cursor),
-# and .codex/config.toml (Codex). Only the [mcp_servers] section is
-# supported in project-level files.
-
-[mcp_servers.mpp]
-# MPP SDK cross-reference tools (search/read upstream SDK source).
-url = "https://mpp.dev/api/mcp"
-enabled = true
-
 [mcp_servers.tidewave]
-# Tidewave project_eval escape hatch on the MPP dev endpoint.
 url = "http://localhost:4008/tidewave/mcp"
 enabled = true
 
 [mcp_servers.harness]
-# Native flat harness driver tools.
 url = "http://localhost:4018/harness/mcp"
 enabled = true
 
-[mcp_servers.harness_eval]
-# Tidewave on the harness dashboard endpoint.
+[mcp_servers.harness_tidewave]
 url = "http://localhost:4018/tidewave/mcp"
 enabled = true

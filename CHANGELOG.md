@@ -10,6 +10,74 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [0.11.0] — 2026-07-31
 
+### Changed — CI runs `mix ci`, and the security audit can no longer pass vacuously
+
+`.github/workflows/ci.yml` invokes the `mix ci` (= `mix precommit.full`) alias
+instead of a hand-maintained step list, so CI and local dev share one gate
+definition. Three properties of that gate needed shoring up before the shared
+definition was trustworthy:
+
+- **`deps.audit` runs last.** mix_audit signals a finding with `System.stop(1)`,
+  which is asynchronous — it returns, the alias proceeds, and the concurrent VM
+  shutdown truncates the next step. Exit status was always non-zero, but the log
+  showed an aborted dialyzer instead of the vulnerability report.
+- **`deps.audit.gated` proves the mirror was populated.** `MixAudit.Repo` discards
+  its clone/pull exit status, so a failed sync yields zero advisories and a
+  passing report. The freshness prover catches that on the developer host but is
+  a host script that skips on CI — precisely where a rate-limited clone would
+  have produced a green "No vulnerabilities found." over nothing. The gate now
+  also rejects a `MIX_AUDIT_ADVISORY_PATH` that diverges from `MixAudit.Repo`'s
+  hardcoded path (the prover honours the variable; the audit does not), and fails
+  if `cowboy` enters `mix.lock` while `.mix_audit_ignore` still ignores
+  GHSA-w4f7-4cxr-rv3c — `--ignore-file` takes advisory IDs only, never a package
+  scope, and that advisory is genuine for cowboy `< 2.16.0`.
+- **`reach.check` is pinned to `--path lib`.** Reach auto-discovers roots via
+  `*/lib` + `*/src` wildcards, which picks up gitignored sibling checkouts
+  (`mpp-docs-fork/src`) that don't exist on a runner. With `smells: [strict: true]`
+  now gating, an unpinned scope would have graded different file sets locally and
+  in CI.
+
+Host-script skips also print via `IO.puts` rather than `Mix.shell().info/1`,
+which `dialyzer.json --quiet` had silenced for the remainder of the run, and the
+"is this runnable" guard is an executable-bit check rather than `File.exists?/1`
+(true for directories and non-executable files, which raised an opaque
+`ErlangError :enoent`).
+
+### Changed — `{:descripex, "~> 0.11"}` → `{:descripex, "~> 0.12.0"}`
+
+descripex 0.12.0 changed `short_name` in `describe/1` output from an atom to a
+string — a consumer-visible contract change shipped at a *minor* bump, which the
+old two-segment `~> 0.11` (`>= 0.11.0 and < 1.0.0`) would have absorbed on any
+fresh resolution. The requirement is now three-segment (`< 0.13.0`); a 0.x
+package that breaks on minor earns the tighter form, and the cap gets raised
+deliberately after reading its release notes.
+
+mpp does not read `short_name` — nothing in `lib/` or `test/` references it, and
+the full suite (1061 tests) is green against descripex 0.12.0 with no code
+change. The break is in the *bound*, not the behaviour. This release was already
+a minor for other reasons, so the narrowing costs no extra version step.
+
+### Changed — self-caps removed; `styler` 1.11.0 → 1.12.2
+
+`{:styler, "~> 1.11.0"}` and `{:ex_ast, "~> 0.12.0"}` were three-segment
+self-caps blocking their own minor lines for no reason beyond how the bounds
+were written. Both dev/test only, so no effect on the published package. styler
+now resolves 1.12.2; ex_ast resolves 0.12.10 because `reach 2.8.2` declares
+`ex_ast ~> 0.12.0`. That transitive requirement is a choice rather than a wall —
+`override: true` gets past it, as cartouche does — but the override is
+unmeasured here: ex_ast 0.13.0 changed pattern-matching semantics (map patterns
+became subset matching) and reach's smell checks are built on those patterns, so
+it could quietly report fewer findings. `req` resolves to 0.7.2.
+
+styler 1.12 rewrote 19 lines of time arithmetic, `DateTime.add(dt, n, :second)`
+→ `DateTime.shift(dt, second: n)` (normalised to `minute:`/`hour:` where the
+literal allowed). These are **not** unconditionally equivalent — `shift/2` is
+calendar-aware and re-resolves the time zone, so on a DST zone it can differ
+from absolute-time addition. Every call site in `MPP.Expires` and `MPP.Plug`
+starts from `DateTime.utc_now/0`, and UTC has no DST, so the rewrite is safe
+here. Worth stating explicitly because the *tests* were rewritten the same way,
+which means a green suite alone would not have proven it.
+
 ### Changed — dependency floors raised so the req 0.7 lift actually lands
 
 - `{:onchain, "~> 0.10"}` → `{:onchain, "~> 0.11"}` and

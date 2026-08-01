@@ -151,7 +151,7 @@ defmodule MPP.Demo.RouterTest do
 
   defp expires_for(config) do
     DateTime.utc_now()
-    |> DateTime.add(config.expires_in, :second)
+    |> DateTime.shift(second: config.expires_in)
     |> DateTime.to_iso8601()
   end
 

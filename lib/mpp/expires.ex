@@ -124,7 +124,7 @@ defmodule MPP.Expires do
 
   defp offset_iso8601(seconds) when is_number(seconds) do
     DateTime.utc_now()
-    |> DateTime.add(trunc(seconds), :second)
+    |> DateTime.shift(second: trunc(seconds))
     |> DateTime.to_iso8601()
   end
 

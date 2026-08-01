@@ -149,7 +149,7 @@ defmodule MPP.PlugTest do
 
   defp expires_for(config) do
     DateTime.utc_now()
-    |> DateTime.add(config.expires_in, :second)
+    |> DateTime.shift(second: config.expires_in)
     |> DateTime.to_iso8601()
   end
 
@@ -183,7 +183,7 @@ defmodule MPP.PlugTest do
 
     expires =
       DateTime.utc_now()
-      |> DateTime.add(expires_in, :second)
+      |> DateTime.shift(second: expires_in)
       |> DateTime.to_iso8601()
 
     challenge =
@@ -846,7 +846,7 @@ defmodule MPP.PlugTest do
 
       past_time =
         DateTime.utc_now()
-        |> DateTime.add(-3600, :second)
+        |> DateTime.shift(hour: -1)
         |> DateTime.to_iso8601()
 
       challenge =

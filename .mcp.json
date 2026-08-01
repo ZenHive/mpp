@@ -1,9 +1,5 @@
 {
   "mcpServers": {
-    "mpp": {
-      "type": "http",
-      "url": "https://mpp.dev/api/mcp"
-    },
     "tidewave": {
       "type": "http",
       "url": "http://localhost:4008/tidewave/mcp"
@@ -12,7 +8,7 @@
       "type": "http",
       "url": "http://localhost:4018/harness/mcp"
     },
-    "harness_eval": {
+    "harness_tidewave": {
       "type": "http",
       "url": "http://localhost:4018/tidewave/mcp"
     }

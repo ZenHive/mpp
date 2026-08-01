@@ -72,7 +72,7 @@ defmodule MPP.VerifierTest do
 
   defp future_expires do
     DateTime.utc_now()
-    |> DateTime.add(300, :second)
+    |> DateTime.shift(minute: 5)
     |> DateTime.to_iso8601()
   end
 
@@ -211,7 +211,7 @@ defmodule MPP.VerifierTest do
 
   describe "verify/2 expiration" do
     test "expired challenge returns payment_expired" do
-      expired = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
+      expired = DateTime.utc_now() |> DateTime.shift(minute: -1) |> DateTime.to_iso8601()
       credential = build_credential(expires: expired)
       opts = verify_opts()
 
@@ -230,7 +230,7 @@ defmodule MPP.VerifierTest do
     end
 
     test "non-expired challenge passes" do
-      future = DateTime.utc_now() |> DateTime.add(300, :second) |> DateTime.to_iso8601()
+      future = DateTime.utc_now() |> DateTime.shift(minute: 5) |> DateTime.to_iso8601()
       credential = build_credential(expires: future)
       opts = verify_opts()
 
