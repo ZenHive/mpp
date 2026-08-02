@@ -8,6 +8,26 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-02
+
+### Security — aggregate budgets for Tempo fee sponsorship
+
+Tempo fee sponsorship now enforces configurable aggregate in-flight fee and
+reservation ceilings across concurrent requests. Reservations are tracked
+atomically through preparation, broadcast, and receipt confirmation, with
+conservative expiry and optional bounded receipt reconciliation. Capacity
+responses remain payable HTTP 402 / MCP payment-required responses and include
+retry timing without exposing configured limits.
+
+**Breaking:** Every Tempo configuration that enables local or hosted fee
+sponsorship must now explicitly select an atomic `"store"` implementing
+`MPP.Tempo.Store.update/3`. Configurations that relied on the app-started default
+store now fail validation at initialization. Single-node deployments can select
+`MPP.Tempo.ConCacheStore`; horizontally scaled deployments must select one shared
+atomic backend for every node sponsoring the same wallet. Hosted sponsorship
+must also provide a stable, non-empty `"sponsor_budget_id"` shared by every
+endpoint for that wallet.
+
 ## [0.11.0] — 2026-07-31
 
 ### Changed — CI runs `mix ci`, and the security audit can no longer pass vacuously
