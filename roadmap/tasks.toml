@@ -355,7 +355,7 @@ phase = 3
 bundle = "discovery"
 status = "pending"
 title = "OpenAPI discovery document generation"
-scores = { d = 4, b = 7, u = 8 }
+scores = { d = 4, b = 8, u = 8 }
 markers = ["parallel"]
 acceptance_criteria = [
   "OpenAPI 3.1.0-valid output",
@@ -488,7 +488,7 @@ phase = 5
 bundle = "evm"
 status = "pending"
 title = "EVM credentialTypes backfill"
-scores = { d = 3, b = 5, u = 6 }
+scores = { d = 3, b = 7, u = 8 }
 acceptance_criteria = [
   "challenge_method_details/1 includes credentialTypes",
   "Default permit2Address = canonical; overridable via method_config",
@@ -803,7 +803,7 @@ phase = 10
 bundle = "session"
 status = "pending"
 title = "Channel state and voucher types"
-scores = { d = 5, b = 6, u = 7 }
+scores = { d = 5, b = 9, u = 8 }
 depends_on = [28, 29]
 acceptance_criteria = [
   "Channel ID computation matches mppx/mpp-rs for same inputs",
@@ -828,7 +828,7 @@ phase = 10
 bundle = "session"
 status = "pending"
 title = "Session credential actions"
-scores = { d = 5, b = 6, u = 6 }
+scores = { d = 5, b = 9, u = 8 }
 depends_on = [30]
 acceptance_criteria = [
   "Four action handlers: open, voucher, topUp, close",
@@ -957,7 +957,7 @@ bundle = "client-sdk"
 milestone = "v0_13"
 status = "pending"
 title = "Payment-aware Req plugin"
-scores = { d = 5, b = 8, u = 8 }
+scores = { d = 5, b = 10, u = 10 }
 depends_on = ["33a", "33b"]
 acceptance_criteria = [
   "Req plugin with attach/2 for pipeline integration",
@@ -984,7 +984,7 @@ bundle = "client-sdk"
 milestone = "v0_13"
 status = "pending"
 title = "MCP client transport"
-scores = { d = 3, b = 6, u = 7 }
+scores = { d = 5, b = 9, u = 9 }
 depends_on = [32, "33b", "33c"]
 acceptance_criteria = [
   "Implements Transport behaviour for JSON-RPC messages",
@@ -1010,7 +1010,7 @@ bundle = "client-sdk"
 milestone = "v0_13"
 status = "pending"
 title = "Built-in charge providers"
-scores = { d = 6, b = 8, u = 9 }
+scores = { d = 6, b = 10, u = 10 }
 depends_on = ["33a", "33b"]
 acceptance_criteria = [
   "Built-in Tempo charge provider implementing PaymentProvider",
@@ -1043,7 +1043,7 @@ phase = 13
 bundle = "lightning"
 status = "pending"
 title = "Lightning charge method"
-scores = { d = 6, b = 5, u = 5 }
+scores = { d = 6, b = 8, u = 8 }
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "challenge_method_details/1 returns invoice, paymentHash, network",
@@ -1065,7 +1065,7 @@ phase = 13
 bundle = "lightning"
 status = "pending"
 title = "Lightning session method"
-scores = { d = 8, b = 5, u = 4 }
+scores = { d = 8, b = 9, u = 8 }
 depends_on = [19]
 acceptance_criteria = [
   "Session lifecycle: open → bearer → topUp → close",
@@ -1093,7 +1093,7 @@ phase = 14
 bundle = "solana"
 status = "pending"
 title = "Solana charge method"
-scores = { d = 6, b = 6, u = 5 }
+scores = { d = 6, b = 9, u = 9 }
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "Pull mode: verify signed tx bytes, broadcast, confirm",
@@ -1121,7 +1121,7 @@ phase = 15
 bundle = "card"
 status = "pending"
 title = "Card charge method"
-scores = { d = 8, b = 5, u = 4 }
+scores = { d = 8, b = 10, u = 8 }
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "RSA key pair generation and JWKS endpoint support",
@@ -1150,7 +1150,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "Stellar charge method"
-scores = { d = 7, b = 5, u = 6 }
+scores = { d = 7, b = 8, u = 7 }
 acceptance_criteria = [
   "MPP.Methods.Stellar implements the MPP.Method behaviour (pull XDR + push hash modes)",
   "Live Stellar testnet (Soroban RPC) integration: at least one real success and one relevant real error per mode; missing credentials flunk loudly with exact setup instructions",
@@ -1171,7 +1171,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "EVM Permit2 credential path"
-scores = { d = 7, b = 7, u = 7 }
+scores = { d = 7, b = 8, u = 8 }
 acceptance_criteria = [
   "Permit2 EIP-712 signing/verification matches the canonical Permit2 contract (Uniswap-owned Permit2 contract + draft-evm-charge-00.md:392-495 are the authorities)",
   "Live Sepolia integration: one real successful Permit2 settlement and one relevant real error (e.g. expired or overspent permit rejected); missing credentials flunk loudly with exact setup instructions",
@@ -1192,7 +1192,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "EVM EIP-3009 authorization credential"
-scores = { d = 6, b = 5, u = 5 }
+scores = { d = 6, b = 10, u = 10 }
 acceptance_criteria = [
   "transferWithAuthorization flow matches the EIP-3009 semantics of Circle-owned USDC/EURC contracts (provider-owned authority) per draft-evm-charge-00.md:592-645",
   "challengeHash used as the EIP-3009 nonce; replay of the same authorization is rejected (regression test proves it)",
@@ -1275,7 +1275,7 @@ phase = 17
 bundle = "transport-ws"
 status = "pending"
 title = "WebSocket transport binding"
-scores = { d = 5, b = 6, u = 5 }
+scores = { d = 5, b = 8, u = 7 }
 acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match the MPP transport specification; reference SDKs are compatibility evidence", "Retry/backoff posture matches upstream and a dropped/rejected connection does not amplify payment retries", "End-to-end integration test uses an actual local WebSocket client/server connection for successful pay-and-retry plus a relevant protocol/connection error; mock-only coverage is insufficient"]
 touches = ["mix.exs", "lib/mpp/client/transport.ex", "lib/mpp/transports/websocket/", "lib/mpp/mcp.ex", "test/mpp/transports/websocket/"]
 assignee = "grok"
@@ -1294,7 +1294,7 @@ phase = 17
 bundle = "transport-jsonrpc"
 status = "pending"
 title = "JSON-RPC transport (non-MCP)"
-scores = { d = 4, b = 4, u = 4 }
+scores = { d = 4, b = 7, u = 7 }
 acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code and challenge placement match the MPP transport specification; reference SDKs are compatibility evidence", "Client-side `MPP.Client.Transport` implementation and server-side adapter usable from Plug", "End-to-end integration test over the real local Plug/JSON-RPC boundary covers successful payment retry and a relevant payment-required/error response"]
 touches = ["lib/mpp/client/transport.ex", "lib/mpp/transports/json_rpc/", "lib/mpp/plug.ex", "lib/mpp/mcp.ex", "test/mpp/transports/json_rpc/", "test/mpp/plug_test.exs"]
 assignee = "grok"
@@ -1313,7 +1313,7 @@ phase = 10
 bundle = "session"
 status = "pending"
 title = "Tempo subscriptions"
-scores = { d = 6, b = 6, u = 5 }
+scores = { d = 6, b = 9, u = 8 }
 depends_on = [31]
 acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches the normative Tempo subscription draft; reference SDKs are compatibility evidence", "Fee-payer sponsored subscription path", "TIP-1034 voucher and TIP-20 channel-id golden vectors are pinned as deterministic conformance tests against refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly with exact setup instructions"]
 touches = ["lib/mpp/intents/session.ex", "lib/mpp/session/", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/session_receipt.ex", "test/mpp/session/", "test/mpp/methods/tempo_integration_test.exs"]
@@ -1331,7 +1331,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "Hedera charge method"
-scores = { d = 6, b = 4, u = 4 }
+scores = { d = 6, b = 7, u = 7 }
 acceptance_criteria = ["MPP.Methods.Hedera implements the Method behaviour and the current MPP Hedera charge draft", "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available", "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction; missing credentials flunk loudly with exact setup instructions"]
 touches = ["mix.exs", "lib/mpp/methods/hedera.ex", "test/mpp/methods/hedera_test.exs", "test/mpp/methods/hedera_integration_test.exs"]
 assignee = "grok"
@@ -1430,7 +1430,7 @@ phase = 1
 bundle = "core-protocol"
 status = "pending"
 title = "Hash credential type audit + spec backfill"
-scores = { d = 2, b = 5, u = 5 }
+scores = { d = 2, b = 7, u = 8 }
 acceptance_criteria = [
   "Audit confirms whether `MPP.Credential` already supports the `hash` credential type per latest spec",
   "If missing: parse / serialize / verify path for `hash` credentials added",
@@ -1963,7 +1963,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "Near Intents charge method"
-scores = { d = 7, b = 4, u = 4 }
+scores = { d = 7, b = 8, u = 8 }
 depends_on = [55]
 acceptance_criteria = ["MPP.Methods.NearIntents implements the MPP.Method behaviour for charge intent (hash credential path)", "Live testnet integration against the Near Intents endpoints (1Click API + Origin RPC): at least one real successful settlement and one relevant real error; missing credentials flunk loudly with exact setup instructions", "Settlement + refund-recovery semantics (mpp-specs #299 clarifications) pinned by integration test against the provider-owned docs", "Mocks/fixtures derived from observed live responses only"]
 out_of_scope = ["Session/subscription intents for Near", "x402 interop"]
@@ -1982,7 +1982,7 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "USDC charge method"
-scores = { d = 10, b = 7, u = 7 }
+scores = { d = 10, b = 10, u = 10 }
 depends_on = [21, 40]
 acceptance_criteria = ["MPP.Methods.USDC implements every normative profile in the current draft-usdc-charge specification: direct EVM EIP-3009, direct Solana, direct Stacks USDCx/SIP-010, and Circle Gateway Transfer", "USDC-specific native-asset identity, token-control, replay, and receipt requirements are enforced across all profiles", "Each direct-chain profile has live provider-owned test-network evidence for at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward", "Circle Gateway has at least one sandbox success (attestation/transfer accepted) and one relevant sandbox error such as rejected or expired attestation; missing credentials for any live leg flunk loudly with exact setup instructions", "The EVM profile reuses Task 40's EIP-3009 primitives instead of duplicating them; the Solana profile reuses Task 21's chain integration"]
 out_of_scope = ["Re-implementing EIP-3009 primitives (Task 40)", "Re-implementing generic Solana transfer primitives (Task 21)"]
@@ -2003,7 +2003,7 @@ phase = 12
 bundle = "client-sdk"
 status = "pending"
 title = "Add x402 v2 exact interoperability"
-scores = { d = 9, b = 7, u = 7 }
+scores = { d = 9, b = 10, u = 9 }
 depends_on = [40, "33c"]
 acceptance_criteria = ["x402 v2 PAYMENT-REQUIRED, PAYMENT-SIGNATURE, and PAYMENT-RESPONSE headers round-trip against official x402 vectors without being accepted as native Payment-auth headers", "The HTTP client discovers supported x402 exact offers alongside native MPP challenges, feeds both through Task 33c's shared selection policy, and emits an exact EIP-3009 credential using Task 40's primitives", "Server-side EVM exact support verifies and settles through a configurable x402 facilitator, returns the official settlement response shape, and can coexist with native MPP on one endpoint", "At least one real successful settlement and one relevant real rejection are observed against an official-compatible live facilitator/test environment before implementation; integration tests pin the observed verify/settle/error semantics and missing credentials flunk loudly with exact setup instructions", "A localnet end-to-end test proves pay-and-retry plus replay rejection without replacing the required live-facilitator evidence", "Current refs/mppx/src/x402 and refs/mppx/src/client/Transport.ts behavior is cross-validated as SDK-compatibility evidence, while the official x402 v2 specification and live facilitator remain authoritative"]
 out_of_scope = ["x402 schemes or chain families not implemented by the current reference SDK at pickup; record them explicitly rather than silently approximating them", "Re-implementing EIP-3009 authorization primitives owned by Task 40"]

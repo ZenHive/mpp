@@ -460,10 +460,10 @@
       "title": "OpenAPI discovery document generation",
       "scores": {
         "d": 4,
-        "b": 7,
+        "b": 8,
         "u": 8
       },
-      "eff": 1.88,
+      "eff": 2.0,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [
@@ -602,10 +602,10 @@
       "title": "EVM credentialTypes backfill",
       "scores": {
         "d": 3,
-        "b": 5,
-        "u": 6
+        "b": 7,
+        "u": 8
       },
-      "eff": 1.83,
+      "eff": 2.5,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -982,10 +982,10 @@
       "title": "Channel state and voucher types",
       "scores": {
         "d": 5,
-        "b": 6,
-        "u": 7
+        "b": 9,
+        "u": 8
       },
-      "eff": 1.3,
+      "eff": 1.7,
       "dep_layer": 2,
       "unlocks": 2,
       "markers": [],
@@ -1019,10 +1019,10 @@
       "title": "Session credential actions",
       "scores": {
         "d": 5,
-        "b": 6,
-        "u": 6
+        "b": 9,
+        "u": 8
       },
-      "eff": 1.2,
+      "eff": 1.7,
       "dep_layer": 3,
       "unlocks": 1,
       "markers": [],
@@ -1162,10 +1162,10 @@
       "title": "Payment-aware Req plugin",
       "scores": {
         "d": 5,
-        "b": 8,
-        "u": 8
+        "b": 10,
+        "u": 10
       },
-      "eff": 1.6,
+      "eff": 2.0,
       "dep_layer": 1,
       "unlocks": 2,
       "markers": [],
@@ -1202,11 +1202,11 @@
       "status": "pending",
       "title": "MCP client transport",
       "scores": {
-        "d": 3,
-        "b": 6,
-        "u": 7
+        "d": 5,
+        "b": 9,
+        "u": 9
       },
-      "eff": 2.17,
+      "eff": 1.8,
       "dep_layer": 2,
       "unlocks": 0,
       "markers": [],
@@ -1247,10 +1247,10 @@
       "title": "Built-in charge providers",
       "scores": {
         "d": 6,
-        "b": 8,
-        "u": 9
+        "b": 10,
+        "u": 10
       },
-      "eff": 1.42,
+      "eff": 1.67,
       "dep_layer": 1,
       "unlocks": 0,
       "markers": [],
@@ -1291,10 +1291,10 @@
       "title": "Lightning charge method",
       "scores": {
         "d": 6,
-        "b": 5,
-        "u": 5
+        "b": 8,
+        "u": 8
       },
-      "eff": 0.83,
+      "eff": 1.33,
       "dep_layer": 0,
       "unlocks": 1,
       "markers": [],
@@ -1326,10 +1326,10 @@
       "title": "Lightning session method",
       "scores": {
         "d": 8,
-        "b": 5,
-        "u": 4
+        "b": 9,
+        "u": 8
       },
-      "eff": 0.56,
+      "eff": 1.06,
       "dep_layer": 1,
       "unlocks": 0,
       "markers": [],
@@ -1365,10 +1365,10 @@
       "title": "Solana charge method",
       "scores": {
         "d": 6,
-        "b": 6,
-        "u": 5
+        "b": 9,
+        "u": 9
       },
-      "eff": 0.92,
+      "eff": 1.5,
       "dep_layer": 0,
       "unlocks": 1,
       "markers": [],
@@ -1402,10 +1402,10 @@
       "title": "Card charge method",
       "scores": {
         "d": 8,
-        "b": 5,
-        "u": 4
+        "b": 10,
+        "u": 8
       },
-      "eff": 0.56,
+      "eff": 1.13,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1441,10 +1441,10 @@
       "title": "Stellar charge method",
       "scores": {
         "d": 7,
-        "b": 5,
-        "u": 6
+        "b": 8,
+        "u": 7
       },
-      "eff": 0.79,
+      "eff": 1.07,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1476,10 +1476,10 @@
       "title": "EVM Permit2 credential path",
       "scores": {
         "d": 7,
-        "b": 7,
-        "u": 7
+        "b": 8,
+        "u": 8
       },
-      "eff": 1.0,
+      "eff": 1.14,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1510,10 +1510,10 @@
       "title": "EVM EIP-3009 authorization credential",
       "scores": {
         "d": 6,
-        "b": 5,
-        "u": 5
+        "b": 10,
+        "u": 10
       },
-      "eff": 0.83,
+      "eff": 1.67,
       "dep_layer": 0,
       "unlocks": 2,
       "markers": [],
@@ -1638,10 +1638,10 @@
       "title": "WebSocket transport binding",
       "scores": {
         "d": 5,
-        "b": 6,
-        "u": 5
+        "b": 8,
+        "u": 7
       },
-      "eff": 1.1,
+      "eff": 1.5,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1675,10 +1675,10 @@
       "title": "JSON-RPC transport (non-MCP)",
       "scores": {
         "d": 4,
-        "b": 4,
-        "u": 4
+        "b": 7,
+        "u": 7
       },
-      "eff": 1.0,
+      "eff": 1.75,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1712,10 +1712,10 @@
       "title": "Tempo subscriptions",
       "scores": {
         "d": 6,
-        "b": 6,
-        "u": 5
+        "b": 9,
+        "u": 8
       },
-      "eff": 0.92,
+      "eff": 1.42,
       "dep_layer": 4,
       "unlocks": 0,
       "markers": [],
@@ -1752,10 +1752,10 @@
       "title": "Hedera charge method",
       "scores": {
         "d": 6,
-        "b": 4,
-        "u": 4
+        "b": 7,
+        "u": 7
       },
-      "eff": 0.67,
+      "eff": 1.17,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1897,10 +1897,10 @@
       "title": "Hash credential type audit + spec backfill",
       "scores": {
         "d": 2,
-        "b": 5,
-        "u": 5
+        "b": 7,
+        "u": 8
       },
-      "eff": 2.5,
+      "eff": 3.75,
       "dep_layer": 0,
       "unlocks": 1,
       "markers": [],
@@ -2931,10 +2931,10 @@
       "title": "Near Intents charge method",
       "scores": {
         "d": 7,
-        "b": 4,
-        "u": 4
+        "b": 8,
+        "u": 8
       },
-      "eff": 0.57,
+      "eff": 1.14,
       "dep_layer": 1,
       "unlocks": 0,
       "markers": [],
@@ -2973,10 +2973,10 @@
       "title": "USDC charge method",
       "scores": {
         "d": 10,
-        "b": 7,
-        "u": 7
+        "b": 10,
+        "u": 10
       },
-      "eff": 0.7,
+      "eff": 1.0,
       "dep_layer": 1,
       "unlocks": 0,
       "markers": [],
@@ -3018,10 +3018,10 @@
       "title": "Add x402 v2 exact interoperability",
       "scores": {
         "d": 9,
-        "b": 7,
-        "u": 7
+        "b": 10,
+        "u": 9
       },
-      "eff": 0.78,
+      "eff": 1.06,
       "dep_layer": 2,
       "unlocks": 0,
       "markers": [],
