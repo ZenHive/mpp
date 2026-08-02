@@ -74,6 +74,18 @@ jobs:
 
       - run: mix deps.get
 
+      # test/support/tempo_access_key.mjs signs Tempo access keys with viem.
+      # The root package.json is gitignored (JS is dev/test-only — MPP ships no
+      # JS runtime to consumers), so CI installs the dependency explicitly,
+      # pinned to the version used locally. Without this, the access-key tests
+      # fail with ERR_MODULE_NOT_FOUND on a runner that has node but no deps.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install viem (Tempo access-key script)
+        run: npm install --no-save viem@2.47.6
+
       - name: Compile
         run: mix compile
 
