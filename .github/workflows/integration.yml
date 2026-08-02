@@ -22,11 +22,11 @@
 #   EVM_RPC_URL             Generic EVM RPC (falls back to Sepolia if unset in tests)
 #   EVM_PRIVATE_KEY         Generic EVM funded key (falls back to Sepolia if unset)
 #
-# OPERATOR ACTION (not code): to make this a required check, mark the
-# "Integration" check required in branch protection for `development` and `main`
-# (Settings -> Branches). Fork PRs cannot read secrets, so this job will flunk on
-# external forks — expected for a credential-gated suite; the nightly cron is the
-# real safety net.
+# This job is deliberately NOT a required status check: harness lands approved
+# runs by ff-pushing straight to `development`, and a required check would block
+# those pushes. The nightly cron plus the PR trigger are the signal. Fork PRs
+# cannot read secrets, so the job flunks on external forks — expected for a
+# credential-gated suite.
 
 name: Integration
 
@@ -35,7 +35,7 @@ on:
     - cron: "0 6 * * *" # nightly 06:00 UTC
   workflow_dispatch:
   pull_request:
-    branches: [development, main]
+    branches: [development]
 
 permissions:
   contents: read
