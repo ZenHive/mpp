@@ -72,18 +72,19 @@ defmodule MPP.MixProject do
       {:oxc, "~> 0.16", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
-      # On-chain verification (Tempo and EVM methods) — 0.11 for the
-      # Onchain.RPC surface the EVM method delegates to, and because 0.11.0 is
-      # the release carrying `cartouche ~> 0.6`. A lower bound would permit
-      # 0.11.0 without requiring it, leaving an existing lock on cartouche 0.5.x
-      # (and therefore req 0.6.x) in place indefinitely.
-      {:onchain, "~> 0.11"},
+      # On-chain verification (Tempo and EVM methods). Floor requires the
+      # Onchain.RPC surface the EVM method delegates to; it also pulls
+      # `cartouche ~> 0.6` (and therefore req 0.6.x) rather than permitting an
+      # existing lock on cartouche 0.5.x to sit indefinitely.
+      # Three-segment: mpp is a leaf app, so capping at the next minor costs no
+      # consumer anything and makes an onchain minor a deliberate step here.
+      {:onchain, "~> 0.12.0"},
 
-      # Tempo chain primitives (Tempo method) — 0.8 for the sender-recovery +
-      # Onchain.Tempo.RPC.simulate/3 primitives the fee-payer pre-broadcast
-      # simulation (MPP.Methods.Tempo) calls directly, and for the same
-      # cartouche-floor reason as onchain above.
-      {:onchain_tempo, "~> 0.8"},
+      # Tempo chain primitives (Tempo method) — sender-recovery plus
+      # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
+      # simulation (MPP.Methods.Tempo) calls directly. Same cartouche-floor
+      # reason, and three-segment for the same reason, as onchain above.
+      {:onchain_tempo, "~> 0.9.0"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
@@ -184,7 +185,7 @@ defmodule MPP.MixProject do
         # (Elixir 1.20's `mix cmd` no longer parses a leading VAR=val prefix).
         "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration --exclude cross_validation",
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
-        "sobelow --skip"
+        "sobelow --skip --exit low"
       ],
       # CI mirror — folds the vibe_kit analyzer steps (clone detection + arch/smell
       # checks), the gated security audit, dialyzer, and the AGENTS.md freshness
