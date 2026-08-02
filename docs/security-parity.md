@@ -75,11 +75,12 @@ mpp-specs: no advisories.
 
 ## Open hardening items
 
-A small number of secure-defaults / defense-in-depth parity items from the upstream audit remain
-open. Per the disclosure policy above, their detail is tracked in **private draft security
-advisories** (Security → Advisories), not enumerated here. Each moves to the ✓ table when its fix
-ships. As of the last audit: **4 open items** (none a confirmed standalone critical; the
-exploitable-replay facets are already covered by Tasks 35/46/50 above).
+**0 open items** as of 2026-08-02. Every advisory tracked against this repo is published with its
+patched release (latest: `GHSA-j4j7-7xpr-c7cr`, fixed in 0.12.0); the earlier "4 open items" from
+the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
+(published 2026-06-29). When a new gap is found, its detail goes to a **private draft security
+advisory** (Security → Advisories) per the disclosure policy above and moves to the ✓ table when
+the fix ships.
 
 ---
 
