@@ -58,6 +58,7 @@ mpp-specs: no advisories.
 | mpp-rs store-on-by-default (`server/tempo.rs`) / mppx `Store.memory()` default | Replay of on-chain tx/credential when no store is configured (issue #7; published `GHSA-vp5h-xh25-44wf`) | `MPP.Tempo.Store.resolve/1` default-on + app-started `ConCacheStore`; `store: false` is the explicit opt-out — `store.ex`, `application.ex` (Task 76, ships 0.7.0) |
 | mpp-rs `put_if_absent` fails closed / mppx atomic `update` | TOCTOU replay window in non-atomic dedup commit (published `GHSA-w8j7-7qc3-5f24`) | `check_and_mark/2` is a required callback; non-atomic stores rejected at init; sequential get+put fallback removed — `store.ex`, `tempo.ex`, `evm.ex`, `plug.ex` (Task 77, ships 0.7.0) |
 | mppx #646 hosted fee-payer signature normalization | Sponsor cosignature mis-encoded when the hosted fee payer returns `yParity` as a hex string rather than a number, yielding an invalid or wrong-recovery co-signed tx | `parse_y_parity/1` already accepts integer, hex-string, and legacy `v` forms and validates the recovery id before RLP encoding — `hosted_fee_payer.ex:195-209` (broader than mppx's `Number()` coercion) |
+| mppx #699 / #707 aggregate sponsor fee budget (our published `GHSA-j4j7-7xpr-c7cr`) | Per-transaction ceilings bound each sponsored tx in isolation, so N concurrent sponsored requests commit N × `max_total_fee` of sponsor exposure — unbounded in aggregate | `MPP.Methods.Tempo.SponsorBudget` — fail-closed aggregate in-flight fee + reservation-count ceilings, pinned per sponsor identity and enforced in one atomic store update; reserved **before** co-sign, three-phase ownership (`prepared`/`broadcasting`/`pending`) with per-request random ids, released only on an observed terminal receipt or conservative chain-valid expiry, state-derived TTL, opt-in bounded receipt reconciliation. Requires an explicitly selected atomic store (`Store.update/3`); the bound is scoped to that shared store. `mpp-rs` has no equivalent — mppx is the sole prior art — `sponsor_budget.ex`, `tempo.ex` (Task 78, ships 0.12.0) |
 | — hardening divergence beyond both SDKs (residual of our published `GHSA-34g7-vx6g-82mq`) | Front-running race on Tempo hash/transaction paths: dedup keyed on tx hash alone, presenter identity never proven (both SDKs default expected sender to `receipt.from` — mpp-rs `verify_hash`, mppx `Charge.ts`) | Opt-in `"require_presenter_binding"`: presenter signs the proof path's EIP-712 envelope (MPP v3 `{account, challengeId, realm}`) with the transfer sender's wallet or an authorized access key; hash path requires a matching `source` DID; advertised as `presenterBinding` in 402 details — `tempo.ex` (Task 75, ships 0.8.0) |
 
 ---
@@ -77,7 +78,7 @@ mpp-specs: no advisories.
 A small number of secure-defaults / defense-in-depth parity items from the upstream audit remain
 open. Per the disclosure policy above, their detail is tracked in **private draft security
 advisories** (Security → Advisories), not enumerated here. Each moves to the ✓ table when its fix
-ships. As of the last audit: **5 open items** (none a confirmed standalone critical; the
+ships. As of the last audit: **4 open items** (none a confirmed standalone critical; the
 exploitable-replay facets are already covered by Tasks 35/46/50 above).
 
 ---

@@ -153,6 +153,11 @@ defmodule MPP.MixProject do
       main: "MPP",
       source_ref: "v#{@version}",
       source_url: @source_url,
+      skip_code_autolink_to: [
+        "MPP.Headers.SchemeSplitter",
+        "MPP.Headers.parse_accept_payment/1",
+        "MPP.Replay"
+      ],
       extras: ["README.md", "CHANGELOG.md", "LICENSE", "SECURITY.md"]
     ]
   end
