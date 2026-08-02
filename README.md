@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ZenHive/mpp/actions/workflows/ci.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/ci.yml)
 [![Code Scanning](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml)
-[![GitHub](https://img.shields.io/github/license/ZenHive/mpp)](https://github.com/ZenHive/mpp/blob/development/LICENSE)
+[![GitHub](https://img.shields.io/github/license/ZenHive/mpp)](https://github.com/ZenHive/mpp/blob/main/LICENSE)
 
 Elixir implementation of the [Machine Payments Protocol](https://mpp.dev) (MPP) — HTTP 402 payment middleware for AI agents and machine-to-machine commerce.
 

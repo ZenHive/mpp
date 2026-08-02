@@ -23,7 +23,7 @@
 #   EVM_PRIVATE_KEY         Generic EVM funded key (falls back to Sepolia if unset)
 #
 # This job is deliberately NOT a required status check: harness lands approved
-# runs by ff-pushing straight to `development`, and a required check would block
+# runs by ff-pushing straight to `main`, and a required check would block
 # those pushes. The nightly cron plus the PR trigger are the signal. Fork PRs
 # cannot read secrets, so the job flunks on external forks — expected for a
 # credential-gated suite.
@@ -35,7 +35,7 @@ on:
     - cron: "0 6 * * *" # nightly 06:00 UTC
   workflow_dispatch:
   pull_request:
-    branches: [development]
+    branches: [main]
 
 permissions:
   contents: read

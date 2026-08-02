@@ -12,9 +12,9 @@ name: Code Scanning
 
 on:
   push:
-    branches: [development]
+    branches: [main]
   pull_request:
-    branches: [development]
+    branches: [main]
   schedule:
     # Weekly resweep so new Sobelow rules / advisories surface without a push.
     - cron: "27 6 * * 1"
