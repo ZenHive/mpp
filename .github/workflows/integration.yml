@@ -14,6 +14,9 @@
 #
 #   TEMPO_RPC_URL           Moderato testnet RPC (https://rpc.moderato.tempo.xyz)
 #   STRIPE_SECRET_KEY       Stripe TEST-mode secret key (sk_test_...)
+#   STRIPE_CONNECT_ACCOUNT  Connected account id (acct_...) under the same
+#                           platform, with the `transfers` capability active
+#                           (destination-charge settlement test)
 #   ETH_SEPOLIA_RPC_URL     Sepolia JSON-RPC endpoint
 #   ETH_SEPOLIA_PRIVATE_KEY Funded Sepolia private key
 #   EVM_RPC_URL             Generic EVM RPC (falls back to Sepolia if unset in tests)
@@ -49,6 +52,7 @@ jobs:
       MIX_ENV: test
       TEMPO_RPC_URL: ${{ secrets.TEMPO_RPC_URL }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_CONNECT_ACCOUNT: ${{ secrets.STRIPE_CONNECT_ACCOUNT }}
       ETH_SEPOLIA_RPC_URL: ${{ secrets.ETH_SEPOLIA_RPC_URL }}
       ETH_SEPOLIA_PRIVATE_KEY: ${{ secrets.ETH_SEPOLIA_PRIVATE_KEY }}
       EVM_RPC_URL: ${{ secrets.EVM_RPC_URL }}
