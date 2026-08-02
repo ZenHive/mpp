@@ -4,7 +4,7 @@ default_branch = "development"
 vision = "First Elixir implementation of the Machine Payments Protocol — HTTP 402 payment middleware that turns any Phoenix API into an agent-billable service. No accounts, no API keys. Payment is authentication."
 
 [focus]
-phase = 9
+phase = 12
 
 # ----------------------------------------------------------------------------
 # Bundles
@@ -106,13 +106,24 @@ order = 2
 phase = 17
 
 # ----------------------------------------------------------------------------
+# Milestones
+# ----------------------------------------------------------------------------
+
+[milestones.v0_13]
+name = "First external consumer pays end-to-end"
+order = 1
+status = "active"
+target_version = "0.13.0"
+description = "Tests the hypothesis that the client SDK surface is what blocks a real Elixir consumer from paying a 402 without hand-rolled glue — shipping the Req plugin (33c, incl. the transport-neutral selection policy absorbed from Task 47), the MCP client transport (33d), and built-in Tempo/Stripe providers (33e) turns the lib from server-verifiable into client-usable."
+
+# ----------------------------------------------------------------------------
 # Phases
 # ----------------------------------------------------------------------------
 
 [phases.1]
 name = "Core Protocol"
 order = 1
-status = "done"
+status = "in_progress"
 
 [phases.2]
 name = "Stripe Payment Method"
@@ -152,7 +163,7 @@ status = "done"
 [phases.9]
 name = "Protocol Utilities"
 order = 9
-status = "in_progress"
+status = "done"
 
 [phases.10]
 name = "Session Support"
@@ -162,7 +173,7 @@ status = "in_progress"
 [phases.11]
 name = "MCP Transport"
 order = 11
-status = "in_progress"
+status = "done"
 
 [phases.12]
 name = "Client SDK"
@@ -342,13 +353,10 @@ implemented = "Shipped the mix mpp.manifest task generating a static JSON manife
 id = 42
 phase = 3
 bundle = "discovery"
-title = "OpenAPI discovery document generation"
 status = "pending"
+title = "OpenAPI discovery document generation"
 scores = { d = 4, b = 7, u = 8 }
 markers = ["parallel"]
-body = """
-Add `mix mpp.openapi` (and `MPP.Discovery.OpenApi.generate/1`) emitting OpenAPI 3.1.0 documents with `x-payment-info` per-operation and `x-service-info` at the document level. Read the latest discovery extension at `paymentauth.org` and in `refs/mpp-specs/specs/extensions/draft-payment-discovery-*.md` at implementation time to confirm the current shape — the spec now uses a multi-offer `offers` array with single-offer shorthand on parse. Cross-check the generated document against mppx's OpenAPI output for an equivalent endpoint config. Complements (does not replace) `mix mpp.manifest`.
-"""
 acceptance_criteria = [
   "OpenAPI 3.1.0-valid output",
   "x-payment-info / x-service-info follow the latest discovery extension",
@@ -356,6 +364,12 @@ acceptance_criteria = [
   "Cross-validated against mppx output for equivalent config",
   "Mix task + programmatic API"
 ]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Add `mix mpp.openapi` (and `MPP.Discovery.OpenApi.generate/1`) emitting OpenAPI 3.1.0 documents with `x-payment-info` per-operation and `x-service-info` at the document level. Read the latest discovery extension at `paymentauth.org` and in `refs/mpp-specs/specs/extensions/draft-payment-discovery-*.md` at implementation time to confirm the current shape — the spec now uses a multi-offer `offers` array with single-offer shorthand on parse. Cross-check the generated document against mppx's OpenAPI output for an equivalent endpoint config. Complements (does not replace) `mix mpp.manifest`.
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 4: Tempo Payment Method
@@ -471,18 +485,21 @@ implemented = "Shipped MPP.Methods.EVM implementing on-chain payment verificatio
 id = 38
 phase = 5
 bundle = "evm"
-title = "EVM credentialTypes backfill"
 status = "pending"
+title = "EVM credentialTypes backfill"
 scores = { d = 3, b = 5, u = 6 }
 markers = ["parallel"]
-body = """
-Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
-"""
 acceptance_criteria = [
   "challenge_method_details/1 includes credentialTypes",
   "Default permit2Address = canonical; overridable via method_config",
   "Unit tests cross-validate against spec examples"
 ]
+assignee = "cursor"
+model = "composer-2.5"
+body = """
+Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 6: Multi-Method Challenges (v0.2.0)
@@ -783,15 +800,10 @@ implemented = "Added MPP.Methods.Tempo.SessionReceipt — a session-intent recei
 id = 30
 phase = 10
 bundle = "session"
-title = "Channel state and voucher types"
 status = "pending"
+title = "Channel state and voucher types"
 scores = { d = 5, b = 6, u = 7 }
 depends_on = [28, 29]
-body = """
-Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. Action values are camelCase in JSON (`"open"` / `"topUp"` / `"voucher"` / `"close"`); use snake_case only for Elixir atoms.
-
-Note 2026-06-12: mpp-rs landed TIP-1034 session client primitives including precompile-backed voucher support (#288, commit 0d57f96) — the production-path successor to the contract-backed v1 channel. At pickup, read `refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs` and `refs/mpp-rs/src/client/tempo/session/` to decide whether to model v1 (contract) and v2 (precompile) voucher types together or stage v2 as a follow-up.
-"""
 acceptance_criteria = [
   "Channel ID computation matches mppx/mpp-rs for same inputs",
   "EIP-712 voucher signature verification",
@@ -799,18 +811,23 @@ acceptance_criteria = [
   "Store behaviour with ETS-backed default implementation",
   "Cross-validated channel IDs against mppx Channel.ts"
 ]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. Action values are camelCase in JSON (`"open"` / `"topUp"` / `"voucher"` / `"close"`); use snake_case only for Elixir atoms.
+
+Note 2026-06-12: mpp-rs landed TIP-1034 session client primitives including precompile-backed voucher support (#288, commit 0d57f96) — the production-path successor to the contract-backed v1 channel. At pickup, read `refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs` and `refs/mpp-rs/src/client/tempo/session/` to decide whether to model v1 (contract) and v2 (precompile) voucher types together or stage v2 as a follow-up.
+"""
+scored_at = "2026-08-02"
 
 [[task]]
 id = 31
 phase = 10
 bundle = "session"
-title = "Session credential actions"
 status = "pending"
+title = "Session credential actions"
 scores = { d = 5, b = 6, u = 6 }
 depends_on = [30]
-body = """
-Implement the four session credential actions: `open` (client deposits, opens channel), `voucher` (client presents signed cumulative-amount voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.
-"""
 acceptance_criteria = [
   "Four action handlers: open, voucher, topUp, close",
   "Correct payload schema per action (JSON: \"open\" / \"voucher\" / \"topUp\" / \"close\"; Elixir atoms snake_case)",
@@ -818,6 +835,12 @@ acceptance_criteria = [
   "Balance tracking per channel",
   "Unit tests for each action lifecycle"
 ]
+assignee = "grok"
+model = "grok-4.5"
+body = """
+Implement the four session credential actions: `open` (client deposits, opens channel), `voucher` (client presents signed cumulative-amount voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 11: MCP Transport
@@ -928,32 +951,37 @@ implemented = "Added the transport-agnostic MPP.Client.Transport behaviour (paym
 id = "33c"
 phase = 12
 bundle = "client-sdk"
-title = "Payment-aware Req plugin"
+milestone = "v0_13"
 status = "pending"
-scores = { d = 4, b = 8, u = 8 }
+title = "Payment-aware Req plugin"
+scores = { d = 5, b = 8, u = 8 }
 depends_on = ["33a", "33b"]
-body = """
-Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.
-"""
 acceptance_criteria = [
   "Req plugin with attach/2 for pipeline integration",
   "Automatic 402 detection and retry",
   "Provider selection from multi-challenge responses",
+  "Challenge selection/ordering is a transport-neutral selection policy — one policy surface consumed by both the HTTP (33b) and MCP (33d) transports, living outside MPP.Client.Transport.HTTP; consumer-configurable, defaulting to server-advertised order (refs: mppx Mppx.ts client orchestration; mpp-rs client/provider.rs:71 selection policy, #371)",
   "Non-402 passthrough",
   "Integration test against mix mpp.demo server"
 ]
+assignee = "cursor"
+model = "composer-2.5"
+body = """
+Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.
+
+Absorbs former Task 47 (superseded 2026-08-02): challenge selection/ordering is client-orchestration, not HTTP-wire-transport — mppx owns it in client orchestration (`refs/mppx/src/client/Mppx.ts`) and mpp-rs at the provider layer (`refs/mpp-rs/src/client/provider.rs:71`, selection policy, #371). Implement it here as a transport-neutral selection policy rather than a Transport.HTTP callback.
+"""
+scored_at = "2026-08-02"
 
 [[task]]
 id = "33d"
 phase = 12
 bundle = "client-sdk"
-title = "MCP client transport"
+milestone = "v0_13"
 status = "pending"
+title = "MCP client transport"
 scores = { d = 3, b = 6, u = 7 }
-depends_on = [32]
-body = """
-Add `MPP.Client.Transport.MCP` implementing the Transport behaviour for JSON-RPC messages. `payment_required?/1` checks error code -32042. `get_challenges/1` extracts from `error.data.challenges`. `set_credential/2` inserts into `params._meta["org.paymentauth/credential"]`. Uses types from Task 32 (`MPP.Mcp`).
-"""
+depends_on = [32, "33b"]
 acceptance_criteria = [
   "Implements Transport behaviour for JSON-RPC messages",
   "Uses MPP.Mcp constants and types",
@@ -962,15 +990,33 @@ acceptance_criteria = [
   "Approval-callback hook invoked before paying (parallels mppx #522 McpClient approval callbacks; read refs/mppx/src/mcp-sdk/client/McpClient.ts at pickup)",
   "Unit tests with mock JSON-RPC exchanges"
 ]
+assignee = "grok"
+model = "grok-4.5"
+body = """
+Add `MPP.Client.Transport.MCP` implementing the Transport behaviour for JSON-RPC messages. `payment_required?/1` checks error code -32042. `get_challenges/1` extracts from `error.data.challenges`. `set_credential/2` inserts into `params._meta["org.paymentauth/credential"]`. Uses types from Task 32 (`MPP.Mcp`).
+"""
+scored_at = "2026-08-02"
 
 [[task]]
 id = "33e"
 phase = 12
 bundle = "client-sdk"
-title = "Built-in charge providers"
+milestone = "v0_13"
 status = "pending"
+title = "Built-in charge providers"
 scores = { d = 6, b = 8, u = 9 }
 depends_on = ["33a", "33b"]
+acceptance_criteria = [
+  "Built-in Tempo charge provider implementing PaymentProvider",
+  "Built-in Stripe charge provider implementing PaymentProvider",
+  "Tempo provider generates the challenge-bound attribution memo (tag + version + server fingerprint from realm + nonce from challenge id, byte layout verified against refs/mppx Attribution and refs/mpp-rs) so its payments pass the 0.6.1 server-side mandatory attribution verification on no-static-memo routes",
+  "Tempo provider pins the advertised chain from the challenge before constructing or signing payment transactions, matching the reference SDK client-side chain-binding behavior",
+  "Public API/docs show end-to-end client usage with the Req plugin or transport layer",
+  "One LIVE integration path per provider — Stripe test-mode API for the Stripe provider, Moderato testnet for the Tempo provider — including a round-trip where this client pays a no-static-memo Tempo route mounted via MPP.Plug and the server accepts it; missing credentials flunk loudly with exact setup instructions, never a silent skip",
+  "Provider selection works cleanly through MPP.Client.MultiProvider"
+]
+assignee = "codex"
+model = "gpt-5.6-sol"
 body = """
 Add built-in client providers so the SDK is useful without every consumer writing their own provider first. Ship `MPP.Client.Providers.Tempo` and `MPP.Client.Providers.Stripe` for charge intent, mirroring the concrete client offerings in the reference SDKs. Each provider should parse the challenge request, execute payment with explicit config, and return a credential for the generic transport/plugin layer. Session-capable providers can layer on after Phase 10 lands.
 
@@ -978,15 +1024,7 @@ Note 2026-06-29: the 0.6.1 server hardening made challenge-bound attribution met
 
 Note 2026-06-30: server-side route/request chain binding shipped in Task 45. The built-in Tempo provider still needs the client-side counterpart: it must pin the challenge's advertised chain before constructing or signing a payment, matching the reference SDK security posture.
 """
-acceptance_criteria = [
-  "Built-in Tempo charge provider implementing PaymentProvider",
-  "Built-in Stripe charge provider implementing PaymentProvider",
-  "Tempo provider generates the challenge-bound attribution memo (tag + version + server fingerprint from realm + nonce from challenge id, byte layout verified against refs/mppx Attribution and refs/mpp-rs) so its payments pass the 0.6.1 server-side mandatory attribution verification on no-static-memo routes",
-  "Tempo provider pins the advertised chain from the challenge before constructing or signing payment transactions, matching the reference SDK client-side chain-binding behavior",
-  "Public API/docs show end-to-end client usage with the Req plugin or transport layer",
-  "One integration path per provider against a real or protocol-faithful challenge flow — including a round-trip where this client pays a no-static-memo Tempo route mounted via MPP.Plug and the server accepts it",
-  "Provider selection works cleanly through MPP.Client.MultiProvider"
-]
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 13: Lightning Payment Method
@@ -996,37 +1034,43 @@ acceptance_criteria = [
 id = 19
 phase = 13
 bundle = "lightning"
+status = "blocked"
 title = "Lightning charge method"
-status = "pending"
-scores = { d = 5, b = 7, u = 7 }
-body = """
-Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
-"""
+scores = { d = 6, b = 5, u = 5 }
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "challenge_method_details/1 returns invoice, paymentHash, network",
   "verify/2 checks SHA256(preimage) == paymentHash",
   "Unit tests with known preimage/hash pairs",
-  "Integration test with regtest Lightning node (if available)"
+  "Live regtest Lightning integration: at least one real success (invoice paid, preimage credential verified) and one relevant real error (wrong/duplicate preimage rejected); missing node/credentials flunk loudly with exact setup instructions — never a silent skip"
 ]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue)"
+body = """
+Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
+"""
+scored_at = "2026-08-02"
 
 [[task]]
 id = 20
 phase = 13
 bundle = "lightning"
+status = "blocked"
 title = "Lightning session method"
-status = "pending"
 scores = { d = 8, b = 5, u = 4 }
-body = """
-Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Defer until charge method proven and demand exists.
-"""
+depends_on = [19]
 acceptance_criteria = [
   "Session lifecycle: open → bearer → topUp → close",
   "Per-unit metering with balance tracking",
   "SSE \"need-topup\" event emission",
   "Refund via return invoice on close",
-  "Session store behaviour (pluggable: ETS, database, etc.)"
+  "Session store behaviour (pluggable: ETS, database, etc.)",
+  "Live regtest session-lifecycle integration: open → bearer → topUp → close with real invoice settlement and a real refund on close; missing node/credentials flunk loudly — never a silent skip"
 ]
+blocked_reason = "Blocked on Task 19 (Lightning charge) landing, plus the same demand gate; route at unblock"
+body = """
+Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Defer until charge method proven and demand exists.
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 14: Solana Payment Method
@@ -1036,12 +1080,9 @@ acceptance_criteria = [
 id = 21
 phase = 14
 bundle = "solana"
+status = "blocked"
 title = "Solana charge method"
-status = "pending"
 scores = { d = 6, b = 6, u = 5 }
-body = """
-Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency ("sol" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).
-"""
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "Pull mode: verify signed tx bytes, broadcast, confirm",
@@ -1049,8 +1090,13 @@ acceptance_criteria = [
   "SOL native + SPL token support",
   "Fee payer co-signing",
   "Payment splits (up to 8 recipients)",
-  "Unit tests with mocked Solana RPC responses"
+  "Live devnet/testnet integration: one real success per credential mode (pull: signed-tx broadcast + confirm; push: confirmed-signature verify) and one relevant real error; RPC mocks derived from observed live responses only; missing credentials flunk loudly — never a silent skip"
 ]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue)"
+body = """
+Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency ("sol" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 15: Card Payment Method
@@ -1060,20 +1106,23 @@ acceptance_criteria = [
 id = 22
 phase = 15
 bundle = "card"
+status = "blocked"
 title = "Card charge method"
-status = "pending"
 scores = { d = 8, b = 5, u = 4 }
-body = """
-Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. Defer until ecosystem demand.
-"""
 acceptance_criteria = [
   "Implements MPP.Method behaviour",
   "RSA key pair generation and JWKS endpoint support",
   "JWE token decryption (RSA-OAEP-256 + AES-256-GCM)",
   "Network token validation (PAN, expiry, network)",
   "Server Enabler integration pattern",
-  "Unit tests with crafted JWE tokens"
+  "JWE decryption validated against provider-owned test vectors (the token service provider's / card network's official docs are the authority); crafted tokens only for negative cases",
+  "Live enabler round-trip where an accessible test service exists; if none is accessible, the gap is documented in the task outcome — never silently treated as covered"
 ]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue)"
+body = """
+Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. Defer until ecosystem demand.
+"""
+scored_at = "2026-08-02"
 
 # ============================================================================
 # Tasks — Phase 16: Additional Payment Methods
@@ -1083,34 +1132,60 @@ acceptance_criteria = [
 id = 36
 phase = 16
 bundle = "additional-methods"
+status = "blocked"
 title = "Stellar charge method"
-status = "pending"
 scores = { d = 7, b = 5, u = 6 }
+acceptance_criteria = [
+  "MPP.Methods.Stellar implements the MPP.Method behaviour (pull XDR + push hash modes)",
+  "Live Stellar testnet (Soroban RPC) integration: at least one real success and one relevant real error per mode; missing credentials flunk loudly with exact setup instructions",
+  "SEP-41 verification semantics pinned by integration test against the Stellar-owned docs/spec (provider-owned authority; the MPP spec draft defines the wire contract)",
+  "settlement-failed error code added to MPP.Errors and covered by tests"
+]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue)"
 body = """
 Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.
 """
+scored_at = "2026-08-02"
 
 [[task]]
 id = 39
 phase = 16
 bundle = "additional-methods"
-title = "EVM Permit2 credential path"
 status = "pending"
+title = "EVM Permit2 credential path"
 scores = { d = 7, b = 7, u = 7 }
+acceptance_criteria = [
+  "Permit2 EIP-712 signing/verification matches the canonical Permit2 contract (Uniswap-owned Permit2 contract + draft-evm-charge-00.md:392-495 are the authorities)",
+  "Live Sepolia integration: one real successful Permit2 settlement and one relevant real error (e.g. expired or overspent permit rejected); missing credentials flunk loudly with exact setup instructions",
+  "Integration test pins the observed request/response/error semantics; mocks derived from observed live responses only",
+  "Cross-checked against refs/mppx + refs/mpp-rs Permit2 handling where they implement it, with refs/...:line citations"
+]
+assignee = "codex"
+model = "gpt-5.6-sol"
 body = """
 Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.
 """
+scored_at = "2026-08-02"
 
 [[task]]
 id = 40
 phase = 16
 bundle = "additional-methods"
-title = "EVM EIP-3009 authorization credential"
 status = "pending"
+title = "EVM EIP-3009 authorization credential"
 scores = { d = 6, b = 5, u = 5 }
+acceptance_criteria = [
+  "transferWithAuthorization flow matches the EIP-3009 semantics of Circle-owned USDC/EURC contracts (provider-owned authority) per draft-evm-charge-00.md:592-645",
+  "challengeHash used as the EIP-3009 nonce; replay of the same authorization is rejected (regression test proves it)",
+  "Live Sepolia integration against testnet USDC: one real successful authorization settlement and one relevant real error (e.g. reused nonce rejected); missing credentials flunk loudly with exact setup instructions",
+  "Mocks/fixtures derived from observed live responses only"
+]
+assignee = "cursor"
+model = "composer-2.5"
 body = """
 Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
 """
+scored_at = "2026-08-02"
 
 [[task]]
 id = 45
@@ -1164,7 +1239,7 @@ shipped_in = "3d722ee4b18788ad07d1586a20c0f94fa133b912"
 id = 47
 phase = 12
 bundle = "client-sdk"
-status = "pending"
+status = "superseded"
 title = "Client challenge ordering hook"
 scores = { d = 2, b = 4, u = 5 }
 acceptance_criteria = ["Configurable ordering callback on the HTTP transport", "Default behavior unchanged (server-advertised order)", "Multi-provider dispatch honors the reordered list", "Unit tests covering: identity, reverse, filter-then-reorder, empty"]
@@ -1178,61 +1253,67 @@ scored_at = "2026-05-16"
 id = 48
 phase = 17
 bundle = "transport-ws"
-status = "pending"
+status = "blocked"
 title = "WebSocket transport binding"
 scores = { d = 5, b = 6, u = 5 }
 acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match reference framing", "Retry/backoff posture matches upstream (no amplification)", "Integration test against a stub or real WS endpoint"]
+blocked_reason = "Demand-gated transport binding: pull forward when a downstream consumer needs it; route at unblock"
 body = """
 Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS with payment challenges riding on subscription handshakes, and a client-side `MPP.Client.Transport` impl for WS. Read the current WS transport in `refs/mpp-rs` (server-side WS handler and the `alloy-transport-mpp` crate) at implementation time to confirm framing, error codes, challenge placement, and retry/backoff semantics (upstream has hardened against retry amplification — match that posture).
 
 Integrate cleanly with the existing `MPP.Client.Transport` behaviour from Task 33b. The server adapter should be transport-agnostic w.r.t. the underlying WS library (consumers bring their own — Cowboy, Bandit, etc.).
 """
 created_at = "2026-05-16"
-scored_at = "2026-05-16"
+scored_at = "2026-08-02"
 
 [[task]]
 id = 49
 phase = 17
 bundle = "transport-jsonrpc"
-status = "pending"
+status = "blocked"
 title = "JSON-RPC transport (non-MCP)"
 scores = { d = 4, b = 4, u = 4 }
 acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code shape matches spec + reference impls", "Client-side `MPP.Client.Transport` impl", "Server-side adapter usable from Plug"]
+blocked_reason = "Demand-gated transport binding: pull forward when a downstream consumer needs it; route at unblock"
 body = """
 Bare JSON-RPC transport binding (non-MCP-framed) per the spec's transport section. Most consumers reach for MCP — this is for spec completeness and the rare consumer that wants JSON-RPC without MCP's tool/meta layer. Defer-tier; pull forward when first downstream asks.
 
 At pickup time, read the bare-JSON-RPC transport adapters in `refs/mpp-rs` and `refs/mppx` (the non-MCP paths) plus the spec's transport section at `paymentauth.org` to confirm error codes and challenge placement.
 """
 created_at = "2026-05-16"
-scored_at = "2026-05-16"
+scored_at = "2026-08-02"
 
 [[task]]
 id = 50
 phase = 10
 bundle = "session"
-status = "pending"
+status = "blocked"
 title = "Tempo subscriptions"
 scores = { d = 6, b = 6, u = 5 }
-acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches reference impl", "Fee-payer sponsored subscription path", "Integration test against Moderato testnet", "Pin the TIP-1034 voucher + TIP-20 channel-id golden vectors as deterministic conformance tests (refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs — channelId 0xb3946b996bd166db3b61fba0f6af2918b6687bc054e2f4bae979edffc7bd0b4d, voucher EIP-712 digest 0x41a23f1573d302acae1dcec60d237f78d2514768faf670ef27458931c38b5db3, chainId 42431) once escrow voucher/channel support exists"]
+acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches reference impl", "Fee-payer sponsored subscription path", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly"]
+blocked_reason = "Demand-gated and sequenced after Phase 10 session core (Tasks 30/31); pull forward when a consumer needs recurring payments"
 body = """
 Defer-tier. Extend Phase 10 session work with Tempo subscription mode (recurring access-key authorization beyond single-channel session billing). Upstream published the normative drafts on 2026-07-29 (mpp-specs #230): `refs/mpp-specs/specs/intents/draft-payment-intent-subscription-00.md` (the shared subscription intent schema), `refs/mpp-specs/specs/methods/tempo/draft-tempo-subscription-00.md`, and `refs/mpp-specs/specs/methods/stripe/draft-stripe-subscription-00.md` — read those as the authority at pickup time, with `refs/mppx` / `refs/mpp-rs` as the cross-checked implementation reference for the `wallet_authorizeAccessKey` shape and fee-payer integration. The Stripe draft means the subscription intent is not Tempo-only; scope the intent schema so a Stripe subscription method can reuse it. Pull forward only when a downstream consumer needs recurring payments — until then this stays low-Eff in the queue.
+
+Design note (moved out of acceptance_criteria 2026-08-02 because it is conditional on escrow voucher/channel support existing): once escrow voucher/channel support lands, pin the TIP-1034 voucher + TIP-20 channel-id golden vectors as deterministic conformance tests (refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs — channelId 0xb3946b996bd166db3b61fba0f6af2918b6687bc054e2f4bae979edffc7bd0b4d, voucher EIP-712 digest 0x41a23f1573d302acae1dcec60d237f78d2514768faf670ef27458931c38b5db3, chainId 42431).
 """
 created_at = "2026-05-16"
-scored_at = "2026-05-16"
+scored_at = "2026-08-02"
 
 [[task]]
 id = 51
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "blocked"
 title = "Hedera charge method"
 scores = { d = 6, b = 4, u = 4 }
 acceptance_criteria = ["MPP.Methods.Hedera implementing Method behaviour", "Charge intent verification against Hedera network", "Integration test against Hedera testnet"]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue)"
 body = """
 Defer-tier. Implement Hedera as the 8th charge method per `paymentauth.org` + `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. No reference-impl integration upstream yet — when picked up, cross-check against whichever SDK has added it (mppx / mpp-rs / pympp / mpp-go) at that point. Pull forward only when first consumer asks.
 """
 created_at = "2026-05-16"
-scored_at = "2026-05-16"
+scored_at = "2026-08-02"
 
 [[task]]
 id = 52
@@ -1554,7 +1635,7 @@ scores = { d = 3, b = 7, u = 6 }
 markers = ["security"]
 depends_on = [46]
 acceptance_criteria = ["The hash-credential path commits the dedup mark via the store's atomic check_and_mark (same primitive the transaction path uses), not a separate get-then-put", "Concurrency test against ConCacheStore: two simultaneous hash-credential verifications for the same confirmed on-chain hash settle with exactly one success and one already-used rejection", "Retriability preserved: a transient receipt-RPC failure does not consume the hash (a later valid retry still succeeds)", "Stores without check_and_mark/2 fall back to documented best-effort behavior", "mix precommit.full green; touched module at the 95% critical-tier coverage floor", "Commit message and CHANGELOG stay fix-shaped (atomic dedup commit / SDK parity) per SECURITY.md — no underlying-hole detail until the patched release"]
-out_of_scope = ["The transaction (co-signed / fee-payer) path — already atomic", "Plug-level generic dedup (Task 47/661)", "Fee-token allowlist and other Task 46 audit line items"]
+out_of_scope = ["The transaction (co-signed / fee-payer) path — already atomic", "Plug-level generic dedup (Task 35)", "Fee-token allowlist and other Task 46 audit line items"]
 files_to_modify = ["lib/mpp/methods/tempo.ex"]
 touches = ["lib/mpp/methods/tempo.ex", "test/mpp/methods/tempo_test.exs", "lib/mpp/tempo/con_cache_store.ex"]
 assignee = "human"
@@ -1845,3 +1926,39 @@ started_at = "2026-08-01"
 scored_at = "2026-08-01"
 done_at = "2026-08-01"
 shipped_in = "ddc46868fba57ccebb567c04709812b466123076"
+
+[[task]]
+id = "79"
+phase = 16
+bundle = "additional-methods"
+status = "blocked"
+title = "Near Intents charge method"
+scores = { d = 7, b = 4, u = 4 }
+depends_on = [55]
+acceptance_criteria = ["MPP.Methods.NearIntents implements the MPP.Method behaviour for charge intent (hash credential path)", "Live testnet integration against the Near Intents endpoints (1Click API + Origin RPC): at least one real successful settlement and one relevant real error; missing credentials flunk loudly with exact setup instructions", "Settlement + refund-recovery semantics (mpp-specs #299 clarifications) pinned by integration test against the provider-owned docs", "Mocks/fixtures derived from observed live responses only"]
+out_of_scope = ["Session/subscription intents for Near", "x402 interop"]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock"
+body = """
+Implement the Near Intents charge method per `refs/mpp-specs/specs/methods/nearintents/draft-nearintents-charge-01.md` (hash-credential-only method — hence the dependency on Task 55's hash-credential audit). The flow spans the 1Click API for quote/deposit orchestration and Origin RPC for on-chain verification, with the settlement and refund-recovery semantics clarified in mpp-specs #299. The NEAR-owned/Defuse-owned live endpoints and official docs are the provider authority; no reference SDK implements this method yet — cross-check whichever SDK (mppx / mpp-rs / pympp / mpp-go) has added it at pickup time, as reference material only.
+"""
+created_at = "2026-08-02"
+scored_at = "2026-08-02"
+
+[[task]]
+id = "80"
+phase = 16
+bundle = "additional-methods"
+status = "blocked"
+title = "USDC charge method"
+scores = { d = 8, b = 4, u = 4 }
+depends_on = [21, 40]
+acceptance_criteria = ["MPP.Methods.USDC implements the MPP.Method behaviour per draft-usdc-charge-00", "Circle Gateway live evidence: at least one real success (test-environment attestation/transfer accepted) and one relevant real error (e.g. rejected or expired attestation) against Circle's sandbox; missing credentials flunk loudly with exact setup instructions", "Integration tests pin the observed request/response/error semantics per supported network leg; mocks derived from observed reality only", "EIP-3009 path reused from Task 40, not duplicated (cross-ref test or code-level assertion)"]
+out_of_scope = ["Stacks support unless the spec still requires it at pickup (re-check the draft)", "Re-implementing EIP-3009 primitives (Task 40)"]
+blocked_reason = "Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock"
+body = """
+Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`. Scope is wide (D8 is an optimistic floor): the spec spans EVM chains, Solana, Stacks, and Circle Gateway attestation flows (see draft section on supported networks, ~line 132). Circle's official docs, contracts, and the Circle Gateway sandbox are the provider-owned authority.
+
+Boundary with Task 40: Task 40 implements EIP-3009 `transferWithAuthorization` as a credential type inside MPP.Methods.EVM; this task implements the distinct first-class `usdc` method the spec defines on top of those primitives (hence depends_on 40, and 21 for the Solana leg). Do not duplicate the EIP-3009 verification path — reuse it.
+"""
+created_at = "2026-08-02"
+scored_at = "2026-08-02"
