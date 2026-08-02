@@ -11,11 +11,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (2 of 6 done · 0 in progress)
+**Focus phase:** 12 — Client SDK (2 of 7 done · 0 in progress)
 
 **Last shipped:** no recent shipments
 
-**Up next:** Task 33d — MCP client transport [D:3/B:6/U:7 → Eff:2.17] 🎯
+**Up next:** Task 33c — Payment-aware Req plugin [D:5/B:8/U:8 → Eff:1.6] 🚀
 <!-- FOCUS:END -->
 
 ---
@@ -35,7 +35,7 @@
 | Task 6 | ✅ | 🎁 **core-protocol** · ChargeRequest intent schema [D:2/B:8/U:8 → Eff:4.0?] 🎯 |
 | Task 7 | ✅ | 🎁 **core-protocol** · Method behaviour [D:3/B:10/U:10 → Eff:3.33?] 🎯 |
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
-| Task 55 | ⬜ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:5/U:5 → Eff:2.5?] 🎯 |
+| Task 55 | ⬜ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:5/U:5 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -80,7 +80,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
-| Task 38 `[P]` | ⬜ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:5/U:6 → Eff:1.83] 🚀 |
+| Task 38 | ⬜ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:5/U:6 → Eff:1.83] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -163,6 +163,7 @@
 | Task 33d | ⬜ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:3/B:6/U:7 → Eff:2.17] 🎯 |
 | Task 33e | ⬜ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:8/U:9 → Eff:1.42] 📋 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
+| Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:7/U:7 → Eff:0.78] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -222,7 +223,7 @@
 | Task 40 | ⬜ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:5/U:5 → Eff:0.83] ⚠️ |
 | Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67] ⚠️ |
 | Task 79 | ⬜ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:4/U:4 → Eff:0.57] ⚠️ |
-| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:8/B:4/U:4 → Eff:0.5] ⚠️ |
+| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:7/U:7 → Eff:0.7] ⚠️ |
 <!-- TASKS:END -->
 
 ---

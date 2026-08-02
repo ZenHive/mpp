@@ -71,7 +71,7 @@ order = 1
 phase = 11
 
 [bundles.client-sdk]
-description = "Client-side PaymentProvider behaviour + transports + Req plugin + built-in providers"
+description = "Client-side PaymentProvider behaviour, transports, Req plugin, built-in providers, and x402 interop"
 order = 1
 phase = 12
 
@@ -91,7 +91,7 @@ order = 1
 phase = 15
 
 [bundles.additional-methods]
-description = "Stellar charge, EVM Permit2, EVM EIP-3009"
+description = "Stellar, Hedera, Near Intents, USDC, EVM Permit2, and EVM EIP-3009"
 order = 1
 phase = 16
 
@@ -101,7 +101,7 @@ order = 1
 phase = 17
 
 [bundles.transport-jsonrpc]
-description = "Bare JSON-RPC transport (non-MCP) — deferred"
+description = "Bare JSON-RPC transport (non-MCP)"
 order = 2
 phase = 17
 
@@ -110,11 +110,11 @@ phase = 17
 # ----------------------------------------------------------------------------
 
 [milestones.v0_13]
-name = "First external consumer pays end-to-end"
+name = "Payment-aware client SDK"
 order = 1
 status = "active"
 target_version = "0.13.0"
-description = "Tests the hypothesis that the client SDK surface is what blocks a real Elixir consumer from paying a 402 without hand-rolled glue — shipping the Req plugin (33c, incl. the transport-neutral selection policy absorbed from Task 47), the MCP client transport (33d), and built-in Tempo/Stripe providers (33e) turns the lib from server-verifiable into client-usable."
+description = "Tests the hypothesis that shared challenge selection, payment-aware HTTP/MCP orchestration, and built-in Tempo/Stripe providers let an Elixir caller complete a 402 payment flow without hand-rolled payment glue."
 
 # ----------------------------------------------------------------------------
 # Phases
@@ -364,6 +364,7 @@ acceptance_criteria = [
   "Cross-validated against mppx output for equivalent config",
   "Mix task + programmatic API"
 ]
+touches = ["lib/mpp/discovery/", "lib/mix/tasks/mpp.openapi.ex", "lib/mpp.ex", "test/mpp/discovery/"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
@@ -488,14 +489,14 @@ bundle = "evm"
 status = "pending"
 title = "EVM credentialTypes backfill"
 scores = { d = 3, b = 5, u = 6 }
-markers = ["parallel"]
 acceptance_criteria = [
   "challenge_method_details/1 includes credentialTypes",
   "Default permit2Address = canonical; overridable via method_config",
   "Unit tests cross-validate against spec examples"
 ]
-assignee = "cursor"
-model = "composer-2.5"
+touches = ["lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
 """
@@ -811,6 +812,7 @@ acceptance_criteria = [
   "Store behaviour with ETS-backed default implementation",
   "Cross-validated channel IDs against mppx Channel.ts"
 ]
+touches = ["lib/mpp/session/", "lib/mpp/intents/session.ex", "test/mpp/session/"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
@@ -835,6 +837,7 @@ acceptance_criteria = [
   "Balance tracking per channel",
   "Unit tests for each action lifecycle"
 ]
+touches = ["lib/mpp/session/", "lib/mpp/intents/session.ex", "lib/mpp/plug.ex", "test/mpp/session/", "test/mpp/plug_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
@@ -964,8 +967,9 @@ acceptance_criteria = [
   "Non-402 passthrough",
   "Integration test against mix mpp.demo server"
 ]
-assignee = "cursor"
-model = "composer-2.5"
+touches = ["lib/mpp/client/transport.ex", "lib/mpp/client/transport/http.ex", "lib/mpp/client/multi_provider.ex", "lib/mpp/client/req.ex", "test/mpp/client/"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.
 
@@ -981,19 +985,21 @@ milestone = "v0_13"
 status = "pending"
 title = "MCP client transport"
 scores = { d = 3, b = 6, u = 7 }
-depends_on = [32, "33b"]
+depends_on = [32, "33b", "33c"]
 acceptance_criteria = [
   "Implements Transport behaviour for JSON-RPC messages",
   "Uses MPP.Mcp constants and types",
   "Handles payment-required error detection",
   "Credential attachment to request params",
-  "Approval-callback hook invoked before paying (parallels mppx #522 McpClient approval callbacks; read refs/mppx/src/mcp-sdk/client/McpClient.ts at pickup)",
-  "Unit tests with mock JSON-RPC exchanges"
+  "Payment-aware MCP client orchestration consumes Task 33c's shared challenge-selection policy, pays through MultiProvider, and retries the original tool call once with the credential",
+  "Approval callback is invoked after challenge selection and before payment; decline performs neither payment nor retry (parallels refs/mppx/src/mcp/client/McpClient.ts)",
+  "End-to-end integration test against the local MPP MCP server covers successful pay-and-retry plus payment decline; focused unit tests cover malformed JSON-RPC envelopes"
 ]
+touches = ["lib/mpp/client/transport.ex", "lib/mpp/client/mcp.ex", "lib/mpp/mcp.ex", "lib/mpp/client/multi_provider.ex", "test/mpp/client/", "test/mpp/mcp_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
-Add `MPP.Client.Transport.MCP` implementing the Transport behaviour for JSON-RPC messages. `payment_required?/1` checks error code -32042. `get_challenges/1` extracts from `error.data.challenges`. `set_credential/2` inserts into `params._meta["org.paymentauth/credential"]`. Uses types from Task 32 (`MPP.Mcp`).
+Add the MCP client surface that completes payment-aware JSON-RPC tool calls. The low-level `MPP.Client.Transport.MCP` implements the shared Transport behaviour: detect error code -32042, extract `error.data.challenges`, and attach the credential at `params._meta["org.paymentauth/credential"]`. Above that boundary, provide payment-aware call orchestration that selects through Task 33c's shared policy, obtains explicit approval, pays through `MPP.Client.MultiProvider`, and retries once. Match the separation and callback timing in `refs/mppx/src/mcp/client/McpClient.ts`; use Task 32's `MPP.Mcp` constants and types.
 """
 scored_at = "2026-08-02"
 
@@ -1012,9 +1018,10 @@ acceptance_criteria = [
   "Tempo provider generates the challenge-bound attribution memo (tag + version + server fingerprint from realm + nonce from challenge id, byte layout verified against refs/mppx Attribution and refs/mpp-rs) so its payments pass the 0.6.1 server-side mandatory attribution verification on no-static-memo routes",
   "Tempo provider pins the advertised chain from the challenge before constructing or signing payment transactions, matching the reference SDK client-side chain-binding behavior",
   "Public API/docs show end-to-end client usage with the Req plugin or transport layer",
-  "One LIVE integration path per provider — Stripe test-mode API for the Stripe provider, Moderato testnet for the Tempo provider — including a round-trip where this client pays a no-static-memo Tempo route mounted via MPP.Plug and the server accepts it; missing credentials flunk loudly with exact setup instructions, never a silent skip",
+  "One LIVE success and one relevant LIVE error per provider — Stripe test-mode API for Stripe, Moderato testnet for Tempo — including a round-trip where this client pays a no-static-memo Tempo route mounted via MPP.Plug and the server accepts it; integration tests pin observed request/response/error semantics, and missing credentials flunk loudly with exact setup instructions",
   "Provider selection works cleanly through MPP.Client.MultiProvider"
 ]
+touches = ["lib/mpp/client/multi_provider.ex", "lib/mpp/client/providers/", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/stripe.ex", "test/mpp/client/", "test/mpp/methods/tempo_integration_test.exs", "test/mpp/methods/stripe_integration_test.exs", "README.md"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
@@ -1044,6 +1051,7 @@ acceptance_criteria = [
   "Unit tests with known preimage/hash pairs",
   "Live regtest Lightning integration: at least one real success (invoice paid, preimage credential verified) and one relevant real error (wrong/duplicate preimage rejected); missing node/credentials flunk loudly with exact setup instructions — never a silent skip"
 ]
+touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
@@ -1065,12 +1073,13 @@ acceptance_criteria = [
   "SSE \"need-topup\" event emission",
   "Refund via return invoice on close",
   "Session store behaviour (pluggable: ETS, database, etc.)",
-  "Live regtest session-lifecycle integration: open → bearer → topUp → close with real invoice settlement and a real refund on close; missing node/credentials flunk loudly — never a silent skip"
+  "Live regtest session-lifecycle integration: open → bearer → topUp → close with real invoice settlement and a real refund on close, plus a relevant live error such as invalid top-up preimage or rejected refund invoice; missing node/credentials flunk loudly with exact setup instructions"
 ]
+touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "lib/mpp/session/", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
-Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Defer until charge method proven and demand exists.
+Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.
 """
 scored_at = "2026-08-02"
 
@@ -1094,8 +1103,9 @@ acceptance_criteria = [
   "Payment splits (up to 8 recipients)",
   "Live devnet/testnet integration: one real success per credential mode (pull: signed-tx broadcast + confirm; push: confirmed-signature verify) and one relevant real error; RPC mocks derived from observed live responses only; missing credentials flunk loudly — never a silent skip"
 ]
-assignee = "cursor"
-model = "composer-2.5"
+touches = ["mix.exs", "lib/mpp/methods/solana.ex", "test/mpp/methods/solana_test.exs", "test/mpp/methods/solana_integration_test.exs"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency ("sol" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).
 """
@@ -1119,12 +1129,14 @@ acceptance_criteria = [
   "Network token validation (PAN, expiry, network)",
   "Server Enabler integration pattern",
   "JWE decryption validated against provider-owned test vectors (the token service provider's / card network's official docs are the authority); crafted tokens only for negative cases",
-  "Live enabler round-trip where an accessible test service exists; if none is accessible, the gap is documented in the task outcome — never silently treated as covered"
+  "A named conforming Client/Server Enabler test environment is selected from provider-owned documentation before implementation; at least one live successful charge and one relevant live rejection are pinned by integration tests",
+  "If no conforming test environment is actually accessible after checking the named providers, the task transitions to blocked with that evidence rather than completing on crafted tokens; missing credentials flunk loudly with exact setup instructions"
 ]
+touches = ["mix.exs", "lib/mpp/methods/card.ex", "lib/mpp/intents/charge.ex", "test/mpp/methods/card_test.exs", "test/mpp/methods/card_integration_test.exs"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
-Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. Defer until ecosystem demand.
+Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. The MPP card draft is PSP-agnostic, so the implementation session must identify a concrete conforming enabler and establish its live contract before coding against it.
 """
 scored_at = "2026-08-02"
 
@@ -1145,6 +1157,7 @@ acceptance_criteria = [
   "SEP-41 verification semantics pinned by integration test against the Stellar-owned docs/spec (provider-owned authority; the MPP spec draft defines the wire contract)",
   "settlement-failed error code added to MPP.Errors and covered by tests"
 ]
+touches = ["mix.exs", "lib/mpp/methods/stellar.ex", "lib/mpp/errors.ex", "test/mpp/methods/stellar_test.exs", "test/mpp/methods/stellar_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
@@ -1165,6 +1178,7 @@ acceptance_criteria = [
   "Integration test pins the observed request/response/error semantics; mocks derived from observed live responses only",
   "Cross-checked against refs/mppx + refs/mpp-rs Permit2 handling where they implement it, with refs/...:line citations"
 ]
+touches = ["mix.exs", "lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
@@ -1185,8 +1199,9 @@ acceptance_criteria = [
   "Live Sepolia integration against testnet USDC: one real successful authorization settlement and one relevant real error (e.g. reused nonce rejected); missing credentials flunk loudly with exact setup instructions",
   "Mocks/fixtures derived from observed live responses only"
 ]
-assignee = "cursor"
-model = "composer-2.5"
+touches = ["mix.exs", "lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
 """
@@ -1261,9 +1276,10 @@ bundle = "transport-ws"
 status = "pending"
 title = "WebSocket transport binding"
 scores = { d = 5, b = 6, u = 5 }
-acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match reference framing", "Retry/backoff posture matches upstream (no amplification)", "Integration test against a stub or real WS endpoint"]
-assignee = "cursor"
-model = "composer-2.5"
+acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match the MPP transport specification; reference SDKs are compatibility evidence", "Retry/backoff posture matches upstream and a dropped/rejected connection does not amplify payment retries", "End-to-end integration test uses an actual local WebSocket client/server connection for successful pay-and-retry plus a relevant protocol/connection error; mock-only coverage is insufficient"]
+touches = ["mix.exs", "lib/mpp/client/transport.ex", "lib/mpp/transports/websocket/", "lib/mpp/mcp.ex", "test/mpp/transports/websocket/"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS with payment challenges riding on subscription handshakes, and a client-side `MPP.Client.Transport` impl for WS. Read the current WS transport in `refs/mpp-rs` (server-side WS handler and the `alloy-transport-mpp` crate) at implementation time to confirm framing, error codes, challenge placement, and retry/backoff semantics (upstream has hardened against retry amplification — match that posture).
 
@@ -1279,11 +1295,12 @@ bundle = "transport-jsonrpc"
 status = "pending"
 title = "JSON-RPC transport (non-MCP)"
 scores = { d = 4, b = 4, u = 4 }
-acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code shape matches spec + reference impls", "Client-side `MPP.Client.Transport` impl", "Server-side adapter usable from Plug"]
-assignee = "cursor"
-model = "composer-2.5"
+acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code and challenge placement match the MPP transport specification; reference SDKs are compatibility evidence", "Client-side `MPP.Client.Transport` implementation and server-side adapter usable from Plug", "End-to-end integration test over the real local Plug/JSON-RPC boundary covers successful payment retry and a relevant payment-required/error response"]
+touches = ["lib/mpp/client/transport.ex", "lib/mpp/transports/json_rpc/", "lib/mpp/plug.ex", "lib/mpp/mcp.ex", "test/mpp/transports/json_rpc/", "test/mpp/plug_test.exs"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
-Bare JSON-RPC transport binding (non-MCP-framed) per the spec's transport section. Most consumers reach for MCP — this is for spec completeness and the rare consumer that wants JSON-RPC without MCP's tool/meta layer. Defer-tier; pull forward when first downstream asks.
+Implement the bare JSON-RPC transport binding (non-MCP-framed) required for SDK/spec parity, with payment challenges carried without MCP's tool/meta layer.
 
 At pickup time, read the bare-JSON-RPC transport adapters in `refs/mpp-rs` and `refs/mppx` (the non-MCP paths) plus the spec's transport section at `paymentauth.org` to confirm error codes and challenge placement.
 """
@@ -1297,17 +1314,16 @@ bundle = "session"
 status = "pending"
 title = "Tempo subscriptions"
 scores = { d = 6, b = 6, u = 5 }
-acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches reference impl", "Fee-payer sponsored subscription path", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly"]
+depends_on = [31]
+acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches the normative Tempo subscription draft; reference SDKs are compatibility evidence", "Fee-payer sponsored subscription path", "TIP-1034 voucher and TIP-20 channel-id golden vectors are pinned as deterministic conformance tests against refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly with exact setup instructions"]
+touches = ["lib/mpp/intents/session.ex", "lib/mpp/session/", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/session_receipt.ex", "test/mpp/session/", "test/mpp/methods/tempo_integration_test.exs"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
-Defer-tier. Extend Phase 10 session work with Tempo subscription mode (recurring access-key authorization beyond single-channel session billing). Upstream published the normative drafts on 2026-07-29 (mpp-specs #230): `refs/mpp-specs/specs/intents/draft-payment-intent-subscription-00.md` (the shared subscription intent schema), `refs/mpp-specs/specs/methods/tempo/draft-tempo-subscription-00.md`, and `refs/mpp-specs/specs/methods/stripe/draft-stripe-subscription-00.md` — read those as the authority at pickup time, with `refs/mppx` / `refs/mpp-rs` as the cross-checked implementation reference for the `wallet_authorizeAccessKey` shape and fee-payer integration. The Stripe draft means the subscription intent is not Tempo-only; scope the intent schema so a Stripe subscription method can reuse it. Pull forward only when a downstream consumer needs recurring payments — until then this stays low-Eff in the queue.
-
-Design note (moved out of acceptance_criteria 2026-08-02 because it is conditional on escrow voucher/channel support existing): once escrow voucher/channel support lands, pin the TIP-1034 voucher + TIP-20 channel-id golden vectors as deterministic conformance tests (refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs — channelId 0xb3946b996bd166db3b61fba0f6af2918b6687bc054e2f4bae979edffc7bd0b4d, voucher EIP-712 digest 0x41a23f1573d302acae1dcec60d237f78d2514768faf670ef27458931c38b5db3, chainId 42431).
+Extend Phase 10 session work with Tempo subscription mode (recurring access-key authorization beyond single-channel session billing). Upstream published the normative drafts on 2026-07-29 (mpp-specs #230): `refs/mpp-specs/specs/intents/draft-payment-intent-subscription-00.md` (the shared subscription intent schema), `refs/mpp-specs/specs/methods/tempo/draft-tempo-subscription-00.md`, and `refs/mpp-specs/specs/methods/stripe/draft-stripe-subscription-00.md`. Read those as the authority at pickup time, with `refs/mppx` / `refs/mpp-rs` as compatibility references for the `wallet_authorizeAccessKey` shape and fee-payer integration. The Stripe draft means the subscription intent is not Tempo-only; scope the shared intent schema so a Stripe subscription method can reuse it. Task 31 is the only sequencing gate, so its voucher/channel delivery makes the conformance vectors in the acceptance criteria unconditional.
 """
 created_at = "2026-05-16"
 scored_at = "2026-08-02"
-depends_on = [31]
 
 [[task]]
 id = 51
@@ -1316,11 +1332,12 @@ bundle = "additional-methods"
 status = "pending"
 title = "Hedera charge method"
 scores = { d = 6, b = 4, u = 4 }
-acceptance_criteria = ["MPP.Methods.Hedera implementing Method behaviour", "Charge intent verification against Hedera network", "Integration test against Hedera testnet"]
+acceptance_criteria = ["MPP.Methods.Hedera implements the Method behaviour and the current MPP Hedera charge draft", "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available", "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction; missing credentials flunk loudly with exact setup instructions"]
+touches = ["mix.exs", "lib/mpp/methods/hedera.ex", "test/mpp/methods/hedera_test.exs", "test/mpp/methods/hedera_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.5"
 body = """
-Defer-tier. Implement Hedera as the 8th charge method per `paymentauth.org` + `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. No reference-impl integration upstream yet — when picked up, cross-check against whichever SDK has added it (mppx / mpp-rs / pympp / mpp-go) at that point. Pull forward only when first consumer asks.
+Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.
 """
 created_at = "2026-05-16"
 scored_at = "2026-08-02"
@@ -1420,11 +1437,14 @@ acceptance_criteria = [
   "Cross-validated against mppx + mpp-rs `hash` credential test vectors",
   "Negative tests cover malformed and method-incompatible hash credentials"
 ]
+touches = ["lib/mpp/credential.ex", "lib/mpp/verifier.ex", "test/mpp/credential_test.exs", "test/mpp/verifier_test.exs"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
 Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a "parity confirmed" note; if not, add the parse / serialize / verify path.
 """
 created_at = "2026-05-27"
-scored_at = "2026-05-27"
+scored_at = "2026-08-02"
 
 [[task]]
 id = "56"
@@ -1947,6 +1967,7 @@ scores = { d = 7, b = 4, u = 4 }
 depends_on = [55]
 acceptance_criteria = ["MPP.Methods.NearIntents implements the MPP.Method behaviour for charge intent (hash credential path)", "Live testnet integration against the Near Intents endpoints (1Click API + Origin RPC): at least one real successful settlement and one relevant real error; missing credentials flunk loudly with exact setup instructions", "Settlement + refund-recovery semantics (mpp-specs #299 clarifications) pinned by integration test against the provider-owned docs", "Mocks/fixtures derived from observed live responses only"]
 out_of_scope = ["Session/subscription intents for Near", "x402 interop"]
+touches = ["mix.exs", "lib/mpp/methods/near_intents.ex", "lib/mpp/credential.ex", "test/mpp/methods/near_intents_test.exs", "test/mpp/methods/near_intents_integration_test.exs"]
 assignee = "codex"
 model = "gpt-5.6-sol"
 body = """
@@ -1961,16 +1982,38 @@ phase = 16
 bundle = "additional-methods"
 status = "pending"
 title = "USDC charge method"
-scores = { d = 8, b = 4, u = 4 }
+scores = { d = 10, b = 7, u = 7 }
 depends_on = [21, 40]
-acceptance_criteria = ["MPP.Methods.USDC implements the MPP.Method behaviour per draft-usdc-charge-00", "Circle Gateway live evidence: at least one real success (test-environment attestation/transfer accepted) and one relevant real error (e.g. rejected or expired attestation) against Circle's sandbox; missing credentials flunk loudly with exact setup instructions", "Integration tests pin the observed request/response/error semantics per supported network leg; mocks derived from observed reality only", "EIP-3009 path reused from Task 40, not duplicated (cross-ref test or code-level assertion)"]
-out_of_scope = ["Stacks support unless the spec still requires it at pickup (re-check the draft)", "Re-implementing EIP-3009 primitives (Task 40)"]
-assignee = "cursor"
-model = "composer-2.5"
+acceptance_criteria = ["MPP.Methods.USDC implements every normative profile in the current draft-usdc-charge specification: direct EVM EIP-3009, direct Solana, direct Stacks USDCx/SIP-010, and Circle Gateway Transfer", "USDC-specific native-asset identity, token-control, replay, and receipt requirements are enforced across all profiles", "Each direct-chain profile has live provider-owned test-network evidence for at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward", "Circle Gateway has at least one sandbox success (attestation/transfer accepted) and one relevant sandbox error such as rejected or expired attestation; missing credentials for any live leg flunk loudly with exact setup instructions", "The EVM profile reuses Task 40's EIP-3009 primitives instead of duplicating them; the Solana profile reuses Task 21's chain integration"]
+out_of_scope = ["Re-implementing EIP-3009 primitives (Task 40)", "Re-implementing generic Solana transfer primitives (Task 21)"]
+touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/solana.ex", "lib/mpp/methods/stacks.ex", "test/mpp/methods/"]
+assignee = "grok"
+model = "grok-4.5"
 body = """
-Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`. Scope is wide (D8 is an optimistic floor): the spec spans EVM chains, Solana, Stacks, and Circle Gateway attestation flows (see draft section on supported networks, ~line 132). Circle's official docs, contracts, and the Circle Gateway sandbox are the provider-owned authority.
+Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.
 
-Boundary with Task 40: Task 40 implements EIP-3009 `transferWithAuthorization` as a credential type inside MPP.Methods.EVM; this task implements the distinct first-class `usdc` method the spec defines on top of those primitives (hence depends_on 40, and 21 for the Solana leg). Do not duplicate the EIP-3009 verification path — reuse it.
+Boundary with Tasks 40 and 21: Task 40 implements EIP-3009 `transferWithAuthorization` inside MPP.Methods.EVM and Task 21 implements generic Solana payment mechanics. This task implements the distinct first-class `usdc` acceptance surface on top of those primitives and adds the Stacks USDCx and Gateway profiles. Reuse the prerequisite primitives rather than duplicating them.
+"""
+created_at = "2026-08-02"
+scored_at = "2026-08-02"
+
+[[task]]
+id = "81"
+phase = 12
+bundle = "client-sdk"
+status = "pending"
+title = "Add x402 v2 exact interoperability"
+scores = { d = 9, b = 7, u = 7 }
+depends_on = [40, "33c"]
+acceptance_criteria = ["x402 v2 PAYMENT-REQUIRED, PAYMENT-SIGNATURE, and PAYMENT-RESPONSE headers round-trip against official x402 vectors without being accepted as native Payment-auth headers", "The HTTP client discovers supported x402 exact offers alongside native MPP challenges, feeds both through Task 33c's shared selection policy, and emits an exact EIP-3009 credential using Task 40's primitives", "Server-side EVM exact support verifies and settles through a configurable x402 facilitator, returns the official settlement response shape, and can coexist with native MPP on one endpoint", "At least one real successful settlement and one relevant real rejection are observed against an official-compatible live facilitator/test environment before implementation; integration tests pin the observed verify/settle/error semantics and missing credentials flunk loudly with exact setup instructions", "A localnet end-to-end test proves pay-and-retry plus replay rejection without replacing the required live-facilitator evidence", "Current refs/mppx/src/x402 and refs/mppx/src/client/Transport.ts behavior is cross-validated as SDK-compatibility evidence, while the official x402 v2 specification and live facilitator remain authoritative"]
+out_of_scope = ["x402 schemes or chain families not implemented by the current reference SDK at pickup; record them explicitly rather than silently approximating them", "Re-implementing EIP-3009 authorization primitives owned by Task 40"]
+touches = ["mix.exs", "lib/mpp/x402/", "lib/mpp/client/transport.ex", "lib/mpp/methods/evm.ex", "test/mpp/x402/", "test/mpp/client/"]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Add the x402 v2 exact interoperability layer required by the project's explicit SDK-parity goal. Cover the full vertical boundary represented by the current mppx implementation: x402 header/types handling, HTTP transport discovery and credential attachment, EVM exact EIP-3009 client signing, server verification, configurable facilitator settlement, and coexistence with native Payment-auth challenges. Reuse Task 33c's transport-neutral selection policy and Task 40's authorization primitives.
+
+The official x402 v2 specification, provider-owned contract semantics, and observed live facilitator traffic are authoritative. refs/mppx/src/x402/, refs/mppx/src/client/Transport.ts, and its x402 localnet/e2e tests establish the current SDK compatibility target, not semantic authority. Re-audit those local refs at pickup so the task matches the SDK surface that actually ships then.
 """
 created_at = "2026-08-02"
 scored_at = "2026-08-02"
