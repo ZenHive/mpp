@@ -135,7 +135,7 @@
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
 | Task 30 | ⬜ | 🎁 **session** · Channel state and voucher types [D:5/B:6/U:7 → Eff:1.3] 📋 |
 | Task 31 | ⬜ | 🎁 **session** · Session credential actions [D:5/B:6/U:6 → Eff:1.2] 📋 |
-| Task 50 | 🔶 | 🎁 **session** · Tempo subscriptions [D:6/B:6/U:5 → Eff:0.92] ⚠️ ⛔ Demand-gated and sequenced after Phase 10 session core (Tasks 30/31); pull forward when a consumer needs recurring payments |
+| Task 50 | ⬜ | 🎁 **session** · Tempo subscriptions [D:6/B:6/U:5 → Eff:0.92] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -176,8 +176,8 @@
 <!-- TASKS:BEGIN phase=13 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:6/B:5/U:5 → Eff:0.83] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue) |
-| Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:8/B:5/U:4 → Eff:0.56] ⚠️ ⛔ Blocked on Task 19 (Lightning charge) landing, plus the same demand gate; route at unblock |
+| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:6/B:5/U:5 → Eff:0.83] ⚠️ |
+| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:8/B:5/U:4 → Eff:0.56] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -191,7 +191,7 @@
 <!-- TASKS:BEGIN phase=14 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 21 | 🔶 | 🎁 **solana** · Solana charge method [D:6/B:6/U:5 → Eff:0.92] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue) |
+| Task 21 | ⬜ | 🎁 **solana** · Solana charge method [D:6/B:6/U:5 → Eff:0.92] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -205,7 +205,7 @@
 <!-- TASKS:BEGIN phase=15 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 22 | 🔶 | 🎁 **card** · Card charge method [D:8/B:5/U:4 → Eff:0.56] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue) |
+| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:5/U:4 → Eff:0.56] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -217,12 +217,12 @@
 <!-- TASKS:BEGIN phase=16 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 36 | 🔶 | 🎁 **additional-methods** · Stellar charge method [D:7/B:5/U:6 → Eff:0.79] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue) |
+| Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:5/U:6 → Eff:0.79] ⚠️ |
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:7/U:7 → Eff:1.0] 📋 |
 | Task 40 | ⬜ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:5/U:5 → Eff:0.83] ⚠️ |
-| Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock (assignee/model pinned then, so pins cannot go stale in the queue) |
-| Task 79 | 🔶 | 🎁 **additional-methods** · Near Intents charge method [D:7/B:4/U:4 → Eff:0.57] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock |
-| Task 80 | 🔶 | 🎁 **additional-methods** · USDC charge method [D:8/B:4/U:4 → Eff:0.5] ⚠️ ⛔ Demand-gated payment method: pull forward when the first downstream consumer asks; route through the dispatch gate at unblock |
+| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:4/U:4 → Eff:0.67] ⚠️ |
+| Task 79 | ⬜ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:4/U:4 → Eff:0.57] ⚠️ |
+| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:8/B:4/U:4 → Eff:0.5] ⚠️ |
 <!-- TASKS:END -->
 
 ---
