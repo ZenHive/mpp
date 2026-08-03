@@ -125,6 +125,32 @@ defmodule MPP.Tempo.Store do
   def resolve(store), do: store
 
   @doc """
+  Whether `store` exports the dedup callbacks every configured store must provide
+  (`get/1`, `put/2`, `check_and_mark/2`).
+
+  Loads the module first: `function_exported?/3` answers `false` for a module that
+  is merely compiled but not yet loaded, so a valid custom store configured before
+  its first call would otherwise be rejected at init.
+  """
+  @spec dedup_capable?(term()) :: boolean()
+  def dedup_capable?(store) when is_atom(store) do
+    Code.ensure_loaded?(store) and function_exported?(store, :get, 1) and
+      function_exported?(store, :put, 2) and function_exported?(store, :check_and_mark, 2)
+  end
+
+  def dedup_capable?(_store), do: false
+
+  @doc """
+  Whether `store` exports the atomic `update/3` callback that fee sponsorship requires.
+
+  Loads the module first, for the same reason as `dedup_capable?/1`.
+  """
+  @spec update_capable?(term()) :: boolean()
+  def update_capable?({ConCacheStore, _opts}), do: update_capable?(ConCacheStore)
+  def update_capable?(store) when is_atom(store), do: Code.ensure_loaded?(store) and function_exported?(store, :update, 3)
+  def update_capable?(_store), do: false
+
+  @doc """
   Apply an optional `:key_prefix` from store opts to a logical dedup key.
 
   Used by `MPP.Tempo.ConCacheStore`; custom stores may call this for parity with

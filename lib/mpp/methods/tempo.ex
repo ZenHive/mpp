@@ -378,8 +378,7 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp validate_store!(store) do
-    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2) and
-           function_exported?(store, :check_and_mark, 2)) do
+    if !Store.dedup_capable?(store) do
       raise ArgumentError,
             "MPP.Methods.Tempo :store must be a module implementing MPP.Tempo.Store " <>
               "(get/1, put/2, check_and_mark/2 — atomic single-use is required; use `store: false` to disable dedup)"
@@ -460,7 +459,7 @@ defmodule MPP.Methods.Tempo do
       {:ok, store_config} when not is_nil(store_config) and store_config != false ->
         store = Store.resolve(store_config)
 
-        if !sponsor_store_supports_update?(store) do
+        if !Store.update_capable?(store) do
           raise ArgumentError,
                 "MPP.Methods.Tempo sponsorship requires an explicitly selected atomic store implementing update/3"
         end
@@ -470,10 +469,6 @@ defmodule MPP.Methods.Tempo do
               "MPP.Methods.Tempo sponsorship requires an explicit store; select MPP.Tempo.ConCacheStore for one node or a shared atomic backend for multiple nodes"
     end
   end
-
-  defp sponsor_store_supports_update?({ConCacheStore, _opts}), do: function_exported?(ConCacheStore, :update, 3)
-  defp sponsor_store_supports_update?(store) when is_atom(store), do: function_exported?(store, :update, 3)
-  defp sponsor_store_supports_update?(_store), do: false
 
   defp validate_sponsor_budget_limits!(config) do
     overrides = config["fee_payer_policy"]
@@ -855,7 +850,7 @@ defmodule MPP.Methods.Tempo do
   defp sponsor_store(config) do
     with {:ok, configured} when configured not in [nil, false] <- Map.fetch(config, "store"),
          store = Store.resolve(configured),
-         true <- sponsor_store_supports_update?(store) do
+         true <- Store.update_capable?(store) do
       {:ok, store}
     else
       _other -> {:error, :invalid_store}

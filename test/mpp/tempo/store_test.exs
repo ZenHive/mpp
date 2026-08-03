@@ -3,6 +3,7 @@ defmodule MPP.Tempo.StoreTest do
 
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.FailingPutStore
   alias MPP.Test.TempoMemoryStore
 
   @ttl_ms 1_000
@@ -47,6 +48,34 @@ defmodule MPP.Tempo.StoreTest do
       assert :ok = Store.check_and_mark(store, "tuple-atomic", :first)
       assert {:error, :already_exists} = Store.check_and_mark(store, "tuple-atomic", :second)
       assert {:ok, :first} = Store.get(store, "tuple-atomic")
+    end
+  end
+
+  describe "dedup_capable?/1 and update_capable?/1" do
+    test "detect callbacks on a store module that is not loaded yet" do
+      # Regression: a bare function_exported?/3 answers false for a compiled but
+      # unloaded module, which rejected a valid store at init depending on whether
+      # anything had happened to call it first.
+      unload(TempoMemoryStore)
+      refute :erlang.module_loaded(TempoMemoryStore)
+      assert Store.dedup_capable?(TempoMemoryStore)
+
+      unload(TempoMemoryStore)
+      refute :erlang.module_loaded(TempoMemoryStore)
+      assert Store.update_capable?(TempoMemoryStore)
+    end
+
+    test "reject non-modules and stores missing the callbacks" do
+      refute Store.dedup_capable?(nil)
+      refute Store.dedup_capable?(false)
+      refute Store.dedup_capable?("MPP.Test.TempoMemoryStore")
+      refute Store.dedup_capable?(MPP.Tempo.NoSuchStore)
+      refute Store.update_capable?(FailingPutStore)
+    end
+
+    test "unwraps the ConCacheStore tuple form for update_capable?/1" do
+      assert Store.update_capable?({ConCacheStore, name: :whatever})
+      refute Store.update_capable?({FailingPutStore, []})
     end
   end
 
@@ -105,6 +134,15 @@ defmodule MPP.Tempo.StoreTest do
       assert Store.resolve(TempoMemoryStore) == TempoMemoryStore
       assert Store.resolve(store) == store
     end
+  end
+
+  # Drops the loaded copy so the next lookup has to go back to the code path,
+  # reproducing the state a consumer's store module is in before its first call.
+  defp unload(module) do
+    :code.purge(module)
+    :code.delete(module)
+    :code.purge(module)
+    :ok
   end
 
   defp unique_cache_name do

@@ -393,8 +393,7 @@ defmodule MPP.Methods.EVM do
   end
 
   defp validate_store!(store) do
-    if !(is_atom(store) and function_exported?(store, :get, 1) and function_exported?(store, :put, 2) and
-           function_exported?(store, :check_and_mark, 2)) do
+    if !Store.dedup_capable?(store) do
       raise ArgumentError,
             "MPP.Methods.EVM :store must be a module implementing MPP.Tempo.Store " <>
               "(get/1, put/2, check_and_mark/2 — atomic single-use is required; use `store: false` to disable dedup)"

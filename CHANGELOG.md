@@ -8,6 +8,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Fixed
+
+- Store validation no longer rejects a valid `MPP.Tempo.Store` module that has not
+  been loaded yet. `MPP.Plug`, `MPP.Methods.Tempo`, and `MPP.Methods.EVM` now go
+  through `MPP.Tempo.Store.dedup_capable?/1` and `update_capable?/1`, which load the
+  module before checking its callbacks — a bare `function_exported?/3` answered
+  `false` for a compiled-but-unloaded store, so init raised depending on whether
+  anything had happened to call the store first.
+
 ## [0.12.0] — 2026-08-02
 
 ### Security — aggregate budgets for Tempo fee sponsorship
