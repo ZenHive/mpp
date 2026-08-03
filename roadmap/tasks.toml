@@ -1,6 +1,6 @@
 schema_version = 2
 project = "mpp"
-default_branch = "development"
+default_branch = "main"
 vision = "First Elixir implementation of the Machine Payments Protocol — HTTP 402 payment middleware that turns any Phoenix API into an agent-billable service. No accounts, no API keys. Payment is authentication."
 
 [focus]
