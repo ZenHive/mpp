@@ -83,7 +83,7 @@ jobs:
       # JS runtime to consumers), so CI installs the dependency explicitly,
       # pinned to the version used locally. Without this, the access-key tests
       # fail with ERR_MODULE_NOT_FOUND on a runner that has node but no deps.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
