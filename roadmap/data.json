@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "mpp",
-  "default_branch": "development",
+  "default_branch": "main",
   "vision": "First Elixir implementation of the Machine Payments Protocol — HTTP 402 payment middleware that turns any Phoenix API into an agent-billable service. No accounts, no API keys. Payment is authentication.",
   "focus": {
     "phase": 12
@@ -3054,6 +3054,46 @@
       "body": "Add the x402 v2 exact interoperability layer required by the project's explicit SDK-parity goal. Cover the full vertical boundary represented by the current mppx implementation: x402 header/types handling, HTTP transport discovery and credential attachment, EVM exact EIP-3009 client signing, server verification, configurable facilitator settlement, and coexistence with native Payment-auth challenges. Reuse Task 33c's transport-neutral selection policy and Task 40's authorization primitives.\n\nThe official x402 v2 specification, provider-owned contract semantics, and observed live facilitator traffic are authoritative. refs/mppx/src/x402/, refs/mppx/src/client/Transport.ts, and its x402 localnet/e2e tests establish the current SDK compatibility target, not semantic authority. Re-audit those local refs at pickup so the task matches the SDK surface that actually ships then.\n",
       "created_at": "2026-08-02",
       "scored_at": "2026-08-02",
+      "cross_repo": []
+    },
+    {
+      "id": "82",
+      "phase": 13,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Mutation-grade payment credential and wire-security suite",
+      "scores": {
+        "d": 6,
+        "b": 10,
+        "u": 9
+      },
+      "eff": 1.58,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "Properties cover header parsing/formatting, JCS canonicalization, credential binding, verifier pinning and the supported EVM/Tempo authorization boundaries across malformed and boundary inputs",
+        "Wire and authorization results are checked against current provider-owned PaymentAuth specifications plus both reference SDKs where they independently implement the same semantics",
+        "A reproducible mutation campaign targets canonical ordering, digests/HMAC domains, pinned fields, expiry, replay, amount/recipient/chain binding and authorization dispatch; every survivor is classified with evidence",
+        "A wrong canonicalization, pinning or authorization-domain canary is detected and makes the verification run fail",
+        "The ledger records specification/SDK commits, live integration evidence, tool versions, mutations and survivor review; touched critical modules remain at least 95% covered and mix ci passes"
+      ],
+      "touches": [
+        "lib/mpp/headers.ex",
+        "lib/mpp/jcs.ex",
+        "lib/mpp/credential.ex",
+        "lib/mpp/verifier.ex",
+        "lib/mpp/methods/",
+        "test/mpp/"
+      ],
+      "body": "Measure whether MPP's existing property, conformance and integration suites reject realistic payment-protocol faults. The provider-owned PaymentAuth specifications and observed integrations define meaning; mpp-rs/mppx supply cross-implementation evidence but do not override that contract. Challenge canonicalization, credential binding, replay/expiry and EVM/Tempo authorization with generated and domain mutations without changing the public protocol surface.\n",
+      "created_at": "2026-08-17",
+      "scored_at": "2026-08-17",
       "cross_repo": []
     }
   ]
