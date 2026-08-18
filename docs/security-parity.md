@@ -31,6 +31,31 @@ mpp-specs: no advisories.
 
 ---
 
+## Our published advisories & CVE IDs
+
+Every advisory published on `ZenHive/mpp`, with its CVE assignment. Hex packages fall under the
+**Erlang Ecosystem Foundation CNA** — GitHub declines to assign for them and routes requests to
+the EEF (`cna@erlef.org`), which assigned the first three on 2026-07-17. A CNA-assigned CVE is not
+backlinked automatically — the ID was attached to each GitHub advisory via
+`gh api -X PATCH repos/ZenHive/mpp/security-advisories/<ghsa> -f cve_id=<cve>` on 2026-08-18.
+OSV carries both the `CVE-` and the `EEF-CVE-` alias.
+
+| Advisory | CVE | Sev | Fixed in | Subject |
+|---|---|---|---|---|
+| `GHSA-vv77-66rf-pm86` | `CVE-2026-59695` | HIGH 8.3 | 0.6.0 | Unbounded `max_fee_per_gas` in Tempo fee-payer — single-request wallet drain |
+| `GHSA-qpxh-ff8m-c62v` | `CVE-2026-59694` | HIGH 8.3 | 0.6.0 | Unbounded access list in Tempo fee-payer inflates gas cost per payment |
+| `GHSA-vj8p-hp9x-gh47` | `CVE-2026-59252` | HIGH 8.2 | 0.6.0 | Missing `gas_limit` validation in Tempo fee-payer enables wallet drain |
+| `GHSA-wvj9-hmjr-7359` | — (requested 2026-08-18) | MEDIUM | 0.6.1 | Hardening backfill from the upstream SDK audit — **not** a single discrete vulnerability; a CVE is likely inappropriate here |
+| `GHSA-w8j7-7qc3-5f24` | — (requested 2026-08-18) | MEDIUM | 0.7.0 | Non-atomic Tempo hash-credential dedup — replay under a concurrent race |
+| `GHSA-vp5h-xh25-44wf` | — (requested 2026-08-18) | HIGH | 0.7.0 | EVM on-chain transfer proof not single-use — cross-challenge replay |
+| `GHSA-34g7-vx6g-82mq` | — (requested 2026-08-18) | HIGH | 0.8.0 | Static Tempo memo disables per-challenge attribution binding — third-party replay |
+| `GHSA-j4j7-7xpr-c7cr` | — (requested 2026-08-18) | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
+
+The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
+remaining four was requested from the EEF CNA on 2026-08-18.
+
+---
+
 ## ✓ Confirmed parity (closed in our impl)
 
 | Upstream fix | What it guards | Our implementation |
