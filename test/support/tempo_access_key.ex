@@ -1,7 +1,7 @@
 defmodule MPP.Test.TempoAccessKey do
   @moduledoc false
 
-  @viem_version "2.37.1"
+  @viem_version "2.55.18"
   @script Path.expand("tempo_access_key.mjs", __DIR__)
 
   @type authorize_result :: %{

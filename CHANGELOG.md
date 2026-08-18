@@ -14,6 +14,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   documented way to ask whether a configured store satisfies the dedup contract
   (`get/1`, `put/2`, `check_and_mark/2`) or the atomic `update/3` contract.
 
+### Changed
+
+- Refreshed the published on-chain stack through `onchain 0.12.1` and
+  `onchain_tempo 0.9.1`, together with the latest compatible shared upstreams.
+- Updated the development gates to QuickBEAM 0.11, Sobelow 0.15, and Tidewave
+  0.8.4, and refreshed the JS reference SDKs to Ox 1.6.3, viem 2.55.18, and
+  esbuild 0.28.2. Full test output is retained so CI reports failing test
+  identities and can apply ExUnit JSON's configured retry behavior.
+
 ### Fixed
 
 - Store validation no longer rejects a valid `MPP.Tempo.Store` module that has not

@@ -2,7 +2,7 @@
  * Moderato access-key authorize/revoke for integration tests.
  *
  * Uses viem/tempo (npx-installed) — not a production dependency.
- * Invoked by `MPP.Test.TempoAccessKey` via `npx -p viem@2.37.1 node …`.
+ * Invoked by `MPP.Test.TempoAccessKey` via `npx -p viem@2.55.18 node …`.
  */
 import { createClient, http } from "viem"
 import { tempoTestnet } from "viem/chains"
