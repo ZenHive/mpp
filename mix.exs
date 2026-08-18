@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.12.0"
+  @version "0.13.0"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
@@ -183,7 +183,7 @@ defmodule MPP.MixProject do
         "doctor --raise",
         # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV via `env`
         # (Elixir 1.20's `mix cmd` no longer parses a leading VAR=val prefix).
-        "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --summary-only --exclude integration --exclude cross_validation",
+        "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --exclude integration --exclude cross_validation",
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
         "sobelow --skip --exit low"
       ],

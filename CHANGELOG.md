@@ -6,7 +6,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.13.0] — 2026-08-18
+
+### Added
+
+- `MPP.Tempo.Store.dedup_capable?/1` and `MPP.Tempo.Store.update_capable?/1` — the
+  documented way to ask whether a configured store satisfies the dedup contract
+  (`get/1`, `put/2`, `check_and_mark/2`) or the atomic `update/3` contract.
 
 ### Fixed
 
