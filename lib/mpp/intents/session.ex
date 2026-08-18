@@ -72,21 +72,24 @@ defmodule MPP.Intents.Session do
       ]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, session}` on success, `{:error, reason}` on failure"},
-    errors: [:amount_required, :invalid_amount, :currency_required, :invalid_currency],
+    errors: [:amount_required, :invalid_amount, :currency_required, :invalid_currency, :invalid_field_type],
     composes_with: [:to_request]
   )
 
   @spec new(keyword()) :: {:ok, t()} | {:error, atom()}
   def new(opts) when is_list(opts) do
     with {:ok, amount} <- Shared.validate_amount(opts[:amount]),
-         {:ok, currency} <- Shared.validate_currency(opts[:currency]) do
+         {:ok, currency} <- Shared.validate_currency(opts[:currency]),
+         {:ok, unit_type} <- Shared.validate_optional_string(opts[:unit_type]),
+         {:ok, recipient} <- Shared.validate_optional_string(opts[:recipient]),
+         {:ok, suggested_deposit} <- Shared.validate_optional_string(opts[:suggested_deposit]) do
       {:ok,
        %__MODULE__{
          amount: amount,
          currency: currency,
-         unit_type: opts[:unit_type],
-         recipient: opts[:recipient],
-         suggested_deposit: opts[:suggested_deposit],
+         unit_type: unit_type,
+         recipient: recipient,
+         suggested_deposit: suggested_deposit,
          decimals: opts[:decimals],
          external_id: opts[:external_id],
          method_details: opts[:method_details]
@@ -125,7 +128,14 @@ defmodule MPP.Intents.Session do
       map: [kind: :value, description: "Map with camelCase string keys (from JSON-decoded challenge request)"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, session}` on success, `{:error, reason}` on failure"},
-    errors: [:amount_required, :invalid_amount, :currency_required, :invalid_currency, :missing_required_fields],
+    errors: [
+      :amount_required,
+      :invalid_amount,
+      :currency_required,
+      :invalid_currency,
+      :invalid_field_type,
+      :missing_required_fields
+    ],
     composes_with: [:new, :to_request]
   )
 

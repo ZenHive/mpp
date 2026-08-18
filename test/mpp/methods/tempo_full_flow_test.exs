@@ -10,7 +10,10 @@ defmodule MPP.Methods.TempoFullFlowTest do
   (real Moderato testnet, tagged `:integration`), these always run with stubbed RPC.
   """
 
-  use ExUnit.Case, async: true
+  # async: false — these tests start MPP.Test.TempoMemoryStore, whose Agent is
+  # registered under the global name __MODULE__. Two async modules starting it
+  # concurrently raise {:already_started, pid} and, worse, share one dedup table.
+  use ExUnit.Case, async: false
 
   import MPP.Test.TempoTestHelpers
 

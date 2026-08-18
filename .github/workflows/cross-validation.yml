@@ -92,7 +92,7 @@ jobs:
       # TxEnvelopeTempo (serialize/deserialize round-trip); viem carries the
       # Tempo ABIs and addresses our constants are checked against.
       - name: Install JS reference SDKs
-        run: npm install --no-save ox@0.14.7 viem@2.47.6 esbuild@0.28.1
+        run: npm install --no-save ox@1.6.3 viem@2.55.18 esbuild@0.28.2
 
       # Gitignored locally and kept fresh by a session hook; CI has to fetch it.
       # Shallow: the tests read working-tree source, never history.
@@ -105,5 +105,7 @@ jobs:
       # `--only` implies the include, and additionally excludes everything
       # untagged, so this runs the cross-validation suite and nothing else.
       # mix ci already covers the rest.
+      # --no-retry: ex_unit_json auto-retries failures and reports a healed run as
+      # `flaky` with exit 0. For wire-format conformance a heal IS the finding.
       - name: Cross-validation tests
-        run: mix test.json --only cross_validation
+        run: mix test.json --only cross_validation --no-retry

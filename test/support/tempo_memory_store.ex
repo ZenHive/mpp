@@ -3,6 +3,15 @@ defmodule MPP.Test.TempoMemoryStore do
   Agent-based in-memory store implementing `MPP.Tempo.Store` for testing.
 
   Start with `start_supervised!/1` in test setup for automatic cleanup.
+
+  > #### Single global instance {: .warning}
+  >
+  > The Agent is registered under `__MODULE__` because `MPP.Tempo.Store`
+  > dispatches on the module and carries no pid/name argument. A test module
+  > that starts this store must therefore be `async: false`: two concurrent
+  > modules raise `{:already_started, pid}` and would otherwise share one
+  > dedup table, which makes replay-protection assertions depend on the
+  > scheduler.
   """
 
   @behaviour MPP.Tempo.Store

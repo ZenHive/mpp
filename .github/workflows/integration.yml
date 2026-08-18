@@ -88,12 +88,14 @@ jobs:
           node-version: "22"
 
       - name: Install viem (Tempo access-key script)
-        run: npm install --no-save viem@2.47.6
+        run: npm install --no-save viem@2.55.18
 
       - name: Compile
         run: mix compile
 
-      # --include integration overrides test_helper.exs's default exclusion.
+      # `--only` implies the include AND excludes everything untagged, so a
+      # mistyped/absent tag exits 1 instead of greening on ordinary tests.
+      # `--include` does not: it passes with zero integration-tagged tests.
       # Missing secrets -> setup_all flunks loudly; never a silent 0-tests pass.
       - name: Integration tests
-        run: mix test.json --include integration
+        run: mix test.json --only integration --no-retry

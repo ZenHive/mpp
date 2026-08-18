@@ -28,3 +28,25 @@ Not applied: narrowing the typespec to the ConCacheStore tuple would ripple thro
 `SponsorBudget`'s specs (`reserve/3`, `transition/4`, `release/3`, `sweep/2` all take
 `Store.store_ref()`) for a documentation-grade gain, and the policy is already stated in each
 raise message. Worth folding into a future store-API task if the tuple form is ever generalized.
+
+## Codex second opinion (2026-08-18)
+
+Verdict: **PASS WITH WARNINGS** — no correctness or security defect introduced.
+
+Codex independently reached the same conclusion this report did on the
+`dedup_capable?/1` vs `update_capable?/1` asymmetry, and cited the evidence:
+`plug.ex:159`, `evm.ex:376`, `tempo.ex:361` all accept a bare custom module or
+`{ConCacheStore, keyword_opts}` and reject every other tuple *before* the
+capability check, so `update_capable?/1`'s single tuple clause exactly matches
+the accepted shape.
+
+It also confirmed there is **no silent-degradation path**: a load failure makes
+the capability helper return `false`, the validators then raise `ArgumentError`,
+and Tempo's runtime lookup returns `{:error, :invalid_store}`. Only an explicit
+`store: false` resolves to `nil`; an absent config resolves to the default
+`ConCacheStore`. Dedup (replay protection) never degrades quietly.
+
+The one open item is the pre-existing `store_ref` typespec being wider than the
+usable contract (`store.ex:97` vs the dispatch clauses at `store.ex:229`) —
+unchanged verdict: narrowing it ripples through the `SponsorBudget` specs for no
+runtime gain, and the policy is enforced at the raise sites.

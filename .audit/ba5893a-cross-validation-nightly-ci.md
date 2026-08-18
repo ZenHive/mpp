@@ -22,3 +22,21 @@ the default gate because they need a JS toolchain / live credentials, so "exclud
 
 No findings. CLAUDE.md's testing-tier section was updated in the same commit to say both tiers run
 nightly.
+
+## Codex second opinion (2026-08-18)
+
+Codex checked the workflow against **actual runs**, not just the YAML: the first
+run (`actions/runs/30797157705`) and the latest nightly
+(`actions/runs/32102581029`) both executed 21 tests, 0 skipped, so the "green
+with zero tests" failure mode is not occurring. A wrong `--only` tag exits 1, and
+missing npm packages / mppx / esbuild / QuickBEAM all fail hard — there is no
+`continue-on-error` or skip fallback.
+
+| finding | verdict |
+|---|---|
+| `cross-validation.yml:51` `pull_request.branches` targeted `development`, not `main` (prio 7) | **Confirmed, already closed** by `36f7c9f` 15 minutes later. No action. |
+| `cross-validation.yml:109` missing `--no-retry`: `ex_unit_json` auto-retries and reports a healed failure as `flaky` with exit 0 (prio 6) | **Confirmed, FIXED** — added `--no-retry`. For wire-format conformance a heal *is* the finding. Verified against `deps/ex_unit_json/lib/ex_unit_json/config.ex:176` (`:retry` defaults to `true`). |
+| `integration.yml:99` `--include integration` passes with zero integration-tagged tests because untagged tests still run — contradicting its "never a silent 0-tests pass" comment (prio 5) | **Confirmed, FIXED** — switched to `--only integration --no-retry` and corrected the comment. `--only` additionally excludes untagged tests, so a mistyped or absent tag exits 1. |
+| `cross_validation_test.exs:98` the opt-in "test" is a bare `assert true` (prio 4) | **Confirmed, FIXED** — removed; its scope-contract explanation was kept as a comment. A bare `assert true` proves no behavior and would keep the selected suite non-empty after every meaningful test in it disappeared. |
+| `ci.yml:10` header documents only the `:integration` exclusion, omitting `:cross_validation` (prio 2) | Cosmetic; dropped. |
+| No repository-controlled failure alert for scheduled runs — notification depends on the actor's personal settings (`discuss`) | **Open, flagged to the operator.** Not fixable inside this repo's code; needs a decision on a notification sink. |

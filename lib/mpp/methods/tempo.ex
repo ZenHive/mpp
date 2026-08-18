@@ -217,7 +217,7 @@ defmodule MPP.Methods.Tempo do
       ]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, error}` on failure"},
-    errors: [:invalid_payload, :verification_failed]
+    errors: [:invalid_payload, :verification_failed, :sponsor_capacity_exhausted]
   )
 
   @impl MPP.Method

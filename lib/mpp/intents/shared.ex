@@ -16,6 +16,19 @@ defmodule MPP.Intents.Shared do
 
   def validate_currency(_), do: {:error, :invalid_currency}
 
+  @doc """
+  Validate an optional wire field that must be a string when present.
+
+  mpp-rs types `unitType` / `recipient` / `suggestedDeposit` as `Option<String>`
+  (refs/mpp-rs/src/protocol/intents/session.rs:40-61), so serde rejects a
+  non-string there. Accepting `123` would let us build a request the reference
+  SDKs cannot parse.
+  """
+  @spec validate_optional_string(term()) :: {:ok, String.t() | nil} | {:error, :invalid_field_type}
+  def validate_optional_string(nil), do: {:ok, nil}
+  def validate_optional_string(value) when is_binary(value), do: {:ok, value}
+  def validate_optional_string(_), do: {:error, :invalid_field_type}
+
   @doc "Put a map key only when the value is not nil."
   @spec put_optional(map(), String.t(), term()) :: map()
   def put_optional(map, _key, nil), do: map

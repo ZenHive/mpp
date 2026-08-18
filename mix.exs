@@ -63,7 +63,7 @@ defmodule MPP.MixProject do
 
       # Code analysis tools (vibe_kit baseline: credo + ex_slop, ex_dna, reach)
       {:ex_dna, "~> 1.5.1", only: [:dev, :test], runtime: false},
-      {:ex_ast, "~> 0.12", only: [:dev, :test], runtime: false},
+      {:ex_ast, "~> 0.12.0", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:reach, "~> 2.7", only: [:dev, :test], runtime: false},
 

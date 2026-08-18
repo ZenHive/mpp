@@ -37,3 +37,21 @@ than it is.
 
 No findings. CHANGELOG carries the 0.12.0 security section; `docs/security-parity.md` carries the
 matching ✓ row.
+
+## Codex second opinion (2026-08-18)
+
+Dispatched post-hoc after the initial single-reviewer pass. Codex verified fee
+arithmetic and transaction validity against both `refs/mppx` and `refs/mpp-rs`;
+reservation phases, reconciliation and owner fencing against `refs/mppx` only
+(`mpp-rs` has no aggregate-budget implementation).
+
+| finding | verdict |
+|---|---|
+| `lib/mpp/methods/tempo.ex:475` bare `function_exported?/3` rejects compiled-but-unloaded custom stores (prio 7) | **Confirmed, already closed** by `f788c6e` (`Code.ensure_loaded?` before the callback check). No action. |
+| `lib/mpp/methods/tempo.ex:220` descripex `errors:` omits `:sponsor_capacity_exhausted` although `verify/2` returns it at `tempo.ex:832` (prio 3) | **Confirmed, FIXED** — added to the `api(:verify, …)` metadata. |
+| `sponsor_budget_test.exs:65` concurrency test races isolated reservations, not duplicate full verifications — the dedup-loser/owner-fencing race is untested (prio 6) | **Confirmed, open.** Real coverage gap; writing a duplicate-verification race test is a task-sized change, not an audit fix. Recorded here rather than silently dropped. |
+| `tempo_test.exs:2332` failed post-broadcast `:pending` test asserts only the receipt, not that the reservation is retained — a fail-open release regression would pass (prio 6) | **Confirmed, open.** Same class as above. |
+| `sponsor_budget_test.exs:272` mixed-validity TTL refresh goes through `TtlSpyStore`, not production `ConCacheStore` (prio 5) | **Confirmed, open.** The spy proves the call, not the expiry. |
+
+The three open items are genuine test-quality gaps on the sponsor anti-drain
+path. They are named here, in the ledger, so the next roadmap pass sees them.

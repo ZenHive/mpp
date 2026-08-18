@@ -90,18 +90,14 @@ defmodule MPP.Tempo.CrossValidationTest do
       end
     end
 
-    # Documents the test scope contract change (Task 67): this module is
-    # tagged :cross_validation and therefore skipped by default in cold/offline
-    # checks (test_helper.exs + precommit alias + CI). A fresh checkout runs
-    # the gate command cleanly; these tests are still runnable via explicit
-    # --include cross_validation when JS toolchain (viem/ox) is present.
-    test "cross_validation tests are opt-in (excluded from default cold check)" do
-      # The presence of this test inside the :cross_validation-tagged module
-      # serves as the "added test for changed behavior": when excluded by
-      # default config, the gate command succeeds on fresh checkouts without
-      # node_modules; --include cross_validation still exercises the full suite.
-      assert true
-    end
+    # Scope contract (Task 67): this module is tagged :cross_validation and is
+    # therefore skipped by default in cold/offline checks (test_helper.exs +
+    # precommit alias + CI), so a fresh checkout runs the gate command cleanly.
+    # The suite is exercised by the nightly cross-validation workflow and by an
+    # explicit --only cross_validation run when the JS toolchain (viem/ox) is
+    # present. This is a comment, not a test: a bare `assert true` proves no
+    # behavior and would keep the selected suite non-empty even if every
+    # meaningful test in it disappeared.
 
     test "function signatures match viem/tempo ABI definitions", %{rt: rt} do
       abis_js =

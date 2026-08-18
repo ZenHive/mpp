@@ -32,7 +32,10 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
     * `spent` — amount spent in this session (decimal string)
     * `units` — optional integer, number of units consumed
     * `tx_hash` — optional settlement transaction hash (hex)
-    * `external_id` — optional merchant correlation ID echoed from the charge request
+    * `external_id` — optional merchant correlation ID. Additive: mpp-rs's
+      `SessionReceipt` has no such field (refs/mpp-rs/src/protocol/methods/tempo/session_receipt.rs:33-70),
+      while mppx's base receipt schema declares it optional
+      (refs/mppx/src/Receipt.ts:12). Omitted from the wire when nil.
   """
 
   use Descripex, namespace: "/methods/tempo"

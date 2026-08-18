@@ -65,6 +65,40 @@ defmodule MPP.Intents.SessionTest do
     test "returns error when currency is empty string" do
       assert {:error, :invalid_currency} = Session.new(amount: "1000", currency: "")
     end
+
+    # mpp-rs types unitType/recipient/suggestedDeposit as Option<String>
+    # (refs/mpp-rs/src/protocol/intents/session.rs:40-61), so serde rejects a
+    # non-string. Accepting one here would let us emit a request the reference
+    # SDKs cannot parse.
+    test "returns error when unit_type is not a string" do
+      assert {:error, :invalid_field_type} =
+               Session.new(amount: "1000", currency: "usd", unit_type: 123)
+    end
+
+    test "returns error when recipient is not a string" do
+      assert {:error, :invalid_field_type} =
+               Session.new(amount: "1000", currency: "usd", recipient: %{"a" => 1})
+    end
+
+    test "returns error when suggested_deposit is not a string" do
+      assert {:error, :invalid_field_type} =
+               Session.new(amount: "1000", currency: "usd", suggested_deposit: 5000)
+    end
+
+    test "accepts nil for every optional string field" do
+      assert {:ok, session} =
+               Session.new(
+                 amount: "1000",
+                 currency: "usd",
+                 unit_type: nil,
+                 recipient: nil,
+                 suggested_deposit: nil
+               )
+
+      assert session.unit_type == nil
+      assert session.recipient == nil
+      assert session.suggested_deposit == nil
+    end
   end
 
   describe "to_request/1 and from_request/1" do
@@ -156,6 +190,20 @@ defmodule MPP.Intents.SessionTest do
       assert session.decimals == nil
       assert session.external_id == nil
       assert session.method_details == nil
+    end
+
+    test "from_request rejects a non-string unitType on the wire" do
+      assert {:error, :invalid_field_type} =
+               Session.from_request(%{"amount" => "1000", "currency" => "usd", "unitType" => 123})
+    end
+
+    test "from_request rejects a non-string suggestedDeposit on the wire" do
+      assert {:error, :invalid_field_type} =
+               Session.from_request(%{
+                 "amount" => "1000",
+                 "currency" => "usd",
+                 "suggestedDeposit" => 5000
+               })
     end
 
     test "from_request accepts session without unitType" do
