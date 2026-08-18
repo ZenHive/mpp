@@ -1030,7 +1030,7 @@
         30
       ],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Four action handlers: open, voucher, topUp, close",
         "Correct payload schema per action (JSON: \"open\" / \"voucher\" / \"topUp\" / \"close\"; Elixir atoms snake_case)",
@@ -1045,7 +1045,7 @@
         "test/mpp/session/",
         "test/mpp/plug_test.exs"
       ],
-      "body": "Implement the four session credential actions: `open` (client deposits, opens channel), `voucher` (client presents signed cumulative-amount voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.\n",
+      "body": "Implement the four session credential actions: `open` (client deposits, opens channel), `voucher` (client presents signed cumulative-amount voucher for ongoing access), `topUp` (client adds deposit to existing channel), `close` (either party closes channel). Each action maps to a credential payload shape. Server dispatches to correct action handler based on `credential.payload.action`. Integrate with `MPP.Plug` so session endpoints work alongside charge endpoints.\n\nNote 2026-08-18 (sdk-delta-watch): the upstream session runtime moved substantially in Aug 2026 — mppx removed the legacy contract-backed Tempo sessions entirely (#749, commit e2b2a8a), added session credential lifecycle hooks (#710), scheduled settlement for streaming session charges (#733), now requires explicit custom session escrow (#792, commit 3de6560), and fixed fallback closes with stale receipt spend + close-accounting validation (#785, commit c326dc9); mpp-rs settles machineUSD sessions atomically (#387). At pickup, re-read refs/mppx/src/tempo/session/ and refs/mpp-rs/src/protocol/methods/tempo/ before modeling channel/voucher types — the legacy-channel removal upstream makes the precompile-voucher path (see the 2026-06-12 note) the only current target.\n",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
@@ -3094,6 +3094,97 @@
       "body": "Measure whether MPP's existing property, conformance and integration suites reject realistic payment-protocol faults. The provider-owned PaymentAuth specifications and observed integrations define meaning; mpp-rs/mppx supply cross-implementation evidence but do not override that contract. Challenge canonicalization, credential binding, replay/expiry and EVM/Tempo authorization with generated and domain mutations without changing the public protocol surface.\n",
       "created_at": "2026-08-17",
       "scored_at": "2026-08-17",
+      "cross_repo": []
+    },
+    {
+      "id": "83",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Port Aug-2026 upstream wire-parity fixes (case-insensitive auth-params, expires parse validation, receipt extension fields)",
+      "scores": {
+        "d": 3,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 2.17,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "WWW-Authenticate auth-param names parse case-insensitively: `ID=\"..\"` / `Id=\"..\"` are accepted and mapped to the lowercase param, and duplicate detection is case-insensitive (`id=` + `ID=` -> duplicate_param) — matching mppx #788 (refs/mppx/src/Challenge.ts parseAuthParams `.toLowerCase()`); RFC 9110 §11.2 (auth-param names are case-insensitive) is the authority, cited",
+        "parse_challenge rejects a malformed RFC 3339 `expires` at parse time with a distinct {:error, _} atom — matching mpp-rs #377 (refs/mpp-rs/src/protocol/core/headers.rs `is_iso8601_timestamp` guard); absent expires and valid expires still parse; server-side Verifier behavior (verifier.ex check_expiration) unchanged",
+        "MPP.Receipt round-trips method-specific top-level extension fields (e.g. originTxHash) through decode -> encode unchanged, and carries an optional subscriptionId — matching mpp-rs #383 (serde-flattened `extensions` on Receipt, refs/mpp-rs/src/protocol/core/challenge.rs) and mppx Receipt `z.looseObject` (refs/mppx/src/Receipt.ts:38); core fields keep precedence and extensions can never shadow them",
+        "MPP.Client.Transport.HTTP moduledoc and the README client section warn that a payment credential must never be created or attached after a redirect changed the request origin (Req follows redirects by default) — porting the guard intent of mpp-rs #379 (HttpError::CrossOriginRedirect, refs/mpp-rs/src/client/fetch.rs); our transport is passive so the guard is consumer guidance, not code",
+        "Every changed wire behavior cites refs/mppx and refs/mpp-rs file:line evidence per the CLAUDE.md wire-format rule, cross-checked where both agree",
+        "mix precommit.full green; touched modules at the 95% critical-tier coverage floor"
+      ],
+      "out_of_scope": [
+        "Session-runtime deltas (stale receipt close, escrow, streaming settle) — Tasks 31/50 territory",
+        "Tempo machine-token payments — separate task filed in the same sweep",
+        "Loosening the strict unknown-param whitelist rejection (keep it; only make it case-insensitive)",
+        "Stripe sub-cent canOffer pre-402 rejection (mppx #776) — declined as minor ergonomics; the error still surfaces at verify time"
+      ],
+      "touches": [
+        "lib/mpp/headers.ex",
+        "lib/mpp/challenge.ex",
+        "lib/mpp/receipt.ex",
+        "lib/mpp/client/transport/http.ex",
+        "README.md",
+        "test/mpp/headers_test.exs",
+        "test/mpp/challenge_test.exs",
+        "test/mpp/receipt_test.exs"
+      ],
+      "body": "Port the August 2026 upstream wire-parity fixes found by the 2026-08-18 sdk-delta-watch triage. This is a public wire-contract change on a published hex.pm money library — the dispatch trigger — and every item was verified against our current code in the triage: `MPP.Headers.parse_key/1` does not downcase param names (a header with `Id=\"...\"` is rejected as :invalid_auth_params by the whitelist), `Challenge.validate_fields/1` never checks the `expires` shape (only `MPP.Verifier.check_expiration/1` does, server-side), and `MPP.Receipt.from_map/1` silently discards unknown top-level keys and has no subscriptionId field.\n\nUpstream evidence: mppx #788 (case-insensitive auth-param names, commit 9774481), mpp-rs #377 (reject malformed expires at parse, commit 0130060), mpp-rs #383 (preserve method-specific receipt extension fields, commit 8afed36) + mppx Receipt looseObject, mpp-rs #379 client half (refuse credentials across cross-origin redirects, commit 7a6e517). Where mppx and mpp-rs disagree (mpp-rs does not lowercase param names), RFC 9110 §11.2 breaks the tie toward case-insensitivity. Re-read the refs at pickup and cite file:line for each behavior.\n",
+      "created_at": "2026-08-18",
+      "scored_at": "2026-08-18",
+      "cross_repo": []
+    },
+    {
+      "id": "84",
+      "phase": 9,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Support Tempo machine-token charge payments",
+      "scores": {
+        "d": 6,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.08,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "MPP.Methods.Tempo verifies machine-token charge payments per the current reference SDKs at pickup, including the `machineTokenEnabled` methodDetails advertisement in 402 challenge details (cross-checked mppx #784 / refs/mppx/src/tempo and mpp-rs #385 / refs/mpp-rs/src/protocol/methods/tempo/charge.rs TempoChargeExt::machine_token_enabled)",
+        "Machine-token semantics (canonical token, transfer/settlement event shape, push vs pull settlement) are established from Tempo-owned documentation (docs.tempo.xyz) and live chain behavior as the authority; reference SDKs are compatibility evidence only",
+        "Live Moderato integration test pins at least one real successful machine-token settlement and one relevant real rejection; missing credentials flunk loudly with exact export instructions",
+        "Any new wire/calldata/event constant cites refs/mpp-rs and refs/mppx file:line evidence, cross-checked where both agree",
+        "Existing TIP-20 TransferWithMemo verification is unchanged for non-machine-token charges",
+        "mix precommit.full green; touched modules at the 95% critical-tier coverage floor"
+      ],
+      "out_of_scope": [
+        "Machine-token session settlement (mpp-rs #387 settle machineUSD sessions atomically) — session-runtime territory, Tasks 31/50",
+        "Relay settlement wrappers (mppx #793 machine-token relay) unless the server verify path requires them",
+        "Client-side machine-token payment construction beyond what verification needs"
+      ],
+      "touches": [
+        "lib/mpp/methods/tempo.ex",
+        "lib/mpp/methods/tempo/",
+        "test/mpp/methods/tempo_test.exs",
+        "test/mpp/methods/tempo_integration_test.exs"
+      ],
+      "body": "Both official reference SDKs shipped first-party machine-token charge payments in August 2026 (found by the 2026-08-18 sdk-delta-watch triage): mppx #784 \"machine-token payments ... atomic push-mode and hosted fee-sponsored pull settlement\" (commit 61f847e) and mpp-rs #385 \"machine-token charge payments\" (commit 0c45b7a, adds a `machineTokenEnabled` methodDetails flag on the Tempo charge). Our `lib/mpp/methods/tempo.ex` has no machine-token handling (verified by grep in the triage). The demand signal is the project's explicit SDK-parity goal for the Tempo method, not a hedge. Dispatch trigger: on-chain money-verification surface with live external-system evidence required.\n\nAt pickup, first establish from Tempo-owned docs what a machine token is on-chain (canonical token contract, transfer mechanism, how settlement differs from TIP-20 TransferWithMemo), then scope server-side verification accordingly. Chain primitives that belong in onchain_tempo (calldata/event parsing for the machine-token standard) should be proposed against that library rather than inlined here — flag the boundary in the deliverable if onchain_tempo lacks them.\n",
+      "created_at": "2026-08-18",
+      "scored_at": "2026-08-18",
       "cross_repo": []
     }
   ]

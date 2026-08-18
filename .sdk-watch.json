@@ -1,27 +1,67 @@
 {
-  "_doc": "Watermark for the daily SDK-delta watch routine (see CLAUDE.md § Reference implementations). The routine clones each ref, runs `git log <last_seen>..HEAD` over the critical paths, triages new commits for parity gaps vs our Elixir lib, files/updates rmap tasks, then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
-  "checked_at": "2026-08-02",
+  "_doc": "Watermark for the daily SDK-delta watch routine (see CLAUDE.md \u00a7 Reference implementations). The routine clones each ref, runs `git log <last_seen>..HEAD` over the critical paths, triages new commits for parity gaps vs our Elixir lib, files/updates rmap tasks, then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
+  "checked_at": "2026-08-18",
   "refs": {
     "mppx": {
       "url": "https://github.com/wevm/mppx.git",
       "branch": "main",
-      "last_seen": "f3a936963c477db531c8c56cea83df05fb173f3f"
+      "last_seen": "7568194cf70db3d442de13747aecc1bb1ef6d97b"
     },
     "mpp-rs": {
       "url": "https://github.com/tempoxyz/mpp-rs.git",
       "branch": "main",
-      "last_seen": "3e37469bb19434982b433ae44ea8c713f7ea923a"
+      "last_seen": "1162fc9bcb09c6e88f07d4faee8ffda4c5331b8f"
     },
     "mpp-specs": {
       "url": "https://github.com/tempoxyz/mpp-specs.git",
       "branch": "main",
-      "last_seen": "b2609815ff7816275409d6925643499325ef2df5"
+      "last_seen": "f9506cd3472d10f31b4a6c790b3fe6b0ff377f96"
     }
   },
   "critical_paths": {
-    "mppx": ["src/Challenge.ts", "src/Credential.ts", "src/Receipt.ts", "src/Errors.ts", "src/Method.ts", "src/PaymentRequest.ts", "src/tempo/", "src/stripe/", "src/x402/", ".changeset/"],
-    "mpp-rs": ["src/protocol/core/", "src/protocol/methods/", "src/client/", "src/server/", ".changelog/"],
-    "mpp-specs": ["specs/"]
+    "mppx": [
+      "src/Challenge.ts",
+      "src/Credential.ts",
+      "src/Receipt.ts",
+      "src/Errors.ts",
+      "src/Method.ts",
+      "src/PaymentRequest.ts",
+      "src/tempo/",
+      "src/stripe/",
+      "src/x402/",
+      ".changeset/"
+    ],
+    "mpp-rs": [
+      "src/protocol/core/",
+      "src/protocol/methods/",
+      "src/client/",
+      "src/server/",
+      ".changelog/"
+    ],
+    "mpp-specs": [
+      "specs/"
+    ]
   },
-  "triage_keywords": ["security", "advisory", "GHSA", "CVE", "dos", "denial", "overflow", "cap", "limit", "bound", "exhaust", "panic", "wire", "canonical", "hmac", "digest", "replay", "drain", "fee-payer", "fee payer"]
+  "triage_keywords": [
+    "security",
+    "advisory",
+    "GHSA",
+    "CVE",
+    "dos",
+    "denial",
+    "overflow",
+    "cap",
+    "limit",
+    "bound",
+    "exhaust",
+    "panic",
+    "wire",
+    "canonical",
+    "hmac",
+    "digest",
+    "replay",
+    "drain",
+    "fee-payer",
+    "fee payer"
+  ]
 }

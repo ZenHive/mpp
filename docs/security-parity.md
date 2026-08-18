@@ -15,7 +15,7 @@ our unpatched weaknesses in a deployed, money-handling library would be an attac
 **Source basis.** The reference clones in `refs/` are shallow (mpp-rs 72 commits, mppx 174,
 mpp-specs 24, truncated ~2026-03). The **four published advisories below (2026-03-26) are the
 authoritative historical security record**; every named fix falls inside the visible window, so
-the parity set is well-bounded. Last full audit: 2026-06-30.
+the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watch sweep: 2026-08-18.
 
 ---
 
@@ -85,6 +85,11 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 | mppx #646 hosted fee-payer signature normalization | Sponsor cosignature mis-encoded when the hosted fee payer returns `yParity` as a hex string rather than a number, yielding an invalid or wrong-recovery co-signed tx | `parse_y_parity/1` already accepts integer, hex-string, and legacy `v` forms and validates the recovery id before RLP encoding — `hosted_fee_payer.ex:195-209` (broader than mppx's `Number()` coercion) |
 | mppx #699 / #707 aggregate sponsor fee budget (our published `GHSA-j4j7-7xpr-c7cr`) | Per-transaction ceilings bound each sponsored tx in isolation, so N concurrent sponsored requests commit N × `max_total_fee` of sponsor exposure — unbounded in aggregate | `MPP.Methods.Tempo.SponsorBudget` — fail-closed aggregate in-flight fee + reservation-count ceilings, pinned per sponsor identity and enforced in one atomic store update; reserved **before** co-sign, three-phase ownership (`prepared`/`broadcasting`/`pending`) with per-request random ids, released only on an observed terminal receipt or conservative chain-valid expiry, state-derived TTL, opt-in bounded receipt reconciliation. Requires an explicitly selected atomic store (`Store.update/3`); the bound is scoped to that shared store. `mpp-rs` has no equivalent — mppx is the sole prior art — `sponsor_budget.ex`, `tempo.ex` (Task 78, ships 0.12.0) |
 | — hardening divergence beyond both SDKs (residual of our published `GHSA-34g7-vx6g-82mq`) | Front-running race on Tempo hash/transaction paths: dedup keyed on tx hash alone, presenter identity never proven (both SDKs default expected sender to `receipt.from` — mpp-rs `verify_hash`, mppx `Charge.ts`) | Opt-in `"require_presenter_binding"`: presenter signs the proof path's EIP-712 envelope (MPP v3 `{account, challengeId, realm}`) with the transfer sender's wallet or an authorized access key; hash path requires a matching `source` DID; advertised as `presenterBinding` in 402 details — `tempo.ex` (Task 75, ships 0.8.0) |
+| mpp-rs #378 reject unterminated quoted-string (commit 28c7049, 2026-08-08) | Challenge params silently truncated/misparsed from a malformed quoted value | Already rejected: `parse_quoted_string("", _)` → `{:error, :invalid_auth_params}` — `headers.ex:388` (confirmed 2026-08-18 sweep) |
+| mpp-rs #379 reject non-letter method identifiers (commit 7a6e517, 2026-08-10) | Method-name confusion / smuggling via non-`1*LOWERALPHA` identifiers | Already rejected: `Challenge.valid_method_name?/1` enforces the spec ABNF at parse time and at `MPP.Plug.init/1` — `challenge.ex:174-176` |
+| mppx #766 quote-aware multi-challenge splitting (commit f7f8e58, 2026-08-05) | Decoy scheme text inside a quoted auth-param value (e.g. `Basic realm="Payment x"`) misparsed as a challenge boundary | Already immune: `MPP.Headers.SchemeSplitter` tracks quoted-string state and requires a start-or-comma boundary before a scheme token — `headers/scheme_splitter.ex` |
+| mppx #789 prototype-named auth parameters (commit 106ba18, 2026-08-04) | `__proto__`/`constructor` param names polluting the parsed object (JS-specific) | Immune by construction: Elixir maps have no prototype chain, and unknown param names are strictly whitelist-rejected — `headers.ex:356-362` |
+| mpp-rs #381 `cache-control: private` on body-verified paid responses (commit a8e5d6a, 2026-08-10) | Shared caches serving one client's paid response to others | Already set on every successful verification — `plug.ex:364`; 402s carry `no-store` — `plug.ex:398` |
 
 ---
 
