@@ -53,7 +53,7 @@ defmodule MPP.MixProject do
       {:credo, "~> 1.7.18", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4.7", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.23.0", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.15", only: [:dev, :test], runtime: false},
       {:ex_unit_json, "~> 0.6.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test]},
@@ -68,7 +68,7 @@ defmodule MPP.MixProject do
       {:reach, "~> 2.7", only: [:dev, :test], runtime: false},
 
       # JS tooling for dev/test (cross-referencing mppx TypeScript SDK, never production)
-      {:quickbeam, "~> 0.10.16", only: [:dev, :test], runtime: false},
+      {:quickbeam, "~> 0.11.0", only: [:dev, :test], runtime: false},
       {:oxc, "~> 0.16", only: [:dev, :test], runtime: false},
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
