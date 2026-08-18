@@ -6,6 +6,25 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **`currency` is now preserved verbatim** instead of being lowercased.
+  `MPP.Intents.Charge.new/1` and `MPP.Intents.Session.new/1` return the caller's
+  string unchanged, so `"USD"` stays `"USD"` and a checksummed token address keeps
+  its EIP-55 casing on the wire. Both reference SDKs round-trip the value
+  unchanged, and an mppx client comparing `challenge.currency === "USD"` would
+  otherwise fail against an Elixir server. Case-insensitive matching already lives
+  at the comparison sites (`Onchain.Address.equal?/2`, the EVM native-currency
+  check); `MPP.Methods.Stripe` now lowercases at the API boundary, where Stripe's
+  contract requires it. Callers that relied on the normalized value should
+  downcase explicitly.
+- `MPP.Intents.Session` now type-checks its optional wire fields. `unit_type`,
+  `recipient`, and `suggested_deposit` must be strings when present — mpp-rs types
+  them `Option<String>`, so a non-string previously let us build a request the
+  reference SDKs cannot parse. Non-strings return `{:error, :invalid_field_type}`.
+
 ## [0.13.0] — 2026-08-18
 
 ### Added
