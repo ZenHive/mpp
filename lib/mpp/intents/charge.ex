@@ -12,7 +12,7 @@ defmodule MPP.Intents.Charge do
   ## Fields
 
     * `amount` — (required) string in base units (cents for fiat, wei for ETH). Never a float.
-    * `currency` — (required) lowercase string (ISO 4217 for fiat, token address for on-chain)
+    * `currency` — (required) string, preserved verbatim (ISO 4217 for fiat, token address for on-chain)
     * `recipient` — (optional) payment recipient identifier
     * `description` — (optional) human-readable description
     * `external_id` — (optional) caller-provided correlation ID
@@ -35,7 +35,9 @@ defmodule MPP.Intents.Charge do
   @enforce_keys [:amount, :currency]
   defstruct [:amount, :currency, :recipient, :description, :external_id, :method_details]
 
-  api(:new, "Create a new charge intent with validation. Amount must be a string, currency is normalized to lowercase.",
+  api(
+    :new,
+    "Create a new charge intent with validation. Amount and currency must be strings; currency is preserved verbatim.",
     params: [
       opts: [
         kind: :value,

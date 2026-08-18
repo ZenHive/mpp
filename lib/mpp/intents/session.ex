@@ -21,7 +21,7 @@ defmodule MPP.Intents.Session do
   ## Fields
 
     * `amount` — (required) per-unit rate in base units (string). Never a float.
-    * `currency` — (required) lowercase string (ISO 4217 for fiat, token address for on-chain)
+    * `currency` — (required) string, preserved verbatim (ISO 4217 for fiat, token address for on-chain)
     * `unit_type` — (optional) rate unit, e.g. `"second"`, `"minute"`, `"request"`
     * `recipient` — (optional) payment recipient identifier
     * `suggested_deposit` — (optional) suggested channel deposit in base units
@@ -61,7 +61,7 @@ defmodule MPP.Intents.Session do
 
   api(
     :new,
-    "Create a new session intent with validation. Amount must be a string, currency is normalized to lowercase.",
+    "Create a new session intent with validation. Amount and currency must be strings; currency is preserved verbatim.",
     params: [
       opts: [
         kind: :value,

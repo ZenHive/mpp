@@ -17,12 +17,21 @@ defmodule MPP.Intents.SessionTest do
       assert session.method_details == nil
     end
 
-    test "normalizes currency to lowercase" do
+    # Wire parity: mpp-rs types currency as a plain String and asserts verbatim
+    # round-trip (refs/mpp-rs/src/protocol/intents/session.rs:44,169); its doctest
+    # at :24 carries a checksummed token address. Normalizing would break an mppx
+    # client comparing `challenge.currency === "USD"` and would strip the EIP-55
+    # checksum from an on-chain token address.
+    test "preserves currency verbatim" do
       assert {:ok, session} = Session.new(amount: "500", currency: "USD")
-      assert session.currency == "usd"
+      assert session.currency == "USD"
 
       assert {:ok, session2} = Session.new(amount: "500", currency: "Eur")
-      assert session2.currency == "eur"
+      assert session2.currency == "Eur"
+
+      checksummed = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      assert {:ok, session3} = Session.new(amount: "500", currency: checksummed)
+      assert session3.currency == checksummed
     end
 
     test "accepts all optional fields" do

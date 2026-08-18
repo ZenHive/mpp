@@ -322,7 +322,10 @@ defmodule MPP.Methods.Stripe do
   defp build_request_body(spt, charge, config, settlement) do
     base = [
       {"amount", charge.amount},
-      {"currency", charge.currency},
+      # Stripe's API documents a lowercase ISO 4217 code. The intent layer keeps
+      # the operator's string verbatim (wire parity with mpp-rs/mppx), so the
+      # normalization belongs here, at the provider boundary.
+      {"currency", String.downcase(charge.currency)},
       {"confirm", "true"},
       {"shared_payment_granted_token", spt},
       {"automatic_payment_methods[enabled]", "true"},

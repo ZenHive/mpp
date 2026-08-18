@@ -229,6 +229,26 @@ defmodule MPP.Methods.StripeTest do
       assert params["automatic_payment_methods[allow_redirects]"] == "never"
     end
 
+    # The intent layer keeps the operator's currency string verbatim for wire
+    # parity with mpp-rs/mppx, so the lowercase ISO 4217 code Stripe's API
+    # documents has to be produced at this boundary.
+    test "lowercases the currency for Stripe even when the charge preserves case", %{charge: charge} do
+      charge = %{charge | currency: "USD"}
+      test_pid = self()
+
+      Req.Test.stub(Stripe, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:request_body, body})
+        Req.Test.json(conn, %{"id" => @pi_id, "status" => "succeeded"})
+      end)
+
+      assert {:ok, _receipt} = Stripe.verify(%{"spt" => @spt}, charge)
+
+      assert_received {:request_body, body}
+      assert URI.decode_query(body)["currency"] == "usd"
+      assert charge.currency == "USD"
+    end
+
     test "sends idempotency key with challenge_id and spt", %{charge: charge} do
       test_pid = self()
 

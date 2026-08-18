@@ -49,7 +49,7 @@ defmodule MPP.Plug do
 
     * `:method` — (required) module implementing `MPP.Method`
     * `:amount` — (required) price in base units (string)
-    * `:currency` — (required) currency code (string, normalized to lowercase)
+    * `:currency` — (required) currency code (string, preserved verbatim on the wire)
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
     * `:external_id` — (optional) merchant reference ID included in the challenge request
