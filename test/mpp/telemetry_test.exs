@@ -52,13 +52,14 @@ defmodule MPP.TelemetryTest do
   @realm "api.telemetry.test"
 
   setup do
-    {:ok, _} = TelemetryCollector.start_link()
+    # Supervised rather than `start_link` + a manual stop in `on_exit`: the agent
+    # is linked to the test process, so by the time `on_exit` runs it is already
+    # dying, and `Process.whereis` could still return a pid whose name had not been
+    # unregistered yet — `GenServer.stop` then exited `:noproc` and failed the test.
+    start_supervised!(%{id: TelemetryCollector, start: {TelemetryCollector, :start_link, [[]]}})
     :ok = TelemetryCollector.attach()
 
-    on_exit(fn ->
-      TelemetryCollector.detach()
-      if Process.whereis(TelemetryCollector), do: GenServer.stop(TelemetryCollector)
-    end)
+    on_exit(fn -> TelemetryCollector.detach() end)
 
     :ok
   end
