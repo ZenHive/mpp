@@ -11,6 +11,10 @@ defmodule MPP.Client.Req do
       |> Req.get(url: "https://api.example.com/resource")
 
   This is the Elixir counterpart of mpp-rs `PaymentExt` and mppx `Fetch.from()`.
+
+  A 402 that arrives after a redirect changed the request origin is refused
+  (`:cross_origin_redirect`) so a payment credential is never attached to a
+  different host, scheme, or port than the caller asked for (mpp-rs #379).
   """
 
   use Descripex, namespace: "/client"
@@ -62,7 +66,7 @@ defmodule MPP.Client.Req do
       `:server_order`, or `{:accept_payment, entries}` when `:accept_payment` is
       set
     * `:accept_payment` — preference entries advertised on outgoing requests and
-      used as the default ranking policy
+      used as the default ranking policy. `q` values are preserved on the wire
     * `:accept_policy` — `MPP.Client.AcceptPolicy.t()` gating header injection
       (default `:always`)
     * `:max_payment_retries` — payment attempts after a 402 (default 3)
@@ -73,7 +77,10 @@ defmodule MPP.Client.Req do
 
     request
     |> Req.Request.put_private(:mpp_client, config)
-    |> Req.Request.append_request_steps(mpp_accept_payment: &put_accept_payment/1)
+    |> Req.Request.append_request_steps(
+      mpp_origin: &snapshot_origin/1,
+      mpp_accept_payment: &put_accept_payment/1
+    )
     |> Req.Request.append_response_steps(mpp_payment: &handle_payment/1)
   end
 
@@ -117,26 +124,35 @@ defmodule MPP.Client.Req do
           entries -> {:accept_payment, entries}
         end
 
-      policy ->
+      :server_order ->
+        :server_order
+
+      {:accept_payment, entries} = policy when is_list(entries) ->
         policy
+
+      fun when is_function(fun, 1) ->
+        fun
+
+      other ->
+        raise ArgumentError, "MPP.Client.Req.attach/2 :selection is invalid, got: #{inspect(other)}"
+    end
+  end
+
+  defp snapshot_origin(request) do
+    case Req.Request.get_private(request, :mpp_request_origin) do
+      nil -> Req.Request.put_private(request, :mpp_request_origin, origin(request.url))
+      _existing -> request
     end
   end
 
   defp put_accept_payment(request) do
     config = Req.Request.get_private(request, :mpp_client)
 
-    HTTP.set_accept_payment_from_providers(
-      request,
-      accept_payment_pairs(config.accept_payment),
-      config.accept_policy
-    )
-  end
-
-  defp accept_payment_pairs(entries) when is_list(entries) do
-    Enum.map(entries, fn
-      {method, intent, _q} -> {method, intent}
-      %{method: method, intent: intent} -> {method, intent}
-    end)
+    if config.accept_payment == [] or not AcceptPolicy.allows?(config.accept_policy, request.url) do
+      request
+    else
+      HTTP.set_accept_payment(request, config.accept_payment)
+    end
   end
 
   defp handle_payment({request, response}) do
@@ -156,20 +172,51 @@ defmodule MPP.Client.Req do
   end
 
   defp pay_and_retry(request, response, config, retries) do
-    with {:ok, challenges} <- fetch_challenges(response, retries),
+    with :ok <- ensure_same_origin(request),
+         {:ok, challenges} <- fetch_challenges(response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
          {:ok, credential} <- MultiProvider.pay(config.provider, challenge) do
-      request
-      |> HTTP.set_credential(credential)
-      |> Req.Request.put_private(:mpp_payment_retries, retries + 1)
-      |> then(fn paid -> Req.Request.run_request(%{paid | halted: false}) end)
-      |> then(fn {paid, result} -> Req.Request.halt(paid, result) end)
+      paid =
+        request
+        |> HTTP.set_credential(credential)
+        |> Req.Request.put_private(:mpp_payment_retries, retries + 1)
+
+      {paid, result} = Req.Request.run_request(%{paid | halted: false})
+      Req.Request.halt(paid, result)
     else
       {:passthrough, passthrough_response} ->
         {request, passthrough_response}
 
       {:error, reason} ->
         Req.Request.halt(request, %Error{reason: reason, message: error_message(reason)})
+    end
+  end
+
+  defp ensure_same_origin(request) do
+    original = Req.Request.get_private(request, :mpp_request_origin)
+    current = origin(request.url)
+
+    if is_nil(original) or original == current do
+      :ok
+    else
+      {:error, :cross_origin_redirect}
+    end
+  end
+
+  defp origin(%URI{} = uri) do
+    host = if is_binary(uri.host), do: String.downcase(uri.host)
+    port = uri.port
+    scheme = uri.scheme
+
+    default_port? =
+      is_nil(port) or
+        (scheme == "https" and port == 443) or
+        (scheme == "http" and port == 80)
+
+    if default_port? do
+      {scheme, host}
+    else
+      {scheme, host, port}
     end
   end
 
@@ -190,6 +237,8 @@ defmodule MPP.Client.Req do
   end
 
   defp error_message(:no_supported_challenge), do: "no configured provider supports the offered payment challenges"
+
+  defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
 
   defp error_message(reason), do: "MPP payment failed: #{inspect(reason)}"
 end

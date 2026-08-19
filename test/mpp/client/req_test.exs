@@ -118,6 +118,12 @@ defmodule MPP.Client.ReqTest do
       without_message = %ClientReq.Error{reason: :boom}
       assert Exception.message(without_message) == "MPP payment failed: :boom"
     end
+
+    test "rejects an invalid selection policy" do
+      assert_raise ArgumentError, ~r/:selection/, fn ->
+        ClientReq.attach(Req.new(), provider: TempoProvider, selection: :newest)
+      end
+    end
   end
 
   describe "non-402 passthrough" do
@@ -320,6 +326,127 @@ defmodule MPP.Client.ReqTest do
       assert_received {:paid, "tempo"}
     end
 
+    test "explicit {:accept_payment, entries} selection ranks challenges" do
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header(
+              "www-authenticate",
+              challenge_header("tempo") <> ", " <> challenge_header("stripe")
+            )
+            |> Plug.Conn.send_resp(402, "pay")
+
+          _auth ->
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req =
+        client(plug,
+          provider: MultiProvider.new([{TempoProvider, %{test_pid: self()}}, {StripeProvider, %{test_pid: self()}}]),
+          selection: {:accept_payment, [{"stripe", "charge", 1.0}, {"tempo", "charge", 0.1}]}
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "explicit :selection wins over :accept_payment ranking" do
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header(
+              "www-authenticate",
+              challenge_header("tempo") <> ", " <> challenge_header("stripe")
+            )
+            |> Plug.Conn.send_resp(402, "pay")
+
+          _auth ->
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req =
+        client(plug,
+          provider: MultiProvider.new([{TempoProvider, %{test_pid: self()}}, {StripeProvider, %{test_pid: self()}}]),
+          accept_payment: [{"stripe", "charge", 1.0}, {"tempo", "charge", 0.1}],
+          selection: :server_order
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, "stripe"}
+    end
+
+    test "refuses to pay after a cross-origin redirect" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case {conn.host, conn.request_path} do
+          {"good.example", "/resource"} ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "http://evil.example/resource")
+            |> Plug.Conn.send_resp(302, "redirect")
+
+          {"evil.example", "/resource"} ->
+            send(self(), {:evil_auth, Plug.Conn.get_req_header(conn, "authorization")})
+
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+
+          _other ->
+            Plug.Conn.send_resp(conn, 500, "unexpected")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, %ClientReq.Error{reason: :cross_origin_redirect} = error} =
+               Req.get(req, url: "http://good.example/resource")
+
+      assert Exception.message(error) =~ "cross-origin redirect"
+      refute_received {:paid, _}
+      assert_received {:evil_auth, []}
+    end
+
+    test "pays after a same-origin redirect" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case conn.request_path do
+          "/start" ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "/resource")
+            |> Plug.Conn.send_resp(302, "")
+
+          "/resource" ->
+            case Plug.Conn.get_req_header(conn, "authorization") do
+              [] ->
+                conn
+                |> Plug.Conn.put_resp_header("www-authenticate", header)
+                |> Plug.Conn.send_resp(402, "pay")
+
+              _auth ->
+                Plug.Conn.send_resp(conn, 200, "paid")
+            end
+
+          _other ->
+            Plug.Conn.send_resp(conn, 500, "unexpected")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} =
+               Req.get(req, url: "http://example.com/start")
+
+      assert_received {:paid, "tempo"}
+    end
+
     test "a paid retry that offers no supported challenge returns the 402" do
       tempo = challenge_header("tempo")
       stripe = challenge_header("stripe")
@@ -362,6 +489,22 @@ defmodule MPP.Client.ReqTest do
 
       assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/ok")
       assert_received {:accept, ["tempo/charge"]}
+    end
+
+    test "preserves Accept-Payment q values on the wire" do
+      plug = fn conn ->
+        send(self(), {:accept, Plug.Conn.get_req_header(conn, "accept-payment")})
+        Plug.Conn.send_resp(conn, 200, "ok")
+      end
+
+      req =
+        client(plug,
+          provider: TempoProvider,
+          accept_payment: [{"stripe", "charge", 1.0}, {"tempo", "charge", 0.1}]
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/ok")
+      assert_received {:accept, ["stripe/charge, tempo/charge;q=0.1"]}
     end
 
     test "respects AcceptPolicy when injection is blocked" do

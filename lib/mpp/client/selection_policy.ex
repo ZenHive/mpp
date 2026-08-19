@@ -83,4 +83,8 @@ defmodule MPP.Client.SelectionPolicy do
       _other -> []
     end
   end
+
+  defp order(_challenges, policy) do
+    raise ArgumentError, "unknown MPP.Client.SelectionPolicy: #{inspect(policy)}"
+  end
 end

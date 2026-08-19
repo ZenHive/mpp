@@ -118,6 +118,15 @@ defmodule MPP.Client.SelectionPolicyTest do
       assert {:error, :no_supported_challenge} =
                SelectionPolicy.select([], MultiProvider.new([{TempoProvider, %{}}]))
     end
+
+    test "unknown policy raises ArgumentError" do
+      challenges = [make_challenge("tempo")]
+      multi = MultiProvider.new([{TempoProvider, %{}}])
+
+      assert_raise ArgumentError, ~r/unknown MPP.Client.SelectionPolicy/, fn ->
+        SelectionPolicy.select(challenges, multi, :newest)
+      end
+    end
   end
 
   describe "Transport.select_challenge/3" do
