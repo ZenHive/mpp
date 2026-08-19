@@ -1417,7 +1417,7 @@
       "id": 21,
       "phase": 14,
       "bundle": "solana",
-      "status": "in_progress",
+      "status": "done",
       "title": "Solana charge method",
       "scores": {
         "d": 6,
@@ -1446,9 +1446,16 @@
         "test/mpp/methods/solana_test.exs",
         "test/mpp/methods/solana_integration_test.exs"
       ],
+      "shipped_in": "6a4fd9a0c0b6116c64a0eeee1dc2f7d9aa603d64",
       "body": "Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency (\"sol\" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).\n",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-02",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787109701309-07696e05, 6a4fd9a0c0b6116c64a0eeee1dc2f7d9aa603d64).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787109701309-07696e05",
       "cross_repo": []
     },
     {
