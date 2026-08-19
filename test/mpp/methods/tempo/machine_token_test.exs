@@ -199,6 +199,56 @@ defmodule MPP.Methods.Tempo.MachineTokenTest do
                  @live_memo
                )
     end
+
+    test "rejects a negative amount" do
+      assert :error =
+               MachineToken.match_route(
+                 canonical_calls(@live_memo),
+                 @moderato_chain_id,
+                 @live_currency,
+                 -1,
+                 @live_recipient,
+                 @live_memo
+               )
+    end
+
+    test "rejects an invalid currency address" do
+      assert :error =
+               MachineToken.match_route(
+                 canonical_calls(@live_memo),
+                 @moderato_chain_id,
+                 "not-an-address",
+                 @live_amount,
+                 @live_recipient,
+                 @live_memo
+               )
+    end
+
+    test "rejects malformed swapTo calldata" do
+      [approve, swap] = canonical_calls(@live_memo)
+
+      assert :error =
+               MachineToken.match_route(
+                 [approve, %{swap | input: <<0x34, 0x18, 0x9F, 0xED>>}],
+                 @moderato_chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 @live_memo
+               )
+    end
+
+    test "rejects a challenge memo that is not a string" do
+      assert :error =
+               MachineToken.match_route(
+                 canonical_calls(@live_memo),
+                 @moderato_chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 123
+               )
+    end
   end
 
   defp canonical_calls(memo_hex) do

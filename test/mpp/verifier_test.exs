@@ -4,12 +4,12 @@ defmodule MPP.VerifierTest do
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Errors
+  # --- Mock Methods (no Plug dependency) ---
   alias MPP.Intents.Charge
   alias MPP.JCS
+  alias MPP.Methods.Stripe
   alias MPP.Receipt
   alias MPP.Verifier
-
-  # --- Mock Methods (no Plug dependency) ---
 
   defmodule MockMethod do
     @moduledoc false
@@ -67,7 +67,26 @@ defmodule MPP.VerifierTest do
     end
   end
 
-  # --- Test Helpers ---
+  defmodule MockTransactionMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mocktx"
+
+    @impl MPP.Method
+    # --- Test Helpers ---
+    def credential_types, do: ["transaction"]
+
+    @impl MPP.Method
+    def verify(%{"type" => "transaction"}, _charge) do
+      {:ok, Receipt.new(method: method_name(), reference: "tx-ok")}
+    end
+
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "Expected transaction payload")}
+    end
+  end
 
   @secret_key "test-secret-key-for-verifier"
   @realm "api.test.com"
@@ -117,6 +136,7 @@ defmodule MPP.VerifierTest do
       |> then(fn p -> if digest, do: Keyword.put(p, :digest, digest), else: p end)
       |> then(fn p -> if opaque, do: Keyword.put(p, :opaque, opaque), else: p end)
 
+    # --- Tests ---
     challenge = Challenge.create(params, secret)
     %Credential{challenge: challenge, payload: payload}
   end
@@ -132,8 +152,6 @@ defmodule MPP.VerifierTest do
       overrides
     )
   end
-
-  # --- Tests ---
 
   describe "verify/2 success" do
     test "valid credential returns receipt" do
@@ -526,7 +544,7 @@ defmodule MPP.VerifierTest do
 
     test "rejects a well-formed hash credential against Stripe (SPT, not hash)" do
       credential = build_credential(method_name: "stripe", payload: @mpp_rs_hash)
-      opts = verify_opts(method: MPP.Methods.Stripe)
+      opts = verify_opts(method: Stripe)
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert String.contains?(error.type, "invalid-payload")
@@ -553,14 +571,43 @@ defmodule MPP.VerifierTest do
       end
     end
 
-    test "does not type-gate an untyped payload or a non-hash typed payload" do
+    test "does not type-gate an untyped payload" do
       untyped = build_credential(payload: %{"proof" => "valid"})
       assert {:ok, %Receipt{}} = Verifier.verify(untyped, verify_opts())
+    end
 
-      other_type = build_credential(payload: %{"type" => "transaction", "signature" => "0xabc"})
-      assert {:error, %Errors{} = error} = Verifier.verify(other_type, verify_opts())
+    test "rejects any typed payload whose type the method does not accept" do
+      for type <- ["transaction", "proof"] do
+        credential = build_credential(payload: %{"type" => type, "signature" => "0xabc"})
+
+        assert {:error, %Errors{} = error} = Verifier.verify(credential, verify_opts())
+        assert String.contains?(error.type, "invalid-payload")
+        assert error.detail == ~s(type="#{type}" is not accepted by this payment method)
+      end
+    end
+
+    test "rejects a typed non-hash payload against Stripe (SPT, not typed)" do
+      credential = build_credential(method_name: "stripe", payload: %{"type" => "transaction", "signature" => "0xabc"})
+      opts = verify_opts(method: Stripe)
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert String.contains?(error.type, "invalid-payload")
-      assert error.detail == "Missing proof field"
+      assert error.detail == ~s(type="transaction" is not accepted by this payment method)
+    end
+
+    test "accepts a typed payload the method declares in credential_types/0" do
+      credential = build_credential(method_name: "mocktx", payload: %{"type" => "transaction", "signature" => "0xabc"})
+      opts = verify_opts(method: MockTransactionMethod)
+
+      assert {:ok, %Receipt{method: "mocktx", reference: "tx-ok"}} = Verifier.verify(credential, opts)
+    end
+
+    test "rejects a payload whose type is not a string" do
+      credential = build_credential(payload: %{"type" => 123, "proof" => "valid"})
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, verify_opts())
+      assert String.contains?(error.type, "invalid-payload")
+      assert error.detail == "credential payload 'type' must be a string"
     end
   end
 end
