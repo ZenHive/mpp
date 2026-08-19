@@ -47,7 +47,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     assert receipt.reference =~ ~r/^0x[0-9a-f]{64}$/
     assert is_binary(receipt.subscription_id)
     assert {:ok, record} = Store.get(store, receipt.subscription_id)
-    assert record.source == String.downcase(payer.address_hex)
+    assert record.method == "tempo"
+    assert record.method_state.source == String.downcase(payer.address_hex)
     assert record.reference == receipt.reference
     assert DateTime.compare(record.billing_anchor, DateTime.utc_now()) in [:lt, :eq]
   end

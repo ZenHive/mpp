@@ -2,51 +2,55 @@ defmodule MPP.Subscription.Record do
   @moduledoc """
   Persisted recurring-payment authority and settlement state.
 
-  `billing_anchor` is the first settlement block timestamp. Period zero is
-  charged by activation; `last_charged_period` advances only after a confirmed
-  renewal.
+  `billing_anchor` is the start of the first paid period. Provider-specific
+  authority belongs in `method_state`; the remaining fields model billing
+  periods shared by every subscription method.
   """
 
   alias MPP.Intents.Subscription
-  alias MPP.Methods.Tempo.KeyAuthorization
+
+  @type payment :: %{
+          required(:period) => non_neg_integer(),
+          required(:reference) => String.t(),
+          required(:timestamp) => String.t(),
+          required(:event_ids) => [String.t()]
+        }
 
   @type t :: %__MODULE__{
           subscription_id: String.t(),
+          method: String.t(),
           subscription: Subscription.t(),
-          source: String.t(),
-          access_key: String.t(),
-          access_key_type: KeyAuthorization.key_type(),
-          key_authorization: String.t(),
+          method_state: map(),
           billing_anchor: DateTime.t(),
           last_charged_period: non_neg_integer(),
+          payments: %{non_neg_integer() => payment()},
           reference: String.t(),
           timestamp: String.t(),
+          cancellation_effective_at: DateTime.t() | nil,
           in_flight_period: non_neg_integer() | nil,
           in_flight_reference: String.t() | nil
         }
 
   @enforce_keys [
     :subscription_id,
+    :method,
     :subscription,
-    :source,
-    :access_key,
-    :access_key_type,
-    :key_authorization,
+    :method_state,
     :billing_anchor,
     :reference,
     :timestamp
   ]
   defstruct [
     :subscription_id,
+    :method,
     :subscription,
-    :source,
-    :access_key,
-    :access_key_type,
-    :key_authorization,
+    :method_state,
     :billing_anchor,
     :reference,
     :timestamp,
     last_charged_period: 0,
+    payments: %{},
+    cancellation_effective_at: nil,
     in_flight_period: nil,
     in_flight_reference: nil
   ]

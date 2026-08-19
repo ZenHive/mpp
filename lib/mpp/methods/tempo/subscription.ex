@@ -249,9 +249,10 @@ defmodule MPP.Methods.Tempo.Subscription do
   defp settle_renewal(record, period_index, config) do
     reference = "renewal:#{record.subscription_id}:#{period_index}"
     subscription = record.subscription
+    source = record.method_state.source
 
-    with {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, record.source, config, reference),
-         :ok <- simulate_sponsored(tx, record.source, config) do
+    with {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, source, config, reference),
+         :ok <- simulate_sponsored(tx, source, config) do
       case broadcast(tx.raw, config) do
         {:ok, tx_hash, chain_receipt} ->
           confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)
@@ -271,7 +272,15 @@ defmodule MPP.Methods.Tempo.Subscription do
          {:ok, settled_at} <- settlement_time(tx_hash, config),
          :ok <- require_before_expiry(settled_at, subscription.subscription_expires) do
       timestamp = DateTime.to_iso8601(settled_at)
-      updated = %{record | reference: tx_hash, timestamp: timestamp, last_charged_period: period_index}
+
+      updated = %{
+        record
+        | reference: tx_hash,
+          timestamp: timestamp,
+          last_charged_period: period_index,
+          payments: Map.put(record.payments, period_index, payment(period_index, tx_hash, timestamp))
+      }
+
       {:ok, receipt(updated), updated}
     else
       {:error, "subscription transaction reverted" = reason} -> {:error, {:retryable, reason}}
@@ -399,16 +408,24 @@ defmodule MPP.Methods.Tempo.Subscription do
 
     %Record{
       subscription_id: subscription_id(),
+      method: "tempo",
       subscription: %{subscription | method_details: public_method_details(subscription.method_details)},
-      source: authorization.source,
-      access_key: access_key,
-      access_key_type: :secp256k1,
-      key_authorization: serialized,
+      method_state: %{
+        source: authorization.source,
+        access_key: access_key,
+        access_key_type: :secp256k1,
+        key_authorization: serialized
+      },
       billing_anchor: settled_at,
       last_charged_period: 0,
+      payments: %{0 => payment(0, tx_hash, timestamp)},
       reference: tx_hash,
       timestamp: timestamp
     }
+  end
+
+  defp payment(period, reference, timestamp) do
+    %{period: period, reference: reference, timestamp: timestamp, event_ids: []}
   end
 
   defp public_method_details(details) do

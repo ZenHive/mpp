@@ -7,8 +7,12 @@ defmodule MPP.Methods.StripeTest do
   alias MPP.Intents.Charge
   alias MPP.Intents.Subscription
   alias MPP.Methods.Stripe
+  alias MPP.Methods.Stripe.Subscription, as: StripeSubscription
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
+  alias MPP.Subscription.ETSStore, as: SubscriptionStore
+  alias MPP.Subscription.Record
+  alias MPP.Subscription.Store
 
   @stripe_secret_key "sk_test_abc123"
   @network_id "profile_1MqDcVKA5fEO2tZvKQm9g8Yj"
@@ -18,6 +22,10 @@ defmodule MPP.Methods.StripeTest do
   @realm "api.example.com"
 
   setup do
+    subscription_store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
+    start_supervised!(SubscriptionStore.child_spec(name: subscription_store_name))
+    Process.put({__MODULE__, :subscription_store}, {SubscriptionStore, [name: subscription_store_name]})
+
     {:ok, charge} =
       Charge.new(
         amount: "5000",
@@ -724,6 +732,10 @@ defmodule MPP.Methods.StripeTest do
           valid |> Map.put(key, value) |> Stripe.validate_config!()
         end
       end
+
+      assert_raise ArgumentError, ~r/subscription_store must implement/, fn ->
+        valid |> Map.put("subscription_store", String) |> Stripe.validate_config!()
+      end
     end
 
     test "rejects subscription requests outside the constrained Stripe profile" do
@@ -761,6 +773,23 @@ defmodule MPP.Methods.StripeTest do
       assert byte_size(receipt.subscription_id) == 24
       assert receipt.extensions == %{"stripeSubscription" => "sub_test"}
       assert receipt.timestamp == "2023-11-14T22:13:30Z"
+
+      assert {:ok, %Record{} = record} = Store.get(subscription_store(), receipt.subscription_id)
+      assert record.method == "stripe"
+      assert record.billing_anchor == ~U[2023-11-14 22:13:20Z]
+      assert record.last_charged_period == 0
+      assert %{0 => %{period: 0, reference: "in_test", event_ids: []}} = record.payments
+
+      assert record.method_state == %{
+               stripe_subscription_id: "sub_test",
+               customer_id: "cus_test",
+               payment_method_id: "pm_test",
+               price_id: "price_test"
+             }
+
+      refute Map.has_key?(record, :source)
+      refute Map.has_key?(record, :access_key)
+      refute Map.has_key?(record, :key_authorization)
 
       assert_received {:stripe_request, "POST", "/v1/customers", customer_params, customer_headers}
       assert customer_params["description"] == "MPP subscription payer"
@@ -806,6 +835,335 @@ defmodule MPP.Methods.StripeTest do
       refute_received {:stripe_request, "POST", "/v1/payment_methods/pm_test/attach", _params, _headers}
     end
 
+    test "records one canonical period under concurrent duplicate renewal events" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      renewal = stripe_renewal_invoice_fixture("in_renewal", 1)
+      Req.Test.stub(Stripe, &Req.Test.json(&1, renewal))
+
+      results =
+        1..12
+        |> Enum.map(fn _index ->
+          Task.async(fn ->
+            StripeSubscription.process_invoice("evt_renewal", "in_renewal", subscription.method_details)
+          end)
+        end)
+        |> Task.await_many()
+
+      assert Enum.all?(results, &match?({:ok, %Receipt{reference: "in_renewal"}}, &1))
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      assert record.last_charged_period == 1
+      assert map_size(record.payments) == 2
+      assert record.payments[1].event_ids == ["evt_renewal"]
+
+      assert {:ok, duplicate} =
+               StripeSubscription.process_invoice(
+                 "evt_renewal_retry",
+                 "in_renewal",
+                 subscription.method_details
+               )
+
+      assert duplicate.reference == "in_renewal"
+      assert {:ok, retried} = Store.get(subscription_store(), activation.subscription_id)
+      assert Enum.sort(retried.payments[1].event_ids) == ~w(evt_renewal evt_renewal_retry)
+      assert map_size(retried.payments) == 2
+    end
+
+    test "returns the persisted activation on retry and rejects conflicting durable state" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      stub_subscription_flow()
+      assert {:ok, ^first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      assert {:ok, _changed} =
+               Store.update(subscription_store(), first.subscription_id, fn record ->
+                 {:ok, put_in(record.method_state.price_id, "price_other")}
+               end)
+
+      stub_subscription_flow()
+
+      assert {:error, %Errors{detail: "Stripe subscription activation conflicts with durable state"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+    end
+
+    test "rejects malformed renewal events, payment proofs, and activation-period replays" do
+      assert {:error, %Errors{type: type}} = StripeSubscription.process_invoice(nil, nil, nil)
+      assert type =~ "invalid-payload"
+      assert {:error, %Errors{type: cancel_type}} = StripeSubscription.cancel(nil, nil)
+      assert cancel_type =~ "invalid-payload"
+
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, _activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      cases = [
+        {"in_not_cycle", "evt_not_cycle", &Map.delete(&1, "billing_reason")},
+        {"in_bad_payment", "evt_bad_payment",
+         fn invoice ->
+           update_in(invoice["payments"]["data"], fn [paid] ->
+             paid = %{paid | "amount_paid" => 4999}
+             [%{paid | "payment" => put_in(paid["payment"], ["payment_intent", "amount_received"], 4999)}]
+           end)
+         end},
+        {"in_no_payment", "evt_no_payment", &Map.delete(&1, "payments")},
+        {"in_period_zero", "evt_period_zero", &put_invoice_period(&1, 1_700_000_000, 1_700_086_400)}
+      ]
+
+      for {invoice_id, event_id, transform} <- cases do
+        invoice = transform.(stripe_renewal_invoice_fixture(invoice_id, 1))
+        Req.Test.stub(Stripe, &Req.Test.json(&1, invoice))
+
+        assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+                 StripeSubscription.process_invoice(event_id, invoice_id, subscription.method_details)
+      end
+    end
+
+    test "rejects a second invoice and reused event for an already paid period" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_renewal", 1)))
+
+      assert {:ok, %Receipt{}} =
+               StripeSubscription.process_invoice("evt_renewal", "in_renewal", subscription.method_details)
+
+      Req.Test.stub(Stripe, fn conn ->
+        invoice_id = Path.basename(conn.request_path)
+        Req.Test.json(conn, stripe_renewal_invoice_fixture(invoice_id, 1))
+      end)
+
+      for {event_id, invoice_id} <- [
+            {"evt_other", "in_other"},
+            {"evt_renewal", "in_other"}
+          ] do
+        assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+                 StripeSubscription.process_invoice(event_id, invoice_id, subscription.method_details)
+      end
+
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      assert record.payments |> Map.keys() |> Enum.sort() == [0, 1]
+    end
+
+    test "rejects a renewal whose Stripe period drifts from the activation anchor" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      invoice =
+        "in_drifted"
+        |> stripe_renewal_invoice_fixture(1)
+        |> update_in(["lines", "data", Access.at(0), "period", "start"], &(&1 + 1))
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, invoice))
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.process_invoice("evt_drifted", "in_drifted", subscription.method_details)
+
+      assert {:ok, %{payments: payments}} = Store.get(subscription_store(), activation.subscription_id)
+      assert Map.keys(payments) == [0]
+    end
+
+    test "maps month renewals to calendar periods anchored at the first invoice" do
+      january_31 = 1_706_659_200
+      february_29 = 1_709_164_800
+      march_31 = 1_711_843_200
+
+      stub_subscription_flow(
+        price_transform: &put_in(&1, ["recurring", "interval"], "month"),
+        subscription_transform: &put_subscription_period(&1, january_31, february_29),
+        invoice_transform: &put_invoice_period(&1, january_31, february_29)
+      )
+
+      subscription = stripe_subscription(period_unit: :month)
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      renewal =
+        "in_monthly_renewal"
+        |> stripe_renewal_invoice_fixture(1)
+        |> put_invoice_period(february_29, march_31)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, renewal))
+
+      assert {:ok, %Receipt{reference: "in_monthly_renewal"}} =
+               StripeSubscription.process_invoice(
+                 "evt_monthly_renewal",
+                 "in_monthly_renewal",
+                 subscription.method_details
+               )
+
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      assert record.billing_anchor == ~U[2024-01-31 00:00:00Z]
+      assert record.payments |> Map.keys() |> Enum.sort() == [0, 1]
+    end
+
+    test "maps week renewals and rejects periods between multi-month boundaries" do
+      week_end = 1_700_604_800
+      second_week_end = 1_701_209_600
+
+      stub_subscription_flow(
+        price_transform: &put_in(&1, ["recurring", "interval"], "week"),
+        subscription_transform: &put_subscription_period(&1, 1_700_000_000, week_end),
+        invoice_transform: &put_invoice_period(&1, 1_700_000_000, week_end)
+      )
+
+      weekly = stripe_subscription(period_unit: :week)
+      assert {:ok, _activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, weekly)
+
+      renewal =
+        "in_weekly"
+        |> stripe_renewal_invoice_fixture(1)
+        |> put_invoice_period(week_end, second_week_end)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, renewal))
+
+      assert {:ok, %Receipt{reference: "in_weekly"}} =
+               StripeSubscription.process_invoice("evt_weekly", "in_weekly", weekly.method_details)
+
+      january_31 = 1_706_659_200
+      february_29 = 1_709_164_800
+      march_31 = 1_711_843_200
+      april_29 = 1_714_348_800
+
+      stub_subscription_flow(
+        price_transform: fn price ->
+          price
+          |> put_in(["recurring", "interval"], "month")
+          |> put_in(["recurring", "interval_count"], 2)
+        end,
+        subscription_transform: &put_subscription_period(&1, january_31, march_31),
+        invoice_transform: &put_invoice_period(&1, january_31, march_31)
+      )
+
+      two_month_details = Map.put(weekly.method_details, "challenge_id", "ch_two_months")
+
+      every_two_months =
+        stripe_subscription(period_unit: :month, period_count: "2", method_details: two_month_details)
+
+      assert {:ok, _activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, every_two_months)
+
+      between_periods =
+        "in_between_months"
+        |> stripe_renewal_invoice_fixture(1)
+        |> put_invoice_period(february_29, april_29)
+        |> put_in(["parent", "subscription_details", "metadata", "mpp_challenge_id"], "ch_two_months")
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, between_periods))
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.process_invoice(
+                 "evt_between_months",
+                 "in_between_months",
+                 every_two_months.method_details
+               )
+    end
+
+    test "rejects an activation period that does not match the Stripe cadence" do
+      stub_subscription_flow(price_transform: &put_in(&1, ["recurring", "interval"], "month"))
+
+      assert {:error, %Errors{detail: "Stripe first invoice does not match the subscription request"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription(period_unit: :month))
+    end
+
+    test "schedules cancellation at the end of the last paid canonical period" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_renewal", 1)))
+
+      assert {:ok, %Receipt{}} =
+               StripeSubscription.process_invoice("evt_renewal", "in_renewal", subscription.method_details)
+
+      test_pid = self()
+
+      Req.Test.stub(Stripe, fn conn ->
+        {params, conn} = capture_stripe_request(conn, test_pid)
+
+        Req.Test.json(conn, %{
+          "id" => "sub_test",
+          "cancel_at" => String.to_integer(params["cancel_at"]),
+          "cancel_at_period_end" => true
+        })
+      end)
+
+      assert {:ok, canceled} = StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+      assert canceled.cancellation_effective_at == ~U[2023-11-16 22:13:20Z]
+      assert canceled.in_flight_reference == nil
+
+      assert_received {:stripe_request, "POST", "/v1/subscriptions/sub_test", params, headers}
+      assert params == %{"cancel_at" => "1700172800", "proration_behavior" => "none"}
+      assert idempotency_header(headers) =~ "mpp-subscription-schedule-cancel-"
+
+      assert {:ok, ^canceled} = StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+      refute_received {:stripe_request, "POST", "/v1/subscriptions/sub_test", _params, _headers}
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_after_cancel", 2)))
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.process_invoice(
+                 "evt_after_cancel",
+                 "in_after_cancel",
+                 subscription.method_details
+               )
+    end
+
+    test "releases a cancellation claim when Stripe rejects the update" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_status(400)
+        |> Req.Test.json(%{"error" => %{"type" => "invalid_request_error"}})
+      end)
+
+      assert {:error, %Errors{detail: "Stripe subscription cancellation failed"}} =
+               StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      assert record.cancellation_effective_at == nil
+      assert record.in_flight_reference == nil
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, %{"id" => "sub_test", "cancel_at" => nil}))
+
+      assert {:error, %Errors{detail: "Stripe returned an invalid cancellation state"}} =
+               StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+
+      assert {:ok, _in_flight} =
+               Store.update(subscription_store(), activation.subscription_id, fn current ->
+                 {:ok, %{current | in_flight_reference: "renewal:1"}}
+               end)
+
+      assert {:error, %Errors{detail: "Stripe subscription operation is already in flight"}} =
+               StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+
+      assert {:error, %Errors{detail: "Stripe subscription not found"}} =
+               StripeSubscription.cancel("missing_subscription", subscription.method_details)
+
+      assert {:ok, _tempo_record} =
+               Store.update(subscription_store(), activation.subscription_id, fn current ->
+                 {:ok, %{current | method: "tempo", in_flight_reference: nil}}
+               end)
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+
+      assert {:ok, _malformed_state} =
+               Store.update(subscription_store(), activation.subscription_id, fn current ->
+                 {:ok,
+                  %{current | method: "stripe", method_state: Map.delete(current.method_state, :stripe_subscription_id)}}
+               end)
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+    end
+
     test "maps Stripe's synchronous first-invoice action requirement to verification failure" do
       stub_subscription_flow(subscription_error: :requires_action)
 
@@ -814,6 +1172,18 @@ defmodule MPP.Methods.StripeTest do
 
       assert error.type =~ "verification-failed"
       assert error.detail == "Stripe subscription first invoice requires customer action"
+    end
+
+    test "maps Stripe subscription API failures and non-object responses" do
+      for {failure, detail} <- [
+            {:api_error, "Stripe subscription activation failed"},
+            {:invalid_response, "Stripe returned an invalid Subscription"}
+          ] do
+        stub_subscription_flow(subscription_error: failure)
+
+        assert {:error, %Errors{detail: ^detail}} =
+                 Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+      end
     end
 
     test "rejects a paid invoice whose amount does not match the challenge" do
@@ -1191,9 +1561,12 @@ defmodule MPP.Methods.StripeTest do
       "intent" => "subscription",
       "stripe_secret_key" => @stripe_secret_key,
       "network_id" => @network_id,
-      "payment_method_types" => ["card"]
+      "payment_method_types" => ["card"],
+      "subscription_store" => subscription_store()
     }
   end
+
+  defp subscription_store, do: Process.get({__MODULE__, :subscription_store})
 
   defp stripe_subscription(overrides \\ []) do
     defaults = [
@@ -1289,6 +1662,16 @@ defmodule MPP.Methods.StripeTest do
         "code" => "subscription_payment_intent_requires_action"
       }
     })
+  end
+
+  defp stub_subscription_creation(conn, %{subscription_error: :api_error}) do
+    conn
+    |> Plug.Conn.put_status(500)
+    |> Req.Test.json(%{"error" => %{"type" => "api_error"}})
+  end
+
+  defp stub_subscription_creation(conn, %{subscription_error: :invalid_response}) do
+    Req.Test.json(conn, [])
   end
 
   defp stub_subscription_creation(conn, state) do
@@ -1416,6 +1799,43 @@ defmodule MPP.Methods.StripeTest do
         ]
       }
     }
+  end
+
+  defp stripe_renewal_invoice_fixture(invoice_id, period) do
+    period_start = 1_700_000_000 + period * 86_400
+    period_end = period_start + 86_400
+
+    stripe_invoice_fixture()
+    |> Map.put("id", invoice_id)
+    |> Map.put("billing_reason", "subscription_cycle")
+    |> put_in(["parent", "subscription_details", "metadata"], %{"mpp_challenge_id" => "ch_subscription"})
+    |> put_in(["lines", "data", Access.at(0), "period"], %{"start" => period_start, "end" => period_end})
+    |> put_in(
+      ["payments", "data", Access.at(0), "status_transitions", "paid_at"],
+      period_start + 10
+    )
+    |> put_in(
+      ["payments", "data", Access.at(0), "payment", "payment_intent", "setup_future_usage"],
+      nil
+    )
+  end
+
+  defp put_subscription_period(subscription, period_start, period_end) do
+    subscription
+    |> put_in(
+      ["items", "data", Access.at(0), "current_period_start"],
+      period_start
+    )
+    |> put_in(["items", "data", Access.at(0), "current_period_end"], period_end)
+  end
+
+  defp put_invoice_period(invoice, period_start, period_end) do
+    invoice
+    |> put_in(["lines", "data", Access.at(0), "period"], %{"start" => period_start, "end" => period_end})
+    |> put_in(
+      ["payments", "data", Access.at(0), "status_transitions", "paid_at"],
+      period_start + 10
+    )
   end
 
   defp idempotency_header(headers) do

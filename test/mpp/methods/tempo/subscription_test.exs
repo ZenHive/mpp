@@ -148,9 +148,13 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       assert byte_size(receipt.subscription_id) == @subscription_id_encoded_bytes
 
       assert {:ok, %Record{} = record} = Store.get(store, receipt.subscription_id)
-      assert record.source == authorization.source
-      assert record.access_key == String.downcase(SubscriptionHelpers.access_address())
+      assert record.method == "tempo"
+      assert record.method_state.source == authorization.source
+      assert record.method_state.access_key == String.downcase(SubscriptionHelpers.access_address())
+      assert record.method_state.access_key_type == :secp256k1
+      assert record.method_state.key_authorization == signature
       assert record.last_charged_period == 0
+      assert %{0 => %{reference: @tx_hash, event_ids: []}} = record.payments
       assert record.reference == @tx_hash
       assert record.subscription.method_details == %{"chain_id" => 42_431}
       refute Map.has_key?(record.subscription.method_details, "subscription_access_key_private_key")
@@ -184,6 +188,8 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       assert {:ok, renewed} = Store.get(store, activation.subscription_id)
       assert renewed.last_charged_period == 2
+      assert renewed.payments[2].reference == @tx_hash
+      assert renewed.payments[2].period == 2
       assert renewed.in_flight_period == nil
       assert renewed.in_flight_reference == nil
 
@@ -743,11 +749,14 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   defp record(subscription, now) do
     %Record{
       subscription_id: "sub_in_flight",
+      method: "tempo",
       subscription: subscription,
-      source: SubscriptionHelpers.root_address(),
-      access_key: SubscriptionHelpers.access_address(),
-      access_key_type: :secp256k1,
-      key_authorization: "0x01",
+      method_state: %{
+        source: SubscriptionHelpers.root_address(),
+        access_key: SubscriptionHelpers.access_address(),
+        access_key_type: :secp256k1,
+        key_authorization: "0x01"
+      },
       billing_anchor: DateTime.shift(now, day: -2),
       last_charged_period: 0,
       reference: @tx_hash,

@@ -97,11 +97,14 @@ defmodule MPP.Subscription.ETSStoreTest do
 
     %Record{
       subscription_id: id,
+      method: "tempo",
       subscription: SubscriptionHelpers.subscription(),
-      source: SubscriptionHelpers.root_address(),
-      access_key: SubscriptionHelpers.access_address(),
-      access_key_type: :secp256k1,
-      key_authorization: "0x01",
+      method_state: %{
+        source: SubscriptionHelpers.root_address(),
+        access_key: SubscriptionHelpers.access_address(),
+        access_key_type: :secp256k1,
+        key_authorization: "0x01"
+      },
       billing_anchor: now,
       reference: "0x" <> String.duplicate("11", 32),
       timestamp: DateTime.to_iso8601(now)

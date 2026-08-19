@@ -1,6 +1,7 @@
 defmodule MPP.Subscription.Store do
   @moduledoc """
-  Behaviour and dispatch helpers for recurring-subscription persistence.
+  Behaviour and dispatch helpers for method-neutral recurring-subscription
+  persistence.
 
   Updates must be atomic so concurrent renewal attempts cannot charge the same
   billing period twice. `MPP.Subscription.ETSStore` is the single-node default.
