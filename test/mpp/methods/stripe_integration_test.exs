@@ -21,6 +21,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
   @realm "integration-test.example.com"
   @amount "100"
   @currency "usd"
+  @stripe_api_version "2026-02-25.clover"
 
   @spt_endpoint "https://api.stripe.com/v1/test_helpers/shared_payment/granted_tokens"
 
@@ -253,6 +254,108 @@ defmodule MPP.Methods.StripeIntegrationTest do
     end
   end
 
+  describe "subscription activation" do
+    test "creates one fixed-price subscription and validates its paid first invoice", %{
+      stripe_secret_key: stripe_secret_key
+    } do
+      customer_id = create_test_customer!(stripe_secret_key, "success")
+      payment_method_id = attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_visa")
+      on_exit(fn -> delete_test_customer!(stripe_secret_key, customer_id) end)
+
+      config = subscription_plug_config(stripe_secret_key)
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      on_exit(fn -> archive_test_products!(stripe_secret_key, challenge.id) end)
+
+      request = challenge_request(challenge)
+      assert challenge.intent == "subscription"
+      assert request["periodUnit"] == "day"
+      assert request["periodCount"] == "1"
+      refute Map.has_key?(request, "recipient")
+      refute Map.has_key?(request, "subscriptionExpires")
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"paymentMethod" => payment_method_id, "customer" => customer_id}
+      }
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn_200.status == nil, "subscription activation failed: #{inspect(conn_200.resp_body)}"
+      assert %Receipt{} = receipt = conn_200.assigns[:mpp_receipt]
+      assert receipt.method == "stripe"
+      assert receipt.status == "success"
+      assert is_binary(receipt.subscription_id) and receipt.subscription_id != ""
+      assert String.starts_with?(receipt.reference, "in_")
+      assert %{"stripeSubscription" => "sub_" <> _rest = stripe_subscription_id} = receipt.extensions
+
+      stripe_subscription = stripe_get!(stripe_secret_key, "/subscriptions/#{stripe_subscription_id}")
+      assert stripe_subscription["status"] == "active"
+      assert stripe_subscription["customer"] == customer_id
+      assert stripe_subscription["default_payment_method"] == payment_method_id
+      assert stripe_subscription["collection_method"] == "charge_automatically"
+      assert [%{"quantity" => 1, "price" => price}] = stripe_subscription["items"]["data"]
+      assert price["unit_amount"] == 100
+      assert price["currency"] == "usd"
+      assert price["recurring"]["interval"] == "day"
+      assert price["recurring"]["interval_count"] == 1
+
+      invoice =
+        stripe_get!(
+          stripe_secret_key,
+          "/invoices/#{receipt.reference}?" <>
+            URI.encode_query([{"expand[]", "payments.data.payment.payment_intent"}])
+        )
+
+      assert invoice["status"] == "paid"
+      assert invoice["amount_paid"] == 100
+      assert invoice["currency"] == "usd"
+      assert [payment] = invoice["payments"]["data"]
+      assert payment["status"] == "paid"
+      assert payment["payment"]["payment_intent"]["status"] == "succeeded"
+      assert payment["payment"]["payment_intent"]["setup_future_usage"] == "off_session"
+    end
+
+    test "rejects a first invoice that requires customer action", %{
+      stripe_secret_key: stripe_secret_key
+    } do
+      customer_id = create_test_customer!(stripe_secret_key, "requires-action")
+
+      payment_method_id =
+        attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_authenticationRequired")
+
+      on_exit(fn -> delete_test_customer!(stripe_secret_key, customer_id) end)
+
+      config = subscription_plug_config(stripe_secret_key)
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      on_exit(fn -> archive_test_products!(stripe_secret_key, challenge.id) end)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"paymentMethod" => payment_method_id, "customer" => customer_id}
+      }
+
+      conn_error =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn_error.status == 402
+      body = Jason.decode!(conn_error.resp_body)
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] == "Stripe subscription first invoice requires customer action"
+      assert Plug.Conn.get_resp_header(conn_error, "payment-receipt") == []
+    end
+  end
+
   describe "Stripe Connect settlement" do
     test "destination charge settles on and routes funds to a connected account", %{
       stripe_secret_key: stripe_secret_key
@@ -341,6 +444,25 @@ defmodule MPP.Methods.StripeIntegrationTest do
     MPP.Plug.init(plug_opts)
   end
 
+  defp subscription_plug_config(stripe_secret_key) do
+    MPP.Plug.init(
+      secret_key: @hmac_secret,
+      realm: @realm,
+      intent: "subscription",
+      method: Stripe,
+      amount: @amount,
+      currency: @currency,
+      period_unit: "day",
+      period_count: "1",
+      method_config: %{
+        "stripe_secret_key" => stripe_secret_key,
+        "network_id" => "internal",
+        "payment_method_types" => ["card"],
+        "metadata" => %{"test" => "mpp-stripe-subscription"}
+      }
+    )
+  end
+
   defp request_challenge_conn(config) do
     :get
     |> Plug.Test.conn("/api/data")
@@ -398,6 +520,80 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
       %Req.Response{status: status, body: body} ->
         flunk("Failed to create test SPT: HTTP #{status} — #{inspect(body)}")
+    end
+  end
+
+  defp create_test_customer!(stripe_secret_key, scenario) do
+    response =
+      stripe_post!(
+        stripe_secret_key,
+        "/customers",
+        [{"description", "MPP Stripe subscription integration #{scenario}"}]
+      )
+
+    case response do
+      %{"id" => "cus_" <> _rest = customer_id} -> customer_id
+      body -> flunk("Stripe returned an invalid test Customer: #{inspect(body)}")
+    end
+  end
+
+  defp attach_test_payment_method!(stripe_secret_key, customer_id, payment_method) do
+    response =
+      stripe_post!(
+        stripe_secret_key,
+        "/payment_methods/#{payment_method}/attach",
+        [{"customer", customer_id}]
+      )
+
+    case response do
+      %{"id" => "pm_" <> _rest = payment_method_id, "customer" => ^customer_id} -> payment_method_id
+      body -> flunk("Stripe returned an invalid attached PaymentMethod: #{inspect(body)}")
+    end
+  end
+
+  defp archive_test_products!(stripe_secret_key, challenge_id) do
+    stripe_secret_key
+    |> stripe_get!("/products?limit=100&active=true")
+    |> Map.fetch!("data")
+    |> Enum.filter(&(get_in(&1, ["metadata", "mpp_challenge_id"]) == challenge_id))
+    |> Enum.each(fn product ->
+      response = stripe_post!(stripe_secret_key, "/products/#{product["id"]}", [{"active", "false"}])
+      assert response["active"] == false
+    end)
+  end
+
+  defp delete_test_customer!(stripe_secret_key, customer_id) do
+    response = stripe_delete!(stripe_secret_key, "/customers/#{customer_id}")
+    assert response["deleted"] == true
+    assert response["id"] == customer_id
+  end
+
+  defp stripe_get!(stripe_secret_key, path) do
+    stripe_request!(stripe_secret_key, :get, path, nil)
+  end
+
+  defp stripe_post!(stripe_secret_key, path, params) do
+    stripe_request!(stripe_secret_key, :post, path, URI.encode_query(params, :www_form))
+  end
+
+  defp stripe_delete!(stripe_secret_key, path) do
+    stripe_request!(stripe_secret_key, :delete, path, nil)
+  end
+
+  defp stripe_request!(stripe_secret_key, method, path, body) do
+    headers = [
+      {"authorization", "Basic #{Base.encode64(stripe_secret_key <> ":")}"},
+      {"stripe-version", @stripe_api_version}
+    ]
+
+    headers = if body, do: headers ++ [{"content-type", "application/x-www-form-urlencoded"}], else: headers
+
+    request = [url: "https://api.stripe.com/v1" <> path, method: method, headers: headers]
+    request = if body, do: Keyword.put(request, :body, body), else: request
+
+    case Req.request!(request) do
+      %Req.Response{status: status, body: response_body} when status in 200..299 -> response_body
+      %Req.Response{status: status, body: response_body} -> flunk("Stripe API HTTP #{status}: #{inspect(response_body)}")
     end
   end
 end

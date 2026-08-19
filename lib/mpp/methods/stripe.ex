@@ -1,6 +1,6 @@
 defmodule MPP.Methods.Stripe do
   @moduledoc """
-  Stripe payment method — verifies payment via Stripe PaymentIntent with SPT.
+  Stripe payment method for one-time charges and recurring subscriptions.
 
   The client creates a Shared Payment Granted Token (SPT) via Stripe, includes
   it in the credential payload, and the server creates a PaymentIntent with
@@ -68,10 +68,14 @@ defmodule MPP.Methods.Stripe do
 
   ## Credential Payload
 
-  The credential `payload` map must contain:
+  Charge credentials contain:
 
     * `"spt"` — (required) Stripe Shared Payment Granted Token (e.g., `"spt_1N4..."`)
     * `"externalId"` — (optional) caller-provided correlation ID, echoed in receipt
+
+  Subscription credentials contain a required `"paymentMethod"` and an
+  optional existing `"customer"`. Subscription activation follows the
+  constrained Stripe Billing profile in `draft-stripe-subscription-00`.
   """
 
   use MPP.Method
@@ -79,7 +83,9 @@ defmodule MPP.Methods.Stripe do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
   alias MPP.Methods.Shared
+  alias MPP.Methods.Stripe.Subscription, as: StripeSubscription
   alias MPP.Receipt
 
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
@@ -114,6 +120,10 @@ defmodule MPP.Methods.Stripe do
 
   @impl MPP.Method
   @spec validate_config!(map()) :: :ok
+  def validate_config!(%{"intent" => "subscription"} = config) do
+    StripeSubscription.validate_config!(config)
+  end
+
   def validate_config!(config) do
     missing = Enum.filter(@required_config_keys, &is_nil(config[&1]))
 
@@ -141,7 +151,11 @@ defmodule MPP.Methods.Stripe do
   )
 
   @impl MPP.Method
-  @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  @spec verify(map(), Charge.t() | Subscription.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(payload, %Subscription{} = subscription) do
+    StripeSubscription.verify(payload, subscription)
+  end
+
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
@@ -170,7 +184,11 @@ defmodule MPP.Methods.Stripe do
   )
 
   @impl MPP.Method
-  @spec challenge_method_details(Charge.t()) :: map() | nil
+  @spec challenge_method_details(Charge.t() | Subscription.t()) :: map() | nil
+  def challenge_method_details(%Subscription{} = subscription) do
+    StripeSubscription.challenge_method_details(subscription)
+  end
+
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
 

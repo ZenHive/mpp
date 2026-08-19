@@ -5,6 +5,7 @@ defmodule MPP.Methods.StripeTest do
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
   alias MPP.Methods.Stripe
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
@@ -643,6 +644,281 @@ defmodule MPP.Methods.StripeTest do
     end
   end
 
+  describe "subscription intent" do
+    test "Plug init validates config and serializes only public Stripe method details" do
+      config =
+        PaymentPlug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          intent: "subscription",
+          method: Stripe,
+          amount: "5000",
+          currency: "usd",
+          period_unit: "week",
+          period_count: "1",
+          external_id: "plan_42",
+          method_config: %{
+            "stripe_secret_key" => @stripe_secret_key,
+            "network_id" => @network_id,
+            "payment_method_types" => ["card", "link"],
+            "metadata" => %{"plan" => "weekly-pro"},
+            "req_options" => [plug: {Req.Test, Stripe}]
+          }
+        )
+
+      [entry] = config.method_entries
+      request = entry.request |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      assert request["amount"] == "5000"
+      assert request["periodUnit"] == "week"
+      assert request["periodCount"] == "1"
+      assert request["externalId"] == "plan_42"
+
+      assert request["methodDetails"] == %{
+               "networkId" => @network_id,
+               "paymentMethodTypes" => ["card", "link"],
+               "metadata" => %{"plan" => "weekly-pro"}
+             }
+
+      refute entry.request =~ @stripe_secret_key
+      refute Map.has_key?(request["methodDetails"], "stripe_secret_key")
+      refute Map.has_key?(request["methodDetails"], "req_options")
+      refute Map.has_key?(request["methodDetails"], "intent")
+    end
+
+    test "validates subscription-only method config at init" do
+      valid = subscription_config()
+      assert :ok = Stripe.validate_config!(valid)
+
+      for {key, value, message} <- [
+            {"stripe_secret_key", "", "stripe_secret_key"},
+            {"network_id", "", "network_id"},
+            {"payment_method_types", [], "payment_method_types"},
+            {"payment_method_types", ["card", "card"], "payment_method_types"},
+            {"payment_method_types", ["us_bank_account"], "payment_method_types"},
+            {"metadata", %{"bad[key]" => "value"}, "metadata"},
+            {"metadata", %{"plan" => 42}, "metadata"},
+            {"connect", %{}, "does not support Stripe Connect"}
+          ] do
+        assert_raise ArgumentError, ~r/#{message}/, fn ->
+          valid |> Map.put(key, value) |> Stripe.validate_config!()
+        end
+      end
+    end
+
+    test "rejects subscription requests outside the constrained Stripe profile" do
+      for {overrides, message} <- [
+            {[recipient: "acct_recipient"], "must not include recipient"},
+            {[subscription_expires: "2030-01-01T00:00:00Z"], "must not include subscriptionExpires"},
+            {[currency: "USD"], "lowercase ISO 4217"},
+            {[period_unit: :day, period_count: "1096"], "supported day cadence"},
+            {[period_unit: :week, period_count: "157"], "supported week cadence"},
+            {[period_unit: :month, period_count: "37"], "supported month cadence"}
+          ] do
+        assert_raise ArgumentError, ~r/#{message}/, fn ->
+          overrides |> stripe_subscription() |> Stripe.challenge_method_details()
+        end
+      end
+
+      for {period_unit, period_count} <- [day: "1095", week: "156", month: "36"] do
+        details =
+          Stripe.challenge_method_details(stripe_subscription(period_unit: period_unit, period_count: period_count))
+
+        assert details["paymentMethodTypes"] == ["card"]
+      end
+    end
+
+    test "activates one fixed-price subscription and validates the paid first invoice" do
+      stub_subscription_flow()
+      subscription = stripe_subscription(external_id: "plan_42")
+
+      assert {:ok, %Receipt{} = receipt} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      assert receipt.method == "stripe"
+      assert receipt.reference == "in_test"
+      assert receipt.external_id == "plan_42"
+      assert byte_size(receipt.subscription_id) == 24
+      assert receipt.extensions == %{"stripeSubscription" => "sub_test"}
+      assert receipt.timestamp == "2023-11-14T22:13:30Z"
+
+      assert_received {:stripe_request, "POST", "/v1/customers", customer_params, customer_headers}
+      assert customer_params["description"] == "MPP subscription payer"
+      assert customer_params["metadata[mpp_challenge_id]"] == "ch_subscription"
+      assert customer_params["metadata[mpp_external_id]"] == "plan_42"
+      assert idempotency_header(customer_headers) =~ "mpp-subscription-customer-"
+      assert List.keyfind(customer_headers, "stripe-version", 0) == {"stripe-version", "2026-02-25.clover"}
+
+      assert_received {:stripe_request, "POST", "/v1/payment_methods/pm_test/attach", attach_params, _headers}
+      assert attach_params == %{"customer" => "cus_test"}
+
+      assert_received {:stripe_request, "POST", "/v1/products", product_params, _headers}
+      assert product_params["name"] == "MPP subscription"
+
+      assert_received {:stripe_request, "POST", "/v1/prices", price_params, _headers}
+      assert price_params["unit_amount"] == "5000"
+      assert price_params["currency"] == "usd"
+      assert price_params["recurring[interval]"] == "day"
+      assert price_params["recurring[interval_count]"] == "1"
+
+      assert_received {:stripe_request, "POST", "/v1/subscriptions", subscription_params, _headers}
+      assert subscription_params["collection_method"] == "charge_automatically"
+      assert subscription_params["payment_behavior"] == "error_if_incomplete"
+      assert subscription_params["proration_behavior"] == "none"
+      assert subscription_params["items[0][quantity]"] == "1"
+      assert subscription_params["default_payment_method"] == "pm_test"
+
+      assert_received {:stripe_request, "GET", "/v1/invoices/in_test", %{}, invoice_headers}
+      assert idempotency_header(invoice_headers) == nil
+    end
+
+    test "reuses an existing customer-bound PaymentMethod without mutating either" do
+      stub_subscription_flow(payment_customer: "cus_test")
+      subscription = stripe_subscription()
+
+      assert {:ok, %Receipt{}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input", "customer" => "cus_test"}, subscription)
+
+      assert_received {:stripe_request, "GET", "/v1/customers/cus_test", %{}, _headers}
+      refute_received {:stripe_request, "POST", "/v1/customers", _params, _headers}
+      refute_received {:stripe_request, "POST", "/v1/payment_methods/pm_test/attach", _params, _headers}
+    end
+
+    test "maps Stripe's synchronous first-invoice action requirement to verification failure" do
+      stub_subscription_flow(subscription_error: :requires_action)
+
+      assert {:error, %Errors{} = error} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert error.type =~ "verification-failed"
+      assert error.detail == "Stripe subscription first invoice requires customer action"
+    end
+
+    test "rejects a paid invoice whose amount does not match the challenge" do
+      stub_subscription_flow(invoice_transform: &put_in(&1, ["amount_paid"], 4999))
+
+      assert {:error, %Errors{} = error} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert error.detail == "Stripe first invoice does not match the subscription request"
+    end
+
+    test "rejects malformed subscription credentials before calling Stripe" do
+      for payload <- [
+            %{},
+            %{"paymentMethod" => ""},
+            %{"paymentMethod" => 42},
+            %{"paymentMethod" => "pm_input", "customer" => ""},
+            %{"paymentMethod" => "pm_input", "unexpected" => true},
+            "pm_input"
+          ] do
+        assert {:error, %Errors{type: type}} = Stripe.verify(payload, stripe_subscription())
+        assert type =~ "invalid-payload"
+      end
+
+      refute_received {:stripe_request, _method, _path, _params, _headers}
+    end
+
+    test "rejects a PaymentMethod type not advertised by the challenge" do
+      stub_subscription_flow(payment_type: "us_bank_account")
+
+      assert {:error, %Errors{} = error} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert error.detail == "Stripe PaymentMethod type is not allowed by this challenge"
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+    end
+
+    test "rejects a PaymentMethod attached to another Customer" do
+      stub_subscription_flow(payment_customer: "cus_other")
+
+      assert {:error, %Errors{} = error} =
+               Stripe.verify(
+                 %{"paymentMethod" => "pm_input", "customer" => "cus_test"},
+                 stripe_subscription()
+               )
+
+      assert error.detail == "Stripe PaymentMethod belongs to a different Customer"
+      refute_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+    end
+
+    test "rejects malformed Stripe resource objects" do
+      cases = [
+        {[payment_method_transform: fn _payment_method -> %{} end], %{"paymentMethod" => "pm_input"},
+         "invalid PaymentMethod"},
+        {[
+           payment_customer: "cus_test",
+           customer_transform: &Map.put(&1, "deleted", true)
+         ], %{"paymentMethod" => "pm_input", "customer" => "cus_test"}, "invalid Customer"},
+        {[attach_transform: fn _payment_method -> %{} end], %{"paymentMethod" => "pm_input"},
+         "invalid attached PaymentMethod"},
+        {[product_transform: fn _product -> %{} end], %{"paymentMethod" => "pm_input"}, "invalid Product"},
+        {[price_transform: &Map.put(&1, "unit_amount", 4999)], %{"paymentMethod" => "pm_input"}, "Price does not match"},
+        {[price_transform: fn _price -> %{} end], %{"paymentMethod" => "pm_input"}, "Price does not match"},
+        {[subscription_transform: &Map.put(&1, "status", "incomplete")], %{"paymentMethod" => "pm_input"},
+         "Subscription does not match"},
+        {[
+           subscription_transform: fn stripe_subscription ->
+             update_in(stripe_subscription["items"]["data"], fn [item] -> [%{item | "quantity" => 2}] end)
+           end
+         ], %{"paymentMethod" => "pm_input"}, "Subscription item does not match"},
+        {[
+           subscription_transform: &put_in(&1, ["automatic_tax", "enabled"], true)
+         ], %{"paymentMethod" => "pm_input"}, "must not enable automatic tax"}
+      ]
+
+      for {stub_opts, payload, expected_detail} <- cases do
+        stub_subscription_flow(stub_opts)
+        assert {:error, %Errors{} = error} = Stripe.verify(payload, stripe_subscription())
+        assert error.detail =~ expected_detail
+      end
+    end
+
+    test "rejects every paid-invoice shape that can alter subscription accounting" do
+      cases = [
+        fn invoice -> invoice |> Map.put("amount_paid", 4999) |> Map.put("total", 4999) end,
+        fn invoice ->
+          update_in(invoice["lines"]["data"], fn [line] -> [%{line | "amount" => 4999}] end)
+        end,
+        &Map.delete(&1, "lines"),
+        fn invoice ->
+          update_in(invoice["payments"]["data"], fn [payment] ->
+            payment = %{payment | "amount_paid" => 4999}
+            [%{payment | "payment" => put_in(payment["payment"], ["payment_intent", "amount_received"], 4999)}]
+          end)
+        end,
+        &Map.delete(&1, "payments")
+      ]
+
+      for transform <- cases do
+        stub_subscription_flow(invoice_transform: transform)
+
+        assert {:error, %Errors{detail: "Stripe first invoice does not match the subscription request"}} =
+                 Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+      end
+    end
+
+    test "rejects missing runtime config and invalid non-string profile currency" do
+      subscription = stripe_subscription()
+      missing_challenge = %{subscription | method_details: Map.delete(subscription.method_details, "challenge_id")}
+
+      assert {:error, %Errors{detail: detail}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, missing_challenge)
+
+      assert detail =~ "challenge_id"
+
+      assert_raise ArgumentError, ~r/lowercase ISO 4217/, fn ->
+        Stripe.challenge_method_details(%{subscription | currency: nil})
+      end
+
+      too_many_metadata = Map.new(1..51, &{"key#{&1}", "value"})
+
+      assert_raise ArgumentError, ~r/metadata violates Stripe limits/, fn ->
+        subscription_config() |> Map.put("metadata", too_many_metadata) |> Stripe.validate_config!()
+      end
+    end
+  end
+
   describe "validate_config!/1" do
     test "accepts config with all required keys" do
       config = %{"stripe_secret_key" => "sk_test_...", "network_id" => "profile_..."}
@@ -853,6 +1129,241 @@ defmodule MPP.Methods.StripeTest do
   defp decode_challenge_request(challenge) do
     with {:ok, json} <- Base.url_decode64(challenge.request, padding: false) do
       Jason.decode(json)
+    end
+  end
+
+  defp subscription_config do
+    %{
+      "intent" => "subscription",
+      "stripe_secret_key" => @stripe_secret_key,
+      "network_id" => @network_id,
+      "payment_method_types" => ["card"]
+    }
+  end
+
+  defp stripe_subscription(overrides \\ []) do
+    defaults = [
+      amount: "5000",
+      currency: "usd",
+      period_unit: :day,
+      period_count: "1",
+      method_details:
+        Map.merge(subscription_config(), %{
+          "challenge_id" => "ch_subscription",
+          "req_options" => [plug: {Req.Test, Stripe}]
+        })
+    ]
+
+    {:ok, subscription} = defaults |> Keyword.merge(overrides) |> Subscription.new()
+    subscription
+  end
+
+  defp stub_subscription_flow(opts \\ []) do
+    test_pid = self()
+
+    state = %{
+      payment_customer: Keyword.get(opts, :payment_customer),
+      payment_type: Keyword.get(opts, :payment_type, "card"),
+      subscription_error: Keyword.get(opts, :subscription_error),
+      payment_method_transform: Keyword.get(opts, :payment_method_transform, &Function.identity/1),
+      customer_transform: Keyword.get(opts, :customer_transform, &Function.identity/1),
+      attach_transform: Keyword.get(opts, :attach_transform, &Function.identity/1),
+      product_transform: Keyword.get(opts, :product_transform, &Function.identity/1),
+      price_transform: Keyword.get(opts, :price_transform, &Function.identity/1),
+      subscription_transform: Keyword.get(opts, :subscription_transform, &Function.identity/1),
+      invoice_transform: Keyword.get(opts, :invoice_transform, &Function.identity/1)
+    }
+
+    Req.Test.stub(Stripe, fn conn ->
+      {params, conn} = capture_stripe_request(conn, test_pid)
+      stub_subscription_response(conn, params, state)
+    end)
+  end
+
+  defp stub_subscription_response(%{method: "GET", request_path: path} = conn, _params, state) do
+    case path do
+      "/v1/payment_methods/pm_input" ->
+        payment_method = %{
+          "id" => "pm_test",
+          "type" => state.payment_type,
+          "customer" => state.payment_customer
+        }
+
+        Req.Test.json(conn, state.payment_method_transform.(payment_method))
+
+      "/v1/customers/cus_test" ->
+        customer = %{"id" => "cus_test", "object" => "customer", "deleted" => false}
+        Req.Test.json(conn, state.customer_transform.(customer))
+
+      "/v1/invoices/in_test" ->
+        Req.Test.json(conn, state.invoice_transform.(stripe_invoice_fixture()))
+    end
+  end
+
+  defp stub_subscription_response(%{method: "POST", request_path: path} = conn, params, state) do
+    case path do
+      "/v1/customers" ->
+        assert params["description"] == "MPP subscription payer"
+        Req.Test.json(conn, %{"id" => "cus_test", "object" => "customer", "deleted" => false})
+
+      "/v1/payment_methods/pm_test/attach" ->
+        payment_method = %{"id" => "pm_test", "type" => state.payment_type, "customer" => "cus_test"}
+        Req.Test.json(conn, state.attach_transform.(payment_method))
+
+      "/v1/products" ->
+        product = %{"id" => "prod_test", "object" => "product", "active" => true}
+        Req.Test.json(conn, state.product_transform.(product))
+
+      "/v1/prices" ->
+        Req.Test.json(conn, state.price_transform.(stripe_price_fixture()))
+
+      "/v1/subscriptions" ->
+        stub_subscription_creation(conn, state)
+    end
+  end
+
+  defp stub_subscription_creation(conn, %{subscription_error: :requires_action}) do
+    conn
+    |> Plug.Conn.put_status(402)
+    |> Req.Test.json(%{
+      "error" => %{
+        "type" => "card_error",
+        "code" => "subscription_payment_intent_requires_action"
+      }
+    })
+  end
+
+  defp stub_subscription_creation(conn, state) do
+    Req.Test.json(conn, state.subscription_transform.(stripe_subscription_fixture()))
+  end
+
+  defp capture_stripe_request(conn, test_pid) do
+    {params, conn} =
+      case conn.method do
+        "POST" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          {URI.decode_query(body), conn}
+
+        "GET" ->
+          {%{}, conn}
+      end
+
+    send(test_pid, {:stripe_request, conn.method, conn.request_path, params, conn.req_headers})
+    {params, conn}
+  end
+
+  defp stripe_price_fixture do
+    %{
+      "id" => "price_test",
+      "active" => true,
+      "billing_scheme" => "per_unit",
+      "currency" => "usd",
+      "product" => "prod_test",
+      "recurring" => %{"interval" => "day", "interval_count" => 1, "usage_type" => "licensed"},
+      "type" => "recurring",
+      "unit_amount" => 5000
+    }
+  end
+
+  defp stripe_subscription_fixture do
+    %{
+      "id" => "sub_test",
+      "status" => "active",
+      "customer" => "cus_test",
+      "default_payment_method" => "pm_test",
+      "collection_method" => "charge_automatically",
+      "latest_invoice" => "in_test",
+      "automatic_tax" => %{"enabled" => false},
+      "cancel_at" => nil,
+      "cancel_at_period_end" => false,
+      "discounts" => [],
+      "pending_invoice_item_interval" => nil,
+      "schedule" => nil,
+      "trial_end" => nil,
+      "trial_start" => nil,
+      "items" => %{
+        "data" => [
+          %{
+            "subscription" => "sub_test",
+            "quantity" => 1,
+            "discounts" => [],
+            "price" => %{"id" => "price_test"},
+            "current_period_start" => 1_700_000_000,
+            "current_period_end" => 1_700_086_400
+          }
+        ]
+      }
+    }
+  end
+
+  defp stripe_invoice_fixture do
+    %{
+      "id" => "in_test",
+      "status" => "paid",
+      "customer" => "cus_test",
+      "currency" => "usd",
+      "amount_paid" => 5000,
+      "amount_remaining" => 0,
+      "total" => 5000,
+      "discounts" => [],
+      "total_discount_amounts" => [],
+      "total_taxes" => [],
+      "total_pretax_credit_amounts" => [],
+      "pre_payment_credit_notes_amount" => 0,
+      "post_payment_credit_notes_amount" => 0,
+      "starting_balance" => 0,
+      "ending_balance" => 0,
+      "automatic_tax" => %{"enabled" => false},
+      "parent" => %{
+        "type" => "subscription_details",
+        "subscription_details" => %{"subscription" => "sub_test"}
+      },
+      "lines" => %{
+        "data" => [
+          %{
+            "amount" => 5000,
+            "currency" => "usd",
+            "quantity" => 1,
+            "discount_amounts" => [],
+            "discounts" => [],
+            "taxes" => [],
+            "period" => %{"start" => 1_700_000_000, "end" => 1_700_086_400},
+            "pricing" => %{"type" => "price_details", "price_details" => %{"price" => "price_test"}},
+            "parent" => %{
+              "type" => "subscription_item_details",
+              "subscription_item_details" => %{"subscription" => "sub_test", "proration" => false}
+            }
+          }
+        ]
+      },
+      "payments" => %{
+        "data" => [
+          %{
+            "status" => "paid",
+            "amount_paid" => 5000,
+            "currency" => "usd",
+            "status_transitions" => %{"paid_at" => 1_700_000_010},
+            "payment" => %{
+              "type" => "payment_intent",
+              "payment_intent" => %{
+                "status" => "succeeded",
+                "amount_received" => 5000,
+                "currency" => "usd",
+                "customer" => "cus_test",
+                "payment_method" => "pm_test",
+                "setup_future_usage" => "off_session"
+              }
+            }
+          }
+        ]
+      }
+    }
+  end
+
+  defp idempotency_header(headers) do
+    case List.keyfind(headers, "idempotency-key", 0) do
+      {_, value} -> value
+      nil -> nil
     end
   end
 end
