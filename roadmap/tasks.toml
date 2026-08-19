@@ -353,7 +353,7 @@ implemented = "Shipped the mix mpp.manifest task generating a static JSON manife
 id = 42
 phase = 3
 bundle = "discovery"
-status = "in_progress"
+status = "done"
 title = "OpenAPI discovery document generation"
 scores = { d = 4, b = 8, u = 8 }
 markers = ["parallel"]
@@ -370,8 +370,15 @@ model = "gpt-5.6-sol"
 body = """
 Add `mix mpp.openapi` (and `MPP.Discovery.OpenApi.generate/1`) emitting OpenAPI 3.1.0 documents with `x-payment-info` per-operation and `x-service-info` at the document level. Read the latest discovery extension at `paymentauth.org` and in `refs/mpp-specs/specs/extensions/draft-payment-discovery-*.md` at implementation time to confirm the current shape — the spec now uses a multi-offer `offers` array with single-offer shorthand on parse. Cross-check the generated document against mppx's OpenAPI output for an equivalent endpoint config. Complements (does not replace) `mix mpp.manifest`.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787099901908-26fd5b7d, 613287e432dbe48e56460a307784b4cfdb157279)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787099901908-26fd5b7d"
 started_at = "2026-08-19"
 scored_at = "2026-08-02"
+done_at = "2026-08-19"
+shipped_in = "613287e432dbe48e56460a307784b4cfdb157279"
 
 # ============================================================================
 # Tasks — Phase 4: Tempo Payment Method

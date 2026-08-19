@@ -59,7 +59,7 @@
 |------|--------|-------|
 | Task 11 | ✅ | 🎁 **descripex** · Descripex annotations [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
-| Task 42 `[P]` | 🔄 | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0] 🎯 |
+| Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
 ---
