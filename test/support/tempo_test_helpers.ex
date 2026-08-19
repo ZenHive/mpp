@@ -122,6 +122,19 @@ defmodule MPP.Test.TempoTestHelpers do
     TIP20.approve_calldata(TIP20.decode_address(spender_hex), amount)
   end
 
+  @doc "Builds ABI-encoded calldata for swapTo(address,uint256,address,address,bytes32)."
+  def swap_to_calldata(input_token_hex, amount, target_hex, recipient_hex, memo_hex) do
+    {:ok, memo} = Base.decode16(strip_0x(memo_hex), case: :mixed)
+
+    MPP.Methods.Tempo.MachineToken.swap_to_calldata(
+      TIP20.decode_address(input_token_hex),
+      amount,
+      TIP20.decode_address(target_hex),
+      TIP20.decode_address(recipient_hex),
+      memo
+    )
+  end
+
   @doc """
   Builds canonical calldata for swapExactAmountOut(address,address,uint128,uint128):
   selector + four zero-padded 32-byte words (132 bytes total).

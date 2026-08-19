@@ -80,6 +80,12 @@ defmodule MPP.Methods.Tempo do
       atomic `update/3`. `MPP.Tempo.ConCacheStore` provides a single-node bound. Every
       node and endpoint sponsoring the same wallet must use the same physical shared
       atomic backend for a cluster-wide bound.
+    * `"machine_token_enabled"` — (optional) advertise and verify first-party
+      machine-token (MPP Credits / machineUSD) charge payments. When `true`, 402
+      method details include `"machineTokenEnabled" => true`, hash receipts may
+      settle from the canonical swapper, and `type="transaction"` credentials may
+      match the exact `[approve, swapTo]` route. Supported only on Tempo mainnet
+      (`4217`) and Moderato (`42431`). Defaults to `false`.
     * `"require_presenter_binding"` — (optional) require `type="hash"` and
       `type="transaction"` credential presenters to prove control of the transfer's
       sender wallet via a `"presenterSignature"` payload field (see *Presenter
@@ -108,7 +114,8 @@ defmodule MPP.Methods.Tempo do
 
     * `type="hash"` — the credential's top-level `source` (a `did:pkh:eip155:` DID)
       is required and names the account; the signature must recover to it, and the
-      matched transfer's `from` must equal it.
+      matched transfer's `from` must equal it (or, when `"machine_token_enabled"`
+      is set, equal the canonical swapper while the transaction sender equals it).
     * `type="transaction"` — the account is the sender recovered from the signed
       transaction itself; a `source`, when present, must match it.
 
@@ -140,6 +147,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.HostedFeePayer
+  alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias MPP.Methods.Tempo.SponsorBudget
   alias MPP.Receipt
@@ -208,6 +216,7 @@ defmodule MPP.Methods.Tempo do
     validate_sponsor_budget!(config)
     validate_fee_payer_allowed_tokens!(config)
     validate_presenter_binding!(config["require_presenter_binding"])
+    validate_machine_token!(config)
     :ok
   end
 
@@ -284,7 +293,8 @@ defmodule MPP.Methods.Tempo do
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
          :ok <- Shared.check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source),
+         {:ok, sender_policy} <- hash_sender_policy(hash, rpc_url, config),
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source, sender_policy),
          :ok <- commit_hash_used(store, hash) do
       {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
     end
@@ -301,13 +311,8 @@ defmodule MPP.Methods.Tempo do
            {:ok, tx} <- Transaction.deserialize(signature),
            :ok <- verify_chain_id(tx, expected_chain_id),
            :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
-           {:ok, payment} <-
-             Transaction.find_payment_call(tx, charge.currency,
-               amount: charge.amount,
-               recipient: charge.recipient,
-               memo: memo
-             ),
-           :ok <- maybe_validate_call_scope(tx, config),
+           {:ok, payment} <- find_transaction_payment(tx, charge, config, memo),
+           :ok <- maybe_validate_call_scope(tx, config, payment),
            {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id) do
         verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget)
       end
@@ -321,7 +326,7 @@ defmodule MPP.Methods.Tempo do
 
   api(
     :challenge_method_details,
-    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `presenterBinding`) for the 402 challenge.",
+    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `machineTokenEnabled`, `presenterBinding`) for the 402 challenge.",
     params: [
       charge: [
         kind: :value,
@@ -331,7 +336,7 @@ defmodule MPP.Methods.Tempo do
     returns: %{
       type: :map,
       description:
-        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, and `presenterBinding` (present and `true` only when required)"
+        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, `machineTokenEnabled` (present and `true` only when enabled), and `presenterBinding` (present and `true` only when required)"
     }
   )
 
@@ -349,6 +354,13 @@ defmodule MPP.Methods.Tempo do
       case config["memo"] do
         nil -> details
         memo -> Map.put(details, "memo", memo)
+      end
+
+    details =
+      if machine_token_enabled?(config) do
+        Map.put(details, "machineTokenEnabled", true)
+      else
+        details
       end
 
     if presenter_binding_required?(config) do
@@ -670,10 +682,37 @@ defmodule MPP.Methods.Tempo do
           ~s{MPP.Methods.Tempo "require_presenter_binding" must be a boolean, got: #{inspect(other)}}
   end
 
+  defp machine_token_enabled?(%{"machine_token_enabled" => true}), do: true
+  defp machine_token_enabled?(_config), do: false
+
+  defp validate_machine_token!(config) do
+    case config["machine_token_enabled"] do
+      nil ->
+        :ok
+
+      false ->
+        :ok
+
+      true ->
+        chain_id = config["chain_id"] || @moderato_chain_id
+
+        if MachineToken.supported?(chain_id) do
+          :ok
+        else
+          raise ArgumentError, "MPP.Methods.Tempo machine tokens are not supported on chain ID #{chain_id}"
+        end
+
+      other ->
+        raise ArgumentError,
+              ~s{MPP.Methods.Tempo "machine_token_enabled" must be a boolean, got: #{inspect(other)}}
+    end
+  end
+
   # Hash path: the account being proven is named by the credential's top-level
   # `source` DID; the matched transfer's `from` is then enforced against the same
-  # address by transfer_source_matches?/2 (source is guaranteed non-nil here when
-  # the binding verifies).
+  # address by transfer_sender_allowed?/3 (source is guaranteed non-nil here when
+  # the binding verifies). When machine tokens are enabled, `from` may be the
+  # canonical swapper if the transaction sender equals that source.
   defp verify_hash_presenter_binding(payload, source, expected_chain_id, config) do
     case {payload["presenterSignature"], presenter_binding_required?(config)} do
       {nil, false} ->
@@ -795,9 +834,45 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Validates call scope when fee_payer is enabled.
-  # No-op when fee_payer is falsy — any call pattern is allowed for self-paying txs.
-  defp maybe_validate_call_scope(tx, config) do
+  # Machine-token `[approve, swapTo]` is an allowed sponsored route (mpp-rs
+  # `validate_transaction_transfers_with_machine_token` skips DEX call-scope when
+  # the canonical route matches). No-op when fee_payer is falsy.
+  defp maybe_validate_call_scope(_tx, _config, %{machine_token?: true}), do: :ok
+
+  defp maybe_validate_call_scope(tx, config, _payment) do
     if fee_payer_enabled?(config), do: Transaction.validate_call_scope(tx), else: :ok
+  end
+
+  defp find_transaction_payment(tx, charge, config, memo) do
+    case maybe_match_machine_token_route(tx, charge, config, memo) do
+      {:ok, _route} = ok -> ok
+      :error -> find_tip20_payment_call(tx, charge, memo)
+    end
+  end
+
+  defp maybe_match_machine_token_route(tx, charge, config, memo) do
+    if machine_token_enabled?(config) do
+      match_machine_token_route(tx, charge, config, memo)
+    else
+      :error
+    end
+  end
+
+  defp match_machine_token_route(tx, charge, config, memo) do
+    chain_id = config["chain_id"] || @moderato_chain_id
+
+    case MachineToken.match_route(tx.calls, chain_id, charge.currency, charge.amount, charge.recipient, memo) do
+      {:ok, route} -> {:ok, Map.put(route, :machine_token?, true)}
+      :error -> :error
+    end
+  end
+
+  defp find_tip20_payment_call(tx, charge, memo) do
+    Transaction.find_payment_call(tx, charge.currency,
+      amount: charge.amount,
+      recipient: charge.recipient,
+      memo: memo
+    )
   end
 
   defp maybe_reserve_sponsor_budget(tx, config, chain_id) do
@@ -928,13 +1003,14 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, charge, memo, true, budget) do
+  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, memo, true, budget) do
     case rpc_broadcast_sync(raw_hex, rpc_url, rpc_options(config)) do
       {:ok, tx_hash, receipt} ->
         safe_budget_release(budget)
 
         with :ok <- Shared.check_receipt_status(receipt),
-             {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil) do
+             {:ok, sender_policy} <- transaction_sender_policy(tx, config),
+             {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil, sender_policy) do
           {:ok, tx_hash}
         end
 
@@ -1280,9 +1356,12 @@ defmodule MPP.Methods.Tempo do
   # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
   # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.
   # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
-  defp find_matching_transfer(receipt, charge, memo, source)
+  # `sender_policy` is the mpp-rs ReceiptSenderPolicy: when machine tokens are
+  # enabled, a transfer `from` the canonical swapper is accepted if the
+  # transaction sender equals the expected payer.
+  defp find_matching_transfer(receipt, charge, memo, source, sender_policy)
 
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil, source) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil, source, sender_policy) do
     # No memo configured — accept Transfer OR TransferWithMemo matching token/recipient/amount.
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
@@ -1294,7 +1373,7 @@ defmodule MPP.Methods.Tempo do
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
             transfer.amount == amount_int and
-            transfer_source_matches?(transfer, source) and
+            transfer_sender_allowed?(transfer, source, sender_policy) and
             transfer_memo_bound?(transfer, charge)
         end)
 
@@ -1305,7 +1384,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo, source) when is_binary(memo) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo, source, sender_policy) when is_binary(memo) do
     # Memo configured — MUST match TransferWithMemo with matching memo value.
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount) do
       normalized_memo = String.downcase(Hex.strip_0x(memo))
@@ -1318,7 +1397,7 @@ defmodule MPP.Methods.Tempo do
             Onchain.Address.equal?(transfer.to, charge.recipient) and
             transfer.amount == amount_int and
             String.downcase(Hex.strip_0x(transfer.memo)) == normalized_memo and
-            transfer_source_matches?(transfer, source)
+            transfer_sender_allowed?(transfer, source, sender_policy)
         end)
 
       case match do
@@ -1331,10 +1410,97 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp transfer_source_matches?(_transfer, nil), do: true
+  # Non-machine-token path: no source means any `from`; a source must match the
+  # transfer sender. Machine-token path (mpp-rs `ReceiptSenderPolicy` /
+  # mppx `isValidTransferSender`): accept the expected payer or the canonical
+  # swapper when the transaction sender is that payer.
+  defp transfer_sender_allowed?(transfer, source, nil) do
+    is_nil(source) or Onchain.Address.equal?(transfer.from, source)
+  end
 
-  defp transfer_source_matches?(transfer, source) do
-    Onchain.Address.equal?(transfer.from, source)
+  defp transfer_sender_allowed?(transfer, source, %{transaction_sender: tx_from, settlement_senders: senders}) do
+    expected = source || tx_from
+
+    Onchain.Address.equal?(transfer.from, expected) or
+      (Onchain.Address.equal?(tx_from, expected) and settlement_sender?(transfer.from, senders))
+  end
+
+  defp settlement_sender?(from, senders) do
+    Enum.any?(senders, &Onchain.Address.equal?(from, &1))
+  end
+
+  defp hash_sender_policy(hash, rpc_url, config) do
+    settlement_sender_policy(config, fn swapper ->
+      with {:ok, from} <- rpc_fetch_transaction_from(hash, rpc_url, rpc_options(config)) do
+        {:ok, %{transaction_sender: from, settlement_senders: [swapper]}}
+      end
+    end)
+  end
+
+  defp transaction_sender_policy(tx, config) do
+    settlement_sender_policy(config, fn swapper ->
+      case Transaction.sender(tx) do
+        {:ok, sender} -> {:ok, %{transaction_sender: sender, settlement_senders: [swapper]}}
+        {:error, reason} -> {:error, Errors.new(:verification_failed, reason)}
+      end
+    end)
+  end
+
+  defp settlement_sender_policy(config, fun) do
+    if machine_token_enabled?(config) do
+      resolve_settlement_sender(config["chain_id"] || @moderato_chain_id, fun)
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp resolve_settlement_sender(chain_id, fun) do
+    case MachineToken.settlement_sender(chain_id) do
+      nil -> {:error, Errors.new(:verification_failed, "Machine tokens are not supported on chain ID #{chain_id}")}
+      swapper -> fun.(swapper)
+    end
+  end
+
+  # onchain_tempo's receipt parser drops `from` (RPC.parse_receipt keeps only
+  # status/logs). Machine-token hash verification needs the transaction sender
+  # to bind swapper-emitted TransferWithMemo logs to the payer — fetch it from
+  # eth_getTransactionByHash over the same Req options as the other Tempo RPCs.
+  defp rpc_fetch_transaction_from(hash, rpc_url, opts) do
+    req_options = Keyword.get(opts, :req_options, [])
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "method" => "eth_getTransactionByHash",
+        "params" => [hash],
+        "id" => 1
+      })
+
+    result =
+      Req.request(
+        [
+          url: rpc_url,
+          method: :post,
+          headers: [{"content-type", "application/json"}],
+          body: body
+        ],
+        req_options
+      )
+
+    case result do
+      {:ok, %Req.Response{status: status, body: %{"result" => %{"from" => from}}}}
+      when status in 200..299 and is_binary(from) ->
+        {:ok, from}
+
+      {:ok, %Req.Response{status: status, body: %{"result" => nil}}} when status in 200..299 ->
+        {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
+
+      {:error, _exception} ->
+        {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+
+      {:ok, %Req.Response{}} ->
+        {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+    end
   end
 
   defp transfer_memo_bound?(transfer, %Charge{method_details: config}) do

@@ -10,6 +10,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
+  alias MPP.Methods.Tempo.MachineToken
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.FailingPutStore
@@ -209,6 +210,30 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
+    test "accepts machine_token_enabled true on Moderato (default chain)" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "machine_token_enabled" => true})
+    end
+
+    test "accepts machine_token_enabled true on Tempo mainnet" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "chain_id" => 4217, "machine_token_enabled" => true})
+    end
+
+    test "accepts machine_token_enabled false" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "machine_token_enabled" => false})
+    end
+
+    test "raises when machine_token_enabled is true on an unsupported chain" do
+      assert_raise ArgumentError, ~r/machine tokens are not supported on chain ID 1/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "chain_id" => 1, "machine_token_enabled" => true})
+      end
+    end
+
+    test "raises on non-boolean machine_token_enabled" do
+      assert_raise ArgumentError, ~r/machine_token_enabled.*boolean/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "machine_token_enabled" => "yes"})
+      end
+    end
+
     test "rejects malformed sponsorship store references and policy containers" do
       sponsor_config = %{
         "rpc_url" => @rpc_url,
@@ -285,6 +310,16 @@ defmodule MPP.Methods.TempoTest do
 
       charge = %{charge | method_details: %{"require_presenter_binding" => false}}
       refute Map.has_key?(Tempo.challenge_method_details(charge), "presenterBinding")
+    end
+
+    test "includes machineTokenEnabled only when enabled", %{charge: charge} do
+      refute Map.has_key?(Tempo.challenge_method_details(charge), "machineTokenEnabled")
+
+      charge = %{charge | method_details: %{"machine_token_enabled" => false}}
+      refute Map.has_key?(Tempo.challenge_method_details(charge), "machineTokenEnabled")
+
+      charge = %{charge | method_details: %{"machine_token_enabled" => true}}
+      assert Tempo.challenge_method_details(charge)["machineTokenEnabled"] == true
     end
   end
 
@@ -632,6 +667,125 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+  end
+
+  describe "verify/2 — hash credential with machine tokens" do
+    test "does not fetch the transaction sender when the flag is off", %{charge: charge} do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert_received {:rpc_call, "eth_getTransactionReceipt"}
+      refute_received {:rpc_call, "eth_getTransactionByHash"}
+    end
+
+    test "accepts TransferWithMemo from the canonical swapper when the tx sender is the payer", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      swapper = machine_token_swapper()
+      memo = @test_memo
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
+
+      stub_receipt_and_transaction_from(
+        success_receipt(logs: [transfer_with_memo_log(from: swapper, memo: memo)]),
+        @payer
+      )
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
+    test "accepts an ordinary payer Transfer when machine tokens are enabled", %{charge: charge} do
+      charge = enable_machine_token(charge)
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      stub_receipt_and_transaction_from(success_receipt(logs: [transfer_log(from: @payer)]), @payer)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
+    test "rejects a swapper settlement when the tx sender is not the credential source", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      swapper = machine_token_swapper()
+      memo = @test_memo
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      stub_receipt_and_transaction_from(
+        success_receipt(logs: [transfer_with_memo_log(from: swapper, memo: memo)]),
+        "0x2222222222222222222222222222222222222222"
+      )
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching TransferWithMemo"
+    end
+
+    test "rejects machine tokens on an unsupported chain at verify time", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"machine_token_enabled" => true, "chain_id" => 1})
+      }
+
+      stub_receipt(success_receipt())
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail =~ "Machine tokens are not supported on chain ID 1"
+    end
+
+    test "returns a verification error when the transaction is missing on-chain", %{charge: charge} do
+      charge = enable_machine_token(charge)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        result =
+          case request["method"] do
+            "eth_getTransactionReceipt" -> success_receipt()
+            "eth_getTransactionByHash" -> nil
+            _other -> nil
+          end
+
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail =~ "Transaction not found on-chain"
+    end
+
+    test "returns a verification error when eth_getTransactionByHash omits from", %{charge: charge} do
+      charge = enable_machine_token(charge)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        result =
+          case request["method"] do
+            "eth_getTransactionReceipt" -> success_receipt()
+            "eth_getTransactionByHash" -> %{"hash" => @tx_hash}
+            _other -> nil
+          end
+
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail == "Tempo RPC request failed"
     end
   end
 
@@ -1119,6 +1273,41 @@ defmodule MPP.Methods.TempoTest do
       # The full tx is simulated once, then broadcast.
       assert_received {:rpc_call, "eth_simulateV1"}
       assert_received {:rpc_call, "eth_sendRawTransaction"}
+    end
+  end
+
+  describe "verify/2 — transaction credential with machine tokens" do
+    test "accepts the canonical [approve, swapTo] route", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      memo = @test_memo
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
+      tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, memo), chain_id: 42_431)
+
+      stub_broadcast_and_receipt(
+        success_receipt(logs: [transfer_with_memo_log(from: machine_token_swapper(), memo: memo)])
+      )
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+    end
+
+    test "falls through to TIP-20 transfer matching when the route does not match", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_log(from: test_sender_address())]))
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+    end
+
+    test "rejects a mutated machine-token route that is not a TIP-20 transfer", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      memo = @test_memo
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
+      [_approve, swap] = machine_token_calls(1_000_000, memo)
+      tx_hex = build_tempo_tx(calls: [swap], chain_id: 42_431)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert error.detail =~ "No matching transferWithMemo call"
     end
   end
 
@@ -1741,6 +1930,40 @@ defmodule MPP.Methods.TempoTest do
   # Stubs a successful JSON-RPC response wrapping the given receipt map.
   defp stub_receipt(receipt) do
     stub_receipt_response(%{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+  end
+
+  defp stub_receipt_and_transaction_from(receipt, from) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      result =
+        case request["method"] do
+          "eth_getTransactionReceipt" -> receipt
+          "eth_getTransactionByHash" -> %{"from" => from, "hash" => @tx_hash}
+          _other -> nil
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
+    end)
+  end
+
+  defp machine_token_swapper, do: MachineToken.settlement_sender(42_431)
+
+  defp machine_token_token, do: MachineToken.token(42_431)
+
+  defp machine_token_calls(amount, memo) do
+    token = machine_token_token()
+    swapper = machine_token_swapper()
+
+    [
+      build_call(token, approve_calldata(swapper, amount)),
+      build_call(swapper, swap_to_calldata(token, amount, @token_address, @recipient, memo))
+    ]
+  end
+
+  defp enable_machine_token(charge) do
+    %{charge | method_details: Map.put(charge.method_details, "machine_token_enabled", true)}
   end
 
   # Stubs a raw JSON-RPC response body.
@@ -2482,6 +2705,21 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [call1, call2], chain_id: 42_431)
 
       stub_broadcast_and_receipt(success_receipt())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "skips DEX call-scope when the canonical machine-token route matches", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "machine_token_enabled", true)}
+      memo = @test_memo
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
+
+      tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, memo), chain_id: 42_431, fee_payer: true)
+
+      stub_broadcast_and_receipt(
+        success_receipt(logs: [transfer_with_memo_log(from: machine_token_swapper(), memo: memo)])
+      )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
