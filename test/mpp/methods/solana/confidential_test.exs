@@ -21,6 +21,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
   @zk_proof_program ~B58[ZkE1Gama1Proof11111111111111111111111111111]
   @record_program ~B58[recr1L3PCGKLbckBqMNcJhuuyU1zgo8nBhfLVsJNwr5]
   @memo_program ~B58[MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr]
+  @memo_v1_program ~B58[Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo]
   @identity <<0::256>>
   @secret Base.encode64(<<7, 0::248>>)
   @low_ciphertext Base.decode16!(
@@ -107,6 +108,18 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
       end
     end
 
+    test "rejects malformed mint, recipient, and decimals", %{charge: charge} do
+      for invalid_charge <- [
+            %{charge | currency: "not-base58"},
+            %{charge | recipient: "not-base58"},
+            %{charge | method_details: Map.put(charge.method_details, "decimals", 10)}
+          ] do
+        assert_raise ArgumentError, ~r/base58 mint, recipient, and decimals/, fn ->
+          Solana.challenge_method_details(invalid_charge)
+        end
+      end
+    end
+
     test "rejects invalid max_bundle_transactions", %{config: config} do
       assert_raise ArgumentError, ~r/max_bundle_transactions/, fn ->
         Solana.validate_config!(Map.put(config, "max_bundle_transactions", 0))
@@ -174,12 +187,119 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
 
       assert error.detail == "Transaction is not valid base64"
     end
+
+    test "rejects a bundle whose signatures are missing", context do
+      payload = %{
+        "type" => "bundle",
+        "transactions" => Enum.map(valid_bundle(context), &(&1 |> Transaction.serialize() |> Base.encode64()))
+      }
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, context.charge)
+      assert error.detail =~ "missing a required signature"
+    end
+
+    test "settles a signed bundle after decrypting the recipient pending-balance delta", context do
+      transactions = signed_bundle(context)
+      signature = Cartouche.Base58.encode(hd(List.last(transactions).signatures))
+      previous = account_rpc_value(@identity <> @identity, @identity <> @identity)
+      current = account_rpc_value(@low_ciphertext, @high_ciphertext)
+      counter = :atomics.new(1, signed: false)
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {method, id, conn} = read_rpc(conn)
+
+        result =
+          case method do
+            "getAccountInfo" ->
+              if :atomics.add_get(counter, 1, 1) == 1, do: previous, else: current
+
+            "simulateTransaction" ->
+              %{"err" => nil, "logs" => [], "unitsConsumed" => 1}
+
+            "sendTransaction" ->
+              signature
+
+            "getSignatureStatuses" ->
+              [
+                %{
+                  "slot" => 1,
+                  "confirmations" => 1,
+                  "err" => nil,
+                  "confirmationStatus" => "confirmed"
+                }
+              ]
+
+            "getTransaction" ->
+              %{"meta" => %{"err" => nil}, "transaction" => %{"signatures" => [signature]}}
+          end
+
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
+      end)
+
+      assert {:ok, %MPP.Receipt{} = receipt} =
+               Solana.verify(
+                 %{
+                   "type" => "bundle",
+                   "transactions" => Enum.map(transactions, &(&1 |> Transaction.serialize() |> Base.encode64()))
+                 },
+                 stubbed_charge(context.charge)
+               )
+
+      assert receipt.method == "solana"
+      assert receipt.reference == signature
+      assert receipt.extensions == %{"delivery" => "pending"}
+    end
+
+    test "rejects the bundle when pre-broadcast simulation fails", context do
+      Req.Test.stub(__MODULE__, fn conn ->
+        {method, id, conn} = read_rpc(conn)
+
+        result =
+          case method do
+            "getAccountInfo" ->
+              account_rpc_value(@identity <> @identity, @identity <> @identity)
+
+            "simulateTransaction" ->
+              %{"err" => "AccountNotFound", "logs" => [], "unitsConsumed" => 0}
+          end
+
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
+      end)
+
+      payload = %{
+        "type" => "bundle",
+        "transactions" => Enum.map(signed_bundle(context), &(&1 |> Transaction.serialize() |> Base.encode64()))
+      }
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, stubbed_charge(context.charge))
+      assert error.detail =~ "simulation rejected"
+    end
   end
 
   describe "verify_bundle/3" do
     test "accepts ordered proof setup, transfer, and close transactions", context do
       transactions = valid_bundle(context)
       assert :ok = Confidential.verify_bundle(transactions, context.charge, 8)
+    end
+
+    test "accepts allowed memo, compute-budget, and proof-record instructions", context do
+      [setup, transfer] = valid_bundle(context)
+      {record, _record_seed} = Keys.generate_keypair()
+
+      setup =
+        append_instructions(setup, [
+          instruction(@memo_program, [], "payment memo"),
+          instruction(@memo_v1_program, [], "legacy memo"),
+          instruction(Programs.compute_budget_program(), [], <<3, 1::little-unsigned-64>>),
+          SystemProgram.create_account(context.payer, record, 1, 128, @record_program),
+          record_instruction(record, context.payer, <<0>>),
+          record_instruction(record, context.payer, <<1, 42>>),
+          record_instruction(record, context.payer, <<4>>)
+        ])
+
+      transfer = append_instructions(transfer, [record_close_instruction(record, context.payer)])
+
+      assert :ok = Confidential.verify_bundle([setup, transfer], context.charge, 8, %{fee_payer: true})
     end
 
     test "accepts confidential TransferWithFee with five contexts", context do
@@ -203,6 +323,204 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
                Confidential.verify_bundle([setup, disallowed, transfer], context.charge, 8)
 
       assert error.detail =~ "disallowed Token-2022"
+    end
+
+    test "rejects programs outside the confidential bundle allow-list", context do
+      [setup, transfer] = valid_bundle(context)
+      {program, _seed} = Keys.generate_keypair()
+      disallowed = compiled_transaction(context.payer, [instruction(program, [], <<>>)])
+
+      assert_bundle_error([setup, disallowed, transfer], context.charge, "disallowed instruction")
+    end
+
+    test "rejects invalid System Program account creation", context do
+      [setup, transfer] = valid_bundle(context)
+      {account, _seed} = Keys.generate_keypair()
+      {other_funder, _seed} = Keys.generate_keypair()
+      {other_owner, _seed} = Keys.generate_keypair()
+
+      wrong_funder = SystemProgram.create_account(other_funder, account, 1, 128, @zk_proof_program)
+      wrong_owner = SystemProgram.create_account(context.payer, account, 1, 128, other_owner)
+      malformed = instruction(Programs.system_program(), [], <<1>>)
+
+      assert_bundle_error(
+        [prepend_instruction(setup, wrong_funder), transfer],
+        context.charge,
+        "funder must be the bundle fee payer"
+      )
+
+      assert_bundle_error(
+        [prepend_instruction(setup, wrong_owner), transfer],
+        context.charge,
+        "only proof context or proof record accounts"
+      )
+
+      assert_bundle_error(
+        [prepend_instruction(setup, malformed), transfer],
+        context.charge,
+        "disallowed System Program"
+      )
+
+      [transfer_instruction | closes] = decompile_instructions(transfer)
+
+      after_transfer =
+        compiled_transaction(context.payer, [transfer_instruction, wrong_owner | closes])
+
+      assert_bundle_error(
+        [setup, after_transfer],
+        context.charge,
+        "must be created before the transfer"
+      )
+    end
+
+    test "rejects invalid proof setup and context closure", context do
+      [setup, transfer] = valid_bundle(context)
+      {unknown, _seed} = Keys.generate_keypair()
+      {other, _seed} = Keys.generate_keypair()
+      proof = hd(context.contexts)
+
+      assert_bundle_error(
+        [prepend_instruction(setup, proof_close_instruction(proof, context.payer)), transfer],
+        context.charge,
+        "cannot close before the transfer"
+      )
+
+      assert_bundle_error(
+        [setup, with_instructions_after_transfer(transfer, [proof_close_instruction(proof, other)])],
+        context.charge,
+        "rent must return to its owner"
+      )
+
+      assert_bundle_error(
+        [setup, with_instructions_after_transfer(transfer, [proof_close_instruction(unknown, context.payer)])],
+        context.charge,
+        "closes an unknown proof context"
+      )
+
+      for {instruction, detail} <- [
+            {proof_instruction(proof, context.payer, <<>>), "invalid ZK proof instruction"},
+            {proof_instruction(unknown, context.payer, <<1>>), "exactly one proof context"},
+            {proof_instruction(proof, other, <<1>>), "owner must be the bundle fee payer"}
+          ] do
+        assert_bundle_error([append_instructions(setup, [instruction]), transfer], context.charge, detail)
+      end
+
+      [transfer_instruction | closes] = decompile_instructions(transfer)
+
+      proof_after_transfer =
+        compiled_transaction(
+          context.payer,
+          [transfer_instruction, proof_instruction(proof, context.payer, <<1>>) | closes]
+        )
+
+      assert_bundle_error(
+        [setup, proof_after_transfer],
+        context.charge,
+        "proof setup must precede the transfer"
+      )
+    end
+
+    test "rejects invalid proof-record ownership and closure", context do
+      [setup, transfer] = valid_bundle(context)
+      {record, _seed} = Keys.generate_keypair()
+      {unknown, _seed} = Keys.generate_keypair()
+      {other, _seed} = Keys.generate_keypair()
+
+      setup_with_record =
+        append_instructions(setup, [
+          SystemProgram.create_account(context.payer, record, 1, 128, @record_program)
+        ])
+
+      for {instruction, detail} <- [
+            {record_instruction(unknown, context.payer, <<0>>), "must be owned by the bundle fee payer"},
+            {record_instruction(record, other, <<0>>), "must be owned by the bundle fee payer"},
+            {record_close_instruction(unknown, context.payer), "closes an unknown proof record"},
+            {record_close_instruction(record, other), "rent must return to its owner"},
+            {record_instruction(record, context.payer, <<2>>), "invalid proof record instruction"}
+          ] do
+        assert_bundle_error(
+          [append_instructions(setup_with_record, [instruction]), transfer],
+          context.charge,
+          detail
+        )
+      end
+    end
+
+    test "rejects invalid bundle state", context do
+      [setup, transfer] = valid_bundle(context)
+      {other_payer, _seed} = Keys.generate_keypair()
+      {extra_context, _seed} = Keys.generate_keypair()
+      {record, _seed} = Keys.generate_keypair()
+
+      assert_bundle_error([setup], context.charge, "exactly one transfer")
+
+      trailing_memo = compiled_transaction(context.payer, [instruction(@memo_program, [], "late")])
+      assert_bundle_error([setup, transfer, trailing_memo], context.charge, "final bundle transaction")
+
+      setup_with_extra =
+        append_instructions(setup, [
+          SystemProgram.create_account(context.payer, extra_context, 1, 128, @zk_proof_program)
+        ])
+
+      transfer_closing_extra = append_instructions(transfer, [proof_close_instruction(extra_context, context.payer)])
+
+      assert_bundle_error(
+        [setup_with_extra, transfer_closing_extra],
+        context.charge,
+        "Every proof context must be initialized"
+      )
+
+      transfer_missing_close =
+        transfer
+        |> decompile_instructions()
+        |> Enum.drop(-1)
+        |> then(&compiled_transaction(context.payer, &1))
+
+      assert_bundle_error([setup, transfer_missing_close], context.charge, "Every proof context must close")
+
+      setup_with_record =
+        append_instructions(setup, [
+          SystemProgram.create_account(context.payer, record, 1, 128, @record_program),
+          record_instruction(record, context.payer, <<0>>)
+        ])
+
+      assert_bundle_error([setup_with_record, transfer], context.charge, "Every proof record account must be closed")
+
+      transfer_other_payer =
+        transfer
+        |> decompile_instructions()
+        |> then(&compiled_transaction(other_payer, &1))
+
+      assert_bundle_error(
+        [setup, transfer_other_payer],
+        context.charge,
+        "must use the same fee payer"
+      )
+    end
+
+    test "rejects missing fee payer and invalid account indices", context do
+      [setup, transfer] = valid_bundle(context)
+      empty = compiled_transaction(context.payer, [])
+      no_payer = %{empty | message: %{empty.message | account_keys: []}}
+      assert_bundle_error([no_payer], context.charge, "missing a fee payer")
+
+      [compiled | remaining] = setup.message.instructions
+      invalid = %{compiled | program_id_index: 255}
+      invalid_message = %{setup.message | instructions: [invalid | remaining]}
+
+      assert_bundle_error(
+        [%{setup | message: invalid_message}, transfer],
+        context.charge,
+        "invalid account index"
+      )
+    end
+
+    test "rejects invalid confidential payment addresses", context do
+      assert_bundle_error(
+        valid_bundle(context),
+        %{context.charge | currency: "not-base58"},
+        "Invalid confidential mint or recipient address"
+      )
     end
 
     test "enforces fee-payer compute-budget ceilings", context do
@@ -236,6 +554,30 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
   end
 
   describe "recipient balance verification" do
+    test "fetches a live-shaped Token-2022 account and surfaces RPC failures", %{charge: charge} do
+      Req.Test.stub(__MODULE__, fn conn ->
+        {method, id, conn} = read_rpc(conn)
+        assert method == "getAccountInfo"
+
+        Req.Test.json(conn, %{
+          "jsonrpc" => "2.0",
+          "id" => id,
+          "result" => account_rpc_value(@low_ciphertext, @high_ciphertext)
+        })
+      end)
+
+      assert {:ok, snapshot} = Confidential.fetch_snapshot(charge, rpc_opts())
+      assert snapshot.pending_low == split_ciphertext(@low_ciphertext)
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {_method, id, conn} = read_rpc(conn)
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => -32_000, "message" => "rpc-fail"}})
+      end)
+
+      assert {:error, %Errors{} = error} = Confidential.fetch_snapshot(charge, rpc_opts())
+      assert error.detail == "Solana RPC request failed"
+    end
+
     test "parses a Token-2022 confidential account snapshot" do
       account = account_info(@low_ciphertext, @high_ciphertext)
       assert {:ok, snapshot} = Confidential.parse_snapshot(account)
@@ -248,6 +590,25 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
 
       account = account_info(@low_ciphertext, @high_ciphertext, approved: 0)
       assert {:error, %Errors{}} = Confidential.parse_snapshot(account)
+    end
+
+    test "skips unrelated TLV extensions and rejects malformed account data" do
+      [encoded, "base64"] = account_info(@low_ciphertext, @high_ciphertext).data
+      {:ok, data} = Base.decode64(encoded)
+      <<prefix::binary-166, confidential_tlv::binary>> = data
+      unrelated = <<9::little-16, 3::little-16, 1, 2, 3>>
+
+      assert {:ok, _snapshot} =
+               Confidential.parse_snapshot(account_with_data(prefix <> unrelated <> confidential_tlv))
+
+      for malformed <- [
+            <<0::size(165)-unit(8)>>,
+            prefix <> <<0::little-16>>,
+            prefix <> <<9::little-16, 4::little-16, 1>>
+          ] do
+        assert {:error, %Errors{} = error} = Confidential.parse_snapshot(account_with_data(malformed))
+        assert error.detail == "Invalid recipient confidential token account"
+      end
     end
 
     test "confirms both encrypted pending-balance chunks with the recipient secret" do
@@ -328,6 +689,18 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
     )
   end
 
+  defp record_instruction(record, authority, data) do
+    instruction(@record_program, [meta(record, false, true), meta(authority, true, false)], data)
+  end
+
+  defp record_close_instruction(record, owner) do
+    instruction(
+      @record_program,
+      [meta(record, false, true), meta(owner, true, false), meta(owner, false, true)],
+      <<3>>
+    )
+  end
+
   defp token_instruction(accounts, data) do
     last_index = length(accounts) - 1
 
@@ -362,10 +735,72 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
     end)
   end
 
+  defp stubbed_charge(charge) do
+    %{charge | method_details: Map.put(charge.method_details, "req_options", plug: {Req.Test, __MODULE__})}
+  end
+
+  defp rpc_opts do
+    [solana_node: @rpc_url, req_options: [plug: {Req.Test, __MODULE__}]]
+  end
+
+  defp read_rpc(conn) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    request = Jason.decode!(body)
+    {request["method"], request["id"], conn}
+  end
+
+  defp account_rpc_value(low, high) do
+    info = account_info(low, high)
+
+    %{
+      "context" => %{"apiVersion" => "4.2.0", "slot" => 485_367_653},
+      "value" => %{
+        "data" => info.data,
+        "executable" => false,
+        "lamports" => 2_039_280,
+        "owner" => info.owner,
+        "rentEpoch" => 18_446_744_073_709_551_615,
+        "space" => 165 + 1 + 4 + 161
+      }
+    }
+  end
+
+  defp with_instructions_after_transfer(transfer, extra) do
+    [transfer_instruction | closes] = decompile_instructions(transfer)
+
+    compiled_transaction(
+      hd(transfer.message.account_keys),
+      [transfer_instruction | extra] ++ closes
+    )
+  end
+
+  defp prepend_instruction(transaction, instruction) do
+    compiled_transaction(
+      hd(transaction.message.account_keys),
+      [instruction | decompile_instructions(transaction)]
+    )
+  end
+
+  defp append_instructions(transaction, instructions) do
+    compiled_transaction(
+      hd(transaction.message.account_keys),
+      decompile_instructions(transaction) ++ instructions
+    )
+  end
+
+  defp assert_bundle_error(transactions, charge, detail) do
+    assert {:error, %Errors{} = error} = Confidential.verify_bundle(transactions, charge, 8)
+    assert error.detail =~ detail
+  end
+
   defp account_info(low, high, opts \\ []) do
     approved = Keyword.get(opts, :approved, 1)
     extension = <<approved, 1::256, low::binary-64, high::binary-64, 0::size(125)-unit(8)>>
     data = <<0::size(165)-unit(8), 2, 5::little-16, byte_size(extension)::little-16, extension::binary>>
+    %{owner: @token_2022_address, data: [Base.encode64(data), "base64"]}
+  end
+
+  defp account_with_data(data) do
     %{owner: @token_2022_address, data: [Base.encode64(data), "base64"]}
   end
 

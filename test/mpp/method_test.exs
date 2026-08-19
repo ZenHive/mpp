@@ -103,7 +103,7 @@ defmodule MPP.MethodTest do
       assert "authorization" in EVM.credential_types()
     end
 
-    test "Solana declares transaction and signature" do
+    test "Solana declares transaction, signature, and bundle" do
       assert MPP.Methods.Solana.credential_types() == ["transaction", "signature", "bundle"]
     end
 
