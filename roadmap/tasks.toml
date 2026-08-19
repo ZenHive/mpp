@@ -1431,7 +1431,7 @@ shipped_in = "ea423e263bd378ed3624b79b579717171a55edb0"
 id = 55
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "in_progress"
 title = "Hash credential type audit + spec backfill"
 scores = { d = 2, b = 7, u = 8 }
 acceptance_criteria = [
@@ -1447,6 +1447,7 @@ body = """
 Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a "parity confirmed" note; if not, add the parse / serialize / verify path.
 """
 created_at = "2026-05-27"
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 [[task]]
