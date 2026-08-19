@@ -183,7 +183,7 @@
 |------|--------|-------|
 | Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:6/B:8/U:8 → Eff:1.33] 📋 |
 | Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:8/B:9/U:8 → Eff:1.06] 📋 |
-| Task 82 | ⬜ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
+| Task 82 | 🔄 | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
 <!-- TASKS:END -->
 
 ---

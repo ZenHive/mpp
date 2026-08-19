@@ -2121,7 +2121,7 @@ scored_at = "2026-08-02"
 id = "82"
 phase = 13
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Mutation-grade payment credential and wire-security suite"
 scores = { d = 6, b = 10, u = 9 }
 markers = ["security"]
@@ -2133,6 +2133,7 @@ body = """
 Measure whether MPP's existing property, conformance and integration suites reject realistic payment-protocol faults. The provider-owned PaymentAuth specifications and observed integrations define meaning; mpp-rs/mppx supply cross-implementation evidence but do not override that contract. Challenge canonicalization, credential binding, replay/expiry and EVM/Tempo authorization with generated and domain mutations without changing the public protocol surface.
 """
 created_at = "2026-08-17"
+started_at = "2026-08-19"
 scored_at = "2026-08-17"
 
 [[task]]
