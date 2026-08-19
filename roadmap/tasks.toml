@@ -2150,7 +2150,7 @@ shipped_in = "4a092722aa74388e8626af684854a56e5a4940cc"
 id = "85"
 phase = 5
 bundle = "evm"
-status = "in_progress"
+status = "done"
 title = "Require chainId in EVM challenge configuration"
 scores = { d = 3, b = 7, u = 8 }
 markers = ["parallel"]
@@ -2162,9 +2162,16 @@ model = "cursor-grok-4.6-high"
 body = """
 Align EVM challenge configuration with the current unified EVM Charge draft. The canonical specification marks methodDetails.chainId as REQUIRED, but MPP.Methods.EVM currently documents chain_id as optional, omits it when absent, and validates only rpc_url. Make invalid configuration fail at initialization so every emitted EVM challenge carries an explicit target chain. Preserve the existing native-ETH extension and leave new credential implementations to their existing roadmap tasks.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1787109697480-a4d0a7cb, 60255e7fbaf8eb5862945398f124377eb8340370)."
+delivered_by = "cursor"
+verified = true
+verified_by = "codex"
+verification_ref = "harness-run:run-1787109697480-a4d0a7cb"
 created_at = "2026-08-19"
 started_at = "2026-08-19"
 scored_at = "2026-08-19"
+done_at = "2026-08-19"
+shipped_in = "60255e7fbaf8eb5862945398f124377eb8340370"
 
 [[task]]
 id = "86"
