@@ -11,9 +11,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (5 of 8 done · 1 in progress)
+**Focus phase:** 12 — Client SDK (6 of 8 done · 0 in progress)
 
-**Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport, Task 33e — Built-in charge providers on 2026-08-19
+**Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport, Task 33e — Built-in charge providers, Task 89 — Tempo client provider: machine-token charge construction on 2026-08-19
 
 **Up next:** Task 40 — EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67] 🚀
 <!-- FOCUS:END -->
@@ -167,7 +167,7 @@
 | Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 | Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋 |
-| Task 89 `[P]` | 🔄 | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
+| Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
 ---
