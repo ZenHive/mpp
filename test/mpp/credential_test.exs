@@ -203,6 +203,75 @@ defmodule MPP.CredentialTest do
     end
   end
 
+  # Vectors from mpp-rs `test_payment_payload_deserialization` /
+  # `test_payment_payload_strict_field_enforcement`
+  # (refs/mpp-rs/src/protocol/core/challenge.rs) and mppx
+  # `schema: validates hash payload`
+  # (refs/mppx/src/tempo/Methods.test.ts). Payload-layer only — Credential.decode/1
+  # still treats payload as an opaque map, matching both reference SDKs.
+  @mpp_rs_hash_json ~s({"type":"hash","hash":"0xdef123"})
+  @mpp_rs_hash_missing_field ~s({"type":"hash","signature":"0xdef123"})
+  @mppx_tempo_hash_json ~s({"hash":"0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890","type":"hash"})
+
+  describe "hash_payload/1 and parse_hash_payload/1" do
+    test "constructs a hash payload without a signature field (mpp-rs PaymentPayload::hash)" do
+      payload = Credential.hash_payload("0xdef")
+
+      assert payload == %{"type" => "hash", "hash" => "0xdef"}
+      refute Map.has_key?(payload, "signature")
+    end
+
+    test "parses the mpp-rs hash payload vector" do
+      payload = Jason.decode!(@mpp_rs_hash_json)
+      assert {:ok, "0xdef123"} = Credential.parse_hash_payload(payload)
+    end
+
+    test "parses the mppx Tempo hash payload vector" do
+      payload = Jason.decode!(@mppx_tempo_hash_json)
+
+      assert {:ok, "0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890"} =
+               Credential.parse_hash_payload(payload)
+    end
+
+    test "rejects the mpp-rs hash-with-signature vector" do
+      payload = Jason.decode!(@mpp_rs_hash_missing_field)
+      assert {:error, :missing_hash} = Credential.parse_hash_payload(payload)
+    end
+
+    test "rejects a hash payload whose hash is empty, missing, or not a string" do
+      assert {:error, :missing_hash} = Credential.parse_hash_payload(%{"type" => "hash", "hash" => ""})
+      assert {:error, :missing_hash} = Credential.parse_hash_payload(%{"type" => "hash"})
+      assert {:error, :missing_hash} = Credential.parse_hash_payload(%{"type" => "hash", "hash" => 123})
+    end
+
+    test "rejects non-hash typed and untyped payloads" do
+      assert {:error, :not_hash_payload} =
+               Credential.parse_hash_payload(%{"type" => "transaction", "signature" => "0xabc"})
+
+      assert {:error, :not_hash_payload} = Credential.parse_hash_payload(%{"hash" => "0xdef123"})
+      assert {:error, :not_hash_payload} = Credential.parse_hash_payload(%{"proof" => "0x"})
+    end
+
+    test "accepts extra method fields (Tempo presenterSignature) on a hash payload" do
+      payload = "0xdef123" |> Credential.hash_payload() |> Map.put("presenterSignature", "0xsig")
+      assert {:ok, "0xdef123"} = Credential.parse_hash_payload(payload)
+    end
+
+    test "parses a hash payload off a decoded credential struct" do
+      credential = build_credential(payload: Credential.hash_payload("0xabc"))
+      assert {:ok, "0xabc"} = Credential.parse_hash_payload(credential)
+    end
+
+    test "encode/decode roundtrips a hash credential (serialize path)" do
+      credential = build_credential(payload: Credential.hash_payload("0xdef123"))
+      encoded = Credential.encode(credential)
+      assert {:ok, decoded} = Credential.decode(encoded)
+
+      assert decoded.payload == %{"type" => "hash", "hash" => "0xdef123"}
+      assert {:ok, "0xdef123"} = Credential.parse_hash_payload(decoded)
+    end
+  end
+
   # Builds a base64url credential wrapping an echoed challenge with the given
   # field overrides (defaults are all well-formed).
   defp encode_credential(overrides) do

@@ -21,6 +21,22 @@ defmodule MPP.Credential do
   The `challenge.request` field remains as its raw base64url string — never
   re-serialized — to preserve the exact bytes used in HMAC computation.
 
+  ## Hash credentials
+
+  Several payment methods (Tempo, EVM, Hedera, Stellar, Near Intents) accept
+  `payload.type = "hash"`: the client broadcasts a transfer and presents the
+  confirmed transaction identifier. That type was backfilled as first-class in
+  the EVM spec (`draft-evm-charge-00` §1.3, mpp-specs #261) alongside
+  `permit2` / `authorization` / `transaction`.
+
+  `decode/1` still treats `payload` as an opaque map — the same as mppx
+  `Credential.deserialize` and mpp-rs `PaymentCredential.payload`. Typed hash
+  access is `hash_payload/1` (construct) and `parse_hash_payload/1` (extract),
+  matching mpp-rs `PaymentPayload::hash` / `charge_payload()`. Method-specific
+  hash format (0x-prefixed 32-byte hex vs chain-native) is verified by the
+  method, not here. `MPP.Verifier` rejects a well-formed hash payload when the
+  method's `credential_types/0` does not include `"hash"`.
+
   ## Fields
 
     * `challenge` — echoed `MPP.Challenge` struct from the 402 response
@@ -86,6 +102,44 @@ defmodule MPP.Credential do
     |> Jason.encode!()
     |> Base.url_encode64(padding: false)
   end
+
+  api(:hash_payload, "Build a `type=\"hash\"` credential payload map (mpp-rs `PaymentPayload::hash`).",
+    params: [
+      hash: [kind: :value, description: "Transaction hash or chain-native identifier string"]
+    ],
+    returns: %{type: :map, description: "Map with type=hash and hash — no signature field"},
+    composes_with: [:parse_hash_payload, :encode]
+  )
+
+  @spec hash_payload(String.t()) :: map()
+  def hash_payload(hash) when is_binary(hash) and hash != "" do
+    %{"type" => "hash", "hash" => hash}
+  end
+
+  api(
+    :parse_hash_payload,
+    "Extract the hash from a `type=\"hash\"` payload (mpp-rs `PaymentPayload` / `charge_payload()`).",
+    params: [
+      payload: [kind: :value, description: "Credential struct or payload map"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description: "`{:ok, hash}` on a hash payload, `{:error, reason}` otherwise"
+    },
+    errors: [:missing_hash, :not_hash_payload],
+    composes_with: [:hash_payload]
+  )
+
+  @spec parse_hash_payload(t() | map()) :: {:ok, String.t()} | {:error, :missing_hash | :not_hash_payload}
+  def parse_hash_payload(%__MODULE__{payload: payload}), do: parse_hash_payload(payload)
+
+  def parse_hash_payload(%{"type" => "hash", "hash" => hash}) when is_binary(hash) and hash != "" do
+    {:ok, hash}
+  end
+
+  def parse_hash_payload(%{"type" => "hash"}), do: {:error, :missing_hash}
+
+  def parse_hash_payload(payload) when is_map(payload), do: {:error, :not_hash_payload}
 
   # Deserializes a string-keyed map into a credential struct.
   defp from_map(%{"challenge" => challenge_map, "payload" => payload} = map)

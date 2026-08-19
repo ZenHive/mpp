@@ -9,6 +9,7 @@ defmodule MPP.Method do
     1. `method_name/0` — lowercase-ASCII-letters identifier for protocol headers (spec `1*LOWERALPHA`)
     2. `verify/2` — verify a credential payload against a charge or session intent
     3. `challenge_method_details/1` — (optional) add method-specific fields to challenges
+    4. `credential_types/0` — (optional) `payload.type` values this method accepts
 
   ## Usage
 
@@ -101,7 +102,16 @@ defmodule MPP.Method do
   """
   @callback validate_config!(config :: map()) :: :ok
 
-  @optional_callbacks [challenge_method_details: 1, validate_config!: 1]
+  @doc """
+  Returns the `payload.type` values this method accepts (e.g. `["hash"]`).
+
+  `MPP.Verifier` uses this to reject a well-formed `type="hash"` credential
+  against a method that does not implement hash verification (Stripe, demo).
+  The default is `[]` — no typed payloads. Untyped payloads are not gated.
+  """
+  @callback credential_types() :: [String.t()]
+
+  @optional_callbacks [challenge_method_details: 1, validate_config!: 1, credential_types: 0]
 
   @doc false
   @spec __using__(term()) :: Macro.t()
@@ -117,7 +127,11 @@ defmodule MPP.Method do
       @impl MPP.Method
       def validate_config!(_config), do: :ok
 
-      defoverridable challenge_method_details: 1, validate_config!: 1
+      @spec credential_types() :: [String.t()]
+      @impl MPP.Method
+      def credential_types, do: []
+
+      defoverridable challenge_method_details: 1, validate_config!: 1, credential_types: 0
     end
   end
 end

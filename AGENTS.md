@@ -623,7 +623,7 @@ This is a **library** (not a Phoenix app). It provides Plug middleware that any 
 ```
 MPP                        — Root module, Discoverable entry point (describe/0-2 for progressive API discovery)
 MPP.Challenge              — Challenge struct, HMAC-SHA256 ID binding, create/verify
-MPP.Credential             — Credential parsing, challenge echo validation, payload extraction
+MPP.Credential             — Credential parsing, challenge echo validation, payload extraction; hash_payload/1 + parse_hash_payload/1 for type="hash"
 MPP.Receipt                — Receipt struct, base64url JSON serialization
 MPP.Headers                — Parse/format WWW-Authenticate, Authorization, Payment-Receipt wire format (SchemeSplitter = internal multi-scheme boundary state machine)
 MPP.AcceptPayment          — Accept-Payment client-preference header: parse/format/rank/apply_header

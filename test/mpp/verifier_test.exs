@@ -47,6 +47,26 @@ defmodule MPP.VerifierTest do
     end
   end
 
+  defmodule MockHashMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mockhash"
+
+    @impl MPP.Method
+    def credential_types, do: ["hash"]
+
+    @impl MPP.Method
+    def verify(%{"type" => "hash", "hash" => hash}, _charge) when is_binary(hash) do
+      {:ok, Receipt.new(method: method_name(), reference: hash)}
+    end
+
+    def verify(_payload, _charge) do
+      {:error, Errors.new(:invalid_payload, "Expected hash payload")}
+    end
+  end
+
   # --- Test Helpers ---
 
   @secret_key "test-secret-key-for-verifier"
@@ -467,6 +487,71 @@ defmodule MPP.VerifierTest do
       assert_raise ArgumentError, ~r/charge/, fn ->
         Verifier.verify(credential, opts)
       end
+    end
+  end
+
+  describe "verify/2 hash credential type" do
+    # mpp-rs PaymentPayload hash vector (refs/mpp-rs/src/protocol/core/challenge.rs)
+    @mpp_rs_hash %{"type" => "hash", "hash" => "0xdef123"}
+    # mppx Tempo Methods.test.ts `schema: validates hash payload`
+    @mppx_hash %{
+      "type" => "hash",
+      "hash" => "0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890"
+    }
+
+    test "accepts the mpp-rs hash vector on a hash-capable method" do
+      credential = build_credential(method_name: "mockhash", payload: @mpp_rs_hash)
+      opts = verify_opts(method: MockHashMethod)
+
+      assert {:ok, %Receipt{method: "mockhash", reference: "0xdef123"}} =
+               Verifier.verify(credential, opts)
+    end
+
+    test "accepts the mppx Tempo hash vector on a hash-capable method" do
+      credential = build_credential(method_name: "mockhash", payload: @mppx_hash)
+      opts = verify_opts(method: MockHashMethod)
+
+      assert {:ok, %Receipt{reference: "0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890"}} =
+               Verifier.verify(credential, opts)
+    end
+
+    test "rejects a well-formed hash credential against a method that does not accept hash" do
+      credential = build_credential(payload: @mpp_rs_hash)
+      opts = verify_opts()
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-payload")
+      assert error.detail == ~s(type="hash" is not accepted by this payment method)
+    end
+
+    test "rejects the mpp-rs hash-with-signature vector as malformed" do
+      credential = build_credential(method_name: "mockhash", payload: %{"type" => "hash", "signature" => "0xdef123"})
+      opts = verify_opts(method: MockHashMethod)
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-payload")
+      assert error.detail == "hash payload requires 'hash' field"
+    end
+
+    test "rejects type=hash with an empty or non-string hash field" do
+      for bad <- [%{"type" => "hash", "hash" => ""}, %{"type" => "hash", "hash" => 1}] do
+        credential = build_credential(method_name: "mockhash", payload: bad)
+        opts = verify_opts(method: MockHashMethod)
+
+        assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+        assert String.contains?(error.type, "invalid-payload")
+        assert error.detail == "hash payload requires 'hash' field"
+      end
+    end
+
+    test "does not type-gate an untyped payload or a non-hash typed payload" do
+      untyped = build_credential(payload: %{"proof" => "valid"})
+      assert {:ok, %Receipt{}} = Verifier.verify(untyped, verify_opts())
+
+      other_type = build_credential(payload: %{"type" => "transaction", "signature" => "0xabc"})
+      assert {:error, %Errors{} = error} = Verifier.verify(other_type, verify_opts())
+      assert String.contains?(error.type, "invalid-payload")
+      assert error.detail == "Missing proof field"
     end
   end
 end

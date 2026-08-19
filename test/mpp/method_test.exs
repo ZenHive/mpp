@@ -90,6 +90,17 @@ defmodule MPP.MethodTest do
     end
   end
 
+  describe "credential_types/0" do
+    test "default implementation returns an empty list" do
+      assert MockMethod.credential_types() == []
+    end
+
+    test "Tempo and EVM declare hash" do
+      assert "hash" in MPP.Methods.Tempo.credential_types()
+      assert MPP.Methods.EVM.credential_types() == ["hash"]
+    end
+  end
+
   describe "challenge_method_details/1" do
     test "default implementation returns nil", %{charge: charge, session: session} do
       assert MockMethod.challenge_method_details(charge) == nil

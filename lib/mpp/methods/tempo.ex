@@ -176,6 +176,12 @@ defmodule MPP.Methods.Tempo do
   @spec method_name() :: String.t()
   def method_name, do: "tempo"
 
+  api(:credential_types, "Return the Tempo charge payload types: hash, transaction, and proof.")
+
+  @impl MPP.Method
+  @spec credential_types() :: [String.t()]
+  def credential_types, do: ~w(hash transaction proof)
+
   api(
     :validate_config!,
     "Validate Tempo method_config at init time. Raises on missing `rpc_url` or unavailable `onchain` / `onchain_tempo` dependencies.",

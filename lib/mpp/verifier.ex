@@ -80,6 +80,7 @@ defmodule MPP.Verifier do
       :payment_expired,
       :realm_mismatch,
       :request_mismatch,
+      :invalid_payload,
       :verification_failed
     ]
   )
@@ -106,6 +107,7 @@ defmodule MPP.Verifier do
     result =
       with :ok <- verify_tier1(credential.challenge, secret_key, realm),
            :ok <- verify_pinned_fields(credential.challenge, method, realm, charge, digest, opaque),
+           :ok <- check_hash_credential(credential, method),
            {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
         {:ok, receipt}
       else
@@ -215,6 +217,25 @@ defmodule MPP.Verifier do
 
     "Credential chainId does not match this route's requirements (expected '#{expected}')"
   end
+
+  # `type="hash"` is a first-class payload type (EVM spec §1.3 / Tempo §5.2 /
+  # mpp-rs `PayloadType::Hash`). Structural parse lives on Credential; method
+  # compatibility is `credential_types/0`. Untyped payloads are not gated.
+  defp check_hash_credential(%Credential{payload: %{"type" => "hash"} = payload}, method) do
+    case Credential.parse_hash_payload(payload) do
+      {:ok, _hash} ->
+        if "hash" in method.credential_types() do
+          :ok
+        else
+          {:error, Errors.new(:invalid_payload, ~s(type="hash" is not accepted by this payment method))}
+        end
+
+      {:error, _reason} ->
+        {:error, Errors.new(:invalid_payload, "hash payload requires 'hash' field")}
+    end
+  end
+
+  defp check_hash_credential(_credential, _method), do: :ok
 
   defp check_intent_match(%Challenge{intent: intent}, intent), do: :ok
   defp check_intent_match(_challenge, _expected), do: {:error, :intent_mismatch}

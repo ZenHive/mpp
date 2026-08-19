@@ -114,6 +114,12 @@ defmodule MPP.Methods.EVM do
   @spec method_name() :: String.t()
   def method_name, do: "evm"
 
+  api(:credential_types, "Return the EVM charge payload types currently implemented: hash.")
+
+  @impl MPP.Method
+  @spec credential_types() :: [String.t()]
+  def credential_types, do: ~w(hash)
+
   api(
     :validate_config!,
     "Validate EVM method_config at init time. Raises on missing `rpc_url`.",
