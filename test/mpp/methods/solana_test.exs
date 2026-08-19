@@ -2077,10 +2077,6 @@ defmodule MPP.Methods.SolanaTest do
       assert :ok = Instructions.validate_splits_config!(nil)
     end
 
-    test "max_splits is 8" do
-      assert Instructions.max_splits() == 8
-    end
-
     test "raises when there are too many splits" do
       splits = for _i <- 1..9, do: %{"recipient" => "x", "amount" => "1"}
 

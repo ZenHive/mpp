@@ -10,6 +10,17 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- Session credential execution through `MPP.Session.Payload`,
+  `MPP.Session.Actions`, and `MPP.Session.Method`, including `open`, `topUp`,
+  `voucher`, and `close` channel actions. `MPP.Plug` and `MPP.Verifier` now
+  accept session intents and route credentials through the configured session
+  store.
+- Built-in `MPP.Client.Providers.Tempo` and `MPP.Client.Providers.Stripe`
+  charge providers. Tempo constructs chain-pinned, challenge-attributed TIP-20
+  payments; Stripe creates Shared Payment Tokens through the configured API.
+- `MPP.Methods.Solana` for native SOL and SPL-token charge verification in
+  pull-transaction and push-signature modes, including optional fee-payer
+  sponsorship, split payments, and replay deduplication.
 - `MPP.Client.MCP` and `MPP.Client.Transport.MCP` — payment-aware MCP client:
   detect `-32042` / payment-required metadata, select a challenge, obtain
   approval, pay through `MPP.Client.MultiProvider`, and retry the original
@@ -27,6 +38,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- `MPP.Discovery.OpenApi` accepts unpaid routes. Routes with `payment: nil` or
+  no payment key emit a normal success response without `x-payment-info` or a
+  `402` response, while payable operations retain both payment extensions.
 - **EVM `"chain_id"` is required** in `method_config` and advertised as
   `chainId` in challenge `methodDetails`. `MPP.Plug.init/1` raises when it is
   missing or nil.

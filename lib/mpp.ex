@@ -38,6 +38,7 @@ defmodule MPP do
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
     * `MPP.Session.Channel` — Session channel state, balance, and action wire mapping
+    * `MPP.Session.Voucher` — EIP-712 voucher typed data and signature verification
     * `MPP.Session.Payload` — Session credential payload schema (`open` / `voucher` / `topUp` / `close`)
     * `MPP.Session.Actions` — Session credential action handlers and per-channel balance tracking
     * `MPP.Session.Method` — `use` wrapper that dispatches `verify/2` through session actions

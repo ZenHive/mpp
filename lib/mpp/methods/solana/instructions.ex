@@ -130,10 +130,6 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
-  @doc false
-  @spec max_splits() :: pos_integer()
-  def max_splits, do: @max_splits
-
   @doc """
   Validate split entries in method_config (shape only; amount vs charge is
   checked when the charge is available).

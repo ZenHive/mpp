@@ -233,6 +233,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Intents.Session` | Session intent request schema (pay-as-you-go) |
 | `MPP.Session.Channel` | Session channel state, balance, and action wire mapping |
+| `MPP.Session.Voucher` | EIP-712 voucher typed data and signature verification |
 | `MPP.Session.Payload` | Session credential payload schema (`open` / `voucher` / `topUp` / `close`) |
 | `MPP.Session.Actions` | Session credential action handlers and per-channel balance tracking |
 | `MPP.Session.Method` | `use` wrapper that dispatches `verify/2` through session actions |
@@ -249,10 +250,6 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
-| `MPP.Session.Channel` | Session channel state and contract-backed channel ID |
-| `MPP.Session.Voucher` | EIP-712 voucher typed data and signature verification |
-| `MPP.Session.Store` | Behaviour for pluggable session-channel persistence |
-| `MPP.Session.ETSStore` | App-started ETS default session store |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
