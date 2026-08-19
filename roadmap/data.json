@@ -781,7 +781,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
-      "unlocks": 4,
+      "unlocks": 5,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -928,7 +928,7 @@
       },
       "eff": 3.0,
       "dep_layer": 0,
-      "unlocks": 3,
+      "unlocks": 4,
       "markers": [],
       "depends_on": [],
       "shipped_in": "v0.4.0",
@@ -949,7 +949,7 @@
       },
       "eff": 1.88,
       "dep_layer": 1,
-      "unlocks": 3,
+      "unlocks": 4,
       "markers": [],
       "depends_on": [
         26
@@ -1003,7 +1003,7 @@
       },
       "eff": 1.7,
       "dep_layer": 2,
-      "unlocks": 2,
+      "unlocks": 3,
       "markers": [],
       "depends_on": [
         28,
@@ -1048,7 +1048,7 @@
       },
       "eff": 1.7,
       "dep_layer": 3,
-      "unlocks": 1,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [
         30
@@ -1789,7 +1789,7 @@
       },
       "eff": 1.42,
       "dep_layer": 4,
-      "unlocks": 0,
+      "unlocks": 1,
       "markers": [],
       "depends_on": [
         31
@@ -3506,6 +3506,45 @@
         "test/mpp/client/providers/"
       ],
       "body": "Extend MPP.Client.Providers.Tempo so a challenge advertising machineTokenEnabled constructs the machine-token settlement route instead of a plain TIP-20 transferWithMemo. Server-side verification shipped in Task 84 with client-side construction explicitly out of scope; the built-in provider (Task 33e) currently always builds transferWithMemo — also a dependency, expressed here in prose because rmap depends_on takes numeric ids only. Authority: verified MppcSwapper source + live Moderato receipts; refs/mppx/src/tempo/client/Charge.ts and refs/mpp-rs TempoProvider machine-token routing are compatibility evidence. Filed from the task-33e reviewer proposal (run run-1787109695556-70f46cbc).\n",
+      "created_at": "2026-08-19",
+      "scored_at": "2026-08-19",
+      "cross_repo": []
+    },
+    {
+      "id": "90",
+      "phase": 10,
+      "bundle": "session",
+      "status": "pending",
+      "title": "Stripe subscription method on the shared subscription intent",
+      "scores": {
+        "d": 6,
+        "b": 8,
+        "u": 5
+      },
+      "eff": 1.08,
+      "dep_layer": 5,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [
+        50
+      ],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "MPP.Methods.Stripe verifies subscription-intent credentials against refs/mpp-specs/specs/methods/stripe/draft-stripe-subscription-00.md, reusing the shared MPP.Intents.Subscription and Receipt.subscription_id types from Task 50",
+        "Stripe-specific method_details are validated at init and never serialized into public challenges",
+        "Integration test against the Stripe test API: one real subscription success and one relevant real error; missing STRIPE_SECRET_KEY flunks loudly with exact export instructions, never skips",
+        "mix precommit.full green; touched money-path modules stay at or above the 95% critical-tier coverage floor"
+      ],
+      "touches": [
+        "lib/mpp/methods/stripe.ex",
+        "lib/mpp/methods/stripe/",
+        "test/mpp/methods/stripe_test.exs",
+        "test/mpp/methods/stripe_integration_test.exs"
+      ],
+      "body": "Task 50 shipped MPP.Intents.Subscription method-neutral so Stripe can reuse the schema, but only Tempo.Subscription implements it. Implement the Stripe subscription verify path per the provider-owned draft-stripe-subscription-00 spec (refs/mpp-specs). Live Stripe test API is the ground truth; mppx/mpp-rs are compatibility evidence. Filed from the task-50 reviewer proposal (run run-1787113998540-a26968d8).\n",
       "created_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []

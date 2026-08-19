@@ -2301,3 +2301,22 @@ Extend MPP.Client.Providers.Tempo so a challenge advertising machineTokenEnabled
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
+
+[[task]]
+id = "90"
+phase = 10
+bundle = "session"
+status = "pending"
+title = "Stripe subscription method on the shared subscription intent"
+scores = { d = 6, b = 8, u = 5 }
+markers = ["parallel"]
+depends_on = [50]
+acceptance_criteria = ["MPP.Methods.Stripe verifies subscription-intent credentials against refs/mpp-specs/specs/methods/stripe/draft-stripe-subscription-00.md, reusing the shared MPP.Intents.Subscription and Receipt.subscription_id types from Task 50", "Stripe-specific method_details are validated at init and never serialized into public challenges", "Integration test against the Stripe test API: one real subscription success and one relevant real error; missing STRIPE_SECRET_KEY flunks loudly with exact export instructions, never skips", "mix precommit.full green; touched money-path modules stay at or above the 95% critical-tier coverage floor"]
+touches = ["lib/mpp/methods/stripe.ex", "lib/mpp/methods/stripe/", "test/mpp/methods/stripe_test.exs", "test/mpp/methods/stripe_integration_test.exs"]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Task 50 shipped MPP.Intents.Subscription method-neutral so Stripe can reuse the schema, but only Tempo.Subscription implements it. Implement the Stripe subscription verify path per the provider-owned draft-stripe-subscription-00 spec (refs/mpp-specs). Live Stripe test API is the ground truth; mppx/mpp-rs are compatibility evidence. Filed from the task-50 reviewer proposal (run run-1787113998540-a26968d8).
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"

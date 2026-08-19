@@ -138,6 +138,7 @@
 | Task 30 | ✅ | 🎁 **session** · Channel state and voucher types [D:5/B:9/U:8 → Eff:1.7] 🚀 |
 | Task 31 | ✅ | 🎁 **session** · Session credential actions [D:5/B:9/U:8 → Eff:1.7] 🚀 |
 | Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42] 📋 |
+| Task 90 `[P]` | ⬜ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08] 📋 |
 <!-- TASKS:END -->
 
 ---
