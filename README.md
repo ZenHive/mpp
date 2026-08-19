@@ -135,7 +135,7 @@ pipeline :paid_solana do
 end
 ```
 
-Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs.
+Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs. Set `"confidential" => true` (Token-2022 mints only) to require the confidential transfer profile: the client submits a `type="bundle"` credential whose final transaction carries the single Token-2022 confidential `Transfer`/`TransferWithFee`, and the server confirms the amount by decrypting the recipient pending-balance delta with `"recipient_elgamal_secret_key"`.
 
 ### NEAR Intents (1Click)
 
@@ -237,7 +237,8 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 | Stripe | MPP | Fiat (cards, wallets) | v0.1.0 |
 | Tempo | MPP | Stablecoins (TIP-20) | v0.2.0 |
 | EVM | MPP | Any EVM chain (ETH, USDC, ERC-20) | v0.3.0 |
-| Solana | MPP | Native SOL and SPL tokens | Unreleased |
+| Solana | MPP | Native SOL and SPL tokens (incl. Token-2022 confidential) | v0.14.0 |
+| NEAR Intents | MPP | Cross-chain deposits via 1Click (hash-only) | v0.14.0 |
 | Lightning | MPP | Bitcoin (BOLT11) | Future |
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
@@ -280,21 +281,26 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Session.ETSStore` | ETS-backed default session store |
 | `MPP.Subscription.Store` | Pluggable recurring-subscription persistence |
 | `MPP.Subscription.ETSStore` | Application-started single-node subscription store |
+| `MPP.Subscription.Record` | Persisted recurring-payment authority and settlement state |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Stripe.Subscription` | Stripe fixed-price subscription activation and first-invoice verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.Subscription` | Tempo access-key subscription activation, authorization, and renewal |
+| `MPP.Methods.Tempo.KeyAuthorization` | Tempo subscription key-authorization wire codec and verifier |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
 | `MPP.Methods.Tempo.HostedFeePayer` | Hosted `eth_fillTransaction` fee-payer fill support |
 | `MPP.Methods.Tempo.MachineToken` | Canonical first-party machine-token (MPP Credits) charge-route construction and match |
 | `MPP.Methods.Tempo.Proof` | EIP-712 proof credentials for zero-amount Tempo flows |
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
+| `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Methods.NearIntents` | NEAR Intents hash-credential charges via 1Click Swap + origin RPC |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
+| `MPP.Discovery.OpenApi` | OpenAPI 3.1.0 discovery document generation (`x-payment-info`, 402 responses; `mix mpp.openapi`) |
+| `MPP.Discovery.PaymentInfo` | Parser/normalizer for the `x-payment-info` discovery extension |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |
 | `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |

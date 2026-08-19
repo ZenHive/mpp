@@ -6,10 +6,25 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.14.0] — 2026-08-19
 
 ### Added
 
+- EVM `type="authorization"` credentials — EIP-3009 `transferWithAuthorization`
+  settlement for Circle USDC/EURC via `MPP.Methods.EVM.Authorization`. The client
+  signs an off-chain EIP-712 message; the server submits it and pays gas. The
+  EIP-3009 `nonce` is the Payment-auth `challengeHash`, binding the authorization
+  to the challenge and rejecting replay on-chain. Enabled by a server-only
+  `"private_key"` in `method_config`.
+- Solana confidential transfer profile (`type="bundle"`): Token-2022 confidential
+  `Transfer`/`TransferWithFee` verification with ZK proof-context setup and close
+  in the credential bundle, amount confirmation by decrypting the recipient
+  pending-balance delta, and `credentialTypes=["bundle"]` advertisement when
+  `"confidential" => true`.
+- OpenAPI 3.1.0 discovery document generation via `MPP.Discovery.OpenApi` and
+  `mix mpp.openapi`, with `x-payment-info` extensions and 402 responses on
+  payable operations, and `MPP.Discovery.PaymentInfo` for parsing/normalizing
+  the extension.
 - Shared recurring-subscription intents with Stripe Billing activation, Tempo
   access-key activation and renewal, and an application-started ETS subscription
   store with a behaviour for durable shared backends.

@@ -83,6 +83,7 @@ MPP.Methods.Shared         — Internal method-verification helpers (require_con
 MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.Intents.Session        — Session intent request schema (per-unit rate, unit_type, suggested_deposit, ...)
+MPP.Intents.Subscription   — Recurring-subscription intent request schema (period_unit, period_count, subscription_expires, ...)
 MPP.Session.Channel        — Session channel state, balance tracking, action wire mapping
 MPP.Session.Voucher        — EIP-712 voucher typed data and signature verification
 MPP.Session.Payload        — Session credential payload schema (open / voucher / topUp / close)
@@ -96,17 +97,24 @@ MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset
 MPP.Verifier               — Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify)
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK); optional server-only Connect settlement routing
+MPP.Methods.Stripe.Subscription — Stripe fixed-price subscription activation + paid-first-invoice verification
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
+MPP.Methods.Tempo.Subscription — Tempo access-key subscription activation, authorize/2 renewals, single-use claim lifecycle
+MPP.Methods.Tempo.KeyAuthorization — Tempo subscription key-authorization wire codec and verifier (RLP layout matches ox/tempo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
 MPP.Methods.EVM.Authorization — EIP-3009 transferWithAuthorization credential (challengeHash nonce) for USDC/EURC
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
+MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle verification (type="bundle", recipient pending-balance decryption)
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor gas-economics policy: bounds client gas fields before fee-payer co-sign (anti-drain)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache; app-started as the default store
+MPP.Subscription.Store     — Behaviour for recurring-subscription persistence
+MPP.Subscription.ETSStore  — App-started single-node subscription store
+MPP.Subscription.Record    — Persisted recurring-payment authority and settlement state
 MPP.Replay                 — Internal credential single-use dedup shared by the Plug, MCP, and JSON-RPC transports (check_unused/mark_used, Tempo carve-out)
 MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
@@ -126,6 +134,12 @@ MPP.Client.Transport.MCP   — MCP/JSON-RPC transport: -32042 detection, error.d
 MPP.Client.Transport.JsonRpc — Bare JSON-RPC transport: -32042 detection, root-level `_meta` credential attach
 MPP.Client.Transport.WebSocket — WS transport: challenge frames, Payment credential frames, retry/backoff (no payment amplification)
 MPP.Client.MCP             — Payment-aware MCP client: SelectionPolicy, approval hook, MultiProvider pay, single retry
+MPP.Client.AcceptPolicy    — Gates Accept-Payment header injection on outgoing requests
+MPP.Discovery.OpenApi      — OpenAPI 3.1.0 discovery document generation (x-payment-info, 402 responses; mix mpp.openapi)
+MPP.Discovery.PaymentInfo  — Parse/normalize the x-payment-info discovery extension
+MPP.Telemetry              — Server-side payment telemetry events for challenges, verification, receipts
+MPP.Expires                — Expiration helpers: seconds/minutes/hours/days/weeks/months/years, assert!
+MPP.DID                    — DID helpers for EVM credential sources
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
