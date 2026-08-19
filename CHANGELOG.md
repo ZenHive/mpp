@@ -10,6 +10,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- Bare JSON-RPC payment transport via `MPP.Transports.JsonRpc`, including a
+  Plug server adapter and client transport with root-level `_meta` credentials
+  and receipts.
 - Session credential execution through `MPP.Session.Payload`,
   `MPP.Session.Actions`, and `MPP.Session.Method`, including `open`, `topUp`,
   `voucher`, and `close` channel actions. `MPP.Plug` and `MPP.Verifier` now

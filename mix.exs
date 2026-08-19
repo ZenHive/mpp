@@ -223,13 +223,18 @@ defmodule MPP.MixProject do
       "agents.check": [
         &agents_check/1
       ],
+      # The project-scoped ignore has a package-range guard below, so raw
+      # `mix deps.audit` must honor it just like the full gate does.
+      "deps.audit": [
+        "deps.audit --ignore-file .mix_audit_ignore"
+      ],
       # mix_audit discards its sync exit status (mirego/mix_audit#61), so a frozen
       # — or entirely absent — advisory DB still reports green. Prove freshness
       # first, audit, then prove the mirror the audit actually read was populated.
       "deps.audit.gated": [
         &advisory_ignore_scope/1,
         &advisory_freshness/1,
-        "deps.audit --ignore-file .mix_audit_ignore",
+        "deps.audit",
         &advisory_mirror_populated/1
       ],
       ci: ["precommit.full"]
