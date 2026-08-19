@@ -2119,7 +2119,7 @@ shipped_in = "de7decd7e21cf233401fb0e36a34f6098cb7449f"
 id = "84"
 phase = 9
 bundle = "tempo"
-status = "in_progress"
+status = "done"
 title = "Support Tempo machine-token charge payments"
 scores = { d = 6, b = 7, u = 6 }
 acceptance_criteria = ["MPP.Methods.Tempo verifies machine-token charge payments per the current reference SDKs at pickup, including the `machineTokenEnabled` methodDetails advertisement in 402 challenge details (cross-checked mppx #784 / refs/mppx/src/tempo and mpp-rs #385 / refs/mpp-rs/src/protocol/methods/tempo/charge.rs TempoChargeExt::machine_token_enabled)", "Machine-token semantics (canonical token, transfer/settlement event shape, push vs pull settlement) are established from Tempo-owned documentation (docs.tempo.xyz) and live chain behavior as the authority; reference SDKs are compatibility evidence only", "Live Moderato integration test pins at least one real successful machine-token settlement and one relevant real rejection; missing credentials flunk loudly with exact export instructions", "Any new wire/calldata/event constant cites refs/mpp-rs and refs/mppx file:line evidence, cross-checked where both agree", "Existing TIP-20 TransferWithMemo verification is unchanged for non-machine-token charges", "mix precommit.full green; touched modules at the 95% critical-tier coverage floor"]
@@ -2132,9 +2132,16 @@ Both official reference SDKs shipped first-party machine-token charge payments i
 
 At pickup, first establish from Tempo-owned docs what a machine token is on-chain (canonical token contract, transfer mechanism, how settlement differs from TIP-20 TransferWithMemo), then scope server-side verification accordingly. Chain primitives that belong in onchain_tempo (calldata/event parsing for the machine-token standard) should be proposed against that library rather than inlined here — flag the boundary in the deliverable if onchain_tempo lacks them.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787105685071-69e2850e, 4a092722aa74388e8626af684854a56e5a4940cc)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787105685071-69e2850e"
 created_at = "2026-08-18"
 started_at = "2026-08-19"
 scored_at = "2026-08-18"
+done_at = "2026-08-19"
+shipped_in = "4a092722aa74388e8626af684854a56e5a4940cc"
 
 [[task]]
 id = "85"
