@@ -61,10 +61,34 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     subscription = subscription(config, @moderato_blocked_recipient)
     signature = signed_authorization(subscription, payer, access_key_private_key)
 
-    assert {:error, %Errors{} = error} =
-             Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+    payload = %{"type" => "keyAuthorization", "signature" => signature}
 
+    assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
     assert error.detail == "subscription transfer was not credited to the recipient"
+
+    assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+             Subscription.verify(payload, subscription)
+  end
+
+  test "retries activation on Moderato after a forced reverted first-period settlement" do
+    access_key_private_key = access_key_private_key!()
+    rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
+    payer = fresh_wallet!(rpc_url)
+    sponsor = fresh_wallet!(rpc_url)
+    {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
+    {_store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
+    subscription = subscription(config, recipient)
+    signature = signed_authorization(subscription, payer, access_key_private_key)
+    payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+    forced = %{subscription | method_details: force_first_broadcast_revert(config, rpc_url)}
+
+    assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+             Subscription.verify(payload, forced)
+
+    assert {:ok, %Receipt{} = receipt} = Subscription.verify(payload, subscription)
+    assert receipt.method == "tempo"
+    assert receipt.reference =~ ~r/^0x[0-9a-f]{64}$/
   end
 
   defp access_key_private_key! do
@@ -150,6 +174,47 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
         |> DateTime.to_iso8601(),
       method_details: config
     )
+  end
+
+  defp force_first_broadcast_revert(config, rpc_url) do
+    {:ok, reverted?} = Agent.start_link(fn -> false end)
+
+    Map.put(config, "req_options",
+      plug: fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        if request["method"] == "eth_sendRawTransactionSync" and Agent.get_and_update(reverted?, &{!&1, true}) do
+          json_rpc(conn, request["id"], %{
+            "transactionHash" => "0x" <> String.duplicate("11", 32),
+            "status" => "0x0",
+            "logs" => []
+          })
+        else
+          forward_rpc(conn, request, rpc_url)
+        end
+      end
+    )
+  end
+
+  defp forward_rpc(conn, request, rpc_url) do
+    case Req.post(rpc_url, json: request) do
+      {:ok, %Req.Response{status: status, body: body}} ->
+        encoded = if is_binary(body), do: body, else: Jason.encode!(body)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(status, encoded)
+
+      {:error, exception} ->
+        flunk("Tempo Moderato RPC forward failed: #{Exception.message(exception)}")
+    end
+  end
+
+  defp json_rpc(conn, id, result) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.send_resp(200, Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
   end
 
   defp signed_authorization(subscription, payer, access_key_private_key) do

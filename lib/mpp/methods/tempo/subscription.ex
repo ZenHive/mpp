@@ -4,8 +4,11 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   Activation verifies the root-signed key authorization, provisions the
   server-held access key, and settles the first period atomically in one Tempo
-  transaction. Later `renew/2` calls reuse that access key within the exact
-  periodic token and recipient scope persisted at activation.
+  transaction. A reverted first-period transfer releases the activation
+  credential so the client can retry; an ambiguous broadcast or a confirmed
+  transfer that missed the recipient keeps the claim held. Later `renew/2`
+  calls reuse that access key within the exact periodic token and recipient
+  scope persisted at activation.
   """
 
   alias MPP.Errors
@@ -27,6 +30,10 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   @subscription_id_bytes 18
   @renewal_in_flight_error "subscription renewal is already in flight"
+  @activation_already_used "subscription activation credential already used"
+  @activation_store_unavailable "subscription activation store unavailable"
+  @activation_store_cannot_release "subscription activation store cannot release claims; " <>
+                                     "configure a Tempo store that implements update/3"
 
   @doc "Validate Tempo subscription-only method configuration."
   @spec validate_config!(map()) :: :ok
@@ -166,9 +173,28 @@ defmodule MPP.Methods.Tempo.Subscription do
     with {:ok, tx, memo} <-
            SubscriptionTransaction.build(subscription, authorization, authorization.source, config, settlement_reference),
          :ok <- simulate_sponsored(tx, authorization.source, config),
-         :ok <- claim_activation(config, serialized_authorization),
-         {:ok, tx_hash, chain_receipt} <- broadcast(tx.raw, config),
-         :ok <- require_success(chain_receipt),
+         :ok <- claim_activation(config, serialized_authorization) do
+      finalize_activation(
+        settle_activation(subscription, authorization, serialized_authorization, config, tx, memo),
+        config,
+        serialized_authorization
+      )
+    end
+  end
+
+  defp settle_activation(subscription, authorization, serialized_authorization, config, tx, memo) do
+    case broadcast(tx.raw, config) do
+      {:ok, tx_hash, chain_receipt} ->
+        confirm_activation(subscription, authorization, serialized_authorization, config, tx_hash, chain_receipt, memo)
+
+      # The node may have included the tx; keep the claim to prevent double settlement.
+      {:error, reason} ->
+        {:error, {:held, reason}}
+    end
+  end
+
+  defp confirm_activation(subscription, authorization, serialized_authorization, config, tx_hash, chain_receipt, memo) do
+    with :ok <- require_success(chain_receipt),
          :ok <- require_transfer(chain_receipt, subscription, memo),
          {:ok, settled_at} <- settlement_time(tx_hash, config),
          :ok <- require_before_expiry(settled_at, subscription.subscription_expires),
@@ -178,9 +204,21 @@ defmodule MPP.Methods.Tempo.Subscription do
          :ok <- Store.put(store(config), record) do
       {:ok, receipt(record)}
     else
+      {:error, "subscription transaction reverted" = reason} -> {:error, {:retryable, reason}}
+      {:error, reason} -> {:error, {:held, reason}}
+    end
+  end
+
+  defp finalize_activation({:ok, _receipt} = ok, _config, _signature), do: ok
+
+  defp finalize_activation({:error, {:retryable, reason}}, config, signature) do
+    case release_activation(config, signature) do
+      :ok -> {:error, reason}
       {:error, _reason} = error -> error
     end
   end
+
+  defp finalize_activation({:error, {:held, reason}}, _config, _signature), do: {:error, reason}
 
   defp authorize_record(record, config) do
     case due_period(record) do
@@ -294,15 +332,37 @@ defmodule MPP.Methods.Tempo.Subscription do
         :ok
 
       store ->
-        key = "mpp:subscription:" <> activation_key(config, signature)
+        key = activation_dedup_key(config, signature)
 
         case TempoStore.check_and_mark(store, key, System.system_time(:millisecond)) do
           :ok -> :ok
-          {:error, :already_exists} -> {:error, "subscription activation credential already used"}
-          {:error, _reason} -> {:error, "subscription activation store unavailable"}
+          {:error, :already_exists} -> {:error, @activation_already_used}
+          {:error, _reason} -> {:error, @activation_store_unavailable}
         end
     end
   end
+
+  defp release_activation(config, signature) do
+    case TempoStore.resolve(config["store"]) do
+      nil -> :ok
+      store -> release_activation_store(store, config, signature)
+    end
+  end
+
+  defp release_activation_store(store, config, signature) do
+    if TempoStore.update_capable?(store) do
+      case TempoStore.update(store, activation_dedup_key(config, signature), &release_activation_value/1) do
+        {:ok, :ok} -> :ok
+        {:error, _reason} -> {:error, @activation_store_unavailable}
+      end
+    else
+      {:error, @activation_store_cannot_release}
+    end
+  end
+
+  defp release_activation_value(_value), do: {:delete, :ok}
+
+  defp activation_dedup_key(config, signature), do: "mpp:subscription:" <> activation_key(config, signature)
 
   defp activation_key(%{"challenge_id" => id}, _signature) when is_binary(id) and id != "", do: id
 

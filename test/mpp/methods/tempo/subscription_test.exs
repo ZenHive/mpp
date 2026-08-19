@@ -40,6 +40,36 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     def check_and_mark(_key, _value), do: {:error, :unavailable}
   end
 
+  defmodule EtsClaimStore do
+    @moduledoc false
+
+    def prepare(table) do
+      case :ets.whereis(table) do
+        :undefined -> :ets.new(table, [:named_table, :public, :set])
+        _tid -> :ok
+      end
+    end
+
+    def check_and_mark(table, key, value) do
+      if :ets.insert_new(table, {key, value}), do: :ok, else: {:error, :already_exists}
+    end
+  end
+
+  defmodule DedupOnlyStore do
+    @moduledoc false
+
+    def prepare, do: EtsClaimStore.prepare(__MODULE__)
+    def check_and_mark(key, value), do: EtsClaimStore.check_and_mark(__MODULE__, key, value)
+  end
+
+  defmodule FailingUpdateStore do
+    @moduledoc false
+
+    def prepare, do: EtsClaimStore.prepare(__MODULE__)
+    def check_and_mark(key, value), do: EtsClaimStore.check_and_mark(__MODULE__, key, value)
+    def update(_key, _fun, _opts), do: {:error, :unavailable}
+  end
+
   setup do
     store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
     start_supervised!(ETSStore.child_spec(name: store_name))
@@ -274,13 +304,17 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     end
 
     test "opts out of activation replay protection when store is false", %{store: store} do
-      stub_successful_chain()
+      stub_reverted_chain()
       challenge_id = "opt-out-#{System.unique_integer([:positive])}"
       config = store |> config() |> Map.merge(%{"store" => false, "challenge_id" => challenge_id})
       subscription = subscription(config)
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
+      assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+               Subscription.verify(payload, subscription)
+
+      stub_successful_chain()
       assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
       assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
     end
@@ -362,16 +396,86 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       refute Transaction.has_fee_payer_placeholder?(tx)
     end
 
-    test "does not persist a reverted activation", %{store: store} do
+    test "releases a reverted activation claim so a retry can proceed", %{store: store} do
       stub_reverted_chain()
       config = config(store)
       subscription = subscription(config)
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:error, %Errors{} = error} =
-               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+      assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+               Subscription.verify(payload, subscription)
 
-      assert error.detail == "subscription transaction reverted"
+      stub_successful_chain()
+
+      assert {:ok, %Receipt{reference: @tx_hash}} = Subscription.verify(payload, subscription)
+    end
+
+    test "keeps the activation claim when a confirmed transfer misses the recipient", %{store: store} do
+      stub_success_without_transfer()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:error, %Errors{detail: "subscription transfer was not credited to the recipient"}} =
+               Subscription.verify(payload, subscription)
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "keeps the activation claim after an ambiguous broadcast failure", %{store: store} do
+      stub_broadcast_failure()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
+      assert error.detail =~ "RPC request failed"
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "keeps a reverted activation claim when the store cannot release it", %{store: store} do
+      DedupOnlyStore.prepare()
+      stub_reverted_chain()
+      config = store |> config() |> Map.put("store", DedupOnlyStore)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
+      assert error.detail =~ "cannot release claims"
+      assert error.detail =~ "update/3"
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "fails closed when releasing a reverted activation claim fails", %{store: store} do
+      FailingUpdateStore.prepare()
+      stub_reverted_chain()
+      config = store |> config() |> Map.put("store", FailingUpdateStore)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:error, %Errors{detail: "subscription activation store unavailable"}} =
+               Subscription.verify(payload, subscription)
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
     end
 
     test "accepts an unsupported simulation method but rejects other sponsor simulation failures", %{store: store} do
@@ -507,6 +611,14 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       "eth_sendRawTransactionSync" = request["method"]
       result = %{"transactionHash" => @tx_hash, "status" => "0x0", "logs" => []}
       Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+    end)
+  end
+
+  defp stub_broadcast_failure do
+    Req.Test.stub(__MODULE__, fn conn ->
+      request = request(conn)
+      "eth_sendRawTransactionSync" = request["method"]
+      Req.Test.transport_error(conn, :timeout)
     end)
   end
 
