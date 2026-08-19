@@ -1402,7 +1402,7 @@
       "id": 21,
       "phase": 14,
       "bundle": "solana",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Solana charge method",
       "scores": {
         "d": 6,
@@ -1432,6 +1432,7 @@
         "test/mpp/methods/solana_integration_test.exs"
       ],
       "body": "Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency (\"sol\" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).\n",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },

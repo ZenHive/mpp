@@ -195,7 +195,7 @@
 <!-- TASKS:BEGIN phase=14 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 21 | ⬜ | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5] 🚀 |
+| Task 21 | 🔄 | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---
