@@ -235,6 +235,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
+| `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments |
+| `MPP.Client.Providers.Stripe` | Built-in Stripe charge provider — Shared Payment Token creation |
 | `MPP.Client.SelectionPolicy` | Transport-neutral challenge selection/ordering (default: server offer order) |
 | `MPP.Client.Req` | Payment-aware Req plugin — 402 detect, pay, retry (`attach/2`) |
 | `MPP.Client.Transport` | Client transport behaviour — 402 detection, challenge fetch, credential attach |
@@ -246,12 +248,32 @@ The server can offer multiple payment methods in a single 402 response. The agen
 ## Client
 
 ```elixir
+provider =
+  MPP.Client.MultiProvider.new([
+    {MPP.Client.Providers.Tempo,
+     %{
+       private_key: tempo_private_key,
+       rpc_url: "https://rpc.tempo.xyz",
+       expected_chain_id: 4217,
+       client_id: "my-agent"
+     }},
+    {MPP.Client.Providers.Stripe,
+     %{
+       secret_key: stripe_secret_key,
+       payment_method: "pm_..."
+     }}
+  ])
+
 Req.new()
-|> MPP.Client.Req.attach(provider: my_provider)
+|> MPP.Client.Req.attach(provider: provider)
 |> Req.get(url: "https://api.example.com/resource")
 ```
 
 `MPP.Client.Req` intercepts HTTP 402, pays, and retries with `Authorization: Payment`.
+Provider credentials and endpoints are passed explicitly; the providers do not read
+application configuration or environment variables. The Tempo provider verifies that
+the RPC serves the challenge's advertised chain before signing and automatically creates
+the challenge-bound attribution memo required by routes without a static memo.
 A payment credential must never be created or attached after a redirect changed the
 request origin — `Req` follows redirects by default. `MPP.Client.Req.attach/2` refuses
 that path (`:cross_origin_redirect`, mpp-rs #379). Callers that drive

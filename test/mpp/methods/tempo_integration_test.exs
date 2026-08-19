@@ -16,6 +16,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
   use ExUnit.Case, async: false
 
+  alias MPP.Client.Providers.Tempo, as: TempoProvider
   alias MPP.Credential
   alias MPP.Headers
   alias MPP.Intents.Charge
@@ -153,6 +154,47 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   describe "full 402 handshake" do
+    test "built-in provider pays a no-static-memo route with bound attribution", %{
+      config: config,
+      rpc_url: rpc_url
+    } do
+      challenge = request_challenge!(config)
+      refute get_in(challenge_request(challenge), ["methodDetails", "memo"])
+      sender = fresh_wallet!(rpc_url)
+
+      assert {:ok, credential} =
+               TempoProvider.pay(challenge, %{
+                 private_key: sender.private_key,
+                 rpc_url: rpc_url,
+                 expected_chain_id: @chain_id,
+                 client_id: "mpp-elixir-integration"
+               })
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn_200.status == nil,
+             "Attribution-bound provider transaction should pass — got #{inspect(conn_200.resp_body)}"
+
+      assert %Receipt{method: "tempo", status: "success"} = conn_200.assigns[:mpp_receipt]
+    end
+
+    test "built-in provider rejects an advertised chain that differs from live Moderato", %{
+      config: config,
+      rpc_url: rpc_url
+    } do
+      challenge = config |> request_challenge!() |> put_challenge_chain_id(1)
+
+      assert {:error, {:rpc_chain_id_mismatch, 1, @chain_id}} =
+               TempoProvider.pay(challenge, %{
+                 private_key: @recipient_key,
+                 rpc_url: rpc_url
+               })
+    end
+
     test "happy path: 402 → hash credential → receipt", %{
       config: config,
       recipient: recipient_address,
@@ -1447,6 +1489,17 @@ defmodule MPP.Methods.TempoIntegrationTest do
     assert [challenge_header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
     assert {:ok, challenge} = Headers.parse_challenge(challenge_header)
     challenge
+  end
+
+  defp challenge_request(challenge) do
+    {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+    Jason.decode!(json)
+  end
+
+  defp put_challenge_chain_id(challenge, chain_id) do
+    request = challenge |> challenge_request() |> put_in(["methodDetails", "chainId"], chain_id)
+    encoded = request |> Jason.encode!() |> Base.url_encode64(padding: false)
+    %{challenge | request: encoded}
   end
 
   # Submits a credential payload against a config and returns the parsed error body.

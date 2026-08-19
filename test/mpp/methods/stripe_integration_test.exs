@@ -8,6 +8,8 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
   use ExUnit.Case, async: false
 
+  alias MPP.Client.MultiProvider
+  alias MPP.Client.Providers.Stripe, as: StripeProvider
   alias MPP.Credential
   alias MPP.Headers
   alias MPP.Methods.Stripe
@@ -46,6 +48,52 @@ defmodule MPP.Methods.StripeIntegrationTest do
   end
 
   describe "full 402 handshake" do
+    test "built-in provider creates the SPT and completes the Plug round trip", %{
+      config: config,
+      stripe_secret_key: stripe_secret_key
+    } do
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+
+      provider =
+        MultiProvider.new([
+          {StripeProvider, %{secret_key: stripe_secret_key, payment_method: "pm_card_visa"}}
+        ])
+
+      assert {:ok, credential} = MultiProvider.pay(provider, challenge)
+      assert String.starts_with?(credential.payload["spt"], "spt_")
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/data")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert conn_200.status == nil
+      assert %Receipt{method: "stripe", status: "success"} = conn_200.assigns[:mpp_receipt]
+    end
+
+    test "built-in provider preserves Stripe's live invalid-payment-method error", %{
+      config: config,
+      stripe_secret_key: stripe_secret_key
+    } do
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+
+      provider_config = %{
+        secret_key: stripe_secret_key,
+        payment_method: "pm_missing_mpp_provider_integration"
+      }
+
+      assert {:error, {:stripe_api_error, status, %{"error" => %{"message" => message}}}} =
+               StripeProvider.pay(challenge, provider_config)
+
+      assert status in 400..499
+      assert is_binary(message) and message != ""
+    end
+
     test "happy path: 402 → SPT creation → credential → receipt", %{
       config: config,
       stripe_secret_key: stripe_secret_key
@@ -291,6 +339,12 @@ defmodule MPP.Methods.StripeIntegrationTest do
       )
 
     MPP.Plug.init(plug_opts)
+  end
+
+  defp request_challenge_conn(config) do
+    :get
+    |> Plug.Test.conn("/api/data")
+    |> MPP.Plug.call(config)
   end
 
   defp challenge_request(challenge) do
