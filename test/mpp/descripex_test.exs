@@ -1,6 +1,8 @@
 defmodule MPP.DescripexTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Discovery.OpenApi
+  alias MPP.Discovery.PaymentInfo
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
   alias MPP.Methods.EVM
@@ -26,6 +28,8 @@ defmodule MPP.DescripexTest do
     MPP.JCS,
     MPP.Verifier,
     MPP.Mcp,
+    OpenApi,
+    PaymentInfo,
     MPP.Client.PaymentProvider,
     MPP.Client.MultiProvider,
     MPP.Client.SelectionPolicy,
@@ -155,6 +159,15 @@ defmodule MPP.DescripexTest do
 
         assert meta[:namespace] == "/methods",
                "#{inspect(mod)} should have namespace /methods, got #{inspect(meta[:namespace])}"
+      end
+    end
+
+    test "discovery modules have /discovery namespace" do
+      for mod <- [OpenApi, PaymentInfo] do
+        {:docs_v1, _, _, _, _, meta, _} = Code.fetch_docs(mod)
+
+        assert meta[:namespace] == "/discovery",
+               "#{inspect(mod)} should have namespace /discovery, got #{inspect(meta[:namespace])}"
       end
     end
   end

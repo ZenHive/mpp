@@ -48,6 +48,8 @@ defmodule MPP do
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
+    * `MPP.Discovery.OpenApi` — OpenAPI 3.1.0 payment discovery generation
+    * `MPP.Discovery.PaymentInfo` — x-payment-info parsing and normalization
 
   ## Discovery
 
@@ -78,6 +80,8 @@ defmodule MPP do
       MPP.JCS,
       MPP.Verifier,
       MPP.Mcp,
+      MPP.Discovery.OpenApi,
+      MPP.Discovery.PaymentInfo,
       MPP.Client.PaymentProvider,
       MPP.Client.MultiProvider,
       MPP.Client.SelectionPolicy,
