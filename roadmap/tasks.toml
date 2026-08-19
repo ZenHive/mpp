@@ -2352,7 +2352,7 @@ scored_at = "2026-08-19"
 id = "91"
 phase = 10
 bundle = "session"
-status = "in_progress"
+status = "done"
 title = "Release Tempo subscription activation claims after failed settlement"
 scores = { d = 6, b = 8, u = 7 }
 markers = ["parallel"]
@@ -2370,9 +2370,16 @@ Orchestrator decisions (resolved 2026-08-19):
 
 Authority: live Moderato settlement plus the existing renewal claim policy in this module. Reference SDKs are compatibility evidence only.
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1787125033044-df3d8867, dd2fb3b17f9fc9cd2774e40dcca14b08c2cec23a)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787125033044-df3d8867"
 created_at = "2026-08-19"
 started_at = "2026-08-19"
 scored_at = "2026-08-19"
+done_at = "2026-08-19"
+shipped_in = "dd2fb3b17f9fc9cd2774e40dcca14b08c2cec23a"
 
 [[task]]
 id = "92"
