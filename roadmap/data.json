@@ -3182,7 +3182,7 @@
       "id": "84",
       "phase": 9,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Support Tempo machine-token charge payments",
       "scores": {
         "d": 6,
@@ -3217,6 +3217,7 @@
       ],
       "body": "Both official reference SDKs shipped first-party machine-token charge payments in August 2026 (found by the 2026-08-18 sdk-delta-watch triage): mppx #784 \"machine-token payments ... atomic push-mode and hosted fee-sponsored pull settlement\" (commit 61f847e) and mpp-rs #385 \"machine-token charge payments\" (commit 0c45b7a, adds a `machineTokenEnabled` methodDetails flag on the Tempo charge). Our `lib/mpp/methods/tempo.ex` has no machine-token handling (verified by grep in the triage). The demand signal is the project's explicit SDK-parity goal for the Tempo method, not a hedge. Dispatch trigger: on-chain money-verification surface with live external-system evidence required.\n\nAt pickup, first establish from Tempo-owned docs what a machine token is on-chain (canonical token contract, transfer mechanism, how settlement differs from TIP-20 TransferWithMemo), then scope server-side verification accordingly. Chain primitives that belong in onchain_tempo (calldata/event parsing for the machine-token standard) should be proposed against that library rather than inlined here — flag the boundary in the deliverable if onchain_tempo lacks them.\n",
       "created_at": "2026-08-18",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-18",
       "cross_repo": []
     },
