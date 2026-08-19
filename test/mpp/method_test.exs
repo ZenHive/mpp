@@ -93,6 +93,7 @@ defmodule MPP.MethodTest do
   describe "credential_types/0" do
     test "default implementation returns an empty list" do
       assert MockMethod.credential_types() == []
+      assert MPP.Methods.Stripe.credential_types() == []
     end
 
     test "Tempo and EVM declare hash" do

@@ -524,6 +524,15 @@ defmodule MPP.VerifierTest do
       assert error.detail == ~s(type="hash" is not accepted by this payment method)
     end
 
+    test "rejects a well-formed hash credential against Stripe (SPT, not hash)" do
+      credential = build_credential(method_name: "stripe", payload: @mpp_rs_hash)
+      opts = verify_opts(method: MPP.Methods.Stripe)
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "invalid-payload")
+      assert error.detail == ~s(type="hash" is not accepted by this payment method)
+    end
+
     test "rejects the mpp-rs hash-with-signature vector as malformed" do
       credential = build_credential(method_name: "mockhash", payload: %{"type" => "hash", "signature" => "0xdef123"})
       opts = verify_opts(method: MockHashMethod)

@@ -97,6 +97,12 @@ defmodule MPP.Methods.Stripe do
   @spec method_name() :: String.t()
   def method_name, do: "stripe"
 
+  api(:credential_types, "Return the Stripe charge payload types. Stripe uses SPT tokens, not typed hash payloads.")
+
+  @impl MPP.Method
+  @spec credential_types() :: [String.t()]
+  def credential_types, do: []
+
   api(
     :validate_config!,
     "Validate Stripe method_config at init time. Raises on missing `stripe_secret_key` or `network_id`.",
