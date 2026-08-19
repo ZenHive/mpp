@@ -13,6 +13,7 @@ defmodule MPP.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       test_coverage: test_coverage(),
+      test_ignore_filters: [~r{^test/mutation/security_(campaign|mutations)\.exs$}],
       dialyzer: dialyzer(),
       description: description(),
       package: package(),
