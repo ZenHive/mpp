@@ -14,6 +14,18 @@ defmodule MPP.Session.Payload do
 
   @type action :: Channel.action()
 
+  @type parse_error ::
+          :invalid_action
+          | :invalid_payload
+          | :invalid_transaction_type
+          | :invalid_descriptor
+          | :invalid_settlement_route
+          | {:invalid_channel_id, term()}
+          | {:invalid_hex, atom()}
+          | {:invalid_amount, atom()}
+          | {:invalid_address, atom()}
+          | {:invalid_hash, atom()}
+
   @type descriptor :: %{
           payer: String.t(),
           payee: String.t(),
@@ -59,7 +71,7 @@ defmodule MPP.Session.Payload do
   ]
 
   @doc "Parse a session credential payload map into a typed struct."
-  @spec parse(term()) :: {:ok, t()} | {:error, term()}
+  @spec parse(term()) :: {:ok, t()} | {:error, parse_error()}
   def parse(payload) when is_map(payload) do
     with {:ok, action} <- Channel.action_from_wire(payload["action"]),
          {:ok, channel_id} <- Channel.normalize_id(payload["channelId"]),

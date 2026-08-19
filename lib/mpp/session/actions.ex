@@ -360,5 +360,4 @@ defmodule MPP.Session.Actions do
   defp payload_error({:invalid_amount, field}), do: Errors.new(:invalid_payload, "invalid session credential #{field}")
   defp payload_error({:invalid_address, field}), do: Errors.new(:invalid_payload, "invalid session credential #{field}")
   defp payload_error({:invalid_hash, field}), do: Errors.new(:invalid_payload, "invalid session credential #{field}")
-  defp payload_error(_reason), do: Errors.new(:invalid_payload, "invalid session credential payload")
 end
