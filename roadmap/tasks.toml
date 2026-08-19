@@ -2090,7 +2090,7 @@ scored_at = "2026-08-17"
 id = "83"
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "done"
 title = "Port Aug-2026 upstream wire-parity fixes (case-insensitive auth-params, expires parse validation, receipt extension fields)"
 scores = { d = 3, b = 7, u = 6 }
 markers = ["parallel"]
@@ -2104,9 +2104,16 @@ Port the August 2026 upstream wire-parity fixes found by the 2026-08-18 sdk-delt
 
 Upstream evidence: mppx #788 (case-insensitive auth-param names, commit 9774481), mpp-rs #377 (reject malformed expires at parse, commit 0130060), mpp-rs #383 (preserve method-specific receipt extension fields, commit 8afed36) + mppx Receipt looseObject, mpp-rs #379 client half (refuse credentials across cross-origin redirects, commit 7a6e517). Where mppx and mpp-rs disagree (mpp-rs does not lowercase param names), RFC 9110 §11.2 breaks the tie toward case-insensitivity. Re-read the refs at pickup and cite file:line for each behavior.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1787105682928-fb5b4d61, de7decd7e21cf233401fb0e36a34f6098cb7449f)."
+delivered_by = "cursor"
+verified = true
+verified_by = "codex"
+verification_ref = "harness-run:run-1787105682928-fb5b4d61"
 created_at = "2026-08-18"
 started_at = "2026-08-19"
 scored_at = "2026-08-18"
+done_at = "2026-08-19"
+shipped_in = "de7decd7e21cf233401fb0e36a34f6098cb7449f"
 
 [[task]]
 id = "84"
