@@ -662,6 +662,7 @@ MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint 
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
 MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32043, meta keys), server transport adapter (init/1 + call/3 with replay dedup), server/client helpers
 MPP.Transports.JsonRpc     — Bare JSON-RPC transport: root-level `_meta` credential/receipt, init/1 + call/3, Plug adapter
+MPP.Transports.WebSocket   — WS adapter: handshake challenge, credential/receipt frames, JSON-RPC message frames (library-agnostic)
 MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)
 MPP.Client.MultiProvider   — Multi-provider dispatch: wraps [{module, config}], routes to first match
 MPP.Client.Providers.Tempo — Built-in Tempo charge provider: chain-pinned, attribution-bound TIP-20 payments
@@ -672,6 +673,7 @@ MPP.Client.Transport       — Transport behaviour: payment_required?/1, get_cha
 MPP.Client.Transport.HTTP  — HTTP transport over Req: 402 detection, WWW-Authenticate parsing, Authorization: Payment attach
 MPP.Client.Transport.MCP   — MCP/JSON-RPC transport: -32042 detection, error.data.challenges, params._meta credential attach
 MPP.Client.Transport.JsonRpc — Bare JSON-RPC transport: -32042 detection, root-level `_meta` credential attach
+MPP.Client.Transport.WebSocket — WS transport: challenge frames, Payment credential frames, retry/backoff (no payment amplification)
 MPP.Client.MCP             — Payment-aware MCP client: SelectionPolicy, approval hook, MultiProvider pay, single retry
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint

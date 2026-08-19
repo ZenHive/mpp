@@ -282,6 +282,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |
 | `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |
+| `MPP.Transports.WebSocket` | WebSocket adapter: handshake `challenge`, `credential`/`receipt` frames, JSON-RPC `message` frames |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
 | `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments, including machine-token `[approve, swapTo]` when advertised |
@@ -292,6 +293,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Client.Transport.HTTP` | HTTP transport over `Req` |
 | `MPP.Client.Transport.MCP` | MCP/JSON-RPC transport: `-32042` detection, challenge extract, `_meta` credential attach |
 | `MPP.Client.Transport.JsonRpc` | Bare JSON-RPC transport: `-32042` detection, root-level `_meta` credential attach |
+| `MPP.Client.Transport.WebSocket` | WebSocket transport: `challenge` frames, `Payment` credential frames, retry/backoff |
 | `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay, retry the tool call once |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |
 
@@ -344,6 +346,15 @@ Generic (non-MCP) JSON-RPC uses root-level `_meta` so `params` can be an array.
 `MPP.Transports.JsonRpc.Plug` mounts on a Plug route; `MPP.Client.Transport.JsonRpc`
 attaches the credential at `_meta["org.paymentauth/credential"]` on the request
 envelope.
+
+WebSocket endpoints use typed MPP frames (mpp-rs / `alloy-transport-mpp`).
+`MPP.Transports.WebSocket` is library-agnostic: `open/1` emits the handshake
+`challenge`, `handle_text/2` verifies a `credential` frame and then dispatches
+JSON-RPC carried in `message` frames. `MPP.Client.Transport.WebSocket` detects
+`challenge` frames and attaches `Payment <base64url>` credential frames.
+`MPP.Client.Transport.WebSocket.Retry` matches upstream reconnect posture:
+capped exponential backoff, fatal latch on protocol errors, and no second
+payment after a drop that left a credential unacknowledged.
 
 ## Installation
 

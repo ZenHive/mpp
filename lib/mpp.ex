@@ -54,6 +54,7 @@ defmodule MPP do
     * `MPP.Verifier` — Transport-neutral payment credential verification
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
     * `MPP.Transports.JsonRpc` — Bare JSON-RPC transport (root-level `_meta`, Plug adapter)
+    * `MPP.Transports.WebSocket` — WebSocket adapter: handshake challenge, credential/receipt frames, JSON-RPC `message` frames
     * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
     * `MPP.Client.Providers.Tempo` — Built-in Tempo charge provider (chain-pinned, attribution-bound, machine-token route when advertised)
@@ -61,6 +62,7 @@ defmodule MPP do
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
     * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, retry once)
+    * `MPP.Client.Transport.WebSocket` — WebSocket transport: `challenge` frames, `Payment` credential frames, retry/backoff
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
     * `MPP.Discovery.OpenApi` — OpenAPI 3.1.0 payment discovery generation
     * `MPP.Discovery.PaymentInfo` — x-payment-info parsing and normalization
@@ -98,6 +100,7 @@ defmodule MPP do
       MPP.Verifier,
       MPP.Mcp,
       MPP.Transports.JsonRpc,
+      MPP.Transports.WebSocket,
       MPP.Discovery.OpenApi,
       MPP.Discovery.PaymentInfo,
       MPP.Client.PaymentProvider,

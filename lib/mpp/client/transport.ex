@@ -15,6 +15,7 @@ defmodule MPP.Client.Transport do
   an MCP JSON-RPC client, etc.) is actually issuing requests. HTTP is
   `MPP.Client.Transport.HTTP`; MCP is `MPP.Client.Transport.MCP`; generic
   JSON-RPC (root-level `_meta`) is `MPP.Client.Transport.JsonRpc`.
+  WebSocket (typed MPP frames) is `MPP.Client.Transport.WebSocket`.
 
   ## Callbacks
 

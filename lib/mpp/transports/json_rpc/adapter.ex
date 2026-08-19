@@ -34,7 +34,7 @@ defmodule MPP.Transports.JsonRpc.Adapter do
       {:ok, receipt, challenge_id} ->
         request
         |> handler.()
-        |> normalize_handler_response(request)
+        |> wrap_handler_response(request)
         |> attach_response_receipt(receipt, challenge_id, receipt_at)
 
       {:error, response} ->
@@ -150,33 +150,34 @@ defmodule MPP.Transports.JsonRpc.Adapter do
   defp error_code(%Errors{type: "https://paymentauth.org/problems/malformed-credential"}), do: @invalid_params_code
   defp error_code(%Errors{}), do: @verification_failed_code
 
-  defp normalize_handler_response({:ok, response}, request) when is_map(response),
-    do: normalize_handler_response(response, request)
+  @doc false
+  @spec wrap_handler_response(term(), map()) :: map()
+  def wrap_handler_response({:ok, response}, request) when is_map(response), do: wrap_handler_response(response, request)
 
-  defp normalize_handler_response({:error, response}, request) when is_map(response),
-    do: normalize_handler_response(response, request)
+  def wrap_handler_response({:error, response}, request) when is_map(response),
+    do: wrap_handler_response(response, request)
 
-  defp normalize_handler_response(%{"jsonrpc" => _, "result" => _} = response, _request), do: response
-  defp normalize_handler_response(%{"jsonrpc" => _, "error" => _} = response, _request), do: response
+  def wrap_handler_response(%{"jsonrpc" => _, "result" => _} = response, _request), do: response
+  def wrap_handler_response(%{"jsonrpc" => _, "error" => _} = response, _request), do: response
 
-  defp normalize_handler_response(%{"result" => _} = response, request) do
+  def wrap_handler_response(%{"result" => _} = response, request) do
     response
     |> Map.put_new("jsonrpc", "2.0")
     |> Map.put_new("id", Map.get(request, "id"))
   end
 
-  defp normalize_handler_response(%{"error" => _} = response, request) do
+  def wrap_handler_response(%{"error" => _} = response, request) do
     response
     |> Map.put_new("jsonrpc", "2.0")
     |> Map.put_new("id", Map.get(request, "id"))
   end
 
-  defp normalize_handler_response(result, request) when is_map(result) do
+  def wrap_handler_response(result, request) when is_map(result) do
     %{"jsonrpc" => "2.0", "id" => Map.get(request, "id"), "result" => result}
   end
 
-  defp normalize_handler_response(result, request)
-       when is_binary(result) or is_list(result) or is_number(result) or is_boolean(result) or is_nil(result) do
+  def wrap_handler_response(result, request)
+      when is_binary(result) or is_list(result) or is_number(result) or is_boolean(result) or is_nil(result) do
     %{"jsonrpc" => "2.0", "id" => Map.get(request, "id"), "result" => result}
   end
 
