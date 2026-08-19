@@ -2450,7 +2450,7 @@ shipped_in = "06f9ce40c8bffe25e726cd6e3529ca9ca10b154f"
 id = "94"
 phase = 13
 bundle = "tempo"
-status = "in_progress"
+status = "done"
 title = "Keep Tempo subscription renewal claims after ambiguous broadcast"
 scores = { d = 4, b = 8, u = 7 }
 depends_on = [91]
@@ -2463,9 +2463,16 @@ Task 91 made ACTIVATION release its dedup claim only on proven non-inclusion (si
 
 Apply the Task 91 policy symmetrically to renewal: release the claim only on proven non-inclusion; keep it on ambiguous broadcast/transport; a confirmed missed-recipient stays blocked. Authority: live Moderato settlement behavior plus the activation policy shipped in this module (run run-1787125033044-df3d8867 reviewer evidence).
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1787143472624-6bd4b1e7, a227de08f2e2e587d8aeb433adef8f03365576d3)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787143472624-6bd4b1e7"
 created_at = "2026-08-19"
 started_at = "2026-08-19"
 scored_at = "2026-08-19"
+done_at = "2026-08-19"
+shipped_in = "a227de08f2e2e587d8aeb433adef8f03365576d3"
 
 [[task]]
 id = "95"

@@ -3728,7 +3728,7 @@
       "id": "94",
       "phase": 13,
       "bundle": "tempo",
-      "status": "in_progress",
+      "status": "done",
       "title": "Keep Tempo subscription renewal claims after ambiguous broadcast",
       "scores": {
         "d": 4,
@@ -3755,10 +3755,17 @@
         "test/mpp/methods/tempo/subscription_test.exs",
         "test/mpp/methods/tempo/subscription_integration_test.exs"
       ],
+      "shipped_in": "a227de08f2e2e587d8aeb433adef8f03365576d3",
       "body": "Task 91 made ACTIVATION release its dedup claim only on proven non-inclusion (simulate/validation rejection, confirmed revert) and keep it on ambiguous broadcast/transport errors. RENEWAL still classifies every build/simulate/broadcast error as retryable (settle_renewal/3 with-else maps any {:error, reason} to {:retryable, reason}) and complete_renewal/4 then releases the in-flight period claim - so an eth_sendRawTransactionSync timeout after the node accepted the tx lets a retry charge the same period twice.\n\nApply the Task 91 policy symmetrically to renewal: release the claim only on proven non-inclusion; keep it on ambiguous broadcast/transport; a confirmed missed-recipient stays blocked. Authority: live Moderato settlement behavior plus the activation policy shipped in this module (run run-1787125033044-df3d8867 reviewer evidence).\n",
       "created_at": "2026-08-19",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-19",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787143472624-6bd4b1e7, a227de08f2e2e587d8aeb433adef8f03365576d3).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787143472624-6bd4b1e7",
       "cross_repo": []
     },
     {
