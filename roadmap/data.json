@@ -3132,7 +3132,7 @@
       "id": "83",
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Port Aug-2026 upstream wire-parity fixes (case-insensitive auth-params, expires parse validation, receipt extension fields)",
       "scores": {
         "d": 3,
@@ -3174,6 +3174,7 @@
       ],
       "body": "Port the August 2026 upstream wire-parity fixes found by the 2026-08-18 sdk-delta-watch triage. This is a public wire-contract change on a published hex.pm money library — the dispatch trigger — and every item was verified against our current code in the triage: `MPP.Headers.parse_key/1` does not downcase param names (a header with `Id=\"...\"` is rejected as :invalid_auth_params by the whitelist), `Challenge.validate_fields/1` never checks the `expires` shape (only `MPP.Verifier.check_expiration/1` does, server-side), and `MPP.Receipt.from_map/1` silently discards unknown top-level keys and has no subscriptionId field.\n\nUpstream evidence: mppx #788 (case-insensitive auth-param names, commit 9774481), mpp-rs #377 (reject malformed expires at parse, commit 0130060), mpp-rs #383 (preserve method-specific receipt extension fields, commit 8afed36) + mppx Receipt looseObject, mpp-rs #379 client half (refuse credentials across cross-origin redirects, commit 7a6e517). Where mppx and mpp-rs disagree (mpp-rs does not lowercase param names), RFC 9110 §11.2 breaks the tie toward case-insensitivity. Re-read the refs at pickup and cite file:line for each behavior.\n",
       "created_at": "2026-08-18",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-18",
       "cross_repo": []
     },
