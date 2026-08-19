@@ -38,6 +38,7 @@ defmodule MPP do
     * `MPP.Methods.NearIntents` — NEAR Intents hash-credential charge verification via 1Click + origin RPC
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
+    * `MPP.Intents.Subscription` — Shared recurring-subscription intent schema
     * `MPP.Session.Channel` — Session channel state, balance, and action wire mapping
     * `MPP.Session.Voucher` — EIP-712 voucher typed data and signature verification
     * `MPP.Session.Payload` — Session credential payload schema (`open` / `voucher` / `topUp` / `close`)
@@ -83,6 +84,7 @@ defmodule MPP do
       MPP.Errors,
       MPP.Intents.Charge,
       MPP.Intents.Session,
+      MPP.Intents.Subscription,
       MPP.Methods.Stripe,
       MPP.Methods.Tempo,
       MPP.Methods.EVM,

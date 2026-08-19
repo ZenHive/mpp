@@ -34,6 +34,12 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     def delete(_id), do: {:error, :unavailable}
   end
 
+  defmodule FailingDedupStore do
+    @moduledoc false
+
+    def check_and_mark(_key, _value), do: {:error, :unavailable}
+  end
+
   setup do
     store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
     start_supervised!(ETSStore.child_spec(name: store_name))
@@ -161,6 +167,134 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       refute_receive {:rpc, "eth_sendRawTransactionSync", _params}
     end
 
+    test "releases an in-flight renewal after a reverted settlement so a retry can proceed", %{store: store} do
+      stub_successful_chain()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      stub_reverted_chain()
+
+      assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+               Subscription.renew(activation.subscription_id, config)
+
+      assert {:ok, held} = Store.get(store, activation.subscription_id)
+      assert held.in_flight_period == nil
+      assert held.last_charged_period == 0
+
+      stub_successful_chain()
+      assert {:ok, renewal} = Subscription.renew(activation.subscription_id, config)
+      assert {:ok, renewed} = Store.get(store, activation.subscription_id)
+      assert renewed.last_charged_period == 2
+      assert renewed.in_flight_period == nil
+      assert renewal.reference == @tx_hash
+    end
+
+    test "releases an in-flight renewal when sponsorship simulation fails", %{store: store} do
+      stub_successful_chain()
+      config = sponsored_config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      stub_sponsorship_failure(:rejected)
+
+      assert {:error, %Errors{} = error} = Subscription.renew(activation.subscription_id, config)
+      assert error.detail =~ "subscription sponsorship simulation rejected"
+
+      assert {:ok, held} = Store.get(store, activation.subscription_id)
+      assert held.in_flight_period == nil
+      assert held.last_charged_period == 0
+    end
+
+    test "keeps the in-flight claim when a confirmed renewal transfer misses the recipient", %{store: store} do
+      stub_successful_chain()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      stub_success_without_transfer()
+
+      assert {:error, %Errors{detail: "subscription transfer was not credited to the recipient"}} =
+               Subscription.renew(activation.subscription_id, config)
+
+      assert {:ok, held} = Store.get(store, activation.subscription_id)
+      assert held.in_flight_period == 2
+      assert held.last_charged_period == 0
+    end
+
+    test "rejects a replayed activation credential for the same challenge", %{store: store} do
+      stub_successful_chain()
+      challenge_id = "replay-#{System.unique_integer([:positive])}"
+      config = store |> config() |> Map.put("challenge_id", challenge_id)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "hashes the serialized authorization when challenge_id is absent", %{store: store} do
+      stub_successful_chain()
+      config = store |> config() |> Map.put("challenge_id", "")
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "opts out of activation replay protection when store is false", %{store: store} do
+      stub_successful_chain()
+      challenge_id = "opt-out-#{System.unique_integer([:positive])}"
+      config = store |> config() |> Map.merge(%{"store" => false, "challenge_id" => challenge_id})
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+    end
+
+    test "fails closed when the activation dedup store is unavailable", %{store: store} do
+      stub_successful_chain()
+      config = store |> config() |> Map.put("store", __MODULE__.FailingDedupStore)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:error, %Errors{detail: "subscription activation store unavailable"}} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+    end
+
     test "rejects a second renewal while the billing period is in flight", %{store: store} do
       config = config(store)
       subscription = subscription(config)
@@ -265,20 +399,29 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     end
 
     test "rejects unavailable and post-expiry settlement timestamps", %{store: store} do
-      config = config(store)
-      subscription = subscription(config)
-      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      missing_config = config(store)
+      missing_subscription = subscription(missing_config)
+      {missing_signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(missing_subscription)
 
       stub_missing_settlement()
 
       assert {:error, %Errors{detail: "subscription settlement block timestamp unavailable"}} =
-               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+               Subscription.verify(
+                 %{"type" => "keyAuthorization", "signature" => missing_signature},
+                 missing_subscription
+               )
 
-      expiry = subscription.subscription_expires |> DateTime.from_iso8601() |> elem(1) |> DateTime.to_unix()
+      expiry_config = config(store)
+      expiry_subscription = subscription(expiry_config)
+      {expiry_signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(expiry_subscription)
+      expiry = expiry_subscription.subscription_expires |> DateTime.from_iso8601() |> elem(1) |> DateTime.to_unix()
       stub_successful_chain(block_timestamp: expiry)
 
       assert {:error, %Errors{detail: "subscription activation settled at or after subscriptionExpires"}} =
-               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+               Subscription.verify(
+                 %{"type" => "keyAuthorization", "signature" => expiry_signature},
+                 expiry_subscription
+               )
     end
   end
 
@@ -367,6 +510,31 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     end)
   end
 
+  defp stub_success_without_transfer do
+    Req.Test.stub(__MODULE__, fn conn ->
+      request = request(conn)
+
+      result =
+        case request do
+          %{"method" => "eth_sendRawTransactionSync"} ->
+            %{
+              "transactionHash" => @tx_hash,
+              "blockNumber" => @block_number,
+              "status" => "0x1",
+              "logs" => []
+            }
+
+          %{"method" => "eth_getTransactionReceipt"} ->
+            %{"transactionHash" => @tx_hash, "blockNumber" => @block_number, "status" => "0x1", "logs" => []}
+
+          %{"method" => "eth_getBlockByNumber"} ->
+            %{"number" => @block_number, "timestamp" => hex_quantity(System.os_time(:second)), "transactions" => []}
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+    end)
+  end
+
   defp successful_receipt(raw) do
     memo = SubscriptionHelpers.memo_from_transaction(raw)
 
@@ -404,7 +572,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       "subscription_gas_limit" => @gas_limit,
       "fee_token" => SubscriptionHelpers.token(),
       "subscription_store" => store,
-      "challenge_id" => "subscription_challenge",
+      "challenge_id" => "subscription_challenge_#{System.unique_integer([:positive])}",
       "req_options" => [plug: {Req.Test, __MODULE__}]
     }
   end

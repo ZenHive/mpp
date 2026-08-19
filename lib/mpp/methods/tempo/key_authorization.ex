@@ -341,14 +341,14 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
       Enum.uniq(selectors) != selectors ->
         {:error, "keyAuthorization contains a duplicate selector"}
 
-      @transfer_selector not in selectors ->
-        {:error, "keyAuthorization must allow transfer"}
-
       Enum.any?(selectors, &(&1 not in [@transfer_selector, @transfer_with_memo_selector])) ->
         {:error, "keyAuthorization selector not allowed"}
 
       Enum.any?(rules, &(&1.recipients != [recipient])) ->
         {:error, "keyAuthorization recipient mismatch"}
+
+      @transfer_with_memo_selector not in selectors ->
+        {:error, "keyAuthorization must allow transferWithMemo"}
 
       true ->
         :ok

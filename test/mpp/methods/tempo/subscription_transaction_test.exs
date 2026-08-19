@@ -71,7 +71,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
     assert byte_size(r) in 1..32
     assert byte_size(s) in 1..32
     refute Transaction.has_fee_payer_placeholder?(tx)
-    assert :binary.decode_unsigned(Enum.at(tx.fields, 8)) <= System.os_time(:second) + 60
+    assert :binary.decode_unsigned(Enum.at(tx.fields, 8)) <= System.os_time(:second) + 24
   end
 
   test "rejects invalid signing and sponsorship configuration" do

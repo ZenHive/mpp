@@ -5,6 +5,7 @@ defmodule MPP.DescripexTest do
   alias MPP.Discovery.PaymentInfo
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Intents.Subscription
   alias MPP.Methods.EVM
   alias MPP.Methods.NearIntents
   alias MPP.Methods.Solana
@@ -20,6 +21,7 @@ defmodule MPP.DescripexTest do
     MPP.Errors,
     Charge,
     Session,
+    Subscription,
     Stripe,
     Tempo,
     EVM,

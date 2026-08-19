@@ -23,9 +23,10 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   @default_rpc_url "https://rpc.moderato.tempo.xyz"
   @chain_id 42_431
   @path_usd "0x20c0000000000000000000000000000000000000"
-  @subscription_amount "1"
+  @subscription_amount "1000000"
   @subscription_days 7
-  @gas_limit 1_500_000
+  @gas_limit 8_000_000
+  @max_fee_per_gas 25_000_000_000
   @recipient_private_key "0x1111111111111111111111111111111111111111111111111111111111111111"
   @moderato_blocked_recipient "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
@@ -33,8 +34,9 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
     payer = fresh_wallet!(rpc_url)
+    sponsor = fresh_wallet!(rpc_url)
     {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
-    {store, config} = subscription_config(access_key_private_key, rpc_url)
+    {store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, recipient)
     signature = signed_authorization(subscription, payer, access_key_private_key)
 
@@ -54,7 +56,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
     payer = fresh_wallet!(rpc_url)
-    {_store, config} = subscription_config(access_key_private_key, rpc_url)
+    sponsor = fresh_wallet!(rpc_url)
+    {_store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, @moderato_blocked_recipient)
     signature = signed_authorization(subscription, payer, access_key_private_key)
 
@@ -109,7 +112,7 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     end
   end
 
-  defp subscription_config(access_key_private_key, rpc_url) do
+  defp subscription_config(access_key_private_key, rpc_url, sponsor) do
     store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
     start_supervised!(ETSStore.child_spec(name: store_name))
     store = {ETSStore, [name: store_name]}
@@ -118,9 +121,16 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
       "rpc_url" => rpc_url,
       "chain_id" => @chain_id,
       "subscription_access_key_private_key" => access_key_private_key,
-      "subscription_nonce" => 0,
       "subscription_gas_limit" => @gas_limit,
       "fee_token" => @path_usd,
+      "fee_payer" => true,
+      "fee_payer_private_key" => sponsor.private_key,
+      "fee_payer_allowed_fee_tokens" => [@path_usd],
+      "fee_payer_policy" => %{
+        "max_gas" => @gas_limit,
+        "max_total_fee" => @gas_limit * @max_fee_per_gas,
+        "max_validity_window_seconds" => 20
+      },
       "subscription_store" => store,
       "challenge_id" => "integration-#{System.unique_integer([:positive])}"
     }

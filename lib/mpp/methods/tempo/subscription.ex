@@ -16,6 +16,7 @@ defmodule MPP.Methods.Tempo.Subscription do
   alias MPP.Receipt
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
+  alias MPP.Tempo.Store, as: TempoStore
   alias Onchain.Address
   alias Onchain.RPC
   alias Onchain.Signer
@@ -149,8 +150,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     with {:ok, record} <- fetch_record(subscription_store, subscription_id),
          {:ok, period_index} <- due_period(record),
          {:ok, claimed} <- claim_renewal(subscription_store, record, period_index),
-         {:ok, receipt, updated} <- settle_renewal(claimed, period_index, config),
-         {:ok, _record} <- finalize_renewal(subscription_store, updated, period_index) do
+         {:ok, receipt} <- complete_renewal(subscription_store, claimed, period_index, config) do
       {:ok, receipt}
     else
       {:error, :already_current, record} -> {:ok, receipt(record)}
@@ -166,6 +166,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     with {:ok, tx, memo} <-
            SubscriptionTransaction.build(subscription, authorization, authorization.source, config, settlement_reference),
          :ok <- simulate_sponsored(tx, authorization.source, config),
+         :ok <- claim_activation(config, serialized_authorization),
          {:ok, tx_hash, chain_receipt} <- broadcast(tx.raw, config),
          :ok <- require_success(chain_receipt),
          :ok <- require_transfer(chain_receipt, subscription, memo),
@@ -189,20 +190,46 @@ defmodule MPP.Methods.Tempo.Subscription do
     end
   end
 
+  defp complete_renewal(subscription_store, claimed, period_index, config) do
+    case settle_renewal(claimed, period_index, config) do
+      {:ok, receipt, updated} ->
+        with {:ok, _record} <- finalize_renewal(subscription_store, updated, period_index) do
+          {:ok, receipt}
+        end
+
+      {:error, {:retryable, reason}} ->
+        _ = release_renewal(subscription_store, claimed.subscription_id, period_index)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp settle_renewal(record, period_index, config) do
     reference = "renewal:#{record.subscription_id}:#{period_index}"
     subscription = record.subscription
 
     with {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, record.source, config, reference),
          :ok <- simulate_sponsored(tx, record.source, config),
-         {:ok, tx_hash, chain_receipt} <- broadcast(tx.raw, config),
-         :ok <- require_success(chain_receipt),
+         {:ok, tx_hash, chain_receipt} <- broadcast(tx.raw, config) do
+      confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)
+    else
+      {:error, reason} -> {:error, {:retryable, reason}}
+    end
+  end
+
+  defp confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config) do
+    with :ok <- require_success(chain_receipt),
          :ok <- require_transfer(chain_receipt, subscription, memo),
          {:ok, settled_at} <- settlement_time(tx_hash, config),
          :ok <- require_before_expiry(settled_at, subscription.subscription_expires) do
       timestamp = DateTime.to_iso8601(settled_at)
       updated = %{record | reference: tx_hash, timestamp: timestamp, last_charged_period: period_index}
       {:ok, receipt(updated), updated}
+    else
+      {:error, "subscription transaction reverted" = reason} -> {:error, {:retryable, reason}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -246,6 +273,41 @@ defmodule MPP.Methods.Tempo.Subscription do
       :not_found ->
         {:error, :subscription_not_found}
     end)
+  end
+
+  defp release_renewal(subscription_store, subscription_id, period_index) do
+    Store.update(subscription_store, subscription_id, fn
+      %Record{in_flight_period: ^period_index} = current ->
+        {:ok, %{current | in_flight_period: nil, in_flight_reference: nil}}
+
+      %Record{} = current ->
+        {:ok, current}
+
+      :not_found ->
+        {:error, :subscription_not_found}
+    end)
+  end
+
+  defp claim_activation(config, signature) do
+    case TempoStore.resolve(config["store"]) do
+      nil ->
+        :ok
+
+      store ->
+        key = "mpp:subscription:" <> activation_key(config, signature)
+
+        case TempoStore.check_and_mark(store, key, System.system_time(:millisecond)) do
+          :ok -> :ok
+          {:error, :already_exists} -> {:error, "subscription activation credential already used"}
+          {:error, _reason} -> {:error, "subscription activation store unavailable"}
+        end
+    end
+  end
+
+  defp activation_key(%{"challenge_id" => id}, _signature) when is_binary(id) and id != "", do: id
+
+  defp activation_key(_config, signature) when is_binary(signature) do
+    Base.encode16(:crypto.hash(:sha256, signature), case: :lower)
   end
 
   defp due_period(%Record{} = record) do

@@ -20,7 +20,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   @default_max_priority_fee_per_gas 1_000_000_000
   @default_max_fee_per_gas 25_000_000_000
   @default_gas_limit 5_000_000
-  @default_validity_seconds 60
+  @default_validity_seconds 24
   @signature_component_bits 256
   @recovery_id_offset 27
   @expiring_nonce_key (1 <<< 256) - 1

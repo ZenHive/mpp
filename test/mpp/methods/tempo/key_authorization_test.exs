@@ -123,8 +123,8 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
       {[rules: []], "keyAuthorization must use explicit selector rules"},
       {[rules: [valid_transfer_rule(subscription), valid_transfer_rule(subscription)]],
        "keyAuthorization contains a duplicate selector"},
-      {[rules: [[<<0x95, 0x77, 0x7D, 0x59>>, [recipient_bytes]]]], "keyAuthorization must allow transfer"},
-      {[rules: [[<<0x09, 0x5E, 0xA7, 0xB3>>, [recipient_bytes]]]], "keyAuthorization must allow transfer"},
+      {[rules: [valid_transfer_rule(subscription)]], "keyAuthorization must allow transferWithMemo"},
+      {[rules: [[<<0x09, 0x5E, 0xA7, 0xB3>>, [recipient_bytes]]]], "keyAuthorization selector not allowed"},
       {[rules: [valid_transfer_rule(subscription), [<<0x09, 0x5E, 0xA7, 0xB3>>, [recipient_bytes]]]],
        "keyAuthorization selector not allowed"},
       {[rules: [[<<0xA9, 0x05, 0x9C, 0xBB>>, []]]], "keyAuthorization recipient mismatch"}
@@ -136,6 +136,18 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
       assert {:error, ^expected_error} = verify(authorization, subscription)
     end
+  end
+
+  test "accepts a transferWithMemo-only authorization matching the mppx grant" do
+    subscription = SubscriptionHelpers.subscription()
+    recipient_bytes = decode_address(SubscriptionHelpers.recipient())
+
+    {_serialized, authorization, _rpc} =
+      SubscriptionHelpers.signed_authorization(subscription,
+        rules: [[<<0x95, 0x77, 0x7D, 0x59>>, [recipient_bytes]]]
+      )
+
+    assert :ok = verify(authorization, subscription)
   end
 
   test "rejects a declared source that does not match the root signature" do

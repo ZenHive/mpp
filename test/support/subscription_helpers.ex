@@ -194,8 +194,9 @@ defmodule MPP.Test.SubscriptionHelpers do
     hex(:binary.copy(<<0>>, 12) <> bytes)
   end
 
+  defp decode_key!(<<key::binary-size(32)>>), do: key
   defp decode_key!("0x" <> key), do: decode_key!(key)
-  defp decode_key!(key), do: Base.decode16!(key, case: :mixed)
+  defp decode_key!(key) when is_binary(key), do: Base.decode16!(key, case: :mixed)
 
   defp encode_uint(0), do: <<>>
   defp encode_uint(value), do: :binary.encode_unsigned(value)
