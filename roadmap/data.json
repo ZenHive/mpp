@@ -3453,7 +3453,7 @@
       "id": "88",
       "phase": 14,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Solana confidential transfer profile",
       "scores": {
         "d": 8,
@@ -3488,6 +3488,7 @@
       ],
       "body": "Implement the optional confidential charge profile from draft-solana-charge-00 on top of Task 21's SOL/SPL pull/push method. validate_config!/1 currently raises on confidential: true, so the profile cannot be advertised. Authority: draft-solana-charge-00 (provider-owned spec) plus live Token-2022 behavior on devnet; reference SDKs are compatibility evidence. Filed from the task-21 reviewer proposal (run run-1787109701309-07696e05).\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
