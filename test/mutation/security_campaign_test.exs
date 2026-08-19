@@ -69,7 +69,7 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     on_block = yaml_mapping_block(workflow, "on")
 
     assert on_block =~ ~r/^\s+schedule:\s*$/m
-    assert on_block =~ ~r/cron:\s+"[^"]+"/
+    assert on_block =~ ~r/cron:\s+"\d+ \d+ \* \* \*"/
     assert on_block =~ "workflow_dispatch:"
     refute on_block =~ "pull_request:"
     refute on_block =~ "push:"
@@ -94,6 +94,7 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     end
 
     assert aliases[:"mutation.security"] == "run test/mutation/security_campaign.exs"
+    refute File.read!(".github/workflows/ci.yml") =~ "mutation.security"
   end
 
   defp campaign_results(surviving_id, surviving_status) do
