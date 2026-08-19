@@ -90,6 +90,37 @@ defmodule MPP.Methods.Tempo.MachineToken do
   end
 
   @doc """
+  Build the canonical `[approve, swapTo]` calls for a charge.
+
+  Returns `:error` when the chain has no first-party deployment or any
+  address, amount, or memo is invalid.
+  """
+  @spec settlement_calls(non_neg_integer(), String.t(), non_neg_integer() | String.t(), String.t(), binary()) ::
+          {:ok, [call()]} | :error
+  def settlement_calls(chain_id, currency, amount, recipient, memo) when byte_size(memo) == 32 do
+    with {:ok, deployment} <- deployment(chain_id),
+         {:ok, amount_int} <- parse_amount(amount),
+         {:ok, currency_bin} <- decode_addr(currency),
+         {:ok, recipient_bin} <- decode_addr(recipient),
+         {:ok, token_bin} <- decode_addr(deployment.token),
+         {:ok, swapper_bin} <- decode_addr(deployment.swapper) do
+      {:ok,
+       [
+         %{to: token_bin, value: 0, input: TIP20.approve_calldata(swapper_bin, amount_int)},
+         %{
+           to: swapper_bin,
+           value: 0,
+           input: swap_to_calldata(token_bin, amount_int, currency_bin, recipient_bin, memo)
+         }
+       ]}
+    else
+      _ -> :error
+    end
+  end
+
+  def settlement_calls(_chain_id, _currency, _amount, _recipient, _memo), do: :error
+
+  @doc """
   Match the exact canonical `[approve, swapTo]` route for a charge.
 
   When `memo` is nil, the memo is taken from the `swapTo` calldata (mppx

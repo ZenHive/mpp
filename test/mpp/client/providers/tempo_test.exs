@@ -6,6 +6,7 @@ defmodule MPP.Client.Providers.TempoTest do
   alias MPP.Expires
   alias MPP.Intents.Charge
   alias MPP.Intents.Subscription
+  alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
@@ -62,6 +63,80 @@ defmodule MPP.Client.Providers.TempoTest do
       assert nonce == fingerprint(@challenge_id, 7)
     end
 
+    test "builds approve + swapTo when the challenge advertises machineTokenEnabled" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert tx.chain_id == @chain_id
+
+      assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil)
+      assert route.settlement_sender == MachineToken.settlement_sender(@chain_id)
+
+      assert {:ok, memo} = Base.decode16(String.trim_leading(route.memo, "0x"), case: :mixed)
+      tag = @attribution_tag
+
+      assert <<^tag::binary-size(4), 1, server::binary-size(10), client::binary-size(10), nonce::binary-size(7)>> = memo
+      assert server == fingerprint(@realm, 10)
+      assert client == fingerprint(@client_id, 10)
+      assert nonce == fingerprint(@challenge_id, 7)
+
+      assert {:error, reason} =
+               Transaction.find_payment_call(tx, @token,
+                 amount: "1250",
+                 recipient: @recipient
+               )
+
+      assert reason =~ "No matching transfer"
+    end
+
+    test "keeps a static memo and chain pin on the machine-token route" do
+      memo = "0x" <> String.duplicate("ab", 32)
+
+      challenge =
+        challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true, "memo" => memo})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+
+      assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, memo)
+      assert route.memo == String.downcase(memo)
+
+      assert {:error, {:chain_id_mismatch, @chain_id, 1}} =
+               Tempo.pay(
+                 challenge(method_details: %{"chainId" => 1, "machineTokenEnabled" => true}),
+                 provider_config()
+               )
+    end
+
+    test "builds a fee-payer machine-token route when both are advertised" do
+      challenge =
+        challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true, "feePayer" => true})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert Transaction.has_fee_payer_placeholder?(tx)
+      assert Transaction.fee_token_empty?(tx)
+      assert {:ok, _route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil)
+    end
+
+    test "rejects machineTokenEnabled on a chain with no first-party deployment" do
+      stub_chain_id(1)
+
+      assert {:error, :unsupported_machine_token_chain} =
+               Tempo.pay(
+                 challenge(method_details: %{"chainId" => 1, "machineTokenEnabled" => true}),
+                 Map.put(provider_config(), :expected_chain_id, 1)
+               )
+    end
+
+    test "still signs a transfer when machineTokenEnabled is not exactly true" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => false})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert {:ok, _payment} = payment_call(credential)
+    end
+
     test "uses a challenge-provided static memo verbatim" do
       memo = "0x" <> String.duplicate("ab", 32)
       challenge = challenge(method_details: %{"chainId" => @chain_id, "memo" => memo})
@@ -93,6 +168,26 @@ defmodule MPP.Client.Providers.TempoTest do
 
       assert {:ok, credential} = Tempo.pay(challenge, provider_config())
       assert %{"presenterSignature" => signature} = credential.payload
+      assert {:ok, %{address: address}} = MPP.DID.parse_evm_did(credential.source)
+
+      assert :ok =
+               Proof.verify_signature(
+                 %{
+                   account: address,
+                   challenge_id: challenge.id,
+                   realm: challenge.realm,
+                   chain_id: @chain_id
+                 },
+                 signature,
+                 address
+               )
+    end
+
+    test "creates a signed proof for a zero-amount machine-token challenge" do
+      challenge = challenge(amount: "0", method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert %{"type" => "proof", "signature" => signature} = credential.payload
       assert {:ok, %{address: address}} = MPP.DID.parse_evm_did(credential.source)
 
       assert :ok =
@@ -210,6 +305,13 @@ defmodule MPP.Client.Providers.TempoTest do
       assert {:error, {:invalid_config, :expected_chain_id}} =
                Tempo.pay(challenge(), Map.put(provider_config(), :expected_chain_id, -1))
 
+      assert {:error, {:invalid_config, :expected_chain_id}} =
+               Tempo.pay(challenge(), %{
+                 private_key: @private_key,
+                 rpc_url: "https://moderato.invalid",
+                 expected_chain_id: -1
+               })
+
       assert {:error, {:invalid_config, :client_id}} =
                Tempo.pay(challenge(), Map.put(provider_config(), :client_id, 12))
 
@@ -279,6 +381,60 @@ defmodule MPP.Client.Providers.TempoTest do
 
       missing_access_key = subscription_challenge(method_details: %{"chainId" => @chain_id})
       assert {:error, :missing_access_key} = Tempo.pay(missing_access_key, wallet_provider_config())
+    end
+
+    test "returns subscription challenge-shape and wallet transport errors" do
+      assert {:error, :missing_method_details} =
+               Tempo.pay(subscription_challenge(method_details: nil), wallet_provider_config())
+
+      missing_chain =
+        subscription_challenge(
+          method_details: %{
+            "accessKey" => %{
+              "accessKeyAddress" => SubscriptionHelpers.access_address(),
+              "keyType" => "secp256k1"
+            }
+          }
+        )
+
+      assert {:error, :invalid_chain_id} = Tempo.pay(missing_chain, wallet_provider_config())
+
+      invalid_key_type =
+        subscription_challenge(
+          method_details: %{
+            "accessKey" => %{
+              "accessKeyAddress" => SubscriptionHelpers.access_address(),
+              "keyType" => "rsa"
+            },
+            "chainId" => @chain_id
+          }
+        )
+
+      assert {:error, :invalid_access_key} = Tempo.pay(invalid_key_type, wallet_provider_config())
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => 1, "result" => %{}})
+      end)
+
+      for key_type <- ["p256", "webAuthn"] do
+        challenge =
+          subscription_challenge(
+            method_details: %{
+              "accessKey" => %{
+                "accessKeyAddress" => SubscriptionHelpers.access_address(),
+                "keyType" => key_type
+              },
+              "chainId" => @chain_id
+            }
+          )
+
+        assert {:error, {:wallet_authorization_failed, 200}} = Tempo.pay(challenge, wallet_provider_config())
+      end
+
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      assert {:error, {:wallet_authorization_failed, %Req.TransportError{reason: :econnrefused}}} =
+               Tempo.pay(subscription_challenge(), wallet_provider_config())
     end
   end
 

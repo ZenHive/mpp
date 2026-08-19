@@ -3,8 +3,10 @@ defmodule MPP.Client.Providers.Tempo do
   Built-in Tempo charge provider.
 
   The provider parses a Tempo charge challenge, verifies that the configured
-  RPC is serving the advertised chain, signs a TIP-20 `transferWithMemo`, and
-  returns a transaction credential for the server to broadcast.
+  RPC is serving the advertised chain, and signs either a TIP-20
+  `transferWithMemo` or, when the challenge advertises `machineTokenEnabled`,
+  the canonical `[approve, swapTo]` machine-token settlement route. It returns
+  a transaction credential for the server to broadcast.
 
   Configuration is explicit:
 
@@ -32,6 +34,7 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.Intents.Charge
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.KeyAuthorization
+  alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias Onchain.Address
   alias Onchain.RPC
@@ -111,9 +114,9 @@ defmodule MPP.Client.Providers.Tempo do
   defp parse_config(config) do
     with {:ok, private_key} <- private_key(config[:private_key]),
          {:ok, rpc_url} <- Shared.required_config(config, :rpc_url),
+         {:ok, req_options} <- req_options(config[:req_options]),
          {:ok, expected_chain_id} <- optional_chain_id(config[:expected_chain_id]),
-         {:ok, client_id} <- optional_string(config[:client_id], :client_id),
-         {:ok, req_options} <- req_options(config[:req_options]) do
+         {:ok, client_id} <- optional_string(config[:client_id], :client_id) do
       {:ok,
        %{
          private_key: private_key,
@@ -140,10 +143,8 @@ defmodule MPP.Client.Providers.Tempo do
 
   defp create_credential(challenge, charge, details, amount, chain_id, address, provider) do
     with {:ok, memo} <- payment_memo(challenge, details, provider.client_id),
-         {:ok, token} <- Address.validate(charge.currency),
-         {:ok, recipient} <- Address.validate(charge.recipient),
-         calldata = TIP20.transfer_with_memo_calldata(recipient, amount, memo),
-         {:ok, signature} <- build_transaction([token, <<>>, calldata], challenge, charge, details, chain_id, provider),
+         {:ok, calls} <- payment_calls(charge, details, amount, chain_id, memo),
+         {:ok, signature} <- build_transaction(calls, challenge, charge, details, chain_id, provider),
          {:ok, payload} <-
            transaction_payload(signature, challenge, details, chain_id, address, provider.private_key) do
       {:ok,
@@ -155,7 +156,31 @@ defmodule MPP.Client.Providers.Tempo do
     end
   end
 
-  defp build_transaction(call, challenge, charge, details, chain_id, provider) do
+  defp payment_calls(charge, %{"machineTokenEnabled" => true}, amount, chain_id, memo) do
+    with {:ok, _currency} <- Address.validate(charge.currency),
+         {:ok, _recipient} <- Address.validate(charge.recipient),
+         {:ok, calls} <- machine_token_calls(chain_id, charge.currency, amount, charge.recipient, memo) do
+      {:ok, Enum.map(calls, &rlp_call/1)}
+    end
+  end
+
+  defp payment_calls(charge, _details, amount, _chain_id, memo) do
+    with {:ok, token} <- Address.validate(charge.currency),
+         {:ok, recipient} <- Address.validate(charge.recipient) do
+      {:ok, [[token, <<>>, TIP20.transfer_with_memo_calldata(recipient, amount, memo)]]}
+    end
+  end
+
+  defp machine_token_calls(chain_id, currency, amount, recipient, memo) do
+    case MachineToken.settlement_calls(chain_id, currency, amount, recipient, memo) do
+      {:ok, calls} -> {:ok, calls}
+      :error -> {:error, :unsupported_machine_token_chain}
+    end
+  end
+
+  defp rlp_call(%{to: to, value: 0, input: input}), do: [to, <<>>, input]
+
+  defp build_transaction(calls, challenge, charge, details, chain_id, provider) do
     opts =
       provider.transaction_options
       |> Map.put_new(:nonce, 0)
@@ -163,7 +188,7 @@ defmodule MPP.Client.Providers.Tempo do
       |> Map.put_new(:valid_before, valid_before(challenge))
       |> Map.merge(%{
         private_key: provider.private_key,
-        calls: [call],
+        calls: calls,
         chain_id: chain_id,
         rpc_url: provider.rpc_url
       })

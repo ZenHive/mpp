@@ -270,7 +270,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
 | `MPP.Methods.Tempo.HostedFeePayer` | Hosted `eth_fillTransaction` fee-payer fill support |
-| `MPP.Methods.Tempo.MachineToken` | Canonical first-party machine-token (MPP Credits) charge-route match |
+| `MPP.Methods.Tempo.MachineToken` | Canonical first-party machine-token (MPP Credits) charge-route construction and match |
 | `MPP.Methods.Tempo.Proof` | EIP-712 proof credentials for zero-amount Tempo flows |
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
@@ -284,7 +284,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
-| `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments |
+| `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments, including machine-token `[approve, swapTo]` when advertised |
 | `MPP.Client.Providers.Stripe` | Built-in Stripe charge provider — Shared Payment Token creation |
 | `MPP.Client.SelectionPolicy` | Transport-neutral challenge selection/ordering (default: server offer order) |
 | `MPP.Client.Req` | Payment-aware Req plugin — 402 detect, pay, retry (`attach/2`) |

@@ -51,6 +51,63 @@ defmodule MPP.Methods.Tempo.MachineTokenTest do
     end
   end
 
+  describe "settlement_calls/5" do
+    test "builds the canonical [approve, swapTo] route that match_route accepts" do
+      assert {:ok, calls} =
+               MachineToken.settlement_calls(
+                 @moderato_chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 decode_memo(@live_memo)
+               )
+
+      assert {:ok, route} =
+               MachineToken.match_route(
+                 calls,
+                 @moderato_chain_id,
+                 @live_currency,
+                 "#{@live_amount}",
+                 @live_recipient,
+                 @live_memo
+               )
+
+      assert route.settlement_sender == @swapper_moderato
+      assert route.memo == @live_memo
+    end
+
+    test "rejects unsupported chains, bad addresses, and a non-32-byte memo" do
+      memo = decode_memo(@live_memo)
+
+      assert :error =
+               MachineToken.settlement_calls(
+                 @unsupported_chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 memo
+               )
+
+      assert :error =
+               MachineToken.settlement_calls(
+                 @moderato_chain_id,
+                 "not-an-address",
+                 @live_amount,
+                 @live_recipient,
+                 memo
+               )
+
+      assert :error =
+               MachineToken.settlement_calls(
+                 @moderato_chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 <<0, 1, 2>>
+               )
+    end
+  end
+
   describe "swap_to_calldata/5" do
     test "matches live Moderato swapTo calldata (tx 0x6b1cdd67…c2f0)" do
       encoded =
