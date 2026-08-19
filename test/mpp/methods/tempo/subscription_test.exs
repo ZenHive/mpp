@@ -274,6 +274,44 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       assert {:ok, held} = Store.get(store, activation.subscription_id)
       assert held.in_flight_period == 2
       assert held.last_charged_period == 0
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription renewal is already in flight"}} =
+               Subscription.renew(activation.subscription_id, config)
+    end
+
+    test "keeps the in-flight claim after an ambiguous renewal broadcast failure", %{store: store} do
+      stub_successful_chain()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      stub_broadcast_failure()
+
+      assert {:error, %Errors{} = error} = Subscription.renew(activation.subscription_id, config)
+      assert error.detail =~ "RPC request failed"
+
+      assert {:ok, held} = Store.get(store, activation.subscription_id)
+      assert held.in_flight_period == 2
+      assert held.last_charged_period == 0
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription renewal is already in flight"}} =
+               Subscription.renew(activation.subscription_id, config)
+
+      assert {:ok, still_held} = Store.get(store, activation.subscription_id)
+      assert still_held.in_flight_period == 2
+      assert still_held.last_charged_period == 0
     end
 
     test "rejects a replayed activation credential for the same challenge", %{store: store} do

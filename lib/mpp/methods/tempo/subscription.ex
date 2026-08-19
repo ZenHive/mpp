@@ -8,7 +8,9 @@ defmodule MPP.Methods.Tempo.Subscription do
   credential so the client can retry; an ambiguous broadcast or a confirmed
   transfer that missed the recipient keeps the claim held. Later `renew/2`
   calls reuse that access key within the exact periodic token and recipient
-  scope persisted at activation.
+  scope persisted at activation, with the same settlement policy: a confirmed
+  revert releases the in-flight period claim, while an ambiguous broadcast or
+  a confirmed transfer that missed the recipient keeps the period claimed.
   """
 
   alias MPP.Errors
@@ -249,9 +251,15 @@ defmodule MPP.Methods.Tempo.Subscription do
     subscription = record.subscription
 
     with {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, record.source, config, reference),
-         :ok <- simulate_sponsored(tx, record.source, config),
-         {:ok, tx_hash, chain_receipt} <- broadcast(tx.raw, config) do
-      confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)
+         :ok <- simulate_sponsored(tx, record.source, config) do
+      case broadcast(tx.raw, config) do
+        {:ok, tx_hash, chain_receipt} ->
+          confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)
+
+        # The node may have included the tx; keep the claim to prevent double settlement.
+        {:error, _reason} = error ->
+          error
+      end
     else
       {:error, reason} -> {:error, {:retryable, reason}}
     end

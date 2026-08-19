@@ -1,6 +1,6 @@
 defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   @moduledoc """
-  Live Tempo subscription activation checks against Moderato.
+  Live Tempo subscription activation and renewal checks against Moderato.
 
   Run with:
 
@@ -91,6 +91,43 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     assert receipt.reference =~ ~r/^0x[0-9a-f]{64}$/
   end
 
+  test "retries renewal on Moderato after a forced reverted period settlement" do
+    {store, config, rpc_url, receipt} = activate_overdue_subscription!()
+    forced = force_first_broadcast_revert(config, rpc_url)
+
+    assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+             Subscription.renew(receipt.subscription_id, forced)
+
+    assert {:ok, released} = Store.get(store, receipt.subscription_id)
+    assert released.in_flight_period == nil
+    assert released.last_charged_period == 0
+
+    # Retry is not claim-blocked. Activation already spent this access-key
+    # period's on-chain limit, so Moderato reverts the second transfer instead
+    # of charging twice; that confirmed revert must release the claim again.
+    assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+             Subscription.renew(receipt.subscription_id, config)
+
+    assert {:ok, after_retry} = Store.get(store, receipt.subscription_id)
+    assert after_retry.in_flight_period == nil
+    assert after_retry.last_charged_period == 0
+  end
+
+  test "keeps a renewal claim on Moderato when the confirmed transfer misses the recipient" do
+    {store, config, rpc_url, receipt} = activate_overdue_subscription!()
+    missed = force_first_broadcast_missed_recipient(config, rpc_url)
+
+    assert {:error, %Errors{detail: "subscription transfer was not credited to the recipient"}} =
+             Subscription.renew(receipt.subscription_id, missed)
+
+    assert {:ok, held} = Store.get(store, receipt.subscription_id)
+    assert held.in_flight_period == 2
+    assert held.last_charged_period == 0
+
+    assert {:error, %Errors{detail: "subscription renewal is already in flight"}} =
+             Subscription.renew(receipt.subscription_id, config)
+  end
+
   defp access_key_private_key! do
     case System.get_env("TEMPO_SUBSCRIPTION_ACCESS_KEY_PRIVATE_KEY") do
       value when is_binary(value) and value != "" ->
@@ -176,20 +213,53 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     )
   end
 
+  defp activate_overdue_subscription! do
+    access_key_private_key = access_key_private_key!()
+    rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
+    payer = fresh_wallet!(rpc_url)
+    sponsor = fresh_wallet!(rpc_url)
+    {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
+    {store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
+    subscription = subscription(config, recipient)
+    signature = signed_authorization(subscription, payer, access_key_private_key)
+
+    {:ok, %Receipt{} = receipt} =
+      Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+    {:ok, _record} =
+      Store.update(store, receipt.subscription_id, fn record ->
+        {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+      end)
+
+    {store, config, rpc_url, receipt}
+  end
+
   defp force_first_broadcast_revert(config, rpc_url) do
-    {:ok, reverted?} = Agent.start_link(fn -> false end)
+    force_first_broadcast_result(config, rpc_url, %{
+      "transactionHash" => "0x" <> String.duplicate("11", 32),
+      "status" => "0x0",
+      "logs" => []
+    })
+  end
+
+  defp force_first_broadcast_missed_recipient(config, rpc_url) do
+    force_first_broadcast_result(config, rpc_url, %{
+      "transactionHash" => "0x" <> String.duplicate("22", 32),
+      "status" => "0x1",
+      "logs" => []
+    })
+  end
+
+  defp force_first_broadcast_result(config, rpc_url, result) do
+    {:ok, intercepted?} = Agent.start_link(fn -> false end)
 
     Map.put(config, "req_options",
       plug: fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
 
-        if request["method"] == "eth_sendRawTransactionSync" and Agent.get_and_update(reverted?, &{!&1, true}) do
-          json_rpc(conn, request["id"], %{
-            "transactionHash" => "0x" <> String.duplicate("11", 32),
-            "status" => "0x0",
-            "logs" => []
-          })
+        if request["method"] == "eth_sendRawTransactionSync" and Agent.get_and_update(intercepted?, &{!&1, true}) do
+          json_rpc(conn, request["id"], result)
         else
           forward_rpc(conn, request, rpc_url)
         end
