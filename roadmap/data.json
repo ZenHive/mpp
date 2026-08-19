@@ -3218,6 +3218,84 @@
       "created_at": "2026-08-18",
       "scored_at": "2026-08-18",
       "cross_repo": []
+    },
+    {
+      "id": "85",
+      "phase": 5,
+      "bundle": "evm",
+      "status": "pending",
+      "title": "Require chainId in EVM challenge configuration",
+      "scores": {
+        "d": 3,
+        "b": 7,
+        "u": 8
+      },
+      "eff": 2.5,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "MPP.Methods.EVM rejects configuration without chain_id instead of emitting a challenge that omits the required chainId methodDetails field",
+        "The public configuration documentation identifies chain_id as required and explains the EIP-155 value expected",
+        "Unit tests cover missing, nil, and valid chain_id configuration plus the resulting 402 challenge wire output",
+        "The behavior is verified against the current provider-owned draft-evm-charge specification before implementation, with the exact source revision recorded",
+        "mix precommit.full is green and MPP.Methods.EVM remains at or above the 95% critical-tier coverage floor"
+      ],
+      "out_of_scope": [
+        "Removing the library's existing native-ETH extension",
+        "Adding Permit2, EIP-3009 authorization, or signed-transaction settlement paths"
+      ],
+      "touches": [
+        "lib/mpp/methods/evm.ex",
+        "test/mpp/methods/evm_test.exs",
+        "test/mpp/methods/evm_integration_test.exs"
+      ],
+      "body": "Align EVM challenge configuration with the current unified EVM Charge draft. The canonical specification marks methodDetails.chainId as REQUIRED, but MPP.Methods.EVM currently documents chain_id as optional, omits it when absent, and validates only rpc_url. Make invalid configuration fail at initialization so every emitted EVM challenge carries an explicit target chain. Preserve the existing native-ETH extension and leave new credential implementations to their existing roadmap tasks.\n",
+      "created_at": "2026-08-19",
+      "scored_at": "2026-08-19",
+      "cross_repo": []
+    },
+    {
+      "id": "86",
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "EVM signed-transaction credential path",
+      "scores": {
+        "d": 6,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 1.17,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "MPP.Methods.EVM accepts type=transaction credentials with the signed EIP-1559 transaction payload defined by the current provider-owned draft-evm-charge specification, and advertises transaction only when that path is enabled",
+        "The server validates the signed transaction against the challenged chain, currency, recipient, amount, expiry, and supported no-splits constraints before broadcast, then verifies settlement and atomically records the resulting transaction hash for replay prevention",
+        "A live Sepolia integration pins one successful server-broadcast settlement and one relevant rejection; missing credentials flunk loudly with exact setup instructions",
+        "Wire encoding, transaction hashing, RPC request/response shapes, and failure semantics are cross-checked against current provider-owned specifications and observed live behavior; mppx and mpp-rs are compatibility evidence",
+        "Existing hash credentials remain supported and EVM methodDetails/credential_types report exactly the credential paths implemented by the configured server",
+        "Touched critical modules remain at least 95% covered and mix ci passes"
+      ],
+      "touches": [
+        "lib/mpp/methods/evm.ex",
+        "lib/mpp/method.ex",
+        "test/mpp/methods/evm_test.exs",
+        "test/mpp/methods/evm_integration_test.exs"
+      ],
+      "body": "Add the EVM type=transaction credential path defined by draft-evm-charge. The client supplies a signed EIP-1559 transaction for server broadcast; the server must validate it against the charge before broadcasting, verify settlement, and preserve the existing atomic replay guarantees. Use the provider-owned draft and live Sepolia behavior as semantic authority, with current mppx and mpp-rs implementations as compatibility evidence.\n",
+      "created_at": "2026-08-19",
+      "scored_at": "2026-08-19",
+      "cross_repo": []
     }
   ]
 }

@@ -81,6 +81,7 @@
 |------|--------|-------|
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 | Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 85 `[P]` | ⬜ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -225,6 +226,7 @@
 | Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17] 📋 |
 | Task 79 | ⬜ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0] 📋 |
+| Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
 ---
