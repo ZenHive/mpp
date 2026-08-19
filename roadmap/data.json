@@ -3479,7 +3479,7 @@
       "id": "89",
       "phase": 12,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Tempo client provider: machine-token charge construction",
       "scores": {
         "d": 6,
@@ -3508,6 +3508,7 @@
       ],
       "body": "Extend MPP.Client.Providers.Tempo so a challenge advertising machineTokenEnabled constructs the machine-token settlement route instead of a plain TIP-20 transferWithMemo. Server-side verification shipped in Task 84 with client-side construction explicitly out of scope; the built-in provider (Task 33e) currently always builds transferWithMemo — also a dependency, expressed here in prose because rmap depends_on takes numeric ids only. Authority: verified MppcSwapper source + live Moderato receipts; refs/mppx/src/tempo/client/Charge.ts and refs/mpp-rs TempoProvider machine-token routing are compatibility evidence. Filed from the task-33e reviewer proposal (run run-1787109695556-70f46cbc).\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
