@@ -16,6 +16,9 @@ defmodule MPP.ErrorsTest do
     {:invalid_payload, 402, "Invalid Payload"},
     {:bad_request, 400, "Bad Request"},
     {:payment_action_required, 402, "Payment Action Required"},
+    {:settlement_failed, 402, "Settlement Failed"},
+    {:settlement_unavailable, 503, "Settlement Backend Unavailable"},
+    {:settlement_timeout, 504, "Settlement Timeout"},
     # Session
     {:insufficient_balance, 402, "Insufficient Balance"},
     {:invalid_signature, 402, "Invalid Signature"},
@@ -118,10 +121,10 @@ defmodule MPP.ErrorsTest do
       end
     end
 
-    test "returns all 19 problem types" do
+    test "returns all 22 problem types" do
       types = Errors.types()
 
-      assert Enum.count(types) == 19
+      assert Enum.count(types) == 22
       assert :payment_required in types
       assert :malformed_credential in types
       # Session types
@@ -130,6 +133,9 @@ defmodule MPP.ErrorsTest do
       # 3DS flow
       assert :payment_action_required in types
       assert :sponsor_capacity_exhausted in types
+      assert :settlement_failed in types
+      assert :settlement_unavailable in types
+      assert :settlement_timeout in types
     end
   end
 end

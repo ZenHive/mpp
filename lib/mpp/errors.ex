@@ -22,6 +22,9 @@ defmodule MPP.Errors do
     * `:bad_request` — malformed request (400)
     * `:payment_action_required` — payment requires additional action, e.g. 3DS (402)
     * `:sponsor_capacity_exhausted` — fee sponsor capacity is temporarily unavailable (402)
+    * `:settlement_failed` — verified payment reached a non-success terminal settlement (402)
+    * `:settlement_unavailable` — settlement backend or required origin RPC is unavailable (503)
+    * `:settlement_timeout` — settlement did not reach a terminal state before the server deadline (504)
 
   ### Session
 
@@ -59,6 +62,13 @@ defmodule MPP.Errors do
       title: "Sponsor Capacity Exhausted",
       status: 402
     },
+    settlement_failed: %{suffix: "settlement-failed", title: "Settlement Failed", status: 402},
+    settlement_unavailable: %{
+      suffix: "server-error",
+      title: "Settlement Backend Unavailable",
+      status: 503
+    },
+    settlement_timeout: %{suffix: "server-error", title: "Settlement Timeout", status: 504},
     # Session error types (Phase 10)
     insufficient_balance: %{
       suffix: "session/insufficient-balance",
@@ -98,6 +108,9 @@ defmodule MPP.Errors do
           | :bad_request
           | :payment_action_required
           | :sponsor_capacity_exhausted
+          | :settlement_failed
+          | :settlement_unavailable
+          | :settlement_timeout
           | :insufficient_balance
           | :invalid_signature
           | :signer_mismatch
