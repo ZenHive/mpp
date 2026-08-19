@@ -3539,7 +3539,7 @@
       "id": "90",
       "phase": 10,
       "bundle": "session",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Stripe subscription method on the shared subscription intent",
       "scores": {
         "d": 6,
@@ -3571,6 +3571,7 @@
       ],
       "body": "Task 50 shipped MPP.Intents.Subscription method-neutral so Stripe can reuse the schema, but only Tempo.Subscription implements it. Implement the Stripe subscription verify path per the provider-owned draft-stripe-subscription-00 spec (refs/mpp-specs). Live Stripe test API is the ground truth; mppx/mpp-rs are compatibility evidence. Filed from the task-50 reviewer proposal (run run-1787113998540-a26968d8).\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
