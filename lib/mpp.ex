@@ -45,6 +45,8 @@ defmodule MPP do
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
     * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
+    * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
+    * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
 
   ## Discovery
@@ -78,6 +80,8 @@ defmodule MPP do
       MPP.Mcp,
       MPP.Client.PaymentProvider,
       MPP.Client.MultiProvider,
+      MPP.Client.SelectionPolicy,
+      MPP.Client.Req,
       MPP.Client.AcceptPolicy
     ]
 end

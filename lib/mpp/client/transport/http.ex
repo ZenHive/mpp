@@ -3,8 +3,8 @@ defmodule MPP.Client.Transport.HTTP do
   HTTP implementation of `MPP.Client.Transport` over `Req`.
 
   Operates on `Req.Response` / `Req.Request` structs — this module does not
-  construct Req clients itself. Callers (e.g. the payment-aware Req plugin)
-  feed responses in and receive modified requests out.
+  construct Req clients itself. Automatic 402 pay-and-retry lives in
+  `MPP.Client.Req`; this transport only detects, parses, and attaches.
 
   ## Wire format
 

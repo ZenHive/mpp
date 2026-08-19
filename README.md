@@ -224,6 +224,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
+| `MPP.Client.SelectionPolicy` | Transport-neutral challenge selection/ordering (default: server offer order) |
+| `MPP.Client.Req` | Payment-aware Req plugin — 402 detect, pay, retry (`attach/2`) |
 | `MPP.Client.Transport` | Client transport behaviour — 402 detection, challenge fetch, credential attach |
 | `MPP.Client.Transport.HTTP` | HTTP transport over `Req` |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |

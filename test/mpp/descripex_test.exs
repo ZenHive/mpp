@@ -28,6 +28,8 @@ defmodule MPP.DescripexTest do
     MPP.Mcp,
     MPP.Client.PaymentProvider,
     MPP.Client.MultiProvider,
+    MPP.Client.SelectionPolicy,
+    MPP.Client.Req,
     MPP.Client.AcceptPolicy
   ]
 

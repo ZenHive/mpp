@@ -23,18 +23,17 @@ defmodule MPP.Client.Transport do
 
   ## Selection
 
-  `select_challenge/2` is a small helper (not a callback) that picks the first
-  challenge whose `method`/`intent` is supported by a `MPP.Client.MultiProvider`.
-  This matches the baseline "first supported in server offer order" behaviour
-  shared with the reference SDKs; ranking via `Accept-Payment` is layered on top
-  via the optional `:accept_payment` keyword to `select_challenge/3`.
+  `select_challenge/2` delegates to `MPP.Client.SelectionPolicy` — the
+  transport-neutral policy surface shared with HTTP (`MPP.Client.Req`) and MCP
+  client orchestration. The default preserves server-advertised order; pass
+  `:selection` or `:accept_payment` to `select_challenge/3` to configure it.
   """
 
   use Descripex, namespace: "/client"
 
-  alias MPP.AcceptPayment
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
+  alias MPP.Client.SelectionPolicy
   alias MPP.Credential
 
   @doc """
@@ -66,13 +65,13 @@ defmodule MPP.Client.Transport do
   """
   @callback set_credential(request :: term(), credential :: Credential.t()) :: term()
 
-  api(:select_challenge, "Pick the first challenge whose method+intent is supported by a MultiProvider.",
+  api(:select_challenge, "Pick a MultiProvider-supported challenge via MPP.Client.SelectionPolicy.",
     params: [
       challenges: [kind: :value, description: "List of MPP.Challenge structs in server offer order"],
       multi: [kind: :value, description: "MPP.Client.MultiProvider struct"],
       opts: [
         kind: :value,
-        description: "Optional `:accept_payment` preference list (`{method, intent, q}` tuples)"
+        description: "Optional `:selection` policy or `:accept_payment` preference list (`{method, intent, q}` tuples)"
       ]
     ],
     returns: %{
@@ -83,11 +82,12 @@ defmodule MPP.Client.Transport do
   )
 
   @doc """
-  Pick the first supported challenge, optionally ranked by `Accept-Payment`.
+  Pick a supported challenge via `MPP.Client.SelectionPolicy`.
 
-  When `:accept_payment` is provided, challenges are reordered by client
-  preferences before the first `MultiProvider`-supported match is chosen.
-  Malformed preference lists are ignored (baseline server-offer order).
+  Options:
+
+    * `:selection` — a `SelectionPolicy.t()` (default `:server_order`)
+    * `:accept_payment` — preference entries; used when `:selection` is omitted
 
   Returns `{:error, :no_supported_challenge}` if no challenge matches any
   provider, including the empty-list case.
@@ -95,17 +95,19 @@ defmodule MPP.Client.Transport do
   @spec select_challenge([Challenge.t()], MultiProvider.t(), keyword()) ::
           {:ok, Challenge.t()} | {:error, :no_supported_challenge}
   def select_challenge(challenges, %MultiProvider{} = multi, opts \\ []) when is_list(challenges) do
-    ranked =
-      case Keyword.get(opts, :accept_payment, []) do
-        [] -> challenges
-        preferences -> AcceptPayment.rank(challenges, preferences)
-      end
+    SelectionPolicy.select(challenges, multi, policy_from_opts(opts))
+  end
 
-    case Enum.find(ranked, fn %Challenge{method: m, intent: i} ->
-           MultiProvider.supports?(multi, m, i)
-         end) do
-      %Challenge{} = c -> {:ok, c}
-      nil -> {:error, :no_supported_challenge}
+  defp policy_from_opts(opts) do
+    case Keyword.get(opts, :selection) do
+      nil ->
+        case Keyword.get(opts, :accept_payment, []) do
+          [] -> SelectionPolicy.default()
+          preferences -> {:accept_payment, preferences}
+        end
+
+      policy ->
+        policy
     end
   end
 
