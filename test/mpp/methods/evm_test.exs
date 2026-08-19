@@ -677,13 +677,31 @@ defmodule MPP.Methods.EVMTest do
           "eth_getTransactionCount" => "0x1",
           "eth_estimateGas" => "0x186a0",
           "eth_sendRawTransaction" => @tx_hash,
-          "eth_getTransactionReceipt" => receipt_with_transfer()
+          "eth_getTransactionReceipt" => receipt_with_transfer(sender: EVMAuthorization.signer_address())
         })
       end)
 
       assert {:ok, %Receipt{} = receipt} = EVM.verify(payload, charge)
       assert receipt.method == "evm"
       assert receipt.reference == @tx_hash
+    end
+
+    test "rejects a settlement Transfer whose from is not the authorization signer", %{charge: charge} do
+      charge = authorization_charge(charge)
+      payload = authorization_payload(charge)
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_call" => "0x" <> String.duplicate("0", 64),
+          "eth_getTransactionCount" => "0x1",
+          "eth_estimateGas" => "0x186a0",
+          "eth_sendRawTransaction" => @tx_hash,
+          "eth_getTransactionReceipt" => receipt_with_transfer()
+        })
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "No matching Transfer"
     end
 
     test "rejects a zero-amount authorization charge", %{charge: charge} do
@@ -1018,17 +1036,18 @@ defmodule MPP.Methods.EVMTest do
   # Builds a valid receipt with an ERC-20 Transfer log matching the default charge.
   defp receipt_with_transfer(opts \\ []) do
     recipient = Keyword.get(opts, :recipient, @recipient)
+    sender = Keyword.get(opts, :sender, @sender)
     amount_hex = Keyword.get(opts, :amount_hex, @amount_hex)
 
     # Topics: Transfer topic, padded sender address, padded recipient address
-    padded_sender = "0x" <> String.duplicate("0", 24) <> strip_0x(@sender)
+    padded_sender = "0x" <> String.duplicate("0", 24) <> strip_0x(sender)
     padded_recipient = "0x" <> String.duplicate("0", 24) <> strip_0x(recipient)
 
     %{
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
-      "from" => @sender,
+      "from" => sender,
       "to" => @token_address,
       "logs" => [
         %{

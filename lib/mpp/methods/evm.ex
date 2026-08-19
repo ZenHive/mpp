@@ -191,7 +191,7 @@ defmodule MPP.Methods.EVM do
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          {:ok, hash} <- Authorization.settle(payload, charge),
          :ok <- check_hash_unused(store, hash),
-         {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config),
+         {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config, payload["from"]),
          :ok <- commit_hash_used(store, hash) do
       {:ok, receipt}
     end
@@ -262,10 +262,12 @@ defmodule MPP.Methods.EVM do
   # --- ERC-20 verification ---
 
   # Fetches the transaction receipt, parses Transfer logs, and finds a matching transfer.
-  defp verify_erc20_transfer(hash, charge, rpc_url, config) do
+  # `expected_from` is the EIP-3009 signer for type=authorization (draft-evm-charge-00
+  # §6.2 step 10); hash credentials omit it.
+  defp verify_erc20_transfer(hash, charge, rpc_url, config, expected_from \\ nil) do
     with {:ok, receipt} <- fetch_receipt(hash, rpc_url, config),
          :ok <- Shared.check_receipt_status(receipt),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge) do
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, expected_from) do
       {:ok, Receipt.new(method: "evm", reference: hash, external_id: charge.external_id)}
     end
   end
@@ -305,14 +307,15 @@ defmodule MPP.Methods.EVM do
   # --- Transfer matching ---
 
   # Parses Transfer events from receipt logs and finds one matching the charge.
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, expected_from) do
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       match =
         Enum.find(transfers, fn transfer ->
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
-            transfer.amount == amount_int
+            transfer.amount == amount_int and
+            from_matches?(transfer, expected_from)
         end)
 
       case match do
@@ -321,6 +324,9 @@ defmodule MPP.Methods.EVM do
       end
     end
   end
+
+  defp from_matches?(_transfer, nil), do: true
+  defp from_matches?(transfer, expected_from), do: Onchain.Address.equal?(transfer.from, expected_from)
 
   # --- RPC (delegated to Onchain.RPC) ---
   # Onchain.RPC returns atom-keyed, hex-decoded receipts/transactions and is

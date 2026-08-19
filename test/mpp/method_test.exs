@@ -4,6 +4,7 @@ defmodule MPP.MethodTest do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Methods.EVM
   alias MPP.Receipt
 
   defmodule MockMethod do
@@ -98,7 +99,8 @@ defmodule MPP.MethodTest do
 
     test "Tempo and EVM declare hash" do
       assert "hash" in MPP.Methods.Tempo.credential_types()
-      assert MPP.Methods.EVM.credential_types() == ["hash"]
+      assert "hash" in EVM.credential_types()
+      assert "authorization" in EVM.credential_types()
     end
 
     test "Solana declares transaction and signature" do

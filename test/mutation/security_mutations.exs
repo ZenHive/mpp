@@ -90,8 +90,8 @@ defmodule MPP.Test.SecurityMutations do
         "evm-amount-match-bypassed",
         "evm-amount-authorization",
         "lib/mpp/methods/evm.ex",
-        "            transfer.amount == amount_int\n",
-        "            is_integer(amount_int)\n",
+        "            transfer.amount == amount_int and\n            from_matches?(transfer, expected_from)\n",
+        "            is_integer(amount_int) and\n            from_matches?(transfer, expected_from)\n",
         ["test/mpp/methods/evm_test.exs"],
         false
       ),

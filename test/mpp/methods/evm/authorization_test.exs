@@ -262,6 +262,70 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       assert {:ok, @tx_hash} = Authorization.settle(signed_payload(), charge)
     end
 
+    test "queries the pending account nonce before broadcast" do
+      {:ok, seen} = Agent.start_link(fn -> nil end)
+
+      Req.Test.stub(EVM, fn conn ->
+        {request, conn} = read_rpc(conn)
+        method = request["method"]
+        id = request["id"]
+
+        if method == "eth_getTransactionCount" do
+          Agent.update(seen, fn _ -> request["params"] end)
+        end
+
+        result =
+          case method do
+            "eth_call" -> unused_state()
+            "eth_getTransactionCount" -> "0x1"
+            "eth_estimateGas" -> "0x186a0"
+            "eth_sendRawTransaction" -> @tx_hash
+            "eth_getTransactionReceipt" -> receipt_with_transfer()
+          end
+
+        rpc_json(conn, id, "result", result)
+      end)
+
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+      assert {:ok, @tx_hash} = Authorization.settle(signed_payload(), charge)
+      assert List.last(Agent.get(seen, & &1)) == "pending"
+    end
+
+    test "maps a reverted settlement receipt to settlement-failed" do
+      Req.Test.stub(EVM, fn conn ->
+        {method, id, conn} = read_request(conn)
+
+        case method do
+          "eth_call" ->
+            rpc_json(conn, id, "result", unused_state())
+
+          "eth_getTransactionCount" ->
+            rpc_json(conn, id, "result", "0x1")
+
+          "eth_estimateGas" ->
+            rpc_json(conn, id, "result", "0x186a0")
+
+          "eth_sendRawTransaction" ->
+            rpc_json(conn, id, "result", @tx_hash)
+
+          "eth_getTransactionReceipt" ->
+            rpc_json(conn, id, "result", %{
+              "transactionHash" => @tx_hash,
+              "blockNumber" => "0x1",
+              "status" => "0x0",
+              "from" => EVMAuthorization.signer_address(),
+              "to" => @token,
+              "logs" => []
+            })
+        end
+      end)
+
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+      assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
+      assert error.type =~ "settlement-failed"
+      assert error.detail =~ "reverted"
+    end
+
     test "maps the observed FiatTokenV2 used-or-canceled estimate revert to already used" do
       Req.Test.stub(EVM, fn conn ->
         {method, id, conn} = read_request(conn)
@@ -548,9 +612,13 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
   defp used_state, do: "0x" <> String.duplicate("0", 63) <> "1"
 
   defp read_request(conn) do
-    {:ok, body, conn} = Plug.Conn.read_body(conn)
-    request = Jason.decode!(body)
+    {request, conn} = read_rpc(conn)
     {request["method"], request["id"], conn}
+  end
+
+  defp read_rpc(conn) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    {Jason.decode!(body), conn}
   end
 
   defp rpc_json(conn, id, key, value) do

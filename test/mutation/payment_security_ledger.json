@@ -56,13 +56,20 @@
       "command": "mix test.json --quiet --include integration test/mpp/methods/tempo_integration_test.exs:294 test/mpp/methods/tempo_integration_test.exs:540",
       "result": "passed 2, failed 0",
       "semantics": "a real transferWithMemo verifies and a real transfer is rejected against a mismatched amount"
+    },
+    {
+      "surface": "EVM Sepolia USDC EIP-3009 authorization",
+      "observed_at": "2026-08-19",
+      "command": "mix test.json --include integration test/mpp/methods/evm_authorization_integration_test.exs",
+      "result": "passed 3, failed 0",
+      "semantics": "a real transferWithAuthorization settles against Circle Sepolia USDC; reuse of the same challengeHash nonce is rejected; a correctly signed over-balance authorization reverts ERC20: transfer amount exceeds balance"
     }
   ],
   "campaign": {
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "e4c355314235d08f219f09e6a6e1cbad30ce8fbd0b37e4267e52ff7e410bed99",
+    "fingerprint_sha256": "3d7ff6bcb939dca7d4a8b0d4c44530574790852f3a2cd54e43b570fa6920d915",
     "mutations": [
       {
         "id": "jcs-descending-key-order",

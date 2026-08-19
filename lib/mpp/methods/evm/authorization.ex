@@ -23,6 +23,7 @@ defmodule MPP.Methods.EVM.Authorization do
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Methods.Shared
   alias Onchain.ABI
   alias Onchain.Address
   alias Onchain.RPC
@@ -423,7 +424,7 @@ defmodule MPP.Methods.EVM.Authorization do
            ]),
          {:ok, calldata} <- Onchain.Hex.decode(calldata_hex),
          {:ok, sender} <- Signer.address_from_key(private_key),
-         {:ok, nonce} <- RPC.get_transaction_count(sender, rpc_opts),
+         {:ok, nonce} <- RPC.get_transaction_count(sender, Keyword.put(rpc_opts, :block, "pending")),
          {:ok, gas} <- estimate_gas(sender, charge.currency, calldata_hex, rpc_opts),
          {:ok, unsigned} <-
            Signer.build_transaction(
@@ -476,8 +477,14 @@ defmodule MPP.Methods.EVM.Authorization do
         Process.sleep(@receipt_poll_interval_ms)
         await_receipt(tx_hash, rpc_opts, attempt + 1)
 
-      {:ok, _receipt} ->
-        :ok
+      {:ok, receipt} ->
+        case Shared.check_receipt_status(receipt) do
+          :ok ->
+            :ok
+
+          {:error, _error} ->
+            {:error, Errors.new(:settlement_failed, "Authorization settlement transaction reverted")}
+        end
 
       {:error, reason} ->
         wrap_rpc_error(reason)
