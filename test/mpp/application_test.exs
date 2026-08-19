@@ -1,6 +1,7 @@
 defmodule MPP.ApplicationTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Session.ETSStore
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
 
@@ -20,6 +21,14 @@ defmodule MPP.ApplicationTest do
       assert :ok = ConCacheStore.check_and_mark(key, :first)
       assert {:error, :already_exists} = ConCacheStore.check_and_mark(key, :second)
       assert {:ok, :first} = Store.get(store, key)
+    end
+  end
+
+  describe "default session store" do
+    test "the :mpp application starts the ETS-backed channel store" do
+      pid = Process.whereis(ETSStore)
+      assert is_pid(pid)
+      assert Process.alive?(pid)
     end
   end
 end
