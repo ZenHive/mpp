@@ -3772,7 +3772,7 @@
       "id": "95",
       "phase": 13,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Extend the payment-security mutant set to EIP-3009 authorization checks",
       "scores": {
         "d": 3,
@@ -3798,10 +3798,17 @@
         "test/mutation/",
         "lib/mpp/methods/evm.ex"
       ],
+      "shipped_in": "b0436e39f6f0eda01e7243d5d6b727f497718e1a",
       "body": "Task 40 added EIP-3009 authorization credentials to MPP.Methods.EVM with two new security-critical checks the mutation campaign does not cover: (1) verify/2 dispatches type=authorization in a clause preceding the hash catch-all - no mutant covers dropping that clause (Tempo has an authorization-dispatch canary; EVM does not); (2) the reviewer-added from_matches?(transfer, expected_from) binding (spec section 6.2 step 10) has no mutant covering its removal - the original implementer fixture passed with a Transfer.from that was not the EIP-3009 signer. Evidence: run run-1787125024720-2d6d3db3 reviewer report.\n",
       "created_at": "2026-08-19",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-19",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1787146580986-8e8aa095, b0436e39f6f0eda01e7243d5d6b727f497718e1a).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787146580986-8e8aa095",
       "cross_repo": []
     },
     {
