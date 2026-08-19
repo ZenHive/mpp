@@ -3685,7 +3685,7 @@
       "id": "93",
       "phase": 13,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Run the payment-security mutation campaign on a nightly cadence",
       "scores": {
         "d": 4,
@@ -3711,10 +3711,17 @@
         ".github/workflows/",
         "test/mutation/"
       ],
+      "shipped_in": "06f9ce40c8bffe25e726cd6e3529ca9ca10b154f",
       "body": "Task 82 shipped `mix mutation.security` and a checked-in kill ledger, but the default suite only asserts each mutant applies exactly once and that the ledger JSON already says they were killed. Source can drift so a mutant survives without CI noticing. Put the executable campaign on a nightly workflow, matching integration.yml / cross-validation.yml: excluded from the lander-facing gate, executed on a real cadence. Do not fold it into mix ci.\n",
       "created_at": "2026-08-19",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-19",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787143459192-c8710911, 06f9ce40c8bffe25e726cd6e3529ca9ca10b154f).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787143459192-c8710911",
       "cross_repo": []
     },
     {
