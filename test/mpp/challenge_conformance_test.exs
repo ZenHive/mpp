@@ -1,11 +1,13 @@
 defmodule MPP.ChallengeConformanceTest do
   @moduledoc """
   Cross-SDK conformance: pins `MPP.Challenge.create/2`'s HMAC-SHA256 challenge ID
-  against the canonical golden vectors from the Rust reference SDK.
+  against the shared canonical golden vectors from both reference SDKs.
 
-  Source of truth: `refs/mpp-rs/src/protocol/core/challenge.rs`
-  (`test_golden_vectors` — 10 vectors — and `test_opaque_golden_vectors` — 4 vectors).
-  Secret is the reference's `"test-vector-secret"` throughout.
+  Cross-implementation evidence: `refs/mppx/src/Challenge.test.ts:84-280` and
+  `refs/mpp-rs/src/protocol/core/challenge.rs:1318-1800` independently pin the
+  same vectors. Provider authority is
+  `refs/mpp-specs/specs/core/draft-httpauth-payment-00.md:309-360`. Secret is
+  `"test-vector-secret"` throughout.
 
   These tests guard the wire-format invariant CLAUDE.md calls out: a wrong HMAC
   input layout, JCS canonicalization, or base64url handling on our side would let
@@ -20,10 +22,12 @@ defmodule MPP.ChallengeConformanceTest do
   already-sorted compact JSON is the identity).
   """
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias MPP.Challenge
 
   @secret "test-vector-secret"
+  @property_runs 50
 
   defp b64(json), do: Base.url_encode64(json, padding: false)
 
@@ -111,6 +115,34 @@ defmodule MPP.ChallengeConformanceTest do
     end
   end
 
+  describe "property: all seven HMAC slots are binding domains" do
+    property "changing any generated slot changes the challenge ID" do
+      check all(
+              slot <- StreamData.member_of([:realm, :method, :intent, :request, :expires, :digest, :opaque]),
+              suffix <- StreamData.string(:alphanumeric, min_length: 1, max_length: 16),
+              max_runs: @property_runs
+            ) do
+        base = [
+          realm: "api.example.com",
+          method: "tempo",
+          intent: "charge",
+          request: b64(~S({"amount":"1000000"})),
+          expires: "2030-01-01T00:00:00Z",
+          digest: "sha-256=:base:",
+          opaque: b64(~S({"route":"base"}))
+        ]
+
+        changed = Keyword.update!(base, slot, &mutate_slot(slot, &1, suffix))
+
+        refute Challenge.create(base, @secret).id == Challenge.create(changed, @secret).id
+      end
+    end
+  end
+
   defp maybe_put(params, _key, nil), do: params
   defp maybe_put(params, key, value), do: Keyword.put(params, key, value)
+
+  defp mutate_slot(:request, value, suffix), do: b64(~s({"value":"#{value <> suffix}"}))
+  defp mutate_slot(:opaque, value, suffix), do: b64(~s({"value":"#{value <> suffix}"}))
+  defp mutate_slot(_slot, value, suffix), do: value <> suffix
 end

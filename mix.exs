@@ -26,7 +26,8 @@ defmodule MPP.MixProject do
     [
       preferred_envs: [
         "test.json": :test,
-        "dialyzer.json": :dev
+        "dialyzer.json": :dev,
+        "mutation.security": :test
       ]
     ]
   end
@@ -219,6 +220,7 @@ defmodule MPP.MixProject do
       "check.dispatch": [
         "precommit.full"
       ],
+      "mutation.security": "run test/mutation/security_campaign.exs",
       # Fails when AGENTS.md has drifted from CLAUDE.md. Compares rendered output,
       # not mtimes, so drift in a transitive @-import is caught too.
       "agents.check": [

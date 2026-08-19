@@ -1,7 +1,10 @@
 defmodule MPP.JCSTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias MPP.JCS
+
+  @property_runs 50
 
   describe "canonicalize/1 scalars" do
     test "string" do
@@ -94,6 +97,46 @@ defmodule MPP.JCSTest do
       input = %{"a" => %{"b" => %{"c" => "deep"}}}
       assert JCS.canonicalize(input) == ~S({"a":{"b":{"c":"deep"}}})
     end
+
+    property "sorts generated ASCII keys at every object boundary" do
+      check all(
+              fields <-
+                StreamData.uniq_list_of(
+                  StreamData.tuple({ascii_key(), scalar()}),
+                  min_length: 1,
+                  max_length: 12,
+                  uniq_fun: &elem(&1, 0)
+                ),
+              max_runs: @property_runs
+            ) do
+        object = Map.new(fields)
+
+        expected =
+          fields
+          |> Enum.sort_by(&elem(&1, 0))
+          |> Enum.map_join(",", fn {key, value} -> Jason.encode!(key) <> ":" <> JCS.canonicalize(value) end)
+
+        assert JCS.canonicalize(object) == "{" <> expected <> "}"
+      end
+    end
+
+    property "canonical output is independent of generated insertion order" do
+      check all(
+              fields <-
+                StreamData.uniq_list_of(
+                  StreamData.tuple({ascii_key(), scalar()}),
+                  min_length: 1,
+                  max_length: 12,
+                  uniq_fun: &elem(&1, 0)
+                ),
+              max_runs: @property_runs
+            ) do
+        forward = fields |> Map.new() |> JCS.canonicalize()
+        reverse = fields |> Enum.reverse() |> Map.new() |> JCS.canonicalize()
+
+        assert forward == reverse
+      end
+    end
   end
 
   describe "canonicalize/1 MPP charge request cross-validation" do
@@ -152,5 +195,18 @@ defmodule MPP.JCSTest do
         JCS.canonicalize(%{"outer" => %{inner: "value"}})
       end
     end
+  end
+
+  defp ascii_key do
+    StreamData.string(?a..?z, min_length: 1, max_length: 12)
+  end
+
+  defp scalar do
+    StreamData.one_of([
+      StreamData.integer(),
+      StreamData.boolean(),
+      StreamData.constant(nil),
+      StreamData.string(:alphanumeric, max_length: 24)
+    ])
   end
 end

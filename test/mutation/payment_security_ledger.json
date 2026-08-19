@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-19",
+  "implementation_base_commit": "7b420c90844851bf270bad6399d214b5d5b7640c",
+  "authorities": {
+    "paymentauth_spec": {
+      "commit": "f9506cd3472d10f31b4a6c790b3fe6b0ff377f96",
+      "evidence": [
+        "specs/core/draft-httpauth-payment-00.md:236-420",
+        "specs/intents/draft-payment-intent-charge-00.md:115-283",
+        "specs/methods/evm/draft-evm-charge-00.md:251-324",
+        "specs/methods/tempo/draft-tempo-charge-00.md"
+      ],
+      "role": "provider-owned semantic authority"
+    },
+    "mppx": {
+      "commit": "7568194cf70db3d442de13747aecc1bb1ef6d97b",
+      "evidence": [
+        "src/Challenge.test.ts:84-280",
+        "src/Challenge.ts:619-685",
+        "src/evm/server/Charge.ts:37-86",
+        "src/tempo/server/Charge.ts:142-210,236-362"
+      ],
+      "role": "cross-implementation evidence"
+    },
+    "mpp_rs": {
+      "commit": "1162fc9bcb09c6e88f07d4faee8ffda4c5331b8f",
+      "evidence": [
+        "src/protocol/core/challenge.rs:465-480,1318-1800",
+        "src/server/mpp.rs:316-448,2708-3060",
+        "src/protocol/methods/tempo/method.rs:347-460,791-881,934-1070"
+      ],
+      "role": "cross-implementation evidence"
+    }
+  },
+  "tools": {
+    "erlang_otp": "29",
+    "elixir": "1.20.2",
+    "mix": "1.20.2",
+    "stream_data": "1.4.0",
+    "ex_unit_json": "0.6.0",
+    "onchain": "0.12.1",
+    "onchain_tempo": "0.9.1"
+  },
+  "live_integration_evidence": [
+    {
+      "surface": "EVM Sepolia ERC-20",
+      "observed_at": "2026-08-19",
+      "command": "mix test.json --quiet --include integration test/mpp/methods/evm_integration_test.exs:186 test/mpp/methods/evm_integration_test.exs:198",
+      "result": "passed 2, failed 0",
+      "semantics": "a real WETH transfer verifies and the same transfer is rejected against a mismatched amount"
+    },
+    {
+      "surface": "Tempo Moderato TIP-20",
+      "observed_at": "2026-08-19",
+      "command": "mix test.json --quiet --include integration test/mpp/methods/tempo_integration_test.exs:294 test/mpp/methods/tempo_integration_test.exs:540",
+      "result": "passed 2, failed 0",
+      "semantics": "a real transferWithMemo verifies and a real transfer is rejected against a mismatched amount"
+    }
+  ],
+  "campaign": {
+    "command": "mix mutation.security",
+    "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
+    "seed": 0,
+    "fingerprint_sha256": "69a8c94d5b6677590a44b680a7d3a8f4d00760a696964a355cb0ed2c9a63cb25",
+    "mutations": [
+      {
+        "id": "jcs-descending-key-order",
+        "class": "canonical-ordering",
+        "status": "killed",
+        "evidence": "test/mpp/jcs_test.exs rejects descending generated and fixed object order",
+        "classification": "non-equivalent; violates PaymentAuth JCS ordering"
+      },
+      {
+        "id": "hmac-request-slot-omitted",
+        "class": "hmac-domain",
+        "status": "killed",
+        "evidence": "shared mppx/mpp-rs HMAC golden vectors reject an omitted request slot",
+        "classification": "non-equivalent; removes a required HMAC domain"
+      },
+      {
+        "id": "hmac-digest-slot-omitted",
+        "class": "digest-hmac-domain",
+        "status": "killed",
+        "evidence": "shared HMAC vectors with digest reject an empty digest slot",
+        "classification": "non-equivalent; breaks body-digest binding"
+      },
+      {
+        "id": "verifier-request-pin-bypassed",
+        "class": "pinned-fields",
+        "status": "killed",
+        "evidence": "generated verifier pinning and mpp-rs conformance cases reject a re-signed request mismatch",
+        "classification": "non-equivalent; permits cross-route request reuse"
+      },
+      {
+        "id": "verifier-chain-pin-bypassed",
+        "class": "chain-binding",
+        "status": "killed",
+        "evidence": "mpp-rs pinned-chain conformance rejects a re-signed chainId mismatch",
+        "classification": "non-equivalent; permits cross-chain credential reuse"
+      },
+      {
+        "id": "verifier-expiry-bypassed",
+        "class": "expiry",
+        "status": "killed",
+        "evidence": "verifier expiration tests reject a validly signed expired challenge",
+        "classification": "non-equivalent; accepts expired credentials"
+      },
+      {
+        "id": "credential-replay-precheck-bypassed",
+        "class": "replay",
+        "status": "killed",
+        "evidence": "live-store replay tests reject an already claimed credential",
+        "classification": "non-equivalent; disables single-use enforcement"
+      },
+      {
+        "id": "evm-recipient-match-bypassed",
+        "class": "evm-recipient-authorization",
+        "status": "killed",
+        "evidence": "generated EVM transfer mutations reject non-recipient logs",
+        "classification": "non-equivalent; authorizes the wrong recipient"
+      },
+      {
+        "id": "evm-amount-match-bypassed",
+        "class": "evm-amount-authorization",
+        "status": "killed",
+        "evidence": "generated EVM transfer mutations reject wrong amounts",
+        "classification": "non-equivalent; authorizes the wrong amount"
+      },
+      {
+        "id": "tempo-amount-match-bypassed",
+        "class": "tempo-amount-authorization",
+        "status": "killed",
+        "evidence": "generated Tempo receipt mutations reject wrong amounts",
+        "classification": "non-equivalent; authorizes the wrong amount"
+      },
+      {
+        "id": "tempo-chain-match-bypassed",
+        "class": "tempo-chain-authorization",
+        "status": "killed",
+        "evidence": "generated signed Tempo transactions on non-Moderato chains are rejected",
+        "classification": "non-equivalent; authorizes the wrong chain"
+      },
+      {
+        "id": "tempo-unknown-dispatch-accepted",
+        "class": "authorization-dispatch",
+        "status": "killed",
+        "evidence": "generated unknown credential types are rejected as invalid payloads",
+        "classification": "non-equivalent; accepts an unsupported authorization domain"
+      }
+    ],
+    "canaries": [
+      "jcs-descending-key-order",
+      "verifier-request-pin-bypassed",
+      "tempo-unknown-dispatch-accepted"
+    ],
+    "reviewed_survivors": [
+      {
+        "id": "verifier-request-pin-bypassed",
+        "classification": "genuine test gap in the initial campaign: generated currency mutations were independently rejected before the aggregate request pin",
+        "resolution": "added a re-signed amount-only property; the final campaign kills the mutant",
+        "evidence": "test/mpp/verifier_pinned_property_test.exs"
+      }
+    ],
+    "survivors": [],
+    "survivor_review": "The initial request-pin survivor was a genuine gap and was closed. The final campaign has no survivors. Invalid or unapplied mutants fail the campaign and are not counted as killed."
+  }
+}

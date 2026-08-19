@@ -1,5 +1,6 @@
 defmodule MPP.Methods.EVMTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias MPP.Errors
   alias MPP.Headers
@@ -24,6 +25,8 @@ defmodule MPP.Methods.EVMTest do
   @amount "1000000"
   # 1_000_000 in hex = 0xF4240 — padded to 32 bytes for log data
   @amount_hex "0x" <> String.duplicate("0", 58) <> "0f4240"
+  @property_runs 25
+  @evm_address_bytes 20
 
   # draft-evm-charge-00.md:235 — canonical Permit2 deployment
   @canonical_permit2 "0x000000000022D473030F116dDEE9F6B43aC78BA3"
@@ -446,6 +449,28 @@ defmodule MPP.Methods.EVMTest do
       assert error.detail =~ "No matching Transfer"
     end
 
+    property "rejects generated amount and recipient mismatches", %{charge: charge} do
+      check all(
+              fault <- StreamData.member_of([:amount, :recipient]),
+              wrong_amount <- StreamData.integer(1..999_999),
+              wrong_recipient <- generated_address_except(@recipient),
+              max_runs: @property_runs
+            ) do
+        options =
+          case fault do
+            :amount -> [amount_hex: uint256_hex(wrong_amount)]
+            :recipient -> [recipient: wrong_recipient]
+          end
+
+        Req.Test.stub(EVM, fn conn ->
+          rpc_dispatch(conn, %{"eth_getTransactionReceipt" => receipt_with_transfer(options)})
+        end)
+
+        assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+        assert error.detail =~ "No matching Transfer"
+      end
+    end
+
     test "returns error when transaction not found", %{charge: charge} do
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{"eth_getTransactionReceipt" => nil})
@@ -826,6 +851,17 @@ defmodule MPP.Methods.EVMTest do
 
   defp required_config(extra \\ %{}) do
     Map.merge(%{"rpc_url" => @rpc_url, "chain_id" => @chain_id}, extra)
+  end
+
+  defp uint256_hex(amount) do
+    "0x" <> (amount |> Integer.to_string(16) |> String.pad_leading(64, "0"))
+  end
+
+  defp generated_address_except(address) do
+    [length: @evm_address_bytes]
+    |> StreamData.binary()
+    |> StreamData.map(&("0x" <> Base.encode16(&1, case: :lower)))
+    |> StreamData.filter(&(String.downcase(&1) != String.downcase(address)))
   end
 
   # Merges a dedup store into the charge's method_details.

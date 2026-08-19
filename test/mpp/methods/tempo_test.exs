@@ -3,6 +3,7 @@ defmodule MPP.Methods.TempoTest do
   # registered under the global name __MODULE__. Two async modules starting it
   # concurrently raise {:already_started, pid} and, worse, share one dedup table.
   use ExUnit.Case, async: false
+  use ExUnitProperties
 
   import MPP.Test.TempoTestHelpers
 
@@ -22,6 +23,8 @@ defmodule MPP.Methods.TempoTest do
   @token_address "0x20C0000000000000000000000000000000000000"
   @recipient "0x1234567890AbcdEF1234567890aBcDeF12345678"
   @tx_hash "0x" <> String.duplicate("ab", 32)
+  @property_runs 20
+  @evm_address_bytes 20
   @payer "0x1111111111111111111111111111111111111111"
   @realm "api.test.com"
   @challenge_id "challenge-test-1"
@@ -516,6 +519,39 @@ defmodule MPP.Methods.TempoTest do
       assert error.type =~ "verification-failed"
     end
 
+    property "rejects generated amount and recipient mismatches", %{charge: charge} do
+      check all(
+              fault <- StreamData.member_of([:amount, :recipient]),
+              wrong_amount <- StreamData.integer(1..999_999),
+              wrong_recipient <- generated_address_except(@recipient),
+              max_runs: @property_runs
+            ) do
+        receipt =
+          case fault do
+            :amount -> success_receipt(amount: wrong_amount)
+            :recipient -> success_receipt(to: wrong_recipient)
+          end
+
+        stub_receipt(receipt)
+
+        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+        assert error.detail =~ "No matching Transfer"
+      end
+    end
+
+    property "rejects generated unsupported authorization dispatch types", %{charge: charge} do
+      check all(
+              type <-
+                :alphanumeric
+                |> StreamData.string(min_length: 1, max_length: 20)
+                |> StreamData.filter(&(&1 not in Tempo.credential_types())),
+              max_runs: @property_runs
+            ) do
+        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => type}, charge)
+        assert error.type =~ "invalid-payload"
+      end
+    end
+
     test "returns error when token mismatches", %{charge: charge} do
       receipt = success_receipt(token: "0x0000000000000000000000000000000000000001")
       stub_receipt(receipt)
@@ -841,6 +877,21 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Chain ID mismatch"
+    end
+
+    property "rejects every generated non-Moderato transaction chain", %{charge: charge} do
+      check all(
+              chain_id <- 1..100_000 |> StreamData.integer() |> StreamData.filter(&(&1 != 42_431)),
+              max_runs: @property_runs
+            ) do
+        calldata = transfer_calldata(@recipient, 1_000_000)
+        tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: chain_id)
+
+        assert {:error, %Errors{} = error} =
+                 Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+        assert error.detail =~ "Chain ID mismatch"
+      end
     end
 
     test "returns error when no matching transfer call", %{charge: charge} do
@@ -3389,5 +3440,12 @@ defmodule MPP.Methods.TempoTest do
         "s" => "0x" <> Base.encode16(s_bin, case: :lower)
       }
     }
+  end
+
+  defp generated_address_except(address) do
+    [length: @evm_address_bytes]
+    |> StreamData.binary()
+    |> StreamData.map(&("0x" <> Base.encode16(&1, case: :lower)))
+    |> StreamData.filter(&(String.downcase(&1) != String.downcase(address)))
   end
 end

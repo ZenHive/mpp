@@ -128,6 +128,37 @@ defmodule MPP.VerifierPinnedPropertyTest do
         end
       end
     end
+
+    property "wrong amount in request (re-signed) returns credential_mismatch" do
+      check all(
+              amount <- StreamData.integer(1..999_999),
+              other_amount <- StreamData.integer(1..999_999)
+            ) do
+        charge = build_charge(Integer.to_string(amount), "usd")
+        tampered = build_charge(Integer.to_string(other_amount), "usd")
+
+        challenge =
+          Challenge.create(
+            [
+              realm: @realm,
+              method: "mock",
+              intent: "charge",
+              request: encode_request(tampered),
+              expires: future_expires()
+            ],
+            @secret
+          )
+
+        credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+
+        if amount == other_amount do
+          assert {:ok, _receipt} = Verifier.verify(credential, verify_opts(charge))
+        else
+          assert {:error, %Errors{type: type}} = Verifier.verify(credential, verify_opts(charge))
+          assert String.contains?(type, "credential-mismatch")
+        end
+      end
+    end
   end
 
   describe "property: HMAC corruption yields invalid_challenge, not credential_mismatch" do
