@@ -2332,7 +2332,7 @@ shipped_in = "2d06b3489ff20750c02db5a071d0d1d9f47618a3"
 id = "90"
 phase = 10
 bundle = "session"
-status = "in_progress"
+status = "done"
 title = "Stripe subscription method on the shared subscription intent"
 scores = { d = 6, b = 8, u = 5 }
 markers = ["parallel"]
@@ -2344,9 +2344,16 @@ model = "gpt-5.6-sol"
 body = """
 Task 50 shipped MPP.Intents.Subscription method-neutral so Stripe can reuse the schema, but only Tempo.Subscription implements it. Implement the Stripe subscription verify path per the provider-owned draft-stripe-subscription-00 spec (refs/mpp-specs). Live Stripe test API is the ground truth; mppx/mpp-rs are compatibility evidence. Filed from the task-50 reviewer proposal (run run-1787113998540-a26968d8).
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787125026787-c23729f0, 9bd6075b82442727fead9adb6a1f82a2c810f43b)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787125026787-c23729f0"
 created_at = "2026-08-19"
 started_at = "2026-08-19"
 scored_at = "2026-08-19"
+done_at = "2026-08-19"
+shipped_in = "9bd6075b82442727fead9adb6a1f82a2c810f43b"
 
 [[task]]
 id = "91"
