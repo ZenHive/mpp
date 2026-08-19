@@ -211,6 +211,12 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Intents.Session` | Session intent request schema (pay-as-you-go) |
+| `MPP.Session.Channel` | Session channel state, balance, and action wire mapping |
+| `MPP.Session.Payload` | Session credential payload schema (`open` / `voucher` / `topUp` / `close`) |
+| `MPP.Session.Actions` | Session credential action handlers and per-channel balance tracking |
+| `MPP.Session.Method` | `use` wrapper that dispatches `verify/2` through session actions |
+| `MPP.Session.Store` | Pluggable session-channel persistence |
+| `MPP.Session.ETSStore` | ETS-backed default session store |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |

@@ -5,6 +5,7 @@ defmodule MPP.HeadersTest do
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Headers
+  alias MPP.Methods.Tempo.SessionReceipt
   alias MPP.Receipt
 
   @secret "test-secret-key"
@@ -301,6 +302,21 @@ defmodule MPP.HeadersTest do
 
       refute String.starts_with?(header, "Payment")
       assert {:ok, _} = Base.url_decode64(header, padding: false)
+    end
+
+    test "encodes a Tempo session receipt" do
+      receipt =
+        SessionReceipt.new(
+          challenge_id: "ch_1",
+          channel_id: "0x" <> String.duplicate("11", 32),
+          accepted_cumulative: "100",
+          spent: "10"
+        )
+
+      header = Headers.format_receipt(receipt)
+      assert {:ok, parsed} = SessionReceipt.from_header(header)
+      assert parsed.channel_id == receipt.channel_id
+      assert parsed.accepted_cumulative == "100"
     end
   end
 

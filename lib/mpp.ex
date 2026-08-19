@@ -36,6 +36,12 @@ defmodule MPP do
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
+    * `MPP.Session.Channel` — Session channel state, balance, and action wire mapping
+    * `MPP.Session.Payload` — Session credential payload schema (`open` / `voucher` / `topUp` / `close`)
+    * `MPP.Session.Actions` — Session credential action handlers and per-channel balance tracking
+    * `MPP.Session.Method` — `use` wrapper that dispatches `verify/2` through session actions
+    * `MPP.Session.Store` — Pluggable session-channel persistence
+    * `MPP.Session.ETSStore` — ETS-backed default session store
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Expires` — Expiration timestamp helpers (duration offsets, assert!)

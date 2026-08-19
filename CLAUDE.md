@@ -83,6 +83,13 @@ MPP.Methods.Shared         — Internal method-verification helpers (require_con
 MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.Intents.Session        — Session intent request schema (per-unit rate, unit_type, suggested_deposit, ...)
+MPP.Session.Channel        — Session channel state, balance tracking, action wire mapping
+MPP.Session.Voucher        — EIP-712 voucher typed data and signature verification
+MPP.Session.Payload        — Session credential payload schema (open / voucher / topUp / close)
+MPP.Session.Actions        — Session credential action handlers and per-channel balance updates
+MPP.Session.Method         — use-wrapper that dispatches Method.verify/2 through session actions
+MPP.Session.Store          — Behaviour for pluggable session-channel persistence
+MPP.Session.ETSStore       — ETS-backed default session store (app-started)
 MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding
 MPP.Amount                 — Amount/decimals helpers: parse_units, with_base_units, parse_dollar_amount
 MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset: ASCII keys, no floats) for cross-SDK HMAC interop

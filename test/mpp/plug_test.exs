@@ -6,8 +6,10 @@ defmodule MPP.PlugTest do
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
+  alias MPP.Session.ETSStore
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.TempoMemoryStore
 
@@ -109,6 +111,14 @@ defmodule MPP.PlugTest do
     end
   end
 
+  defmodule MockSessionMethod do
+    @moduledoc false
+    use MPP.Session.Method
+
+    @impl MPP.Method
+    def method_name, do: "mocksession"
+  end
+
   defmodule MockTempoMethod do
     @moduledoc false
     use MPP.Method
@@ -129,6 +139,11 @@ defmodule MPP.PlugTest do
   # --- Helpers ---
 
   @secret_key "test-secret-key-for-plug"
+  @session_channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
+  @session_payer "0x1111111111111111111111111111111111111111"
+  @session_recipient "0x2222222222222222222222222222222222222222"
+  @session_token "0x3333333333333333333333333333333333333333"
+  @session_signature "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
   @base_opts [
     secret_key: @secret_key,
     realm: "api.test.com",
@@ -173,7 +188,7 @@ defmodule MPP.PlugTest do
       [
         realm: config.realm,
         method: entry.method.method_name(),
-        intent: "charge",
+        intent: config.intent,
         request: entry.request,
         expires: expires_for(config)
       ]
@@ -200,7 +215,7 @@ defmodule MPP.PlugTest do
         [
           realm: config.realm,
           method: entry.method.method_name(),
-          intent: "charge",
+          intent: config.intent,
           request: entry.request,
           expires: expires
         ],
@@ -1417,5 +1432,155 @@ defmodule MPP.PlugTest do
       refute body["type"] =~ "payment-expired"
       assert body["detail"] =~ "invalid_expires"
     end
+  end
+
+  describe "session intent endpoints" do
+    setup do
+      store_name = :"#{__MODULE__}.session.#{System.unique_integer([:positive])}"
+      start_supervised!(ETSStore.child_spec(name: store_name))
+
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          intent: "session",
+          method: MockSessionMethod,
+          amount: "10",
+          currency: @session_token,
+          recipient: @session_recipient,
+          unit_type: "request",
+          suggested_deposit: "1000",
+          session_store: {ETSStore, [name: store_name]},
+          method_config: %{
+            "deposit" => 1_000,
+            "payer" => @session_payer,
+            "token" => @session_token
+          },
+          store: false
+        )
+
+      {:ok, config: config}
+    end
+
+    test "init builds a session challenge request", %{config: config} do
+      assert config.intent == "session"
+      assert [%PaymentPlug.MethodEntry{} = entry] = config.method_entries
+      assert %Session{amount: "10", unit_type: "request"} = entry.charge
+      assert entry.method_config["session_store"]
+    end
+
+    test "raises on an unknown intent" do
+      assert_raise ArgumentError, ~r/:intent/, fn ->
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          intent: "subscription",
+          method: MockSessionMethod,
+          amount: "10",
+          currency: "usd"
+        )
+      end
+    end
+
+    test "402 challenge uses the session intent", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/stream")
+        |> call_plug(config)
+
+      assert conn.status == 402
+      {:ok, challenge} = Headers.parse_challenge(get_resp_header(conn, "www-authenticate"))
+      assert challenge.intent == "session"
+    end
+
+    test "open, voucher, topUp, and close succeed through the plug", %{config: config} do
+      open_conn = session_call(config, session_open_payload(80))
+      refute open_conn.halted
+      {:ok, open_receipt} = Headers.parse_receipt(get_resp_header(open_conn, "payment-receipt"))
+      assert open_receipt.method == "mocksession"
+      assert open_receipt.extensions["action"] == "open"
+      assert open_receipt.extensions["acceptedCumulative"] == "80"
+      assert open_receipt.extensions["spent"] == "10"
+
+      voucher_conn = session_call(config, session_voucher_payload(200))
+      refute voucher_conn.halted
+      {:ok, voucher_receipt} = Headers.parse_receipt(get_resp_header(voucher_conn, "payment-receipt"))
+      assert voucher_receipt.extensions["action"] == "voucher"
+      assert voucher_receipt.extensions["spent"] == "20"
+
+      top_up_conn = session_call(config, session_top_up_payload(100))
+      refute top_up_conn.halted
+      {:ok, top_up_receipt} = Headers.parse_receipt(get_resp_header(top_up_conn, "payment-receipt"))
+      assert top_up_receipt.extensions["action"] == "topUp"
+
+      close_conn = session_call(config, session_close_payload(200))
+      refute close_conn.halted
+      {:ok, close_receipt} = Headers.parse_receipt(get_resp_header(close_conn, "payment-receipt"))
+      assert close_receipt.extensions["action"] == "close"
+    end
+
+    test "unknown action returns 402 invalid_payload", %{config: config} do
+      conn = session_call(config, %{"action" => "bearer", "channelId" => @session_channel_id})
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "invalid-payload"
+    end
+
+    test "Accept-Payment */session keeps the session offer", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/stream")
+        |> Plug.Conn.put_req_header("accept-payment", "*/session")
+        |> call_plug(config)
+
+      {:ok, challenge} = Headers.parse_challenge(get_resp_header(conn, "www-authenticate"))
+      assert challenge.intent == "session"
+    end
+  end
+
+  defp session_call(config, payload) do
+    :get
+    |> Plug.Test.conn("/stream")
+    |> Plug.Conn.put_req_header("authorization", build_authorization_header(config, payload))
+    |> call_plug(config)
+  end
+
+  defp session_open_payload(amount) do
+    %{
+      "action" => "open",
+      "type" => "transaction",
+      "channelId" => @session_channel_id,
+      "transaction" => "0x76abcd",
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => @session_signature
+    }
+  end
+
+  defp session_voucher_payload(amount) do
+    %{
+      "action" => "voucher",
+      "channelId" => @session_channel_id,
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => @session_signature
+    }
+  end
+
+  defp session_top_up_payload(amount) do
+    %{
+      "action" => "topUp",
+      "type" => "transaction",
+      "channelId" => @session_channel_id,
+      "transaction" => "0x76abcd",
+      "additionalDeposit" => Integer.to_string(amount)
+    }
+  end
+
+  defp session_close_payload(amount) do
+    %{
+      "action" => "close",
+      "channelId" => @session_channel_id,
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => @session_signature
+    }
   end
 end

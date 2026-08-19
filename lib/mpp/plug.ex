@@ -44,6 +44,9 @@ defmodule MPP.Plug do
     * `:digest` — (optional) expected content digest for body-bound challenges
     * `:opaque` — (optional) base64url-encoded server correlation data
     * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store
+    * `:intent` — (optional) `"charge"` (default) or `"session"`
+    * `:session_store` — (optional, session intent) `MPP.Session.Store` reference;
+      defaults to the application-started `MPP.Session.ETSStore`
 
   ## Single-Method Options
 
@@ -53,6 +56,8 @@ defmodule MPP.Plug do
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
     * `:external_id` — (optional) merchant reference ID included in the challenge request
+    * `:unit_type` — (optional, session intent) rate unit, e.g. `"request"`
+    * `:suggested_deposit` — (optional, session intent) suggested channel deposit
     * `:method_config` — (optional) server-only config map for `verify/2`
 
   ## Multi-Method Options
@@ -69,8 +74,10 @@ defmodule MPP.Plug do
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.JCS
   alias MPP.Replay
+  alias MPP.Session.Store, as: SessionStore
   alias MPP.Telemetry
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -88,7 +95,7 @@ defmodule MPP.Plug do
 
     @type t :: %__MODULE__{
             method: module(),
-            charge: Charge.t(),
+            charge: Charge.t() | Session.t(),
             request: String.t(),
             method_config: map()
           }
@@ -112,11 +119,23 @@ defmodule MPP.Plug do
             expires_in: pos_integer(),
             digest: String.t() | nil,
             opaque: String.t() | nil,
-            store: module() | {module(), keyword()} | nil
+            store: module() | {module(), keyword()} | nil,
+            intent: String.t(),
+            session_store: SessionStore.store_ref() | nil
           }
 
     @enforce_keys [:secret_key, :realm, :method_entries]
-    defstruct [:secret_key, :realm, :method_entries, :expires_in, :digest, :opaque, :store]
+    defstruct [
+      :secret_key,
+      :realm,
+      :method_entries,
+      :expires_in,
+      :digest,
+      :opaque,
+      :store,
+      intent: "charge",
+      session_store: nil
+    ]
   end
 
   @doc """
@@ -129,8 +148,10 @@ defmodule MPP.Plug do
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
+    intent = validate_intent!(Keyword.get(opts, :intent, "charge"))
+    session_store = resolve_session_store(intent, Keyword.get(opts, :session_store))
     method_lists = normalize_methods(opts)
-    entries = Enum.map(method_lists, &build_method_entry/1)
+    entries = Enum.map(method_lists, &build_method_entry(&1, intent, session_store))
     validate_method_name_format!(entries)
     validate_unique_method_names!(entries)
 
@@ -141,9 +162,21 @@ defmodule MPP.Plug do
       expires_in: validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds)),
       digest: Keyword.get(opts, :digest),
       opaque: Keyword.get(opts, :opaque),
-      store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve()
+      store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve(),
+      intent: intent,
+      session_store: session_store
     }
   end
+
+  defp validate_intent!(intent) when intent in ["charge", "session"], do: intent
+
+  defp validate_intent!(_intent) do
+    raise ArgumentError, ~s(MPP.Plug: :intent must be "charge" or "session")
+  end
+
+  defp resolve_session_store("session", nil), do: SessionStore.default_store()
+  defp resolve_session_store("session", store), do: store
+  defp resolve_session_store(_intent, _store), do: nil
 
   defp validate_expires_in!(seconds) when is_integer(seconds) and seconds > 0, do: seconds
 
@@ -204,6 +237,8 @@ defmodule MPP.Plug do
             :recipient,
             :description,
             :external_id,
+            :unit_type,
+            :suggested_deposit,
             :method_config
           ])
         ]
@@ -214,19 +249,13 @@ defmodule MPP.Plug do
   end
 
   # Builds a MethodEntry from per-method keyword opts.
-  defp build_method_entry(method_opts) do
+  defp build_method_entry(method_opts, intent, session_store) do
     method = require_opt!(method_opts, :method)
     method_config = Keyword.get(method_opts, :method_config, %{})
+    method_config = put_session_store(method_config, session_store)
     method.validate_config!(method_config)
 
-    {:ok, charge} =
-      Charge.new(
-        amount: require_opt!(method_opts, :amount),
-        currency: require_opt!(method_opts, :currency),
-        recipient: Keyword.get(method_opts, :recipient),
-        description: Keyword.get(method_opts, :description),
-        external_id: Keyword.get(method_opts, :external_id)
-      )
+    {:ok, charge} = build_pricing_intent(intent, method_opts)
 
     # Pass method_config via charge.method_details so challenge_method_details
     # can read config (e.g., network_id) and return public-facing fields only
@@ -240,7 +269,7 @@ defmodule MPP.Plug do
 
     request =
       charge
-      |> Charge.to_request()
+      |> intent_to_request()
       |> JCS.canonicalize()
       |> Base.url_encode64(padding: false)
 
@@ -251,6 +280,35 @@ defmodule MPP.Plug do
       method_config: method_config
     }
   end
+
+  defp put_session_store(method_config, nil), do: method_config
+
+  defp put_session_store(method_config, session_store) do
+    Map.put_new(method_config, "session_store", session_store)
+  end
+
+  defp build_pricing_intent("charge", method_opts) do
+    Charge.new(
+      amount: require_opt!(method_opts, :amount),
+      currency: require_opt!(method_opts, :currency),
+      recipient: Keyword.get(method_opts, :recipient),
+      description: Keyword.get(method_opts, :description),
+      external_id: Keyword.get(method_opts, :external_id)
+    )
+  end
+
+  defp build_pricing_intent("session", method_opts) do
+    Session.new(
+      amount: require_opt!(method_opts, :amount),
+      currency: require_opt!(method_opts, :currency),
+      recipient: Keyword.get(method_opts, :recipient),
+      unit_type: Keyword.get(method_opts, :unit_type),
+      suggested_deposit: Keyword.get(method_opts, :suggested_deposit)
+    )
+  end
+
+  defp intent_to_request(%Charge{} = charge), do: Charge.to_request(charge)
+  defp intent_to_request(%Session{} = session), do: Session.to_request(session)
 
   # Validates that every method name matches the spec ABNF
   # `payment-method-id = 1*LOWERALPHA`. Challenge parsing (this library's own
@@ -409,9 +467,12 @@ defmodule MPP.Plug do
       end
 
     AcceptPayment.apply_header(method_entries, header, fn entry ->
-      {entry.method.method_name(), "charge"}
+      {entry.method.method_name(), intent_name(entry.charge)}
     end)
   end
+
+  defp intent_name(%Charge{}), do: "charge"
+  defp intent_name(%Session{}), do: "session"
 
   # Generates a fresh challenge for a specific method entry. Public (but
   # undocumented) so the MCP server adapter (`MPP.Mcp`) can reuse the exact same
@@ -423,7 +484,7 @@ defmodule MPP.Plug do
       [
         realm: config.realm,
         method: entry.method.method_name(),
-        intent: "charge",
+        intent: config.intent,
         request: entry.request
       ]
       |> maybe_add(:expires, compute_expires(config.expires_in))

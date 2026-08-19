@@ -30,7 +30,8 @@ defmodule MPP.Verifier do
     * `:secret_key` — (required) HMAC-SHA256 key for challenge verification
     * `:realm` — (required) expected server protection space
     * `:method` — (required) module implementing `MPP.Method`
-    * `:charge` — (required) `MPP.Intents.Charge.t()` for this endpoint
+    * `:charge` — (required) `MPP.Intents.Charge.t()` or `MPP.Intents.Session.t()`
+      for this endpoint. `:intent` is accepted as an alias.
     * `:method_config` — (optional) server-only config map, default `%{}`
     * `:digest` — (optional) expected endpoint digest value
     * `:opaque` — (optional) expected endpoint opaque value
@@ -52,6 +53,7 @@ defmodule MPP.Verifier do
   alias MPP.Credential
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.JCS
   alias MPP.Receipt
   alias MPP.Telemetry
@@ -59,8 +61,6 @@ defmodule MPP.Verifier do
   require Logger
 
   @verification_failed_detail "Payment verification failed"
-
-  @expected_intent "charge"
 
   api(:verify, "Verify a payment credential against endpoint configuration. Transport-neutral.",
     params: [
@@ -90,7 +90,7 @@ defmodule MPP.Verifier do
     secret_key = require_opt!(opts, :secret_key)
     realm = require_opt!(opts, :realm)
     method = require_opt!(opts, :method)
-    charge = require_opt!(opts, :charge)
+    charge = Keyword.get(opts, :intent) || require_opt!(opts, :charge)
     method_config = Keyword.get(opts, :method_config, %{})
     digest = Keyword.get(opts, :digest)
     opaque = Keyword.get(opts, :opaque)
@@ -107,7 +107,7 @@ defmodule MPP.Verifier do
     result =
       with :ok <- verify_tier1(credential.challenge, secret_key, realm),
            :ok <- verify_pinned_fields(credential.challenge, method, realm, charge, digest, opaque),
-           :ok <- check_credential_type(credential, method),
+           :ok <- check_credential_type(credential, method, charge),
            {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
         {:ok, receipt}
       else
@@ -168,7 +168,7 @@ defmodule MPP.Verifier do
   # endpoint configuration. Matches mpp-rs `verify_pinned_fields/2` semantics.
   defp verify_pinned_fields(challenge, method_module, expected_realm, charge, expected_digest, expected_opaque) do
     with :ok <- check_method_match(challenge, method_module),
-         :ok <- check_intent_match(challenge, @expected_intent),
+         :ok <- check_intent_match(challenge, expected_intent(charge)),
          :ok <- check_realm_match(challenge, expected_realm),
          :ok <- check_opaque_match(challenge, expected_opaque),
          {:ok, request} <- decode_credential_request(challenge),
@@ -180,8 +180,8 @@ defmodule MPP.Verifier do
     end
   end
 
-  defp pinning_detail(:intent_mismatch, challenge, _charge) do
-    "Credential intent '#{challenge.intent}' does not match this route's requirements (expected '#{@expected_intent}')"
+  defp pinning_detail(:intent_mismatch, challenge, charge) do
+    "Credential intent '#{challenge.intent}' does not match this route's requirements (expected '#{expected_intent(charge)}')"
   end
 
   defp pinning_detail(:method_mismatch, challenge, _charge) do
@@ -223,6 +223,10 @@ defmodule MPP.Verifier do
   # `credential_types/0` before `method.verify/2`; `type="hash"` additionally
   # requires the structural hash payload (parse lives on Credential). Untyped
   # payloads are not gated.
+  defp check_credential_type(%Credential{payload: %{"action" => _action}}, _method, %Session{}), do: :ok
+
+  defp check_credential_type(credential, method, _intent), do: check_credential_type(credential, method)
+
   defp check_credential_type(%Credential{payload: %{"type" => type} = payload}, method) when is_binary(type) do
     cond do
       type not in method.credential_types() ->
@@ -271,31 +275,37 @@ defmodule MPP.Verifier do
     end
   end
 
+  defp expected_intent(%Charge{}), do: "charge"
+  defp expected_intent(%Session{}), do: "session"
+
+  defp intent_to_request(%Charge{} = charge), do: Charge.to_request(charge)
+  defp intent_to_request(%Session{} = session), do: Session.to_request(session)
+
   defp check_request_match(%Challenge{request: request}, charge) do
     expected =
       charge
-      |> Charge.to_request()
+      |> intent_to_request()
       |> JCS.canonicalize()
       |> Base.url_encode64(padding: false)
 
     if request == expected, do: :ok, else: {:error, :request_mismatch}
   end
 
-  defp check_request_currency(%{"currency" => currency}, %Charge{currency: expected}) do
+  defp check_request_currency(%{"currency" => currency}, %{currency: expected}) do
     if currency == expected, do: :ok, else: {:error, :currency_mismatch}
   end
 
   defp check_request_currency(_request, _charge), do: {:error, :currency_mismatch}
 
-  defp check_request_recipient(%{"recipient" => recipient}, %Charge{recipient: expected}) when is_binary(expected) do
+  defp check_request_recipient(%{"recipient" => recipient}, %{recipient: expected}) when is_binary(expected) do
     if recipient == expected, do: :ok, else: {:error, :recipient_mismatch}
   end
 
-  defp check_request_recipient(_request, %Charge{recipient: nil}), do: :ok
+  defp check_request_recipient(_request, %{recipient: nil}), do: :ok
 
-  defp check_request_recipient(_request, %Charge{recipient: _}), do: {:error, :recipient_mismatch}
+  defp check_request_recipient(_request, %{recipient: _}), do: {:error, :recipient_mismatch}
 
-  defp check_request_chain_id(request, %Charge{method_details: %{"chainId" => expected}}) do
+  defp check_request_chain_id(request, %{method_details: %{"chainId" => expected}}) do
     actual = get_in(request, ["methodDetails", "chainId"])
     actual_str = chain_id_string(actual)
 

@@ -93,9 +93,63 @@ defmodule MPP.Session.ChannelTest do
       assert {:error, :cumulative_amount_exceeds_deposit} =
                Channel.new(Keyword.merge(channel_opts(), deposit: 1, cumulative_amount: 2))
 
+      assert {:error, :spent_exceeds_cumulative} =
+               Channel.new(Keyword.merge(channel_opts(), cumulative_amount: 1, spent: 2))
+
       assert_raise ArgumentError, fn ->
         Channel.new!(Keyword.put(channel_opts(), :payer, "invalid"))
       end
+    end
+  end
+
+  describe "balance tracking" do
+    test "tracks available voucher balance and remaining deposit" do
+      channel = Channel.new!(Keyword.merge(channel_opts(), cumulative_amount: 400, spent: 150))
+
+      assert Channel.available_balance(channel) == 250
+      assert Channel.remaining_deposit(channel) == 999_600
+    end
+
+    test "apply_voucher raises the ceiling and activates an open channel" do
+      open = Channel.new!(channel_opts())
+
+      assert {:ok, active} = Channel.apply_voucher(open, 250)
+      assert active.status == :active
+      assert active.cumulative_amount == 250
+
+      assert {:ok, ^active} = Channel.apply_voucher(active, 250)
+      assert {:error, :voucher_not_monotonic} = Channel.apply_voucher(active, 100)
+      assert {:error, :amount_exceeds_deposit} = Channel.apply_voucher(active, 2_000_000)
+    end
+
+    test "apply_top_up increases deposit and apply_spend consumes authorized balance" do
+      {:ok, channel} = channel_opts() |> Channel.new!() |> Channel.apply_voucher(200)
+
+      assert {:ok, topped} = Channel.apply_top_up(channel, 50)
+      assert topped.deposit == 1_000_050
+
+      assert {:ok, spent} = Channel.apply_spend(topped, 80)
+      assert spent.spent == 80
+      assert spent.units == 1
+      assert Channel.available_balance(spent) == 120
+      assert {:error, :insufficient_balance} = Channel.apply_spend(spent, 121)
+    end
+
+    test "rejects balance mutations on a closed channel" do
+      {:ok, closed} = channel_opts() |> Channel.new!() |> Channel.activate() |> elem(1) |> Channel.close()
+
+      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_voucher(closed, 1)
+      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_top_up(closed, 1)
+      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_spend(closed, 1)
+    end
+
+    test "rejects non-integer balance mutations and treats a zero spend as a no-op" do
+      channel = Channel.new!(channel_opts())
+
+      assert {:error, {:invalid_amount, :cumulative_amount}} = Channel.apply_voucher(channel, "1")
+      assert {:error, {:invalid_amount, :additional_deposit}} = Channel.apply_top_up(channel, 0)
+      assert {:error, {:invalid_amount, :spent}} = Channel.apply_spend(channel, -1)
+      assert {:ok, ^channel} = Channel.apply_spend(channel, 0)
     end
   end
 

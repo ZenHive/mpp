@@ -38,6 +38,7 @@ defmodule MPP.Headers do
   alias MPP.Challenge
   alias MPP.Credential
   alias MPP.Headers.SchemeSplitter
+  alias MPP.Methods.Tempo.SessionReceipt
   alias MPP.Receipt
 
   @payment_scheme "Payment"
@@ -218,9 +219,13 @@ defmodule MPP.Headers do
     composes_with: [:parse_receipt]
   )
 
-  @spec format_receipt(Receipt.t()) :: String.t()
+  @spec format_receipt(Receipt.t() | SessionReceipt.t()) :: String.t()
   def format_receipt(%Receipt{} = receipt) do
     Receipt.encode(receipt)
+  end
+
+  def format_receipt(%SessionReceipt{} = receipt) do
+    SessionReceipt.to_header(receipt)
   end
 
   api(:parse_receipt, "Parse a `Payment-Receipt` header value into a receipt struct.",

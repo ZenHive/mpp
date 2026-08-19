@@ -39,17 +39,31 @@ defmodule MPP.Session.Channel do
           token: String.t(),
           deposit: non_neg_integer(),
           cumulative_amount: non_neg_integer(),
+          spent: non_neg_integer(),
+          units: non_neg_integer(),
           status: status()
         }
 
   @enforce_keys [:channel_id, :payer, :recipient, :token, :deposit]
-  defstruct [:channel_id, :payer, :recipient, :token, :deposit, cumulative_amount: 0, status: :open]
+  defstruct [
+    :channel_id,
+    :payer,
+    :recipient,
+    :token,
+    :deposit,
+    cumulative_amount: 0,
+    spent: 0,
+    units: 0,
+    status: :open
+  ]
 
   @doc "Create validated channel state in the `:open` status."
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   def new(opts) when is_list(opts) do
     deposit = Keyword.get(opts, :deposit)
     cumulative_amount = Keyword.get(opts, :cumulative_amount, 0)
+    spent = Keyword.get(opts, :spent, 0)
+    units = Keyword.get(opts, :units, 0)
 
     with {:ok, channel_id} <- normalize_id(Keyword.get(opts, :channel_id)),
          {:ok, payer} <- normalize_address(Keyword.get(opts, :payer), :payer),
@@ -57,7 +71,9 @@ defmodule MPP.Session.Channel do
          {:ok, token} <- normalize_address(Keyword.get(opts, :token), :token),
          :ok <- validate_amount(deposit, :deposit),
          :ok <- validate_amount(cumulative_amount, :cumulative_amount),
-         :ok <- validate_balance(deposit, cumulative_amount) do
+         :ok <- validate_amount(spent, :spent),
+         :ok <- validate_amount(units, :units),
+         :ok <- validate_balance(deposit, cumulative_amount, spent) do
       {:ok,
        %__MODULE__{
          channel_id: channel_id,
@@ -65,7 +81,9 @@ defmodule MPP.Session.Channel do
          recipient: recipient,
          token: token,
          deposit: deposit,
-         cumulative_amount: cumulative_amount
+         cumulative_amount: cumulative_amount,
+         spent: spent,
+         units: units
        }}
     end
   end
@@ -90,6 +108,68 @@ defmodule MPP.Session.Channel do
   def close(%__MODULE__{status: :active} = channel), do: {:ok, %{channel | status: :closed}}
 
   def close(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :closed}}
+
+  @doc "Authorized-but-unspent voucher balance (`cumulative_amount - spent`)."
+  @spec available_balance(t()) :: non_neg_integer()
+  def available_balance(%__MODULE__{cumulative_amount: cumulative_amount, spent: spent}) do
+    cumulative_amount - spent
+  end
+
+  @doc "Unvouchered remainder of the on-channel deposit (`deposit - cumulative_amount`)."
+  @spec remaining_deposit(t()) :: non_neg_integer()
+  def remaining_deposit(%__MODULE__{deposit: deposit, cumulative_amount: cumulative_amount}) do
+    deposit - cumulative_amount
+  end
+
+  @doc "Raise the accepted cumulative voucher amount. Equal amounts are idempotent."
+  @spec apply_voucher(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_voucher(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_voucher(%__MODULE__{} = channel, amount) when is_integer(amount) and amount >= 0 do
+    cond do
+      amount > channel.deposit ->
+        {:error, :amount_exceeds_deposit}
+
+      amount < channel.cumulative_amount ->
+        {:error, :voucher_not_monotonic}
+
+      true ->
+        channel
+        |> Map.put(:cumulative_amount, amount)
+        |> maybe_activate()
+    end
+  end
+
+  def apply_voucher(_channel, _amount), do: {:error, {:invalid_amount, :cumulative_amount}}
+
+  @doc "Increase the channel deposit by a positive additional amount."
+  @spec apply_top_up(t(), pos_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_top_up(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_top_up(%__MODULE__{} = channel, amount) when is_integer(amount) and amount > 0 do
+    {:ok, %{channel | deposit: channel.deposit + amount}}
+  end
+
+  def apply_top_up(_channel, _amount), do: {:error, {:invalid_amount, :additional_deposit}}
+
+  @doc "Deduct a per-request spend from the authorized voucher balance."
+  @spec apply_spend(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_spend(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_spend(%__MODULE__{} = channel, 0), do: {:ok, channel}
+
+  def apply_spend(%__MODULE__{} = channel, amount) when is_integer(amount) and amount > 0 do
+    if available_balance(channel) >= amount do
+      {:ok, %{channel | spent: channel.spent + amount, units: channel.units + 1}}
+    else
+      {:error, :insufficient_balance}
+    end
+  end
+
+  def apply_spend(_channel, _amount), do: {:error, {:invalid_amount, :spent}}
+
+  defp maybe_activate(%__MODULE__{status: :open} = channel), do: activate(channel)
+  defp maybe_activate(%__MODULE__{} = channel), do: {:ok, channel}
 
   @doc "Compute the legacy contract-backed channel ID from its identity fields."
   @spec compute_id(id_params() | keyword()) :: {:ok, String.t()} | {:error, term()}
@@ -188,8 +268,13 @@ defmodule MPP.Session.Channel do
   defp validate_amount(value, _field) when is_integer(value) and value >= 0, do: :ok
   defp validate_amount(_value, field), do: {:error, {:invalid_amount, field}}
 
-  defp validate_balance(deposit, cumulative_amount) when cumulative_amount <= deposit, do: :ok
-  defp validate_balance(_deposit, _cumulative_amount), do: {:error, :cumulative_amount_exceeds_deposit}
+  defp validate_balance(deposit, cumulative_amount, spent)
+       when cumulative_amount <= deposit and spent <= cumulative_amount, do: :ok
+
+  defp validate_balance(deposit, cumulative_amount, _spent) when cumulative_amount > deposit,
+    do: {:error, :cumulative_amount_exceeds_deposit}
+
+  defp validate_balance(_deposit, _cumulative_amount, _spent), do: {:error, :spent_exceeds_cumulative}
 
   defp validate_chain_id(chain_id) when is_integer(chain_id) and chain_id >= 0 and chain_id <= @max_chain_id, do: :ok
 

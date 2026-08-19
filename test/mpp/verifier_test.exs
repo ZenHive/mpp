@@ -6,9 +6,11 @@ defmodule MPP.VerifierTest do
   alias MPP.Errors
   # --- Mock Methods (no Plug dependency) ---
   alias MPP.Intents.Charge
+  alias MPP.Intents.Session
   alias MPP.JCS
   alias MPP.Methods.Stripe
   alias MPP.Receipt
+  alias MPP.Session.ETSStore
   alias MPP.Verifier
 
   defmodule MockMethod do
@@ -102,9 +104,44 @@ defmodule MPP.VerifierTest do
     charge
   end
 
-  defp encode_request(charge) do
+  defp build_session(overrides \\ []) do
+    opts =
+      Keyword.merge(
+        [
+          amount: "10",
+          currency: "0x3333333333333333333333333333333333333333",
+          recipient: "0x2222222222222222222222222222222222222222"
+        ],
+        overrides
+      )
+
+    {:ok, session} = Session.new(opts)
+    session
+  end
+
+  defp build_session_credential(session, payload) do
+    params = [
+      realm: @realm,
+      method: "mocksession",
+      intent: "session",
+      request: encode_request(session),
+      expires: future_expires()
+    ]
+
+    challenge = Challenge.create(params, @secret_key)
+    %Credential{challenge: challenge, payload: payload}
+  end
+
+  defp encode_request(%Charge{} = charge) do
     charge
     |> Charge.to_request()
+    |> JCS.canonicalize()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp encode_request(%Session{} = session) do
+    session
+    |> Session.to_request()
     |> JCS.canonicalize()
     |> Base.url_encode64(padding: false)
   end
@@ -211,6 +248,14 @@ defmodule MPP.VerifierTest do
     end
   end
 
+  defmodule MockSessionMethod do
+    @moduledoc false
+    use MPP.Session.Method
+
+    @impl MPP.Method
+    def method_name, do: "mocksession"
+  end
+
   describe "verify/2 intent mismatch" do
     test "session intent credential rejected on charge endpoint" do
       # Build a credential with intent: "session" instead of "charge"
@@ -232,6 +277,49 @@ defmodule MPP.VerifierTest do
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert String.contains?(error.type, "credential-mismatch")
       assert String.contains?(error.detail, "intent 'session'")
+    end
+
+    test "charge intent credential rejected on session endpoint" do
+      session = build_session()
+      credential = build_credential(method_name: "mocksession")
+      opts = verify_opts(method: MockSessionMethod, charge: session)
+
+      assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
+      assert String.contains?(error.type, "credential-mismatch")
+      assert String.contains?(error.detail, "intent 'charge'")
+    end
+
+    test "session credential is accepted on a session endpoint" do
+      store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
+      start_supervised!(ETSStore.child_spec(name: store_name))
+      session = build_session()
+
+      payload = %{
+        "action" => "open",
+        "type" => "transaction",
+        "channelId" => "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e",
+        "transaction" => "0x76abcd",
+        "cumulativeAmount" => "80",
+        "signature" =>
+          "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
+      }
+
+      credential = build_session_credential(session, payload)
+
+      opts =
+        verify_opts(
+          method: MockSessionMethod,
+          charge: session,
+          method_config: %{
+            "session_store" => {ETSStore, [name: store_name]},
+            "deposit" => 1_000,
+            "payer" => "0x1111111111111111111111111111111111111111",
+            "token" => "0x3333333333333333333333333333333333333333"
+          }
+        )
+
+      assert {:ok, %Receipt{} = receipt} = Verifier.verify(credential, opts)
+      assert receipt.extensions["action"] == "open"
     end
   end
 
