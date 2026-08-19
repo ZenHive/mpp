@@ -3914,6 +3914,8 @@
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
       "acceptance_criteria": [
         "`MPP.Mcp.capabilities/1` takes an `MPP.Plug.Config.t()` and returns the payment capability map for the MCP `initialize` response",
         "Methods sourced from `config.method_entries`, intents from `config.intent`, credential types from `method.credential_types/0`",
@@ -3944,6 +3946,8 @@
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "A `:nested` call whose handler returns a non-map result (string, list, number) returns a well-formed JSON-RPC response instead of raising",
         "Regression test covers `:nested` with each non-map result type, asserting no FunctionClauseError after a successful payment",
