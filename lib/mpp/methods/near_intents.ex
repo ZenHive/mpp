@@ -29,7 +29,11 @@ defmodule MPP.Methods.NearIntents do
     * `"one_click_url"` — optional API base URL
     * `"one_click_jwt"` — optional partner JWT; never exposed in challenges
     * `"origin_rpc_url"` — optional EVM origin RPC URL
-    * `"store"` — optional atomic store; defaults to `MPP.Tempo.ConCacheStore`
+    * `"origin_req_options"` — optional Req options for origin RPC
+    * `"poll_timeout_ms"` — optional settlement poll ceiling
+    * `"poll_interval_ms"` — optional status poll interval
+    * `"store"` — optional atomic store implementing `MPP.Tempo.Store.update/3`;
+      defaults to `MPP.Tempo.ConCacheStore`
   """
 
   use MPP.Method
@@ -124,11 +128,11 @@ defmodule MPP.Methods.NearIntents do
       "destinationRecipient" => config["destination_recipient"],
       "amountOut" => config["amount_out"],
       "minAmountIn" => config["min_amount_in"],
-      "depositMemo" => config["deposit_memo"],
       "refundTo" => config["refund_to"],
       "settlementBackend" => "near-intents",
       "credentialTypes" => credential_types()
     }
+    |> maybe_put("depositMemo", config["deposit_memo"])
     |> maybe_put("slippageTolerance", config["slippage_tolerance"])
     |> maybe_put("timeEstimate", config["time_estimate"])
   end

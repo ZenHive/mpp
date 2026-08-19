@@ -42,27 +42,7 @@ defmodule MPP.Methods.NearIntentsIntegrationTest do
   @refund_store :near_intents_live_refund_store
 
   setup_all do
-    rpc_url = System.get_env("ETHEREUM_API_URL")
-
-    if is_nil(rpc_url) or rpc_url == "" do
-      flunk("""
-      Missing NEAR Intents origin RPC configuration!
-
-      Set the archive-node endpoint:
-        export ETHEREUM_API_URL="http://localhost:8545"
-
-      Ensure the blockwatch-one RPC tunnel is running, then run:
-        mix test.json test/mpp/methods/near_intents_integration_test.exs --include integration
-
-      The 1Click status and quote endpoints require no credential. For a
-      fee-free partner quote, optionally set:
-        export NEAR_INTENTS_ONE_CLICK_JWT="<JWT from NEAR Intents>"
-
-      Obtain partner access at: https://partners.near-intents.org
-      """)
-    end
-
-    {:ok, rpc_url: rpc_url}
+    {:ok, rpc_url: System.get_env("ETHEREUM_API_URL")}
   end
 
   test "requests a real executable EXACT_OUTPUT quote" do
@@ -107,6 +87,24 @@ defmodule MPP.Methods.NearIntentsIntegrationTest do
   end
 
   test "verifies a real successful settlement through 1Click and origin RPC", %{rpc_url: rpc_url} do
+    if is_nil(rpc_url) or rpc_url == "" do
+      flunk("""
+      Missing NEAR Intents origin RPC configuration!
+
+      Set the archive-node endpoint:
+        export ETHEREUM_API_URL="http://localhost:8545"
+
+      Ensure the blockwatch-one RPC tunnel is running, then run:
+        mix test.json test/mpp/methods/near_intents_integration_test.exs --include integration
+
+      The 1Click status and quote endpoints require no credential. For a
+      fee-free partner quote, optionally set:
+        export NEAR_INTENTS_ONE_CLICK_JWT="<JWT from NEAR Intents>"
+
+      Obtain partner access at: https://partners.near-intents.org
+      """)
+    end
+
     charge = success_charge(rpc_url)
 
     assert {:ok, %Receipt{} = receipt} = verify(charge, @success_hash)

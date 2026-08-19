@@ -651,6 +651,7 @@ MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Cred
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
+MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor gas-economics policy: bounds client gas fields before fee-payer co-sign (anti-drain)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false

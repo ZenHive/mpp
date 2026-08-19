@@ -23,6 +23,8 @@
 #   EVM_PRIVATE_KEY         Generic EVM funded key (falls back to Sepolia if unset)
 #   SOLANA_RPC_URL          Solana JSON-RPC (devnet: https://api.devnet.solana.com)
 #   SOLANA_PRIVATE_KEY      Funded Ed25519 seed (hex, base58, or Solana CLI JSON)
+#   ETHEREUM_API_URL        Ethereum mainnet archive RPC (NEAR Intents origin receipts)
+#   NEAR_INTENTS_ONE_CLICK_JWT  Optional 1Click partner JWT for fee-free quotes
 #
 # This job is deliberately NOT a required status check: harness lands approved
 # runs by ff-pushing straight to `main`, and a required check would block
@@ -61,6 +63,8 @@ jobs:
       EVM_PRIVATE_KEY: ${{ secrets.EVM_PRIVATE_KEY }}
       SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
       SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+      ETHEREUM_API_URL: ${{ secrets.ETHEREUM_API_URL }}
+      NEAR_INTENTS_ONE_CLICK_JWT: ${{ secrets.NEAR_INTENTS_ONE_CLICK_JWT }}
     steps:
       - uses: actions/checkout@v7
 

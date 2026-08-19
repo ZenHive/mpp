@@ -2,7 +2,7 @@ defmodule MPP.Methods.Shared do
   @moduledoc """
   Verification helpers shared by the payment-method modules
   (`MPP.Methods.EVM`, `MPP.Methods.Tempo`, `MPP.Methods.Stripe`,
-  `MPP.Methods.Solana`).
+  `MPP.Methods.Solana`, `MPP.Methods.NearIntents`).
 
   These are small, method-agnostic building blocks. `require_config/3` takes a
   human-readable method `label` so its error message names the calling method.

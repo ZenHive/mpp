@@ -37,7 +37,8 @@ following especially seriously:
   challenge forgery, constant-time-comparison bypass, realm/expiry/request-match gaps.
 - Credential parsing and challenge-echo validation (`MPP.Credential`).
 - Payment-method verification (`MPP.Methods.Stripe`, `MPP.Methods.Tempo`,
-  `MPP.Methods.EVM`) — accepting an unconfirmed, underpaid, or replayed payment.
+  `MPP.Methods.EVM`, `MPP.Methods.Solana`, `MPP.Methods.NearIntents`) —
+  accepting an unconfirmed, underpaid, or replayed payment.
 - Wire-format and canonicalization (`MPP.JCS`, `MPP.BodyDigest`, `MPP.Headers`,
   `MPP.Receipt`) — encoding/canonicalization mismatches that break cross-SDK HMAC interop.
 - Fee-payer gas-economics policy (`MPP.Methods.Tempo.FeePayerPolicy`) — sponsor

@@ -38,6 +38,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 - `MPP.Receipt` preserves method-specific top-level fields (`extensions`) and
   optional `subscriptionId` through decode → encode (mpp-rs #383 / mppx
   `looseObject`).
+- `MPP.Methods.NearIntents` for hash-only NEAR Intents charges via the 1Click
+  Swap API and optional EVM origin RPC. `quote/1` mints a wet `EXACT_OUTPUT`
+  quote; verification waits for destination `SUCCESS` and retires both the
+  origin hash and the single-use deposit address.
+- RFC 9457 problem types `:settlement_failed` (402), `:settlement_unavailable`
+  (503), and `:settlement_timeout` (504) for terminal settlement, backend
+  outage, and poll timeout.
 
 ### Changed
 

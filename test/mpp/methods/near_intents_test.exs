@@ -62,13 +62,18 @@ defmodule MPP.Methods.NearIntentsTest do
       refute Map.has_key?(details, "one_click_jwt")
       refute Map.has_key?(details, "origin_rpc_url")
       refute Map.has_key?(details, "store")
+      refute Map.has_key?(details, "depositMemo")
 
       charge =
         update_in(charge.method_details, fn config ->
-          Map.merge(config, %{"slippage_tolerance" => 75, "time_estimate" => 120})
+          Map.merge(config, %{
+            "slippage_tolerance" => 75,
+            "time_estimate" => 120,
+            "deposit_memo" => "memo-79"
+          })
         end)
 
-      assert %{"slippageTolerance" => 75, "timeEstimate" => 120} =
+      assert %{"slippageTolerance" => 75, "timeEstimate" => 120, "depositMemo" => "memo-79"} =
                NearIntents.challenge_method_details(charge)
     end
 

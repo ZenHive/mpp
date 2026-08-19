@@ -108,7 +108,8 @@ defmodule MPP.MixProject do
     """
     Elixir implementation of the Machine Payments Protocol (MPP) — HTTP 402
     payment middleware for AI agents and machine-to-machine commerce. Supports
-    Stripe, Tempo, generic EVM, and Solana payment methods with pluggable architecture.
+    Stripe, Tempo, generic EVM, Solana, and NEAR Intents payment methods with
+    pluggable architecture.
     """
   end
 

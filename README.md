@@ -139,7 +139,30 @@ Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address
 
 ### NEAR Intents (1Click)
 
-Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
+Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). A configured `"store"` must implement atomic `MPP.Tempo.Store.update/3`. There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
+
+```elixir
+{:ok, quote} =
+  MPP.Methods.NearIntents.quote(%{
+    "origin_asset" => "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "origin_asset_id" => "nep141:eth-usdt.omft.near",
+    "destination_asset" => "tron:mainnet/trc20:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+    "destination_asset_id" => "nep141:tron-usdt.omft.near",
+    "destination_recipient" => "TJ4FU4NFMqFDtcLYxFnJvfv3rWfLN9vCB7",
+    "amount_out" => "1000000",
+    "refund_to" => "0x...",
+    "deadline" => deadline
+  })
+
+plug MPP.Plug,
+  secret_key: "your-hmac-secret",
+  realm: "api.example.com",
+  method: MPP.Methods.NearIntents,
+  amount: quote.amount,
+  currency: quote.currency,
+  recipient: quote.recipient,
+  method_config: quote.method_config
+```
 
 **Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
