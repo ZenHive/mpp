@@ -2344,3 +2344,46 @@ Task 50 shipped MPP.Intents.Subscription method-neutral so Stripe can reuse the 
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
+
+[[task]]
+id = "91"
+phase = 10
+bundle = "session"
+status = "pending"
+title = "Release Tempo subscription activation claims after failed settlement"
+scores = { d = 6, b = 8, u = 7 }
+markers = ["parallel"]
+depends_on = [50]
+acceptance_criteria = ["A retryable activation settlement failure (broadcast/RPC error or reverted first-period transfer) does not permanently consume the activation credential", "A confirmed activation that did not credit the recipient still cannot be retried with the same credential", "Unit tests cover retry after revert and keep-blocked after a missed recipient, matching the renewal claim policy", "Live Moderato: one successful retry after a forced retryable activation failure, and one relevant non-retryable rejection; missing credentials flunk with exact export instructions"]
+touches = ["lib/mpp/methods/tempo/subscription.ex", "test/mpp/methods/tempo/subscription_test.exs", "test/mpp/methods/tempo/subscription_integration_test.exs"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+Activation currently claims the Tempo dedup key before broadcast (`claim_activation/2` in `MPP.Methods.Tempo.Subscription`). Renewal already releases its in-flight claim on retryable failures (broadcast, simulate, revert) and keeps the claim when a confirmed transfer misses the recipient. Activation has no matching release: a reverted or RPC-failed first period burns `type="keyAuthorization"` so the client cannot retry. Evidence: `lib/mpp/methods/tempo/subscription.ex` `activate/4` claims then broadcasts; `test/mpp/methods/tempo/subscription_test.exs` covers reverted activation not persisting a record but does not assert the credential remains reusable.
+
+Orchestrator decisions (resolved 2026-08-19):
+- Release the claim ONLY on failures that prove non-inclusion: pre-broadcast validation/simulate rejections and confirmed reverts. On an ambiguous broadcast/transport error where the node may have included the tx, KEEP the claim held (fail-safe against double settlement) — same policy renewal follows.
+- Gate release on `MPP.Tempo.Store.update_capable?/1` (v0.13.0). For stores that only implement `check_and_mark/2`, keep the claim held and surface a documented, actionable error telling the operator the store cannot release activation claims; do not invent a second claim mechanism.
+
+Authority: live Moderato settlement plus the existing renewal claim policy in this module. Reference SDKs are compatibility evidence only.
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
+
+[[task]]
+id = "92"
+phase = 17
+bundle = "transport-ws"
+status = "pending"
+title = "WebSocket session metering: needVoucher loop and voucher-in-flight latch"
+scores = { d = 6, b = 6, u = 4 }
+depends_on = [48]
+acceptance_criteria = ["The server adapter can run a metered session over the typed frames from Task 48: deduct per tick, emit needVoucher, wait for the voucher credential, emit a session receipt (parity with refs/mpp-rs src/server/ws_session.rs)", "The client retry loop refuses a second voucher pay while one is in flight (parity with alloy-transport-mpp ws.rs handle_text NeedVoucher: second NeedVoucher while in flight is fatal)", "E2E loopback test covers needVoucher, then voucher, then resume, plus the second-in-flight fatal case", "mix precommit.full green"]
+touches = ["lib/mpp/transports/websocket.ex", "lib/mpp/transports/websocket/", "lib/mpp/client/transport/websocket/", "test/mpp/transports/websocket/", "test/mpp/client/transport/"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+Task 48 shipped the charge handshake over WebSocket. mpp-rs additionally drives session top-ups over the same socket: a needVoucher frame requests the next voucher, a second NeedVoucher while a voucher is in flight is fatal, and a voucher send sets credential_awaiting_receipt. Our code only builds need_voucher_frame/1; Retry has no voucher-in-flight event and Transports.WebSocket does not run the metering loop. Authority: refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs (~L934-960) and refs/mpp-rs/src/server/ws_session.rs as the protocol-in-practice reference, cross-checked with the transport spec. Filed from the task-48 reviewer proposal (run run-1787120716249-bc01b1bb).
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
