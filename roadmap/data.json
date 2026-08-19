@@ -1698,7 +1698,7 @@
       "id": 48,
       "phase": 17,
       "bundle": "transport-ws",
-      "status": "pending",
+      "status": "in_progress",
       "title": "WebSocket transport binding",
       "scores": {
         "d": 5,
@@ -1728,6 +1728,7 @@
       ],
       "body": "Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS with payment challenges riding on subscription handshakes, and a client-side `MPP.Client.Transport` impl for WS. Read the current WS transport in `refs/mpp-rs` (server-side WS handler and the `alloy-transport-mpp` crate) at implementation time to confirm framing, error codes, challenge placement, and retry/backoff semantics (upstream has hardened against retry amplification — match that posture).\n\nIntegrate cleanly with the existing `MPP.Client.Transport` behaviour from Task 33b. The server adapter should be transport-agnostic w.r.t. the underlying WS library (consumers bring their own — Cowboy, Bandit, etc.).\n",
       "created_at": "2026-05-16",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },

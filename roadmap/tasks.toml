@@ -1339,7 +1339,7 @@ scored_at = "2026-05-16"
 id = 48
 phase = 17
 bundle = "transport-ws"
-status = "pending"
+status = "in_progress"
 title = "WebSocket transport binding"
 scores = { d = 5, b = 8, u = 7 }
 acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match the MPP transport specification; reference SDKs are compatibility evidence", "Retry/backoff posture matches upstream and a dropped/rejected connection does not amplify payment retries", "End-to-end integration test uses an actual local WebSocket client/server connection for successful pay-and-retry plus a relevant protocol/connection error; mock-only coverage is insufficient"]
@@ -1352,6 +1352,7 @@ Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS wit
 Integrate cleanly with the existing `MPP.Client.Transport` behaviour from Task 33b. The server adapter should be transport-agnostic w.r.t. the underlying WS library (consumers bring their own — Cowboy, Bandit, etc.).
 """
 created_at = "2026-05-16"
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 [[task]]
