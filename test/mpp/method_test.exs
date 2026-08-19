@@ -104,7 +104,7 @@ defmodule MPP.MethodTest do
     end
 
     test "Solana declares transaction and signature" do
-      assert MPP.Methods.Solana.credential_types() == ["transaction", "signature"]
+      assert MPP.Methods.Solana.credential_types() == ["transaction", "signature", "bundle"]
     end
 
     test "NearIntents declares hash only" do

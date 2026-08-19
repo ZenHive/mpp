@@ -5,7 +5,7 @@ defmodule MPP.Methods.Solana do
   @moduledoc """
   Solana payment method — verifies native SOL and SPL token charge payments.
 
-  Two credential types are supported, matching `draft-solana-charge-00`:
+  Three credential types are supported, matching `draft-solana-charge-00`:
 
     * `type="transaction"` (pull, default) — the client sends signed legacy
       transaction bytes; the server optionally co-signs as fee payer, simulates,
@@ -13,6 +13,9 @@ defmodule MPP.Methods.Solana do
     * `type="signature"` (push) — the client broadcasts the transaction and
       sends the confirmed signature; the server fetches it via RPC and matches
       the transfer against the charge.
+    * `type="bundle"` (confidential) — the client sends ordered proof setup,
+      Token-2022 confidential transfer, and proof close transactions. The
+      server confirms the encrypted amount with its recipient ElGamal key.
 
   ## Configuration
 
@@ -52,6 +55,11 @@ defmodule MPP.Methods.Solana do
       without waiting for confirmation. Default `true`
     * `"max_compute_unit_limit"` / `"max_compute_unit_price"` — (optional)
       fee-payer ceilings for compute-budget instructions
+    * `"confidential"` — (optional) enables the Token-2022 confidential profile
+    * `"recipient_elgamal_secret_key"` — (required for confidential) base64
+      canonical scalar for the recipient confidential token account
+    * `"max_bundle_transactions"` — (optional) confidential bundle bound;
+      defaults to 8
 
   ## Credential Payload
 
@@ -59,6 +67,8 @@ defmodule MPP.Methods.Solana do
       transaction bytes (max 1232 decoded)
     * `"type" => "signature"`, `"signature" => "<base58>"` — confirmed
       transaction signature
+    * `"type" => "bundle"`, `"transactions" => ["<base64>", ...]` — ordered
+      confidential transaction bundle
 
   ## Currency
 
@@ -82,6 +92,7 @@ defmodule MPP.Methods.Solana do
   alias MPP.Hex
   alias MPP.Intents.Charge
   alias MPP.Methods.Shared
+  alias MPP.Methods.Solana.Confidential
   alias MPP.Methods.Solana.Instructions
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -98,6 +109,7 @@ defmodule MPP.Methods.Solana do
   @solana_rpc_error_detail "Solana RPC request failed"
   @zero_amount_detail "Zero-amount challenges are not supported for Solana credentials"
   @signature_bytes 64
+  @default_max_bundle_transactions 8
 
   api(:method_name, "Return the payment method identifier for Solana.")
 
@@ -105,11 +117,11 @@ defmodule MPP.Methods.Solana do
   @spec method_name() :: String.t()
   def method_name, do: "solana"
 
-  api(:credential_types, "Return the Solana charge payload types: transaction and signature.")
+  api(:credential_types, "Return the Solana charge payload types: transaction, signature, and bundle.")
 
   @impl MPP.Method
   @spec credential_types() :: [String.t()]
-  def credential_types, do: ~w(transaction signature)
+  def credential_types, do: ~w(transaction signature bundle)
 
   api(
     :validate_config!,
@@ -131,7 +143,7 @@ defmodule MPP.Methods.Solana do
     end
 
     validate_network!(config["network"])
-    validate_confidential!(config)
+    Confidential.validate_config!(config)
     validate_store!(config["store"])
     validate_fee_payer!(config)
     Instructions.validate_splits_config!(config["splits"])
@@ -143,7 +155,7 @@ defmodule MPP.Methods.Solana do
       payload: [
         kind: :value,
         description:
-          ~s{Credential payload map with `"type"` (`"transaction"` or `"signature"`) and the corresponding proof field}
+          ~s{Credential payload map with `"type"` (`"transaction"`, `"signature"`, or `"bundle"`) and the corresponding proof field}
       ],
       charge: [
         kind: :value,
@@ -160,6 +172,7 @@ defmodule MPP.Methods.Solana do
     config = charge.method_details || %{}
 
     with :ok <- reject_zero_amount(charge),
+         :ok <- reject_non_bundle_when_confidential(config),
          :ok <- reject_signature_when_fee_payer(config) do
       verify_signature_credential(payload, charge, config)
     end
@@ -168,13 +181,27 @@ defmodule MPP.Methods.Solana do
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- reject_zero_amount(charge) do
+    with :ok <- reject_zero_amount(charge),
+         :ok <- reject_non_bundle_when_confidential(config) do
       verify_transaction_credential(payload, charge, config)
     end
   end
 
+  def verify(%{"type" => "bundle"} = payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+
+    with :ok <- reject_zero_amount(charge),
+         :ok <- require_confidential(config) do
+      verify_bundle_credential(payload, charge, config)
+    end
+  end
+
   def verify(_payload, %Charge{}) do
-    {:error, Errors.new(:invalid_payload, ~s(Missing or invalid 'type' field — expected "transaction" or "signature"))}
+    {:error,
+     Errors.new(
+       :invalid_payload,
+       ~s(Missing or invalid 'type' field — expected "transaction", "signature", or "bundle")
+     )}
   end
 
   api(
@@ -197,10 +224,11 @@ defmodule MPP.Methods.Solana do
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
     fee_payer? = fee_payer_enabled?(config)
+    :ok = Confidential.validate_charge!(charge, config)
 
     details = %{
       "network" => network(config),
-      "credentialTypes" => credential_types(),
+      "credentialTypes" => challenge_credential_types(config),
       "feePayer" => fee_payer?
     }
 
@@ -209,6 +237,7 @@ defmodule MPP.Methods.Solana do
     |> maybe_put_token_program(charge, config)
     |> maybe_put_fee_payer_key(config, fee_payer?)
     |> maybe_put_splits(config)
+    |> maybe_put_confidential(config)
   end
 
   # --- signature (push) ---
@@ -247,6 +276,90 @@ defmodule MPP.Methods.Solana do
          :ok <- commit_signature_used(store, signature) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
+  end
+
+  # --- confidential bundle ---
+
+  defp verify_bundle_credential(payload, charge, config) do
+    store = Store.resolve(config["store"])
+    max_transactions = config["max_bundle_transactions"] || @default_max_bundle_transactions
+
+    with {:ok, transactions} <- extract_bundle(payload, max_transactions),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Solana"),
+         :ok <- require_recipient(charge),
+         :ok <- verify_bundle_signatures(transactions, config),
+         :ok <- Confidential.verify_bundle(transactions, charge, max_transactions, instruction_opts(charge, config)),
+         {:ok, transactions} <- cosign_bundle(transactions, config),
+         {:ok, signature} <- transactions |> List.last() |> transaction_signature(),
+         :ok <- check_signature_unused(store, signature),
+         {:ok, previous} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
+         {:ok, ^signature} <- settle_bundle(transactions, rpc_url, config),
+         {:ok, confirmed} <- fetch_transaction(signature, rpc_url, config),
+         :ok <- Confidential.verify_confirmed(confirmed),
+         {:ok, current} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
+         :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]),
+         :ok <- commit_signature_used(store, signature) do
+      {:ok,
+       Receipt.new(
+         method: "solana",
+         reference: signature,
+         external_id: charge.external_id,
+         extensions: %{"delivery" => "pending"}
+       )}
+    end
+  end
+
+  defp extract_bundle(%{"transactions" => transactions}, max_transactions)
+       when is_list(transactions) and transactions != [] and length(transactions) <= max_transactions do
+    transactions
+    |> Enum.reduce_while({:ok, []}, fn encoded, {:ok, decoded} ->
+      case extract_transaction(%{"transaction" => encoded}) do
+        {:ok, transaction} -> {:cont, {:ok, [transaction | decoded]}}
+        {:error, _error} = failure -> {:halt, failure}
+      end
+    end)
+    |> case do
+      {:ok, transactions} -> {:ok, Enum.reverse(transactions)}
+      {:error, _error} = failure -> failure
+    end
+  end
+
+  defp extract_bundle(_payload, _max_transactions) do
+    {:error, Errors.new(:invalid_payload, "Missing, empty, or oversized 'transactions' field in bundle payload")}
+  end
+
+  defp verify_bundle_signatures(transactions, config) do
+    Enum.reduce_while(transactions, :ok, fn transaction, :ok ->
+      case verify_signatures(transaction, config) do
+        :ok -> {:cont, :ok}
+        {:error, _error} = failure -> {:halt, failure}
+      end
+    end)
+  end
+
+  defp cosign_bundle(transactions, config) do
+    transactions
+    |> Enum.reduce_while({:ok, []}, fn transaction, {:ok, signed} ->
+      case maybe_cosign_fee_payer(transaction, config) do
+        {:ok, transaction} -> {:cont, {:ok, [transaction | signed]}}
+        {:error, _error} = failure -> {:halt, failure}
+      end
+    end)
+    |> case do
+      {:ok, transactions} -> {:ok, Enum.reverse(transactions)}
+      {:error, _error} = failure -> failure
+    end
+  end
+
+  defp settle_bundle(transactions, rpc_url, config) do
+    Enum.reduce_while(transactions, {:ok, nil}, fn transaction, {:ok, _last_signature} ->
+      with :ok <- simulate_transaction(transaction, rpc_url, config),
+           {:ok, signature} <- broadcast_transaction(transaction, rpc_url, config, true) do
+        {:cont, {:ok, signature}}
+      else
+        {:error, _error} = failure -> {:halt, failure}
+      end
+    end)
   end
 
   defp extract_transaction(%{"transaction" => encoded}) when is_binary(encoded) do
@@ -474,6 +587,10 @@ defmodule MPP.Methods.Solana do
 
   defp maybe_put_splits(details, _config), do: details
 
+  defp maybe_put_confidential(details, %{"confidential" => true}), do: Map.put(details, "confidential", true)
+
+  defp maybe_put_confidential(details, _config), do: details
+
   # --- config / keys ---
 
   defp network(%{"network" => network}) when network in @networks, do: network
@@ -482,6 +599,26 @@ defmodule MPP.Methods.Solana do
   defp fee_payer_enabled?(%{"fee_payer" => true}), do: true
   defp fee_payer_enabled?(%{"feePayer" => true}), do: true
   defp fee_payer_enabled?(_config), do: false
+
+  defp challenge_credential_types(config) do
+    if Confidential.enabled?(config), do: ["bundle"], else: ~w(transaction signature)
+  end
+
+  defp reject_non_bundle_when_confidential(config) do
+    if Confidential.enabled?(config) do
+      {:error, Errors.new(:invalid_payload, ~s(type="bundle" is required when confidential is true))}
+    else
+      :ok
+    end
+  end
+
+  defp require_confidential(config) do
+    if Confidential.enabled?(config) do
+      :ok
+    else
+      {:error, Errors.new(:invalid_payload, ~s(type="bundle" is allowed only when confidential is true))}
+    end
+  end
 
   defp reject_signature_when_fee_payer(config) do
     if fee_payer_enabled?(config) do
@@ -643,13 +780,6 @@ defmodule MPP.Methods.Solana do
     raise ArgumentError,
           "MPP.Methods.Solana network must be one of #{Enum.join(@networks, ", ")}; got: #{inspect(network)}"
   end
-
-  defp validate_confidential!(%{"confidential" => true}) do
-    raise ArgumentError,
-          "MPP.Methods.Solana does not implement confidential transfers; omit confidential from method_config"
-  end
-
-  defp validate_confidential!(_config), do: :ok
 
   defp validate_fee_payer!(config) do
     if fee_payer_enabled?(config) do

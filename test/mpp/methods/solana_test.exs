@@ -132,8 +132,8 @@ defmodule MPP.Methods.SolanaTest do
   end
 
   describe "credential_types/0" do
-    test "accepts transaction and signature" do
-      assert Solana.credential_types() == ["transaction", "signature"]
+    test "accepts transaction, signature, and bundle" do
+      assert Solana.credential_types() == ["transaction", "signature", "bundle"]
     end
   end
 
@@ -154,8 +154,8 @@ defmodule MPP.Methods.SolanaTest do
       end
     end
 
-    test "raises on confidential transfers" do
-      assert_raise ArgumentError, ~r/confidential/, fn ->
+    test "raises on incomplete confidential config" do
+      assert_raise ArgumentError, ~r/token_program/, fn ->
         Solana.validate_config!(%{"rpc_url" => @rpc_url, "confidential" => true})
       end
     end

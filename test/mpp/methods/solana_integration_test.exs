@@ -6,6 +6,10 @@ defmodule MPP.Methods.SolanaIntegrationTest do
     * `SOLANA_RPC_URL` (or `SOLANA_DEVNET_RPC_URL`) — JSON-RPC endpoint
     * `SOLANA_PRIVATE_KEY` — funded Ed25519 seed as hex, base58, or Solana CLI JSON
 
+  Confidential-transfer tests additionally require the live Token-2022 mint,
+  recipient, recipient ElGamal key, and fresh signed bundles listed in their
+  setup failure message.
+
   Run with: `mix test test/mpp/methods/solana_integration_test.exs --include integration`
   """
 
@@ -24,6 +28,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
   @lamports 1_000
   @airdrop_lamports 1_000_000_000
   @confirmation_timeout_ms 30_000
+  @token_2022_program "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 
   setup_all do
     rpc_url = System.get_env("SOLANA_RPC_URL") || System.get_env("SOLANA_DEVNET_RPC_URL")
@@ -137,6 +142,36 @@ defmodule MPP.Methods.SolanaIntegrationTest do
     assert is_binary(receipt.reference)
   end
 
+  describe "confidential bundle profile" do
+    setup :put_confidential_context
+
+    test "settles a real Token-2022 confidential transfer bundle", context do
+      charge = confidential_charge(context)
+
+      assert {:ok, %Receipt{} = receipt} =
+               Solana.verify(
+                 %{"type" => "bundle", "transactions" => context.confidential_success_bundle},
+                 charge
+               )
+
+      assert receipt.method == "solana"
+      assert receipt.extensions == %{"delivery" => "pending"}
+      assert {:ok, <<_::binary-64>>} = Cartouche.Base58.decode(receipt.reference)
+    end
+
+    test "rejects a real confidential bundle whose credited amount differs", context do
+      charge = confidential_charge(context)
+
+      assert {:error, %MPP.Errors{} = error} =
+               Solana.verify(
+                 %{"type" => "bundle", "transactions" => context.confidential_wrong_amount_bundle},
+                 charge
+               )
+
+      assert error.detail =~ "recipient account balance delta"
+    end
+  end
+
   defp sol_charge(context, recipient) do
     {:ok, charge} =
       Charge.new(
@@ -164,6 +199,110 @@ defmodule MPP.Methods.SolanaIntegrationTest do
             "fee_payer_private_key" => Base.encode16(context.fee_payer_seed, case: :lower)
           })
     }
+  end
+
+  defp put_confidential_context(context) do
+    names = ~w(
+      SOLANA_CONFIDENTIAL_MINT
+      SOLANA_CONFIDENTIAL_RECIPIENT
+      SOLANA_CONFIDENTIAL_ELGAMAL_SECRET_KEY
+      SOLANA_CONFIDENTIAL_AMOUNT
+      SOLANA_CONFIDENTIAL_DECIMALS
+      SOLANA_CONFIDENTIAL_SUCCESS_BUNDLE_JSON
+      SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON
+    )
+
+    values = Map.new(names, &{&1, System.get_env(&1)})
+
+    if Enum.any?(values, fn {_name, value} -> is_nil(value) or value == "" end) do
+      flunk(confidential_setup_message())
+    end
+
+    {:ok,
+     Map.merge(context, %{
+       confidential_mint: values["SOLANA_CONFIDENTIAL_MINT"],
+       confidential_recipient: values["SOLANA_CONFIDENTIAL_RECIPIENT"],
+       confidential_secret: values["SOLANA_CONFIDENTIAL_ELGAMAL_SECRET_KEY"],
+       confidential_amount: values["SOLANA_CONFIDENTIAL_AMOUNT"],
+       confidential_decimals: parse_confidential_decimals!(values["SOLANA_CONFIDENTIAL_DECIMALS"]),
+       confidential_success_bundle:
+         decode_bundle!(values["SOLANA_CONFIDENTIAL_SUCCESS_BUNDLE_JSON"], "SOLANA_CONFIDENTIAL_SUCCESS_BUNDLE_JSON"),
+       confidential_wrong_amount_bundle:
+         decode_bundle!(
+           values["SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON"],
+           "SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON"
+         )
+     })}
+  end
+
+  defp confidential_charge(context) do
+    {:ok, charge} =
+      Charge.new(
+        amount: context.confidential_amount,
+        currency: context.confidential_mint,
+        recipient: context.confidential_recipient
+      )
+
+    %{
+      charge
+      | method_details: %{
+          "rpc_url" => context.rpc_url,
+          "network" => "devnet",
+          "decimals" => context.confidential_decimals,
+          "token_program" => @token_2022_program,
+          "confidential" => true,
+          "recipient_elgamal_secret_key" => context.confidential_secret,
+          "fee_payer" => true,
+          "fee_payer_private_key" => Base.encode16(context.payer_seed, case: :lower),
+          "store" => false
+        }
+    }
+  end
+
+  defp decode_bundle!(encoded, name) do
+    case Jason.decode(encoded) do
+      {:ok, transactions} when is_list(transactions) and transactions != [] and is_binary(hd(transactions)) ->
+        transactions
+
+      _other ->
+        flunk("#{name} must be a non-empty JSON array of base64 signed transactions")
+    end
+  end
+
+  defp parse_confidential_decimals!(value) do
+    case Integer.parse(value) do
+      {decimals, ""} when decimals in 0..9 -> decimals
+      _other -> flunk("SOLANA_CONFIDENTIAL_DECIMALS must be an integer from 0 to 9")
+    end
+  end
+
+  defp confidential_setup_message do
+    """
+    Missing Solana confidential-transfer devnet fixtures!
+
+    Configure a Token-2022 confidential-transfer mint and recipient account,
+    then export the recipient's own ElGamal secret and two fresh fee-sponsored
+    bundles. The second bundle must transfer a different amount than the
+    challenged SOLANA_CONFIDENTIAL_AMOUNT:
+
+      export SOLANA_CONFIDENTIAL_MINT="<Token-2022 confidential mint>"
+      export SOLANA_CONFIDENTIAL_RECIPIENT="<recipient wallet address>"
+      export SOLANA_CONFIDENTIAL_ELGAMAL_SECRET_KEY="<base64 32-byte recipient secret>"
+      export SOLANA_CONFIDENTIAL_AMOUNT="<success amount in base units>"
+      export SOLANA_CONFIDENTIAL_DECIMALS="<mint decimals, 0-9>"
+      export SOLANA_CONFIDENTIAL_SUCCESS_BUNDLE_JSON='["<base64 setup tx>","<base64 transfer tx>"]'
+      export SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON='["<base64 setup tx>","<base64 transfer tx>"]'
+
+    Both bundles must use the SOLANA_PRIVATE_KEY public key as fee payer, leave
+    its signature slot empty, return all proof-account rent to it, and use a
+    current devnet blockhash. Regenerate both bundles before every run.
+
+    Setup guide:
+      https://solana.com/docs/tokens/extensions/confidential-transfer
+
+    Then run:
+      mix test test/mpp/methods/solana_integration_test.exs --include integration
+    """
   end
 
   defp fund_fee_payer!(context) do

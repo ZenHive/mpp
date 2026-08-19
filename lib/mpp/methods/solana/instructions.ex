@@ -81,6 +81,12 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
+  @doc false
+  @spec verify_compute_budget([classified()], map()) :: :ok | {:error, Errors.t()}
+  def verify_compute_budget(classified, opts) when is_list(classified) and is_map(opts) do
+    check_compute_budget(classified, opts)
+  end
+
   @doc """
   Enforce the pull-mode instruction allow-list, ATA policy, and compute-budget
   ceilings, then match payment legs against the challenge.
@@ -90,7 +96,7 @@ defmodule MPP.Methods.Solana.Instructions do
     with {:ok, classified} <- map_classify_error(classify_compiled(tx)),
          :ok <- reject_disallowed_kinds(classified, charge),
          :ok <- reject_non_idempotent_ata(classified),
-         :ok <- check_compute_budget(classified, opts),
+         :ok <- verify_compute_budget(classified, opts),
          :ok <- check_ata_policy(classified, charge, opts),
          :ok <- reject_fee_payer_source(classified, opts) do
       match_payment_legs(classified, charge, opts)
