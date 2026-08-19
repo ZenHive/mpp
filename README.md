@@ -228,6 +228,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Client.Req` | Payment-aware Req plugin — 402 detect, pay, retry (`attach/2`) |
 | `MPP.Client.Transport` | Client transport behaviour — 402 detection, challenge fetch, credential attach |
 | `MPP.Client.Transport.HTTP` | HTTP transport over `Req` |
+| `MPP.Client.Transport.MCP` | MCP/JSON-RPC transport: `-32042` detection, challenge extract, `_meta` credential attach |
+| `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay, retry the tool call once |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |
 
 ## Installation

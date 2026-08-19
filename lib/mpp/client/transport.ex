@@ -12,7 +12,8 @@ defmodule MPP.Client.Transport do
 
   This is the transport-shaped glue that sits between the provider-side
   `MPP.Client.PaymentProvider` abstraction and whatever concrete client (Req,
-  an MCP JSON-RPC client, etc.) is actually issuing requests.
+  an MCP JSON-RPC client, etc.) is actually issuing requests. HTTP is
+  `MPP.Client.Transport.HTTP`; JSON-RPC/MCP is `MPP.Client.Transport.MCP`.
 
   ## Callbacks
 

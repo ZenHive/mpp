@@ -47,6 +47,7 @@ defmodule MPP do
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
+    * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, retry once)
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
     * `MPP.Discovery.OpenApi` — OpenAPI 3.1.0 payment discovery generation
     * `MPP.Discovery.PaymentInfo` — x-payment-info parsing and normalization
