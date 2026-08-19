@@ -6,6 +6,14 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- The payment-security mutation campaign runs nightly and through
+  `workflow_dispatch` via `.github/workflows/mutation-security.yml`, while
+  remaining outside `mix ci` / `mix precommit.full`.
+
 ## [0.14.0] — 2026-08-19
 
 ### Added
