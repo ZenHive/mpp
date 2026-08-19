@@ -92,7 +92,7 @@
 > 1 task complete (v0.2.0). Multiple payment methods per endpoint with per-method pricing and credential routing.
 
 <!-- TASKS:BEGIN phase=6 -->
-> 1 task. See [CHANGELOG.md](CHANGELOG.md#phase-6-multi-method-challenges).
+> 2 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-6-multi-method-challenges).
 <!-- TASKS:END -->
 
 ---

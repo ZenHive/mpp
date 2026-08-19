@@ -3849,6 +3849,47 @@
       "verified_by": "cursor",
       "verification_ref": "harness-run:run-1787143475109-5e2b6677",
       "cross_repo": []
+    },
+    {
+      "id": "97",
+      "phase": 6,
+      "bundle": "stripe",
+      "status": "pending",
+      "title": "Stripe subscription lifecycle conformance: deleted-event revocation and stale invoice voiding",
+      "scores": {
+        "d": 5,
+        "b": 7,
+        "u": 5
+      },
+      "eff": 1.2,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "Live Stripe test: deleting a subscription plus a duplicate deleted event is idempotent, and a later paid cycle invoice for a post-deletion period is not recorded",
+        "Live test-clock: an unpaid cycle invoice is voided/uncollectible before the next period begins, and a later paid webhook for that invoice is not recorded",
+        "Unit tests cover the record marking, idempotency, and rejection paths with fixtures derived from observed live payloads",
+        "mix check.dispatch green; MPP.Methods.Stripe.Subscription coverage stays >= 95%"
+      ],
+      "out_of_scope": [
+        "Webhook transport/endpoint plumbing beyond what MPP exposes today",
+        "Tempo subscription lifecycle (separate method)"
+      ],
+      "touches": [
+        "lib/mpp/methods/stripe/subscription.ex",
+        "lib/mpp/subscription/record.ex",
+        "test/mpp/methods/stripe_test.exs",
+        "test/mpp/methods/stripe_integration_test.exs"
+      ],
+      "body": "Task 96 shipped durable Stripe subscription state, canonical-period renewal accounting, and cancel/2 — but two normative behaviors from draft-stripe-subscription-00 remain (run run-1787143475109-5e2b6677 review evidence):\n\n1. Stripe-initiated cancellation: treat `customer.subscription.deleted` (and equivalent cancellation state) as revocation for future renewals. After webhook authenticity checks, mark the matching method-neutral subscription record so `process_invoice` rejects periods whose start is at or after the deletion — without deleting the record. Duplicate deleted events must be idempotent.\n\n2. Stale invoice collection: if a renewal invoice is still unpaid when a later canonical period begins, drive the Stripe invoice to a non-collectible state (void / mark uncollectible / disable automatic collection) so a late Stripe retry cannot collect a closed period. Local `process_invoice` already rejects non-consecutive and already-charged periods; this task closes the Stripe-side hole.\n\nAuthority: Stripe live test API (test clocks) + draft-stripe-subscription-00 in refs/mpp-specs. Missing STRIPE_SECRET_KEY must flunk with exact export instructions, never skip.\n",
+      "created_at": "2026-08-19",
+      "scored_at": "2026-08-19",
+      "cross_repo": []
     }
   ]
 }
