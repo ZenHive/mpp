@@ -414,8 +414,8 @@ Try it and [open an issue](https://github.com/ZenHive/mpp/issues) if anything br
 
 ## Continuous Integration
 
-Two GitHub Actions workflows gate the repo (Elixir/OTP pinned via `.tool-versions`,
-so CI never drifts from local `mix format`):
+GitHub Actions workflows (Elixir/OTP pinned via `.tool-versions`, so CI never
+drifts from local `mix format`):
 
 - **CI** (`.github/workflows/ci.yml`) — runs on every push/PR to `development` and
   `main`: format check, `--warnings-as-errors` compile, Credo strict, Doctor,
@@ -433,7 +433,12 @@ so CI never drifts from local `mix format`):
   | `ETH_SEPOLIA_RPC_URL` / `ETH_SEPOLIA_PRIVATE_KEY` | Sepolia RPC + funded key |
   | `EVM_RPC_URL` / `EVM_PRIVATE_KEY` | Generic EVM RPC + funded key (falls back to Sepolia) |
 
-A third workflow, **Code Scanning** (`.github/workflows/code-scanning.yml`), uploads
+- **Mutation security** (`.github/workflows/mutation-security.yml`) — nightly
+  and `workflow_dispatch` only (not on PRs). Runs `mix mutation.security`, which
+  applies each payment-security mutant, compiles it, and runs its tests. A
+  surviving canary fails the job. Kept out of `mix ci` / `mix precommit.full`.
+
+A further workflow, **Code Scanning** (`.github/workflows/code-scanning.yml`), uploads
 Sobelow findings to the Security → Code scanning tab (CodeQL has no Elixir support).
 Security vulnerabilities should be reported privately — see [SECURITY.md](SECURITY.md).
 

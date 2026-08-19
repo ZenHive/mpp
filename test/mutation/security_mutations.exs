@@ -219,6 +219,25 @@ defmodule MPP.Test.SecurityMutationCampaign do
     end
   end
 
+  @spec validate_results([map()], map()) :: :ok | {:error, term()}
+  def validate_results(results, ledger) do
+    expected =
+      ledger
+      |> get_in(["campaign", "mutations"])
+      |> Map.new(&{&1["id"], &1["status"]})
+
+    survivors = Enum.filter(results, &(&1.status == "survived"))
+    invalid = Enum.filter(results, &(expected[&1.id] != &1.status))
+    surviving_canaries = Enum.filter(survivors, & &1.canary)
+
+    cond do
+      surviving_canaries != [] -> {:error, {:surviving_canaries, Enum.map(surviving_canaries, & &1.id)}}
+      survivors != [] -> {:error, {:unclassified_survivors, Enum.map(survivors, & &1.id)}}
+      invalid != [] -> {:error, {:ledger_result_mismatch, invalid}}
+      true -> :ok
+    end
+  end
+
   defp create_sandbox(root) do
     sandbox = Path.join(System.tmp_dir!(), "mpp-security-mutation-#{System.unique_integer([:positive])}")
     File.mkdir_p!(sandbox)
@@ -313,24 +332,6 @@ defmodule MPP.Test.SecurityMutationCampaign do
       {output, _status} ->
         IO.puts("KILLED #{mutation.id}")
         {:ok, %{id: mutation.id, status: "killed", output: tail(output), canary: mutation.canary}}
-    end
-  end
-
-  defp validate_results(results, ledger) do
-    expected =
-      ledger
-      |> get_in(["campaign", "mutations"])
-      |> Map.new(&{&1["id"], &1["status"]})
-
-    survivors = Enum.filter(results, &(&1.status == "survived"))
-    invalid = Enum.filter(results, &(expected[&1.id] != &1.status))
-    surviving_canaries = Enum.filter(survivors, & &1.canary)
-
-    cond do
-      surviving_canaries != [] -> {:error, {:surviving_canaries, Enum.map(surviving_canaries, & &1.id)}}
-      survivors != [] -> {:error, {:unclassified_survivors, Enum.map(survivors, & &1.id)}}
-      invalid != [] -> {:error, {:ledger_result_mismatch, invalid}}
-      true -> :ok
     end
   end
 

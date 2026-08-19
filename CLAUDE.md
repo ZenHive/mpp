@@ -42,6 +42,7 @@ mix ex_dna --max-clones 0          # clone detection (folded into precommit.full
 mix reach.check --arch --smells --path lib   # architecture/smell checks (folded into precommit.full)
 mix deps.audit.gated               # advisory-freshness proof + deps.audit (folded into precommit.full)
 mix ci                             # canonical gate = mix precommit.full (see "Toolchain & check commands")
+mix mutation.security              # payment-security mutant campaign (nightly CI; not in mix ci)
 ```
 
 ## Toolchain & check commands
@@ -55,6 +56,7 @@ For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's
 - **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
 - When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
 - Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules. Excluded from the gate does not mean unexecuted: both tiers run nightly in their own workflows (`.github/workflows/integration.yml`, `.github/workflows/cross-validation.yml`), which supply the credentials and JS toolchain the gate deliberately does without.
+- **`mix mutation.security`** is the executable payment-security mutant campaign (sandbox, apply, compile `--force`, run tests). It is not part of `mix ci` / `mix precommit.full`. The default suite only checks that each mutant still applies once and that the checked-in ledger says they were killed. The campaign itself runs nightly via `.github/workflows/mutation-security.yml` (and `workflow_dispatch`, not on every PR); a surviving canary (`canonical-ordering`, `pinned-fields`, `authorization-dispatch`) fails the job.
 
 ## Architecture
 

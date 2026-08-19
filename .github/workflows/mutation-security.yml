@@ -1,0 +1,70 @@
+# Payment-security mutation campaign (`mix mutation.security`).
+#
+# Task 82 shipped the campaign and a checked-in kill ledger, but the default
+# suite only asserts each mutant still applies exactly once and that the ledger
+# JSON already says they were killed. Source can drift so a mutant survives
+# without the lander-facing gate noticing. This workflow is where the
+# executable campaign actually runs: sandbox the tree, apply each mutant,
+# compile --force, run that mutant's tests. A surviving canary
+# (canonical-ordering, pinned-fields, or authorization-dispatch) exits 1.
+#
+# Kept out of `mix ci` / `mix precommit.full` on purpose — the campaign is
+# minutes of per-mutant recompiles, not a lander-facing check. Same split as
+# integration.yml and cross-validation.yml: excluded from the default gate,
+# executed on a real cadence. Needs NO repo secrets.
+#
+# This job is deliberately NOT a required status check and does NOT run on
+# pull_request: harness lands approved runs by ff-pushing straight to `main`,
+# and a required check (or a PR trigger) would either block those pushes or
+# fold this campaign into the lander-facing gate it is meant to stay out of.
+
+name: Mutation security
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # nightly 04:00 UTC, ahead of cross-validation and integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation-security:
+    name: Mutation security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps & _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-elixir${{ steps.beam.outputs.elixir-version }}-
+
+      - run: mix deps.get
+
+      - name: Compile
+        run: mix compile
+
+      # The mix task is the executable campaign (apply + compile --force + test),
+      # not the ledger-only assertions in test/mutation/security_campaign_test.exs.
+      # Deps/_build cache is fine; a surviving canary still fails this step.
+      - name: Payment-security mutation campaign
+        run: mix mutation.security
