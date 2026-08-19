@@ -97,6 +97,50 @@ defmodule MPP.Discovery.OpenApiTest do
       assert document["paths"]["/search"]["get"]["responses"]["402"] == %{"description" => "Payment Required"}
     end
 
+    test "omits x-payment-info and 402 for unpaid GET routes alongside paid POSTs" do
+      # Matches mppx createDocument / generateProxy: 402 and x-payment-info only
+      # when route.payment is truthy (wevm/mppx src/discovery/OpenApi.ts).
+      # draft-payment-discovery-00 §4.4: only payable operations MUST carry them.
+      document =
+        OpenApi.generate(
+          info: %{title: "Mixed API", version: "1.0.0"},
+          routes: [
+            [method: :get, path: "/resource"],
+            [
+              method: :post,
+              path: "/resource",
+              payment: %{"intent" => "charge", "method" => "tempo", "amount" => "100"}
+            ],
+            [method: :get, path: "/health", payment: nil],
+            %{
+              "method" => "post",
+              "path" => "/search",
+              "payment" => %{"intent" => "charge", "method" => "stripe", "amount" => "50"}
+            }
+          ]
+        )
+
+      assert_openapi_3_1_0(document)
+
+      unpaid = %{"responses" => %{"200" => %{"description" => "Successful response"}}}
+      assert document["paths"]["/resource"]["get"] == unpaid
+      assert document["paths"]["/health"]["get"] == unpaid
+
+      paid_same_path = document["paths"]["/resource"]["post"]
+      assert paid_same_path["responses"]["402"] == %{"description" => "Payment Required"}
+
+      assert paid_same_path["x-payment-info"]["offers"] == [
+               %{"intent" => "charge", "method" => "tempo", "amount" => "100"}
+             ]
+
+      paid_other_path = document["paths"]["/search"]["post"]
+      assert paid_other_path["responses"]["402"] == %{"description" => "Payment Required"}
+
+      assert paid_other_path["x-payment-info"]["offers"] == [
+               %{"intent" => "charge", "method" => "stripe", "amount" => "50"}
+             ]
+    end
+
     test "accepts Elixir atom-key and keyword-list payment and service_info" do
       document =
         OpenApi.generate(
@@ -211,6 +255,27 @@ defmodule MPP.Discovery.OpenApiTest do
   defp assert_service_error(config, service_info, message) do
     assert_raise ArgumentError, message, fn ->
       OpenApi.generate(Keyword.put(config, :service_info, service_info))
+    end
+  end
+
+  defp assert_openapi_3_1_0(document) do
+    assert document["openapi"] == "3.1.0"
+    assert is_binary(document["info"]["title"])
+    assert is_binary(document["info"]["version"])
+    assert map_size(document["paths"]) > 0
+    assert {:ok, _json} = Jason.encode(document)
+
+    for {path, path_item} <- document["paths"], {method, operation} <- path_item do
+      assert String.starts_with?(path, "/")
+      assert method in ~w(delete get head options patch post put trace)
+      assert %{"200" => %{"description" => description}} = operation["responses"]
+      assert is_binary(description)
+
+      if Map.has_key?(operation, "x-payment-info") do
+        assert operation["responses"]["402"] == %{"description" => "Payment Required"}
+      else
+        refute Map.has_key?(operation["responses"], "402")
+      end
     end
   end
 end

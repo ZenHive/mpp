@@ -3,8 +3,10 @@ defmodule MPP.Discovery.OpenApi do
   Generates OpenAPI 3.1.0 discovery documents for MPP-enabled HTTP operations.
 
   The input is a keyword list or map containing `:info`, `:routes`, and optional
-  `:service_info`. Payment metadata may use either discovery form, but generated
-  documents always contain the recommended multi-offer `offers` array.
+  `:service_info`. Routes with payment metadata emit `x-payment-info` and a 402
+  response; routes with `payment: nil` or no `:payment` key are unpaid and omit
+  both. Payment metadata may use either discovery form, but generated documents
+  always contain the recommended multi-offer `offers` array on payable operations.
 
       MPP.Discovery.OpenApi.generate(
         info: %{title: "Example API", version: "1.0.0"},
@@ -13,6 +15,7 @@ defmodule MPP.Discovery.OpenApi do
           "docs" => %{"homepage" => "https://example.com"}
         },
         routes: [
+          [method: :get, path: "/health"],
           [
             method: :post,
             path: "/v1/search",
@@ -83,20 +86,9 @@ defmodule MPP.Discovery.OpenApi do
     path = route |> fetch_required!(:path) |> validate_path!()
     method = route |> fetch_required!(:method) |> normalize_method!()
 
-    payment_info =
-      route
-      |> fetch_required!(:payment)
-      |> mapish!("x-payment-info")
-      |> parse_payment_info!()
-
     operation =
-      %{
-        "responses" => %{
-          "200" => %{"description" => "Successful response"},
-          "402" => %{"description" => "Payment Required"}
-        },
-        "x-payment-info" => payment_info
-      }
+      %{"responses" => %{"200" => %{"description" => "Successful response"}}}
+      |> put_payment_extension(config_value(route, :payment))
       |> put_optional_string("summary", config_value(route, :summary))
       |> put_request_body(config_value(route, :request_body))
 
@@ -113,6 +105,19 @@ defmodule MPP.Discovery.OpenApi do
   end
 
   defp normalize_info!(_info), do: raise(ArgumentError, "OpenAPI info must be a keyword list or map")
+
+  defp put_payment_extension(operation, nil), do: operation
+
+  defp put_payment_extension(operation, payment) do
+    payment_info =
+      payment
+      |> mapish!("x-payment-info")
+      |> parse_payment_info!()
+
+    operation
+    |> put_in(["responses", "402"], %{"description" => "Payment Required"})
+    |> Map.put("x-payment-info", payment_info)
+  end
 
   defp parse_payment_info!(payment_info) do
     case PaymentInfo.parse(payment_info) do
