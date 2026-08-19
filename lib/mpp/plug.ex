@@ -47,7 +47,7 @@ defmodule MPP.Plug do
     * `:digest` — (optional) expected content digest for body-bound challenges
     * `:opaque` — (optional) base64url-encoded server correlation data
     * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store
-    * `:intent` — (optional) `"charge"` (default) or `"session"`
+    * `:intent` — (optional) `"charge"` (default), `"session"`, or `"subscription"`
     * `:session_store` — (optional, session intent) `MPP.Session.Store` reference;
       defaults to the application-started `MPP.Session.ETSStore`
 
@@ -61,6 +61,9 @@ defmodule MPP.Plug do
     * `:external_id` — (optional) merchant reference ID included in the challenge request
     * `:unit_type` — (optional, session intent) rate unit, e.g. `"request"`
     * `:suggested_deposit` — (optional, session intent) suggested channel deposit
+    * `:period_unit` — (required, subscription intent) `"day"`, `"week"`, or `"month"`
+    * `:period_count` — (required, subscription intent) positive canonical decimal string
+    * `:subscription_expires` — (optional shared subscription expiry, required by Tempo)
     * `:method_config` — (optional) server-only config map for `verify/2`
 
   ## Multi-Method Options
@@ -78,6 +81,8 @@ defmodule MPP.Plug do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Intents.Shared, as: Intent
+  alias MPP.Intents.Subscription
   alias MPP.JCS
   alias MPP.Replay
   alias MPP.Session.Store, as: SessionStore
@@ -98,7 +103,7 @@ defmodule MPP.Plug do
 
     @type t :: %__MODULE__{
             method: module(),
-            charge: Charge.t() | Session.t(),
+            charge: Charge.t() | Session.t() | Subscription.t(),
             request: String.t(),
             method_config: map()
           }
@@ -171,10 +176,10 @@ defmodule MPP.Plug do
     }
   end
 
-  defp validate_intent!(intent) when intent in ["charge", "session"], do: intent
+  defp validate_intent!(intent) when intent in ["charge", "session", "subscription"], do: intent
 
   defp validate_intent!(_intent) do
-    raise ArgumentError, ~s(MPP.Plug: :intent must be "charge" or "session")
+    raise ArgumentError, ~s(MPP.Plug: :intent must be "charge", "session", or "subscription")
   end
 
   defp resolve_session_store("session", nil), do: SessionStore.default_store()
@@ -242,6 +247,9 @@ defmodule MPP.Plug do
             :external_id,
             :unit_type,
             :suggested_deposit,
+            :period_unit,
+            :period_count,
+            :subscription_expires,
             :method_config
           ])
         ]
@@ -256,6 +264,7 @@ defmodule MPP.Plug do
     method = require_opt!(method_opts, :method)
     method_config = Keyword.get(method_opts, :method_config, %{})
     method_config = put_session_store(method_config, session_store)
+    method_config = put_subscription_intent(method_config, intent)
     method.validate_config!(method_config)
 
     {:ok, charge} = build_pricing_intent(intent, method_opts)
@@ -272,7 +281,7 @@ defmodule MPP.Plug do
 
     request =
       charge
-      |> intent_to_request()
+      |> Intent.to_request()
       |> JCS.canonicalize()
       |> Base.url_encode64(padding: false)
 
@@ -289,6 +298,12 @@ defmodule MPP.Plug do
   defp put_session_store(method_config, session_store) do
     Map.put_new(method_config, "session_store", session_store)
   end
+
+  defp put_subscription_intent(method_config, "subscription") do
+    Map.put_new(method_config, "intent", "subscription")
+  end
+
+  defp put_subscription_intent(method_config, _intent), do: method_config
 
   defp build_pricing_intent("charge", method_opts) do
     Charge.new(
@@ -310,8 +325,18 @@ defmodule MPP.Plug do
     )
   end
 
-  defp intent_to_request(%Charge{} = charge), do: Charge.to_request(charge)
-  defp intent_to_request(%Session{} = session), do: Session.to_request(session)
+  defp build_pricing_intent("subscription", method_opts) do
+    Subscription.new(
+      amount: require_opt!(method_opts, :amount),
+      currency: require_opt!(method_opts, :currency),
+      recipient: Keyword.get(method_opts, :recipient),
+      period_unit: require_opt!(method_opts, :period_unit),
+      period_count: require_opt!(method_opts, :period_count),
+      subscription_expires: Keyword.get(method_opts, :subscription_expires),
+      description: Keyword.get(method_opts, :description),
+      external_id: Keyword.get(method_opts, :external_id)
+    )
+  end
 
   # Validates that every method name matches the spec ABNF
   # `payment-method-id = 1*LOWERALPHA`. Challenge parsing (this library's own
@@ -476,6 +501,7 @@ defmodule MPP.Plug do
 
   defp intent_name(%Charge{}), do: "charge"
   defp intent_name(%Session{}), do: "session"
+  defp intent_name(%Subscription{}), do: "subscription"
 
   # Generates a fresh challenge for a specific method entry. Public (but
   # undocumented) so the MCP server adapter (`MPP.Mcp`) can reuse the exact same

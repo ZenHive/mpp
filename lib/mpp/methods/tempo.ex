@@ -142,6 +142,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
   alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
@@ -150,6 +151,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias MPP.Methods.Tempo.SponsorBudget
+  alias MPP.Methods.Tempo.Subscription, as: TempoSubscription
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -188,7 +190,7 @@ defmodule MPP.Methods.Tempo do
 
   @impl MPP.Method
   @spec credential_types() :: [String.t()]
-  def credential_types, do: ~w(hash transaction proof)
+  def credential_types, do: ~w(hash transaction proof keyAuthorization)
 
   api(
     :validate_config!,
@@ -217,6 +219,7 @@ defmodule MPP.Methods.Tempo do
     validate_fee_payer_allowed_tokens!(config)
     validate_presenter_binding!(config["require_presenter_binding"])
     validate_machine_token!(config)
+    if config["intent"] == "subscription", do: TempoSubscription.validate_config!(config)
     :ok
   end
 
@@ -273,6 +276,10 @@ defmodule MPP.Methods.Tempo do
       {:ok, Receipt.new(method: "tempo", reference: reference, external_id: charge.external_id)}
     end
   end
+
+  @impl MPP.Method
+  @spec verify(map(), Subscription.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(payload, %Subscription{} = subscription), do: TempoSubscription.verify(payload, subscription)
 
   @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:error, Errors.t()}
@@ -369,6 +376,11 @@ defmodule MPP.Methods.Tempo do
       details
     end
   end
+
+  @impl MPP.Method
+  @spec challenge_method_details(Subscription.t()) :: map()
+  def challenge_method_details(%Subscription{} = subscription),
+    do: TempoSubscription.challenge_method_details(subscription)
 
   # --- Private helpers ---
 

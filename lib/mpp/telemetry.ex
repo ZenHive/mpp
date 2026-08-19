@@ -26,7 +26,6 @@ defmodule MPP.Telemetry do
   alias MPP.Credential
   alias MPP.Errors
   alias MPP.Intents.Charge
-  alias MPP.Intents.Session
   alias MPP.Receipt
 
   @type monotonic_time :: integer()
@@ -45,7 +44,7 @@ defmodule MPP.Telemetry do
   end
 
   @doc false
-  @spec challenge(Challenge.t(), Charge.t() | Session.t() | nil, metadata()) :: :ok
+  @spec challenge(Challenge.t(), MPP.Method.intent() | nil, metadata()) :: :ok
   def challenge(%Challenge{} = challenge, charge \\ nil, extra \\ %{}) do
     :telemetry.execute(
       [:mpp, :challenge],
@@ -55,7 +54,7 @@ defmodule MPP.Telemetry do
   end
 
   @doc false
-  @spec verify_start(Credential.t(), Charge.t() | Session.t() | nil, metadata()) :: monotonic_time()
+  @spec verify_start(Credential.t(), MPP.Method.intent() | nil, metadata()) :: monotonic_time()
   def verify_start(%Credential{} = credential, charge \\ nil, extra \\ %{}) do
     :telemetry.execute(
       [:mpp, :verify, :start],
@@ -67,7 +66,7 @@ defmodule MPP.Telemetry do
   end
 
   @doc false
-  @spec verify_ok(Credential.t(), Charge.t() | Session.t() | nil, monotonic_time(), metadata()) :: :ok
+  @spec verify_ok(Credential.t(), MPP.Method.intent() | nil, monotonic_time(), metadata()) :: :ok
   def verify_ok(%Credential{} = credential, charge, start_time, extra \\ %{}) do
     duration = System.monotonic_time() - start_time
 
@@ -81,7 +80,7 @@ defmodule MPP.Telemetry do
   @doc false
   @spec verify_fail(
           Credential.t(),
-          Charge.t() | Session.t() | nil,
+          MPP.Method.intent() | nil,
           monotonic_time(),
           Errors.t() | atom(),
           metadata()
@@ -99,7 +98,7 @@ defmodule MPP.Telemetry do
   end
 
   @doc false
-  @spec receipt(Credential.t(), Receipt.t(), Charge.t() | Session.t() | nil, metadata()) :: :ok
+  @spec receipt(Credential.t(), Receipt.t(), MPP.Method.intent() | nil, metadata()) :: :ok
   def receipt(%Credential{} = credential, %Receipt{} = receipt, charge \\ nil, extra \\ %{}) do
     metadata =
       credential

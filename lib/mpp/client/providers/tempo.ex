@@ -30,6 +30,8 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.Credential
   alias MPP.DID
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
+  alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.Proof
   alias Onchain.Address
   alias Onchain.RPC
@@ -50,15 +52,48 @@ defmodule MPP.Client.Providers.Tempo do
   @expiring_validity_seconds 25
   @transaction_option_keys ~w(gas_limit nonce nonce_key valid_before valid_after)a
 
-  @doc "Returns true for Tempo charge challenges."
+  @doc "Returns true for Tempo charge and subscription challenges."
   @impl PaymentProvider
   @spec supports?(String.t(), String.t(), map()) :: boolean()
   def supports?("tempo", "charge", _config), do: true
+  def supports?("tempo", "subscription", _config), do: true
   def supports?(_method, _intent, _config), do: false
 
-  @doc "Pays a Tempo charge challenge and returns its signed credential."
+  @doc "Pays a Tempo charge or authorizes a Tempo subscription challenge."
   @impl PaymentProvider
   @spec pay(Challenge.t(), map()) :: {:ok, Credential.t()} | {:error, term()}
+  def pay(%Challenge{intent: "subscription"} = challenge, config) when is_map(config) do
+    with {:ok, subscription} <- Shared.parse_subscription(challenge, "tempo"),
+         {:ok, wallet_rpc_url} <- Shared.required_config(config, :wallet_rpc_url),
+         {:ok, details} <- subscription_method_details(subscription),
+         {:ok, chain_id} <- advertised_chain_id(details["chainId"]),
+         true <- is_integer(chain_id),
+         {:ok, access_key, key_type} <- subscription_access_key(details),
+         {:ok, params} <-
+           KeyAuthorization.wallet_params(subscription,
+             access_key: access_key,
+             key_type: key_type
+           ),
+         {:ok, authorization} <- authorize_access_key(wallet_rpc_url, params, config[:req_options]),
+         :ok <-
+           KeyAuthorization.verify(authorization, subscription,
+             chain_id: chain_id,
+             access_key: access_key,
+             key_type: key_type,
+             challenge_expires: challenge.expires
+           ) do
+      {:ok,
+       %Credential{
+         challenge: challenge,
+         payload: %{"type" => "keyAuthorization", "signature" => KeyAuthorization.serialize(authorization)},
+         source: DID.evm_did(authorization.source, chain_id)
+       }}
+    else
+      false -> {:error, :invalid_chain_id}
+      {:error, _reason} = error -> error
+    end
+  end
+
   def pay(%Challenge{} = challenge, config) when is_map(config) do
     with {:ok, charge} <- Shared.parse_charge(challenge, "tempo"),
          {:ok, provider} <- parse_config(config),
@@ -235,6 +270,51 @@ defmodule MPP.Client.Providers.Tempo do
 
   defp method_details(%Charge{method_details: nil}), do: {:ok, %{}}
   defp method_details(%Charge{method_details: details}) when is_map(details), do: {:ok, details}
+
+  defp subscription_method_details(%Subscription{method_details: details}) when is_map(details), do: {:ok, details}
+  defp subscription_method_details(%Subscription{}), do: {:error, :missing_method_details}
+
+  defp subscription_access_key(%{"accessKey" => %{"accessKeyAddress" => address, "keyType" => key_type}}) do
+    with {:ok, normalized} <- Address.normalize(address),
+         {:ok, type} <- subscription_key_type(key_type) do
+      {:ok, normalized, type}
+    else
+      _ -> {:error, :invalid_access_key}
+    end
+  end
+
+  defp subscription_access_key(_details), do: {:error, :missing_access_key}
+
+  defp subscription_key_type("secp256k1"), do: {:ok, :secp256k1}
+  defp subscription_key_type("p256"), do: {:ok, :p256}
+  defp subscription_key_type("webAuthn"), do: {:ok, :web_authn}
+  defp subscription_key_type(_type), do: {:error, :invalid_access_key_type}
+
+  defp authorize_access_key(url, params, req_options) do
+    body = %{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "wallet_authorizeAccessKey",
+      "params" => [params]
+    }
+
+    opts = Keyword.merge([json: body], req_options || [])
+
+    case Req.post(url, opts) do
+      {:ok, %{status: status, body: %{"result" => %{"keyAuthorization" => authorization}}}}
+      when status in 200..299 ->
+        KeyAuthorization.from_rpc(authorization)
+
+      {:ok, %{body: %{"error" => %{"message" => message}}}} when is_binary(message) ->
+        {:error, {:wallet_authorization_failed, message}}
+
+      {:ok, %{status: status}} ->
+        {:error, {:wallet_authorization_failed, status}}
+
+      {:error, reason} ->
+        {:error, {:wallet_authorization_failed, reason}}
+    end
+  end
 
   defp parse_amount(amount) do
     case Integer.parse(amount) do

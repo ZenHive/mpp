@@ -1,6 +1,10 @@
 defmodule MPP.Intents.Shared do
   @moduledoc false
 
+  alias MPP.Intents.Charge
+  alias MPP.Intents.Session
+  alias MPP.Intents.Subscription
+
   @doc "Validate a required non-empty string amount."
   @spec validate_amount(term()) :: {:ok, String.t()} | {:error, :amount_required | :invalid_amount}
   def validate_amount(nil), do: {:error, :amount_required}
@@ -48,4 +52,10 @@ defmodule MPP.Intents.Shared do
   @spec put_optional(map(), String.t(), term()) :: map()
   def put_optional(map, _key, nil), do: map
   def put_optional(map, key, value), do: Map.put(map, key, value)
+
+  @doc "Serialize any supported payment intent to its wire request map."
+  @spec to_request(Charge.t() | Session.t() | Subscription.t()) :: map()
+  def to_request(%Charge{} = charge), do: Charge.to_request(charge)
+  def to_request(%Session{} = session), do: Session.to_request(session)
+  def to_request(%Subscription{} = subscription), do: Subscription.to_request(subscription)
 end

@@ -10,14 +10,16 @@ defmodule MPP.Application do
 
   use Application
 
-  alias MPP.Session.ETSStore
+  alias MPP.Session.ETSStore, as: SessionStore
+  alias MPP.Subscription.ETSStore, as: SubscriptionStore
   alias MPP.Tempo.ConCacheStore
 
   @impl true
   def start(_type, _args) do
     children = [
       ConCacheStore.child_spec([]),
-      ETSStore.child_spec([])
+      SessionStore.child_spec([]),
+      SubscriptionStore.child_spec([])
     ]
 
     opts = [strategy: :one_for_one, name: MPP.Supervisor]

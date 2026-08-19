@@ -45,11 +45,12 @@ defmodule MPP.Method do
 
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Intents.Subscription
 
   @typedoc """
-  Intent struct passed to method callbacks — charge (one-shot) or session (metered).
+  Intent struct passed to method callbacks — charge, session, or subscription.
   """
-  @type intent :: Charge.t() | Session.t()
+  @type intent :: Charge.t() | Session.t() | Subscription.t()
 
   @doc """
   Returns the lowercase payment method name (e.g., `"stripe"`, `"tempo"`).
@@ -63,13 +64,13 @@ defmodule MPP.Method do
   @callback method_name() :: String.t()
 
   @doc """
-  Verifies a payment credential payload against a charge or session intent.
+  Verifies a payment credential payload against a payment intent.
 
   ## Arguments
 
     * `payload` — method-specific proof map from the credential
       (e.g., `%{"spt" => "spt_..."}` for Stripe)
-    * `intent` — the `MPP.Intents.Charge` or `MPP.Intents.Session` struct from
+    * `intent` — a charge, session, or subscription intent struct from
       the challenge, containing amount, currency, recipient, etc.
 
   ## Returns

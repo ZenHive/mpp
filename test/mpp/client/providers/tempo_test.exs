@@ -5,7 +5,9 @@ defmodule MPP.Client.Providers.TempoTest do
   alias MPP.Client.Providers.Tempo
   alias MPP.Expires
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.Proof
+  alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
 
   @chain_id 42_431
@@ -24,8 +26,9 @@ defmodule MPP.Client.Providers.TempoTest do
   end
 
   describe "supports?/3" do
-    test "supports only Tempo charge challenges" do
+    test "supports Tempo charge and subscription challenges" do
       assert Tempo.supports?("tempo", "charge", %{})
+      assert Tempo.supports?("tempo", "subscription", %{})
       refute Tempo.supports?("stripe", "charge", %{})
       refute Tempo.supports?("tempo", "session", %{})
     end
@@ -226,6 +229,57 @@ defmodule MPP.Client.Providers.TempoTest do
       expired = %{challenge() | expires: Expires.seconds(-1)}
       assert {:error, :payment_expired} = Tempo.pay(expired, provider_config())
     end
+
+    test "calls wallet_authorizeAccessKey with the normative subscription shape" do
+      challenge = subscription_challenge()
+      {:ok, subscription} = challenge |> decode_challenge_request() |> Subscription.from_request()
+      {_serialized, _authorization, rpc_authorization} = SubscriptionHelpers.signed_authorization(subscription)
+      test_process = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_process, {:wallet_request, request})
+
+        Req.Test.json(conn, %{
+          "jsonrpc" => "2.0",
+          "id" => request["id"],
+          "result" => %{"keyAuthorization" => rpc_authorization}
+        })
+      end)
+
+      assert {:ok, credential} = Tempo.pay(challenge, wallet_provider_config())
+      assert credential.payload["type"] == "keyAuthorization"
+      assert credential.source =~ SubscriptionHelpers.root_address()
+
+      assert_receive {:wallet_request,
+                      %{
+                        "method" => "wallet_authorizeAccessKey",
+                        "params" => [params]
+                      }}
+
+      assert params["address"] == SubscriptionHelpers.access_address()
+      assert [%{"selector" => "0xa9059cbb"}, %{"selector" => "0x95777d59"}] = params["scopes"]
+      assert [%{"limit" => "0xf4240", "period" => 86_400}] = params["limits"]
+    end
+
+    test "returns wallet errors and rejects malformed subscription challenges" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        Req.Test.json(conn, %{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "error" => %{"code" => -32_602, "message" => "authorization rejected"}
+        })
+      end)
+
+      assert {:error, {:wallet_authorization_failed, "authorization rejected"}} =
+               Tempo.pay(subscription_challenge(), wallet_provider_config())
+
+      assert {:error, {:missing_config, :wallet_rpc_url}} = Tempo.pay(subscription_challenge(), %{})
+
+      missing_access_key = subscription_challenge(method_details: %{"chainId" => @chain_id})
+      assert {:error, :missing_access_key} = Tempo.pay(missing_access_key, wallet_provider_config())
+    end
   end
 
   defp challenge(opts \\ []) do
@@ -262,6 +316,50 @@ defmodule MPP.Client.Providers.TempoTest do
       gas_limit: @gas_limit,
       req_options: [plug: {Req.Test, __MODULE__}]
     }
+  end
+
+  defp subscription_challenge(opts \\ []) do
+    method_details =
+      Keyword.get(opts, :method_details, %{
+        "accessKey" => %{
+          "accessKeyAddress" => SubscriptionHelpers.access_address(),
+          "keyType" => "secp256k1"
+        },
+        "chainId" => @chain_id
+      })
+
+    subscription =
+      SubscriptionHelpers.subscription(
+        subscription_expires:
+          DateTime.utc_now()
+          |> DateTime.truncate(:second)
+          |> DateTime.shift(day: 30)
+          |> DateTime.to_iso8601(),
+        method_details: method_details
+      )
+
+    request = subscription |> Subscription.to_request() |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+    %Challenge{
+      id: @challenge_id,
+      realm: @realm,
+      method: "tempo",
+      intent: "subscription",
+      request: request,
+      expires: Expires.minutes(5)
+    }
+  end
+
+  defp wallet_provider_config do
+    %{
+      wallet_rpc_url: "https://wallet.invalid",
+      req_options: [plug: {Req.Test, __MODULE__}]
+    }
+  end
+
+  defp decode_challenge_request(challenge) do
+    {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+    Jason.decode!(json)
   end
 
   defp fingerprint(value, byte_count) do

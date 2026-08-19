@@ -54,6 +54,8 @@ defmodule MPP.Verifier do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Intents.Shared, as: Intent
+  alias MPP.Intents.Subscription
   alias MPP.JCS
   alias MPP.Receipt
   alias MPP.Telemetry
@@ -98,6 +100,7 @@ defmodule MPP.Verifier do
     runtime_config =
       method_config
       |> Map.put("challenge_id", credential.challenge.id)
+      |> Map.put("challenge_expires", credential.challenge.expires)
       |> Map.put("realm", realm)
       |> Map.put("credential_source", credential.source)
 
@@ -277,14 +280,12 @@ defmodule MPP.Verifier do
 
   defp expected_intent(%Charge{}), do: "charge"
   defp expected_intent(%Session{}), do: "session"
-
-  defp intent_to_request(%Charge{} = charge), do: Charge.to_request(charge)
-  defp intent_to_request(%Session{} = session), do: Session.to_request(session)
+  defp expected_intent(%Subscription{}), do: "subscription"
 
   defp check_request_match(%Challenge{request: request}, charge) do
     expected =
       charge
-      |> intent_to_request()
+      |> Intent.to_request()
       |> JCS.canonicalize()
       |> Base.url_encode64(padding: false)
 

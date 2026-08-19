@@ -1,3 +1,6 @@
+# The shared callback set implements MPP.Intent; reach's behaviour-candidate
+# frontend does not suppress plain project-defined @behaviour declarations.
+# reach:disable-next-line behaviour_candidate
 defmodule MPP.Intents.Charge do
   @moduledoc """
   Charge intent request schema — the "Intent = Schema" half of MPP.
@@ -18,6 +21,8 @@ defmodule MPP.Intents.Charge do
     * `external_id` — (optional) caller-provided correlation ID
     * `method_details` — (optional) method-specific fields (e.g., Stripe's `networkId`)
   """
+
+  @behaviour MPP.Intent
 
   use Descripex, namespace: "/intents"
 
@@ -50,6 +55,7 @@ defmodule MPP.Intents.Charge do
     composes_with: [:to_request]
   )
 
+  @impl MPP.Intent
   @spec new(keyword()) :: {:ok, t()} | {:error, atom()}
   def new(opts) when is_list(opts) do
     with {:ok, amount} <- Shared.validate_amount(opts[:amount]),
@@ -74,6 +80,7 @@ defmodule MPP.Intents.Charge do
     composes_with: [:new, :from_request]
   )
 
+  @impl MPP.Intent
   @spec to_request(t()) :: map()
   def to_request(%__MODULE__{} = charge) do
     %{"amount" => charge.amount, "currency" => charge.currency}
@@ -92,6 +99,7 @@ defmodule MPP.Intents.Charge do
     composes_with: [:new, :to_request]
   )
 
+  @impl MPP.Intent
   @spec from_request(map()) :: {:ok, t()} | {:error, atom()}
   def from_request(%{"amount" => amount, "currency" => currency} = map) do
     new(

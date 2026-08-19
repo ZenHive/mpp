@@ -18,6 +18,21 @@ defmodule MPP.Session.Method do
       @impl MPP.Method
       def credential_types, do: ["transaction"]
 
+      @doc "Require the voucher verification domain and signer at method initialization."
+      @spec validate_config!(map()) :: :ok
+      @impl MPP.Method
+      def validate_config!(config) do
+        required = ~w(escrow_contract chain_id authorized_signer)
+        missing = Enum.filter(required, &is_nil(config[&1]))
+
+        if missing != [] do
+          raise ArgumentError,
+                "session method requires these keys in method_config: #{Enum.join(missing, ", ")}"
+        end
+
+        :ok
+      end
+
       @doc "Dispatch a session credential payload through `MPP.Session.Actions`."
       @spec verify(map(), MPP.Method.intent()) :: {:ok, MPP.Receipt.t()} | {:error, MPP.Errors.t()}
       @impl MPP.Method
@@ -30,7 +45,7 @@ defmodule MPP.Session.Method do
         {:error, MPP.Errors.new(:invalid_payload, "session method requires a session intent")}
       end
 
-      defoverridable credential_types: 0, verify: 2
+      defoverridable credential_types: 0, validate_config!: 1, verify: 2
     end
   end
 end

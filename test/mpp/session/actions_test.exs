@@ -15,10 +15,11 @@ defmodule MPP.Session.ActionsTest do
   @token "0x3333333333333333333333333333333333333333"
   @transaction "0x76abcd"
   @signature "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
-  @escrow_contract "0x5555555555555555555555555555555555555555"
   @signer "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-  @mppx_signature @signature
-  @mppx_amount 1_000_000
+  @tip1034_channel_id "0x57e629663a75a0a49f8dc65c9f62ee38ab5dfa9124d7316d160766e4ecbc1227"
+  @tip1034_escrow "0x4d50500000000000000000000000000000000000"
+  @tip1034_signature "0x543a3c0d8484f2f0e2a6f190c87e07803cf96b9abdd6d15337455469c003861f40ef9cbf9411ef324692c1bfbc384efee9fd0476d1cd46743afcd6c82638b3b11b"
+  @tip1034_amount 50
 
   setup do
     name = unique_store_name()
@@ -172,30 +173,30 @@ defmodule MPP.Session.ActionsTest do
   end
 
   describe "signature verification" do
-    test "accepts the mppx voucher vector and rejects a tampered one", %{opts: opts} do
+    test "accepts the mpp-rs TIP-1034 voucher vector and rejects a tampered one", %{opts: opts} do
       signed_opts =
         opts
-        |> Keyword.put(:deposit, @mppx_amount)
-        |> Keyword.put(:escrow_contract, @escrow_contract)
+        |> Keyword.put(:deposit, @tip1034_amount)
+        |> Keyword.put(:escrow_contract, @tip1034_escrow)
         |> Keyword.put(:chain_id, 42_431)
         |> Keyword.put(:authorized_signer, @signer)
         |> Keyword.put(:request_amount, 0)
 
-      payload = @mppx_amount |> open_payload() |> Map.put("signature", @mppx_signature)
+      payload = tip1034_payload(:open, @tip1034_amount, @tip1034_signature)
       assert {:ok, _receipt} = Actions.dispatch(payload, signed_opts)
 
-      tampered = Map.put(voucher_payload(@mppx_amount + 1), "signature", @mppx_signature)
+      tampered = tip1034_payload(:voucher, @tip1034_amount + 1, @tip1034_signature)
       assert {:error, %Errors{} = error} = Actions.dispatch(tampered, signed_opts)
       assert String.contains?(error.type, "invalid-signature")
 
       assert {:error, %Errors{} = malformed} =
-               Actions.dispatch(Map.put(voucher_payload(@mppx_amount), "signature", "0x01"), signed_opts)
+               Actions.dispatch(tip1034_payload(:voucher, @tip1034_amount, "0x01"), signed_opts)
 
       assert String.contains?(malformed.type, "invalid-signature")
 
       assert {:ok, _} =
-               @mppx_amount
-               |> voucher_payload()
+               :voucher
+               |> tip1034_payload(@tip1034_amount, @tip1034_signature)
                |> Map.put("authorizedSigner", @signer)
                |> Actions.dispatch(Keyword.delete(signed_opts, :authorized_signer))
     end
@@ -382,6 +383,20 @@ defmodule MPP.Session.ActionsTest do
       "cumulativeAmount" => Integer.to_string(amount),
       "signature" => @signature
     }
+  end
+
+  defp tip1034_payload(:open, amount, signature) do
+    amount
+    |> open_payload()
+    |> Map.put("channelId", @tip1034_channel_id)
+    |> Map.put("signature", signature)
+  end
+
+  defp tip1034_payload(:voucher, amount, signature) do
+    amount
+    |> voucher_payload()
+    |> Map.put("channelId", @tip1034_channel_id)
+    |> Map.put("signature", signature)
   end
 
   defp top_up_payload(amount) do

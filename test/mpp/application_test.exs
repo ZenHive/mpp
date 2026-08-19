@@ -1,7 +1,8 @@
 defmodule MPP.ApplicationTest do
   use ExUnit.Case, async: true
 
-  alias MPP.Session.ETSStore
+  alias MPP.Session.ETSStore, as: SessionStore
+  alias MPP.Subscription.ETSStore, as: SubscriptionStore
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
 
@@ -26,7 +27,15 @@ defmodule MPP.ApplicationTest do
 
   describe "default session store" do
     test "the :mpp application starts the ETS-backed channel store" do
-      pid = Process.whereis(ETSStore)
+      pid = Process.whereis(SessionStore)
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "default subscription store" do
+    test "the :mpp application starts the ETS-backed subscription store" do
+      pid = Process.whereis(SubscriptionStore)
       assert is_pid(pid)
       assert Process.alive?(pid)
     end

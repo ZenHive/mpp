@@ -1,9 +1,9 @@
 defmodule MPP.Session.Voucher do
   @moduledoc """
-  Legacy Tempo stream-channel voucher and EIP-712 signature verification.
+  TIP-1034 Tempo Channel Reserve voucher and EIP-712 signature verification.
 
-  The signed type is `Voucher(bytes32 channelId,uint128 cumulativeAmount)`
-  under the `Tempo Stream Channel` version `1` domain. Signatures are canonical
+  The signed type is `Voucher(bytes32 channelId,uint96 cumulativeAmount)`
+  under the `TIP20 Channel Reserve` version `1` domain. Signatures are canonical
   65-byte secp256k1 signatures, matching the contract-backed mppx voucher path.
   """
 
@@ -19,10 +19,10 @@ defmodule MPP.Session.Voucher do
   alias Onchain.Address
   alias Onchain.Hex
 
-  @domain_name "Tempo Stream Channel"
+  @domain_name "TIP20 Channel Reserve"
   @domain_version "1"
   @primary_type "Voucher"
-  @max_cumulative_amount (1 <<< 128) - 1
+  @max_cumulative_amount (1 <<< 96) - 1
   @max_chain_id (1 <<< 256) - 1
 
   @type t :: %__MODULE__{
@@ -130,7 +130,7 @@ defmodule MPP.Session.Voucher do
       @primary_type => %Type{
         fields: [
           {"channelId", {:bytes, 32}},
-          {"cumulativeAmount", {:uint, 128}}
+          {"cumulativeAmount", {:uint, 96}}
         ]
       }
     }

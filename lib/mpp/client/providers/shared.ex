@@ -4,17 +4,33 @@ defmodule MPP.Client.Providers.Shared do
   alias MPP.Challenge
   alias MPP.Codec
   alias MPP.Intents.Charge
+  alias MPP.Intents.Subscription
 
   @doc false
   @spec parse_charge(Challenge.t(), String.t()) :: {:ok, Charge.t()} | {:error, term()}
   def parse_charge(%Challenge{} = challenge, method) when is_binary(method) do
-    with :ok <- validate_kind(challenge, method),
+    with :ok <- validate_kind(challenge, method, "charge"),
          :ok <- Challenge.validate_fields(challenge),
          :ok <- validate_expiration(challenge.expires),
          {:ok, request} <- Codec.decode_base64_json(challenge.request),
          :ok <- validate_method_details(request["methodDetails"]),
          {:ok, charge} <- Charge.from_request(request) do
       {:ok, charge}
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc false
+  @spec parse_subscription(Challenge.t(), String.t()) :: {:ok, Subscription.t()} | {:error, term()}
+  def parse_subscription(%Challenge{} = challenge, method) when is_binary(method) do
+    with :ok <- validate_kind(challenge, method, "subscription"),
+         :ok <- Challenge.validate_fields(challenge),
+         :ok <- validate_expiration(challenge.expires),
+         {:ok, request} <- Codec.decode_base64_json(challenge.request),
+         :ok <- validate_method_details(request["methodDetails"]),
+         {:ok, subscription} <- Subscription.from_request(request) do
+      {:ok, subscription}
     else
       {:error, _reason} = error -> error
     end
@@ -43,8 +59,8 @@ defmodule MPP.Client.Providers.Shared do
     end
   end
 
-  defp validate_kind(%Challenge{method: method, intent: "charge"}, method), do: :ok
-  defp validate_kind(%Challenge{}, _method), do: {:error, :unsupported_challenge}
+  defp validate_kind(%Challenge{method: method, intent: intent}, method, intent), do: :ok
+  defp validate_kind(%Challenge{}, _method, _intent), do: {:error, :unsupported_challenge}
 
   defp validate_method_details(nil), do: :ok
   defp validate_method_details(details) when is_map(details), do: :ok

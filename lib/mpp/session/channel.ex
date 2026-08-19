@@ -1,11 +1,11 @@
 defmodule MPP.Session.Channel do
   @moduledoc """
-  State and legacy contract-backed identity for an MPP payment channel.
+  State and TIP-1034 precompile identity for an MPP payment channel.
 
-  Channel IDs match the Tempo stream-channel contract and the legacy mppx and
-  mpp-rs implementations:
+  Channel IDs match the Tempo TIP-20 Channel Reserve precompile:
 
-      keccak256(abi.encode(payer, payee, token, salt, authorizedSigner,
+      keccak256(abi.encode(payer, payee, operator, token, salt,
+                           authorizedSigner, expiringNonceHash,
                            escrowContract, chainId))
 
   Channel lifecycle is deliberately small: a new channel is `:open`, may be
@@ -18,7 +18,7 @@ defmodule MPP.Session.Channel do
   alias Onchain.Address
   alias Onchain.Hex
 
-  @channel_id_types "(address,address,address,bytes32,address,address,uint256)"
+  @channel_id_types "(address,address,address,address,bytes32,address,bytes32,address,uint256)"
   @max_chain_id (1 <<< 256) - 1
 
   @type status :: :open | :active | :closed
@@ -26,9 +26,11 @@ defmodule MPP.Session.Channel do
   @type id_params :: %{
           payer: String.t(),
           payee: String.t(),
+          operator: String.t(),
           token: String.t(),
           salt: String.t(),
           authorized_signer: String.t(),
+          expiring_nonce_hash: String.t(),
           escrow_contract: String.t(),
           chain_id: non_neg_integer()
         }
@@ -171,29 +173,33 @@ defmodule MPP.Session.Channel do
   defp maybe_activate(%__MODULE__{status: :open} = channel), do: activate(channel)
   defp maybe_activate(%__MODULE__{} = channel), do: {:ok, channel}
 
-  @doc "Compute the legacy contract-backed channel ID from its identity fields."
+  @doc "Compute the TIP-1034 channel ID from its complete identity descriptor."
   @spec compute_id(id_params() | keyword()) :: {:ok, String.t()} | {:error, term()}
   def compute_id(params) when is_list(params), do: params |> Map.new() |> compute_id()
 
   def compute_id(%{
         payer: payer,
         payee: payee,
+        operator: operator,
         token: token,
         salt: salt,
         authorized_signer: authorized_signer,
+        expiring_nonce_hash: expiring_nonce_hash,
         escrow_contract: escrow_contract,
         chain_id: chain_id
       }) do
     with {:ok, payer} <- normalize_address_bytes(payer, :payer),
          {:ok, payee} <- normalize_address_bytes(payee, :payee),
+         {:ok, operator} <- normalize_address_bytes(operator, :operator),
          {:ok, token} <- normalize_address_bytes(token, :token),
          {:ok, salt} <- normalize_salt(salt),
          {:ok, authorized_signer} <- normalize_address_bytes(authorized_signer, :authorized_signer),
+         {:ok, expiring_nonce_hash} <- normalize_expiring_nonce_hash(expiring_nonce_hash),
          {:ok, escrow_contract} <- normalize_address_bytes(escrow_contract, :escrow_contract),
          :ok <- validate_chain_id(chain_id) do
       encoded =
         ABI.encode(@channel_id_types, [
-          {payer, payee, token, salt, authorized_signer, escrow_contract, chain_id}
+          {payer, payee, operator, token, salt, authorized_signer, expiring_nonce_hash, escrow_contract, chain_id}
         ])
 
       {:ok, encoded |> Hash.keccak() |> Hex.encode()}
@@ -253,6 +259,13 @@ defmodule MPP.Session.Channel do
     case decode_fixed_bytes(salt, 32) do
       {:ok, bytes} -> {:ok, bytes}
       :error -> {:error, :invalid_salt}
+    end
+  end
+
+  defp normalize_expiring_nonce_hash(value) do
+    case decode_fixed_bytes(value, 32) do
+      {:ok, bytes} -> {:ok, bytes}
+      :error -> {:error, :invalid_expiring_nonce_hash}
     end
   end
 

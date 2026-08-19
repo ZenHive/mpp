@@ -7,36 +7,36 @@ defmodule MPP.Session.VoucherTest do
   alias MPP.Session.Voucher
   alias Onchain.Hex
 
-  @channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
-  @cumulative_amount 1_000_000
-  @escrow_contract "0x5555555555555555555555555555555555555555"
+  @channel_id "0x57e629663a75a0a49f8dc65c9f62ee38ab5dfa9124d7316d160766e4ecbc1227"
+  @cumulative_amount 50
+  @escrow_contract "0x4d50500000000000000000000000000000000000"
   @chain_id 42_431
   @signer "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-  @max_uint128 (1 <<< 128) - 1
+  @max_uint96 (1 <<< 96) - 1
 
-  # Generated with mppx's legacy Voucher.ts domain/types and viem's
-  # hashTypedData/privateKeyToAccount using the Anvil account-0 key.
-  @mppx_digest "0x65634beff4a9c9761b8b67baedefc7f10f671ef27263182af880dfd78b4c84e4"
-  @mppx_signature "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
+  # refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs
+  # precompile_voucher_signing_hash_matches_tip1034_golden.
+  @tip1034_digest "0x41a23f1573d302acae1dcec60d237f78d2514768faf670ef27458931c38b5db3"
+  @tip1034_signature "0x543a3c0d8484f2f0e2a6f190c87e07803cf96b9abdd6d15337455469c003861f40ef9cbf9411ef324692c1bfbc384efee9fd0476d1cd46743afcd6c82638b3b11b"
 
   describe "EIP-712 conformance" do
-    test "matches the mppx voucher digest and verifies its signature" do
+    test "matches the mpp-rs TIP-1034 digest and verifies a deterministic signature" do
       voucher = voucher()
 
       assert {:ok, digest} = Voucher.hash(voucher, @escrow_contract, @chain_id)
-      assert Hex.encode(digest) == @mppx_digest
+      assert Hex.encode(digest) == @tip1034_digest
       assert Voucher.hash!(voucher, @escrow_contract, @chain_id) == digest
       assert :ok = Voucher.verify_signature(voucher, @escrow_contract, @chain_id, @signer)
     end
 
-    test "builds the legacy stream-channel domain and uint128 voucher type" do
+    test "builds the TIP-1034 domain and uint96 voucher type" do
       assert {:ok, typed_data} = Voucher.typed_data(voucher(), @escrow_contract, @chain_id)
-      assert %Domain{name: "Tempo Stream Channel", version: "1", chain_id: @chain_id} = typed_data.domain
+      assert %Domain{name: "TIP20 Channel Reserve", version: "1", chain_id: @chain_id} = typed_data.domain
       assert typed_data.domain.verifying_contract == Hex.decode!(@escrow_contract)
 
       assert typed_data.types["Voucher"].fields == [
                {"channelId", {:bytes, 32}},
-               {"cumulativeAmount", {:uint, 128}}
+               {"cumulativeAmount", {:uint, 96}}
              ]
 
       assert Voucher.typed_data!(voucher(), @escrow_contract, @chain_id) == typed_data
@@ -78,7 +78,7 @@ defmodule MPP.Session.VoucherTest do
 
   describe "validation" do
     test "normalizes the voucher wire values" do
-      upper_signature = uppercase_hex(@mppx_signature)
+      upper_signature = uppercase_hex(@tip1034_signature)
 
       assert {:ok, voucher} =
                Voucher.new(
@@ -88,30 +88,30 @@ defmodule MPP.Session.VoucherTest do
                )
 
       assert voucher.channel_id == @channel_id
-      assert voucher.signature == @mppx_signature
+      assert voucher.signature == @tip1034_signature
     end
 
-    test "accepts uint128 boundaries and rejects overflow" do
+    test "accepts uint96 boundaries and rejects overflow" do
       assert {:ok, _voucher} =
                Voucher.new(
                  channel_id: @channel_id,
                  cumulative_amount: 0,
-                 signature: @mppx_signature
+                 signature: @tip1034_signature
                )
 
       assert {:ok, _voucher} =
                Voucher.new(
                  channel_id: @channel_id,
-                 cumulative_amount: @max_uint128,
-                 signature: @mppx_signature
+                 cumulative_amount: @max_uint96,
+                 signature: @tip1034_signature
                )
 
-      for invalid <- [-1, @max_uint128 + 1, "1", nil] do
+      for invalid <- [-1, @max_uint96 + 1, "1", nil] do
         assert {:error, :invalid_cumulative_amount} =
                  Voucher.new(
                    channel_id: @channel_id,
                    cumulative_amount: invalid,
-                   signature: @mppx_signature
+                   signature: @tip1034_signature
                  )
       end
     end
@@ -124,7 +124,7 @@ defmodule MPP.Session.VoucherTest do
                  signature: "0xdead"
                )
 
-      eip155_signature = String.replace_suffix(@mppx_signature, "1c", "24")
+      eip155_signature = String.replace_suffix(@tip1034_signature, "1b", "24")
 
       assert {:error, :invalid_signature} =
                Voucher.new(
@@ -133,7 +133,7 @@ defmodule MPP.Session.VoucherTest do
                  signature: eip155_signature
                )
 
-      magic_signature = @mppx_signature <> String.duplicate("77", 32)
+      magic_signature = @tip1034_signature <> String.duplicate("77", 32)
 
       assert {:error, :invalid_signature} =
                Voucher.new(
@@ -184,7 +184,7 @@ defmodule MPP.Session.VoucherTest do
     Voucher.new!(
       channel_id: @channel_id,
       cumulative_amount: @cumulative_amount,
-      signature: @mppx_signature
+      signature: @tip1034_signature
     )
   end
 

@@ -8,14 +8,16 @@ defmodule MPP.Session.ChannelCrossValidationTest do
   @params %{
     payer: "0x1111111111111111111111111111111111111111",
     payee: "0x2222222222222222222222222222222222222222",
+    operator: "0x3333333333333333333333333333333333333333",
     token: "0x3333333333333333333333333333333333333333",
     salt: "0x0000000000000000000000000000000000000000000000000000000000000001",
     authorized_signer: "0x4444444444444444444444444444444444444444",
+    expiring_nonce_hash: "0x" <> String.duplicate("77", 32),
     escrow_contract: "0x5555555555555555555555555555555555555555",
     chain_id: 42_431
   }
 
-  test "channel ID matches mppx Channel.ts through its ox ABI/hash primitives" do
+  test "TIP-1034 channel ID matches ox ABI/hash primitives" do
     node =
       System.find_executable("node") ||
         flunk("Missing Node.js: install Node and the repository's ox package to run mppx cross-validation")
@@ -34,18 +36,22 @@ defmodule MPP.Session.ChannelCrossValidationTest do
       AbiParameters.from([
         'address payer',
         'address payee',
+        'address operator',
         'address token',
         'bytes32 salt',
         'address authorizedSigner',
+        'bytes32 expiringNonceHash',
         'address escrowContract',
         'uint256 chainId',
       ]),
       [
         '#{@params.payer}',
         '#{@params.payee}',
+        '#{@params.operator}',
         '#{@params.token}',
         '#{@params.salt}',
         '#{@params.authorized_signer}',
+        '#{@params.expiring_nonce_hash}',
         '#{@params.escrow_contract}',
         #{@params.chain_id}n,
       ],

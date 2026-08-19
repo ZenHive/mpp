@@ -11,6 +11,7 @@ defmodule MPP.PlugTest do
   alias MPP.Receipt
   alias MPP.Session.ETSStore
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
 
   # --- Mock Methods ---
@@ -117,6 +118,9 @@ defmodule MPP.PlugTest do
 
     @impl MPP.Method
     def method_name, do: "mocksession"
+
+    @impl MPP.Method
+    def validate_config!(_config), do: :ok
   end
 
   defmodule MockTempoMethod do
@@ -1474,7 +1478,7 @@ defmodule MPP.PlugTest do
         PaymentPlug.init(
           secret_key: @secret_key,
           realm: "api.test.com",
-          intent: "subscription",
+          intent: "refund",
           method: MockSessionMethod,
           amount: "10",
           currency: "usd"
@@ -1536,6 +1540,68 @@ defmodule MPP.PlugTest do
       {:ok, challenge} = Headers.parse_challenge(get_resp_header(conn, "www-authenticate"))
       assert challenge.intent == "session"
     end
+  end
+
+  describe "subscription intent endpoints" do
+    test "emits a shared subscription request with Tempo access-key details" do
+      config = subscription_config()
+
+      conn = :get |> Plug.Test.conn("/subscription") |> call_plug(config)
+      assert conn.status == 402
+
+      {:ok, challenge} = Headers.parse_challenge(get_resp_header(conn, "www-authenticate"))
+      {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+      request = Jason.decode!(json)
+
+      assert challenge.intent == "subscription"
+      assert request["periodUnit"] == "day"
+      assert request["periodCount"] == "1"
+      assert request["subscriptionExpires"]
+
+      assert request["methodDetails"] == %{
+               "accessKey" => %{
+                 "accessKeyAddress" => SubscriptionHelpers.access_address(),
+                 "keyType" => "secp256k1"
+               },
+               "chainId" => SubscriptionHelpers.chain_id(),
+               "feePayer" => false
+             }
+    end
+
+    test "rejects Tempo subscription periods that cannot be represented exactly" do
+      assert_raise ArgumentError, ~r/periodUnit day or week/, fn ->
+        subscription_config(period_unit: "month")
+      end
+    end
+  end
+
+  defp subscription_config(overrides \\ []) do
+    expires =
+      DateTime.utc_now()
+      |> DateTime.truncate(:second)
+      |> DateTime.shift(day: 30)
+      |> DateTime.to_iso8601()
+
+    opts = [
+      secret_key: @secret_key,
+      realm: "api.test.com",
+      intent: "subscription",
+      method: MPP.Methods.Tempo,
+      amount: "1000000",
+      currency: SubscriptionHelpers.token(),
+      recipient: SubscriptionHelpers.recipient(),
+      period_unit: "day",
+      period_count: "1",
+      subscription_expires: expires,
+      method_config: %{
+        "rpc_url" => "https://rpc.moderato.tempo.xyz",
+        "chain_id" => SubscriptionHelpers.chain_id(),
+        "subscription_access_key_private_key" => SubscriptionHelpers.access_private_key()
+      },
+      store: false
+    ]
+
+    opts |> Keyword.merge(overrides) |> PaymentPlug.init()
   end
 
   defp session_call(config, payload) do
