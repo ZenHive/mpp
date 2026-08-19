@@ -220,6 +220,9 @@ defmodule MPP.Client.Providers.TempoTest do
       assert {:error, :invalid_chain_id} =
                Tempo.pay(challenge(method_details: %{}), Map.delete(provider_config(), :expected_chain_id))
 
+      assert {:error, :invalid_chain_id} =
+               Tempo.pay(challenge(method_details: %{"chainId" => "42431"}), provider_config())
+
       expired = %{challenge() | expires: Expires.seconds(-1)}
       assert {:error, :payment_expired} = Tempo.pay(expired, provider_config())
     end

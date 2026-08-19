@@ -664,6 +664,8 @@ MPP.Plug.Config            — Validated endpoint config struct (shared settings
 MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32043, meta keys), server transport adapter (init/1 + call/3 with replay dedup), server/client helpers
 MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)
 MPP.Client.MultiProvider   — Multi-provider dispatch: wraps [{module, config}], routes to first match
+MPP.Client.Providers.Tempo — Built-in Tempo charge provider: chain-pinned, attribution-bound TIP-20 payments
+MPP.Client.Providers.Stripe — Built-in Stripe charge provider: Shared Payment Token creation
 MPP.Client.SelectionPolicy — Transport-neutral challenge selection/ordering (default: server offer order)
 MPP.Client.Req             — Payment-aware Req plugin: attach/2 intercepts 402, pays, retries
 MPP.Client.Transport       — Transport behaviour: payment_required?/1, get_challenges/1, set_credential/2 + select_challenge/2 helper
