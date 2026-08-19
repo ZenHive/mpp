@@ -180,14 +180,17 @@ pipeline :paid_multi do
         method: MPP.Methods.Stripe,
         amount: "5000",
         currency: "usd",
-        method_config: %{"stripe_secret_key" => "sk_test_..."}
+        method_config: %{
+          "stripe_secret_key" => "sk_test_...",
+          "network_id" => "profile_1Mqx..."
+        }
       ],
       [
         method: MPP.Methods.Tempo,
         amount: "5000000",
         currency: "0x...(pathUSD)",
         recipient: "0x...",
-        method_config: %{"rpc_url" => "https://rpc.tempo.xyz"}
+        method_config: %{"rpc_url" => "https://rpc.tempo.xyz", "chain_id" => 4217}
       ]
     ]
 end
@@ -392,7 +395,7 @@ payment after a drop that left a credential unacknowledged.
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.13.0"}
+    {:mpp, "~> 0.16.0"}
   ]
 end
 ```
