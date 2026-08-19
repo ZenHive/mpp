@@ -96,7 +96,7 @@ defmodule MPP.Methods.EVM do
   require Logger
 
   # draft-evm-charge-00.md:276-291
-  # (tempoxyz/mpp-specs@582b8908cfd9c79446c45226622c678a6d5687ca):
+  # (tempoxyz/mpp-specs@3fa03a9385fb4cc65b05815ba4acdaf5b0d9766a):
   # methodDetails.chainId is REQUIRED (EIP-155 chain ID).
   @required_config_keys ~w(rpc_url chain_id)
   @zero_address "0x0000000000000000000000000000000000000000"

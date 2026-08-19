@@ -147,7 +147,7 @@ defmodule MPP.Methods.EVMTest do
 
   describe "validate_config!/1" do
     # draft-evm-charge-00.md:276-291
-    # (tempoxyz/mpp-specs@582b8908cfd9c79446c45226622c678a6d5687ca):
+    # (tempoxyz/mpp-specs@3fa03a9385fb4cc65b05815ba4acdaf5b0d9766a):
     # methodDetails.chainId is REQUIRED (EIP-155 chain ID).
     test "returns :ok with valid config" do
       assert :ok = EVM.validate_config!(required_config())
