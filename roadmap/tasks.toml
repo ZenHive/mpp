@@ -1381,7 +1381,8 @@ status = "pending"
 title = "Tempo subscriptions"
 scores = { d = 6, b = 9, u = 8 }
 depends_on = [31]
-acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches the normative Tempo subscription draft; reference SDKs are compatibility evidence", "Fee-payer sponsored subscription path", "TIP-1034 voucher and TIP-20 channel-id golden vectors are pinned as deterministic conformance tests against refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly with exact setup instructions"]
+acceptance_criteria = ["Subscription intent / receipt types", "wallet_authorizeAccessKey integration matches the normative Tempo subscription draft; reference SDKs are compatibility evidence", "Fee-payer sponsored subscription path", "TIP-1034 voucher and TIP-20 channel-id golden vectors are pinned as deterministic conformance tests against refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs",
+  "The Tempo session method requires escrow_contract, chain_id, and authorized_signer in config so EIP-712 voucher verification is never silently skipped (task-31 review concern, run run-1787109699419-6e5470cc): a session config missing any of the three is rejected at init", "Integration test against Moderato testnet: at least one real success and one relevant real error; missing credentials flunk loudly with exact setup instructions"]
 touches = ["lib/mpp/intents/session.ex", "lib/mpp/session/", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/session_receipt.ex", "test/mpp/session/", "test/mpp/methods/tempo_integration_test.exs"]
 assignee = "codex"
 model = "gpt-5.6-sol"
@@ -2226,6 +2227,26 @@ assignee = "cursor"
 model = "cursor-grok-4.6-high"
 body = """
 Let mix mpp.openapi / MPP.Discovery.OpenApi.generate/1 omit x-payment-info and the 402 response when a route has payment: nil or no payment key. Today every generated route must include payment, so the generator cannot describe mixed free+paid surfaces. Authority: draft-payment-discovery-00 (only payable operations MUST carry x-payment-info); mppx src/discovery/OpenApi.ts createDocument adds 402 and x-payment-info only when route.payment is truthy (compatibility evidence). Filed from the task-42 reviewer proposal (run run-1787099901908-26fd5b7d).
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
+
+[[task]]
+id = "88"
+phase = 14
+bundle = "additional-methods"
+status = "pending"
+title = "Solana confidential transfer profile"
+scores = { d = 8, b = 7, u = 6 }
+markers = ["parallel"]
+depends_on = [21]
+acceptance_criteria = ["MPP.Methods.Solana accepts type=bundle credentials (ordered signed transactions: ZK ElGamal proof-context setup, confidential Transfer/TransferWithFee, proof-context close) when methodDetails.confidential is true", "Challenge validation rejects confidential+splits, confidential+currency=sol, and non-Token-2022 tokenProgram", "The server confirms the amount by decrypting its own confidential token account, never via the mint auditor key, per draft-solana-charge-00", "Live Token-2022 confidential-transfer test mint: one real bundle success and one relevant real rejection; mocks derived only from observed live responses; missing credentials flunk loudly with exact setup instructions"]
+out_of_scope = ["Re-implementing generic SOL/SPL charge verification", "Acting as the mint auditor"]
+touches = ["lib/mpp/methods/solana.ex", "test/mpp/methods/solana_test.exs", "test/mpp/methods/solana_integration_test.exs"]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Implement the optional confidential charge profile from draft-solana-charge-00 on top of Task 21's SOL/SPL pull/push method. validate_config!/1 currently raises on confidential: true, so the profile cannot be advertised. Authority: draft-solana-charge-00 (provider-owned spec) plus live Token-2022 behavior on devnet; reference SDKs are compatibility evidence. Filed from the task-21 reviewer proposal (run run-1787109701309-07696e05).
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
