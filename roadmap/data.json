@@ -1291,7 +1291,7 @@
       "phase": 12,
       "bundle": "client-sdk",
       "milestone": "v0_13",
-      "status": "in_progress",
+      "status": "done",
       "title": "Built-in charge providers",
       "scores": {
         "d": 6,
@@ -1327,9 +1327,16 @@
         "test/mpp/methods/stripe_integration_test.exs",
         "README.md"
       ],
+      "shipped_in": "a76194820514c8fbec492989eec8e71ad51ccb04",
       "body": "Add built-in client providers so the SDK is useful without every consumer writing their own provider first. Ship `MPP.Client.Providers.Tempo` and `MPP.Client.Providers.Stripe` for charge intent, mirroring the concrete client offerings in the reference SDKs. Each provider should parse the challenge request, execute payment with explicit config, and return a credential for the generic transport/plugin layer. Session-capable providers can layer on after Phase 10 lands.\n\nNote 2026-06-29: the 0.6.1 server hardening made challenge-bound attribution metadata MANDATORY on Tempo routes that configure no static memo — the server filters out plain transfers and any memo not derived from the challenge (server fingerprint from the realm, nonce from the challenge id; layout matches refs/mppx Attribution + refs/mpp-rs). The Tempo provider is the only client-side place that builds the on-chain transfer, so it MUST generate that attribution memo, or its payments will be rejected by the very server in this repo. This is the client counterpart to the already-shipped server verification; cross-check the byte layout against the reference SDKs at pickup.\n\nNote 2026-06-30: server-side route/request chain binding shipped in Task 45. The built-in Tempo provider still needs the client-side counterpart: it must pin the challenge's advertised chain before constructing or signing a payment, matching the reference SDK security posture.\n",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-02",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1787109695556-70f46cbc, a76194820514c8fbec492989eec8e71ad51ccb04).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787109695556-70f46cbc",
       "cross_repo": []
     },
     {

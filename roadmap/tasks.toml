@@ -1058,7 +1058,7 @@ id = "33e"
 phase = 12
 bundle = "client-sdk"
 milestone = "v0_13"
-status = "in_progress"
+status = "done"
 title = "Built-in charge providers"
 scores = { d = 6, b = 10, u = 10 }
 depends_on = ["33a", "33b"]
@@ -1081,8 +1081,15 @@ Note 2026-06-29: the 0.6.1 server hardening made challenge-bound attribution met
 
 Note 2026-06-30: server-side route/request chain binding shipped in Task 45. The built-in Tempo provider still needs the client-side counterpart: it must pin the challenge's advertised chain before constructing or signing a payment, matching the reference SDK security posture.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787109695556-70f46cbc, a76194820514c8fbec492989eec8e71ad51ccb04)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787109695556-70f46cbc"
 started_at = "2026-08-19"
 scored_at = "2026-08-02"
+done_at = "2026-08-19"
+shipped_in = "a76194820514c8fbec492989eec8e71ad51ccb04"
 
 # ============================================================================
 # Tasks — Phase 13: Lightning Payment Method
