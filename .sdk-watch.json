@@ -29,6 +29,8 @@
       "src/tempo/",
       "src/stripe/",
       "src/x402/",
+      "src/server/",
+      "src/mcp/",
       ".changeset/"
     ],
     "mpp-rs": [
