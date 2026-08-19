@@ -231,12 +231,28 @@ defmodule MPP.McpTest do
         ]
       }
 
+      # Wire map matches draft-payment-transport-mcp-00 InitializeResult.capabilities
+      # (`experimental.payment.methods.<name>.intents`), plus `credentialTypes`.
       assert Mcp.capabilities(config) == %{
-               experimental: %{
-                 payment: %{
-                   methods: %{
-                     "evm" => %{intents: ["session"], credentialTypes: ["authorization", "hash"]},
-                     "mock" => %{intents: ["session"], credentialTypes: []}
+               "experimental" => %{
+                 "payment" => %{
+                   "methods" => %{
+                     "evm" => %{"intents" => ["session"], "credentialTypes" => ["authorization", "hash"]},
+                     "mock" => %{"intents" => ["session"], "credentialTypes" => []}
+                   }
+                 }
+               }
+             }
+    end
+
+    test "builds the same map from init/1 config" do
+      config = server_config()
+
+      assert Mcp.capabilities(config) == %{
+               "experimental" => %{
+                 "payment" => %{
+                   "methods" => %{
+                     "mock" => %{"intents" => ["charge"], "credentialTypes" => []}
                    }
                  }
                }

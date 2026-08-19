@@ -131,10 +131,17 @@ defmodule MPP.Mcp do
       Map.new(config.method_entries, fn entry ->
         method = entry.method
 
-        {method.method_name(), %{intents: [config.intent], credentialTypes: method.credential_types()}}
+        {method.method_name(),
+         %{
+           "intents" => [config.intent],
+           "credentialTypes" => method.credential_types()
+         }}
       end)
 
-    %{experimental: %{payment: %{methods: methods}}}
+    # MCP InitializeResult.capabilities fragment (draft-payment-transport-mcp-00).
+    # mppx's server transport does not yet advertise this; `credentialTypes` is
+    # extra vs the spec example and comes from `method.credential_types/0`.
+    %{"experimental" => %{"payment" => %{"methods" => methods}}}
   end
 
   api(
