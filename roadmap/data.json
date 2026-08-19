@@ -3001,7 +3001,7 @@
       "id": "79",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Near Intents charge method",
       "scores": {
         "d": 7,
@@ -3036,6 +3036,7 @@
       ],
       "body": "Implement the Near Intents charge method per `refs/mpp-specs/specs/methods/nearintents/draft-nearintents-charge-01.md` (hash-credential-only method — hence the dependency on Task 55's hash-credential audit). The flow spans the 1Click API for quote/deposit orchestration and Origin RPC for on-chain verification, with the settlement and refund-recovery semantics clarified in mpp-specs #299. The NEAR-owned/Defuse-owned live endpoints and official docs are the provider authority; no reference SDK implements this method yet — cross-check whichever SDK (mppx / mpp-rs / pympp / mpp-go) has added it at pickup time, as reference material only.\n",
       "created_at": "2026-08-02",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
