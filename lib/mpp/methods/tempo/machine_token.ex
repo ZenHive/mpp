@@ -82,8 +82,11 @@ defmodule MPP.Methods.Tempo.MachineToken do
       when byte_size(input_token) == 20 and is_integer(amount) and amount >= 0 and byte_size(target_token) == 20 and
              byte_size(recipient) == 20 and byte_size(memo) == 32 do
     @swap_to_selector <>
-      <<0::96, input_token::binary-size(20), amount::unsigned-big-size(256), 0::96, target_token::binary-size(20), 0::96,
-        recipient::binary-size(20), memo::binary-size(32)>>
+      <<0::96, input_token::binary-size(20)>> <>
+      <<amount::unsigned-big-size(256)>> <>
+      <<0::96, target_token::binary-size(20)>> <>
+      <<0::96, recipient::binary-size(20)>> <>
+      <<memo::binary-size(32)>>
   end
 
   @doc """
