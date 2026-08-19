@@ -1381,12 +1381,15 @@ defmodule MPP.PlugTest do
     end
   end
 
-  describe "check_expiration/1 malformed expires" do
-    test "malformed expires timestamp is distinguished from expired (credential-mismatch)" do
+  describe "parse-time malformed expires (mpp-rs #377)" do
+    test "malformed expires in an Authorization credential is rejected as malformed-credential" do
+      # Challenge.create still accepts a bad expires (server-constructed); the wire
+      # parse path now rejects it before Verifier.check_expiration/1. Verifier's
+      # credential-mismatch mapping for a directly-built struct is unchanged
+      # (see verifier_test.exs).
       config = init_config()
       entry = first_entry(config)
 
-      # Build a challenge with an invalid expires value
       challenge =
         Challenge.create(
           [
@@ -1410,9 +1413,9 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "malformed-credential"
       refute body["type"] =~ "payment-expired"
-      assert body["detail"] =~ "ISO 8601"
+      assert body["detail"] =~ "invalid_expires"
     end
   end
 end

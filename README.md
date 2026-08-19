@@ -232,6 +232,22 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay, retry the tool call once |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |
 
+## Client
+
+```elixir
+Req.new()
+|> MPP.Client.Req.attach(provider: my_provider)
+|> Req.get(url: "https://api.example.com/resource")
+```
+
+`MPP.Client.Req` intercepts HTTP 402, pays, and retries with `Authorization: Payment`.
+A payment credential must never be created or attached after a redirect changed the
+request origin — `Req` follows redirects by default. `MPP.Client.Req.attach/2` refuses
+that path (`:cross_origin_redirect`, mpp-rs #379). Callers that drive
+`MPP.Client.Transport.HTTP` themselves must apply the same rule: do not call
+`set_credential/2` on a request whose origin (scheme/host/port) differs from the
+URL the caller asked for.
+
 ## Installation
 
 ```elixir

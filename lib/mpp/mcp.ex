@@ -650,7 +650,7 @@ defmodule MPP.Mcp do
 
   # Converts a Receipt struct + challenge_id to an MCP receipt map (adds challengeId).
   defp receipt_to_mcp_map(%Receipt{} = receipt, challenge_id) do
-    map = %{
+    core = %{
       "status" => receipt.status,
       "method" => receipt.method,
       "timestamp" => receipt.timestamp,
@@ -658,7 +658,11 @@ defmodule MPP.Mcp do
       "challengeId" => challenge_id
     }
 
-    maybe_put(map, "externalId", receipt.external_id)
+    receipt.extensions
+    |> Map.drop(["status", "method", "timestamp", "reference", "externalId", "subscriptionId", "challengeId"])
+    |> Map.merge(core)
+    |> maybe_put("externalId", receipt.external_id)
+    |> maybe_put("subscriptionId", receipt.subscription_id)
   end
 
   # Decodes base64url-encoded request to a native JSON map for MCP wire format.

@@ -20,6 +20,19 @@ defmodule MPP.ReceiptTest do
       assert receipt.external_id == "order-42"
     end
 
+    test "accepts optional subscription_id" do
+      receipt = Receipt.new(method: "tempo", reference: "tx_hash", subscription_id: "sub_123")
+
+      assert receipt.subscription_id == "sub_123"
+    end
+
+    test "defaults extensions to an empty map" do
+      receipt = Receipt.new(method: "stripe", reference: "pi_abc")
+
+      assert receipt.extensions == %{}
+      assert receipt.subscription_id == nil
+    end
+
     test "accepts custom timestamp" do
       receipt = Receipt.new(method: "stripe", reference: "pi_abc", timestamp: "2026-01-01T00:00:00Z")
 
@@ -54,6 +67,71 @@ defmodule MPP.ReceiptTest do
       assert decoded.method == "tempo"
       assert decoded.reference == "0xdeadbeef"
       assert decoded.external_id == nil
+      assert decoded.subscription_id == nil
+      assert decoded.extensions == %{}
+    end
+
+    test "roundtrip preserves subscriptionId (mpp-rs #383)" do
+      # refs/mpp-rs/src/protocol/core/headers.rs:780-794; challenge.rs:815-816.
+      receipt = Receipt.new(method: "tempo", reference: "0xabc123", subscription_id: "sub_123")
+      encoded = Receipt.encode(receipt)
+      assert {:ok, decoded} = Receipt.decode(encoded)
+
+      assert decoded.subscription_id == "sub_123"
+    end
+
+    test "roundtrip preserves method-specific extension fields (originTxHash)" do
+      # refs/mpp-rs/src/protocol/core/headers.rs:810-817 flatten; refs/mppx/src/Receipt.ts:38 looseObject.
+      json =
+        Jason.encode!(%{
+          "status" => "success",
+          "method" => "tempo",
+          "timestamp" => "2024-01-01T00:00:00Z",
+          "reference" => "0xabc123",
+          "originTxHash" => "0xdef456"
+        })
+
+      encoded = Base.url_encode64(json, padding: false)
+      assert {:ok, parsed} = Receipt.decode(encoded)
+      assert parsed.extensions["originTxHash"] == "0xdef456"
+
+      assert {:ok, reparsed} = parsed |> Receipt.encode() |> Receipt.decode()
+      assert reparsed.extensions["originTxHash"] == "0xdef456"
+    end
+
+    test "core fields keep precedence over stuffed extensions" do
+      receipt =
+        Receipt.new(
+          method: "tempo",
+          reference: "0xabc",
+          timestamp: "2024-01-01T00:00:00Z",
+          extensions: %{"method" => "evil", "status" => "failed", "originTxHash" => "0xdef"}
+        )
+
+      encoded = Receipt.encode(receipt)
+      {:ok, raw} = encoded |> Base.url_decode64!(padding: false) |> Jason.decode()
+
+      assert raw["method"] == "tempo"
+      assert raw["status"] == "success"
+      assert raw["originTxHash"] == "0xdef"
+      refute raw["method"] == "evil"
+    end
+
+    test "foreign subscriptionId on the wire is not dropped" do
+      # refs/mpp-rs/src/protocol/core/headers.rs:798-806.
+      json =
+        Jason.encode!(%{
+          "status" => "success",
+          "method" => "tempo",
+          "timestamp" => "2024-01-01T00:00:00Z",
+          "reference" => "0xabc123",
+          "subscriptionId" => "sub_123"
+        })
+
+      encoded = Base.url_encode64(json, padding: false)
+      assert {:ok, parsed} = Receipt.decode(encoded)
+      assert parsed.subscription_id == "sub_123"
+      refute Map.has_key?(parsed.extensions, "subscriptionId")
     end
 
     test "encode produces valid base64url string" do
@@ -87,6 +165,20 @@ defmodule MPP.ReceiptTest do
       json = Jason.encode!(%{"method" => "stripe", "reference" => "pi_123", "status" => "success"})
       encoded = Base.url_encode64(json, padding: false)
       assert {:error, :missing_required_fields} = Receipt.decode(encoded)
+    end
+
+    test "returns error for a non-string subscriptionId" do
+      json =
+        Jason.encode!(%{
+          "method" => "tempo",
+          "reference" => "0xabc",
+          "timestamp" => "2024-01-01T00:00:00Z",
+          "status" => "success",
+          "subscriptionId" => 123
+        })
+
+      encoded = Base.url_encode64(json, padding: false)
+      assert {:error, :invalid_field_type} = Receipt.decode(encoded)
     end
   end
 end

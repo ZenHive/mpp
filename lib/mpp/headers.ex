@@ -105,7 +105,8 @@ defmodule MPP.Headers do
       :empty_id,
       :invalid_method,
       :invalid_request,
-      :invalid_digest
+      :invalid_digest,
+      :invalid_expires
     ],
     composes_with: [:format_challenge]
   )
@@ -143,7 +144,8 @@ defmodule MPP.Headers do
       :empty_id,
       :invalid_method,
       :invalid_request,
-      :invalid_digest
+      :invalid_digest,
+      :invalid_expires
     ],
     composes_with: [:parse_challenge, :format_challenge]
   )
@@ -226,7 +228,7 @@ defmodule MPP.Headers do
       header: [kind: :value, description: "Raw Payment-Receipt header value (bare base64url JSON)"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, reason}` on failure"},
-    errors: [:invalid_base64, :invalid_json, :missing_required_fields, :token_too_large],
+    errors: [:invalid_base64, :invalid_json, :missing_required_fields, :invalid_field_type, :token_too_large],
     composes_with: [:format_receipt]
   )
 
@@ -334,11 +336,17 @@ defmodule MPP.Headers do
     |> String.trim_leading()
   end
 
-  # Extracts the parameter key up to the "=" sign.
+  # Extracts the parameter key up to the "=" sign. Names are lowercased so
+  # `ID=` / `Id=` map to `"id"` and `id=` + `ID=` collide as `:duplicate_param`.
+  #
+  # Authority: RFC 9110 §11.2 ("the name token is matched case-insensitively").
+  # mppx lowercases at parse (`refs/mppx/src/Challenge.ts:388`); mpp-rs keeps the
+  # raw token (`refs/mpp-rs/src/protocol/core/headers.rs:150`) — the RFC breaks
+  # that disagreement toward case-insensitivity (mppx #788).
   defp parse_key(input) do
     case String.split(input, "=", parts: 2) do
       [key, rest] ->
-        key = String.trim(key)
+        key = key |> String.trim() |> String.downcase(:ascii)
 
         if key == "" do
           {:error, :invalid_auth_params}

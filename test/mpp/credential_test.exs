@@ -175,6 +175,11 @@ defmodule MPP.CredentialTest do
       assert {:error, :invalid_optional_field} = Credential.decode(encoded)
     end
 
+    test "rejects an echoed challenge whose expires is a malformed timestamp" do
+      encoded = encode_credential(expires: "not-a-date")
+      assert {:error, :invalid_expires} = Credential.decode(encoded)
+    end
+
     test "rejects an echoed challenge whose description is not a string" do
       encoded = encode_credential(description: 42)
       assert {:error, :invalid_optional_field} = Credential.decode(encoded)

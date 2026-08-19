@@ -227,6 +227,22 @@ defmodule MPP.ChallengeTest do
       assert {:error, :invalid_digest} = Challenge.validate_fields(%{valid_challenge() | digest: "sha-512=abc"})
     end
 
+    test "rejects a malformed expires timestamp (mpp-rs #377)" do
+      assert {:error, :invalid_expires} = Challenge.validate_fields(%{valid_challenge() | expires: "not-a-date"})
+    end
+
+    test "accepts a valid RFC 3339 expires" do
+      assert :ok = Challenge.validate_fields(%{valid_challenge() | expires: "2026-12-31T23:59:59Z"})
+    end
+
+    test "accepts a nil expires" do
+      assert :ok = Challenge.validate_fields(%{valid_challenge() | expires: nil})
+    end
+
+    test "rejects a non-binary expires (defensive)" do
+      assert {:error, :invalid_expires} = Challenge.validate_fields(%{valid_challenge() | expires: 123})
+    end
+
     test "rejects a non-binary method (defensive)" do
       assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: 123})
     end

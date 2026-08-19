@@ -122,7 +122,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `1*LOWERALPHA`, request base64url-JSON object, digest `sha-256=…`). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `1*LOWERALPHA`, request base64url-JSON object, digest `sha-256=…`, expires RFC 3339). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -130,16 +130,18 @@ defmodule MPP.Challenge do
       ]
     ],
     returns: %{type: :tagged, description: "`:ok` if all fields are well-formed, `{:error, reason}` otherwise"},
-    errors: [:empty_id, :invalid_method, :invalid_request, :invalid_digest],
+    errors: [:empty_id, :invalid_method, :invalid_request, :invalid_digest, :invalid_expires],
     composes_with: [:create, :verify]
   )
 
-  @spec validate_fields(t()) :: :ok | {:error, :empty_id | :invalid_method | :invalid_request | :invalid_digest}
+  @spec validate_fields(t()) ::
+          :ok | {:error, :empty_id | :invalid_method | :invalid_request | :invalid_digest | :invalid_expires}
   def validate_fields(%__MODULE__{} = challenge) do
     with :ok <- validate_id(challenge.id),
          :ok <- validate_method(challenge.method),
-         :ok <- validate_request(challenge.request) do
-      validate_digest(challenge.digest)
+         :ok <- validate_request(challenge.request),
+         :ok <- validate_digest(challenge.digest) do
+      validate_expires(challenge.expires)
     end
   end
 
@@ -196,6 +198,22 @@ defmodule MPP.Challenge do
   defp validate_digest(nil), do: :ok
   defp validate_digest("sha-256=" <> _), do: :ok
   defp validate_digest(_digest), do: {:error, :invalid_digest}
+
+  # expires, when present, MUST be RFC 3339. Parse-time rejection (mpp-rs #377
+  # `is_iso8601_timestamp`, refs/mpp-rs/src/protocol/core/headers.rs:210,284)
+  # so a malformed timestamp never reaches HMAC / verifier expiry checks.
+  # Absent expires still parses; server-side `Verifier.check_expiration/1` is
+  # unchanged (missing vs expired vs malformed stay distinct there).
+  defp validate_expires(nil), do: :ok
+
+  defp validate_expires(expires) when is_binary(expires) do
+    case DateTime.from_iso8601(expires) do
+      {:ok, _dt, _offset} -> :ok
+      {:error, _} -> {:error, :invalid_expires}
+    end
+  end
+
+  defp validate_expires(_expires), do: {:error, :invalid_expires}
 
   # Computes the HMAC-SHA256 challenge ID from 7 fixed positional slots.
   #

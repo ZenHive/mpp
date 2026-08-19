@@ -162,6 +162,36 @@ defmodule MPP.HeadersTest do
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", unknown="x"))
     end
 
+    test "accepts uppercase and mixed-case auth-param names (RFC 9110 §11.2, mppx #788)" do
+      # refs/mppx/src/Challenge.ts:388 `.toLowerCase()`; refs/mppx/src/Challenge.test.ts:568-583.
+      # mpp-rs does not lowercase (refs/mpp-rs/src/protocol/core/headers.rs:150); RFC 9110 §11.2
+      # ("the name token is matched case-insensitively") breaks the tie.
+      original = make_challenge()
+      header = Headers.format_challenge(original)
+
+      upper = Regex.replace(~r/\b(id|realm|method|intent|request)=/, header, fn param -> String.upcase(param) end)
+
+      mixed =
+        Regex.replace(~r/\b(id|realm|method|intent|request)=/, header, fn <<first, rest::binary>> ->
+          <<first - 32, rest::binary>>
+        end)
+
+      assert {:ok, from_upper} = Headers.parse_challenge(upper)
+      assert {:ok, from_mixed} = Headers.parse_challenge(mixed)
+      assert from_upper.id == original.id
+      assert from_mixed.id == original.id
+      assert from_upper.realm == original.realm
+      assert from_mixed.method == original.method
+    end
+
+    test "duplicate detection is case-insensitive (id= + ID= -> :duplicate_param)" do
+      # refs/mppx/src/Challenge.test.ts:680-682.
+      header =
+        ~s(Payment id="a", realm="api.example.com", method="stripe", intent="charge", request="eyJ0ZXN0Ijp0cnVlfQ", ID="b")
+
+      assert {:error, :duplicate_param} = Headers.parse_challenge(header)
+    end
+
     test "rejects scheme-only input with no params" do
       assert {:error, :invalid_scheme} = Headers.parse_challenge("Payment")
     end
@@ -541,6 +571,27 @@ defmodule MPP.HeadersTest do
     test "accepts a valid sha-256 digest" do
       assert {:ok, %Challenge{digest: "sha-256=abc123"}} =
                Headers.parse_challenge(challenge_header(digest: "sha-256=abc123"))
+    end
+
+    test "rejects a malformed expires timestamp at parse (mpp-rs #377)" do
+      # refs/mpp-rs/src/protocol/core/headers.rs:210 (`is_iso8601_timestamp`) and :284
+      # (parse-time guard). Distinct from verifier `check_expiration/1`.
+      assert {:error, :invalid_expires} =
+               Headers.parse_challenge(challenge_header(expires: "not-a-date"))
+    end
+
+    test "rejects a date-only expires value" do
+      assert {:error, :invalid_expires} =
+               Headers.parse_challenge(challenge_header(expires: "2025-01-01"))
+    end
+
+    test "accepts a valid RFC 3339 expires" do
+      assert {:ok, %Challenge{expires: "2025-01-15T12:05:00Z"}} =
+               Headers.parse_challenge(challenge_header(expires: "2025-01-15T12:05:00Z"))
+    end
+
+    test "absent expires still parses" do
+      assert {:ok, %Challenge{expires: nil}} = Headers.parse_challenge(challenge_header([]))
     end
   end
 

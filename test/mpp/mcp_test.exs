@@ -401,6 +401,21 @@ defmodule MPP.McpTest do
 
       assert updated["_meta"]["org.paymentauth/receipt"]["externalId"] == "ext-001"
     end
+
+    test "includes subscriptionId and extension fields when present on receipt" do
+      receipt = %{
+        sample_receipt()
+        | subscription_id: "sub_123",
+          extensions: %{"originTxHash" => "0xdef456"}
+      }
+
+      updated = Mcp.attach_receipt(%{}, receipt, "ch_123")
+      mcp_receipt = updated["_meta"]["org.paymentauth/receipt"]
+
+      assert mcp_receipt["subscriptionId"] == "sub_123"
+      assert mcp_receipt["originTxHash"] == "0xdef456"
+      assert mcp_receipt["challengeId"] == "ch_123"
+    end
   end
 
   # -------------------------------------------------------------------

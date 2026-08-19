@@ -277,4 +277,13 @@ defmodule MPP.Client.Transport.HTTPTest do
     assert :set_accept_payment in names
     assert :set_accept_payment_from_providers in names
   end
+
+  test "moduledoc warns not to attach a credential after a cross-origin redirect" do
+    # mpp-rs #379 (refs/mpp-rs/src/client/fetch.rs:256-272). Transport is passive;
+    # the guard is consumer guidance here — MPP.Client.Req enforces it in code.
+    {:docs_v1, _, :elixir, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP)
+    downcased = String.downcase(doc)
+    assert downcased =~ "cross-origin"
+    assert downcased =~ "must never be created or attached"
+  end
 end

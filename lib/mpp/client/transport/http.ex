@@ -6,6 +6,16 @@ defmodule MPP.Client.Transport.HTTP do
   construct Req clients itself. Automatic 402 pay-and-retry lives in
   `MPP.Client.Req`; this transport only detects, parses, and attaches.
 
+  ## Cross-origin redirects
+
+  This transport is passive: `set_credential/2` attaches whatever credential
+  the caller supplies. A payment credential must never be created or attached
+  after a redirect changed the request origin (scheme/host/port). `Req` follows
+  redirects by default, so callers that drive this transport themselves must
+  refuse that path — the same guard as mpp-rs `HttpError::CrossOriginRedirect`
+  (`refs/mpp-rs/src/client/fetch.rs:256-272`, #379). `MPP.Client.Req.attach/2`
+  enforces this; this module documents the contract for hand-rolled transports.
+
   ## Wire format
 
     * Payment-required response: HTTP status `402`
@@ -80,7 +90,8 @@ defmodule MPP.Client.Transport.HTTP do
       :invalid_scheme,
       :missing_required_params,
       :duplicate_param,
-      :invalid_auth_params
+      :invalid_auth_params,
+      :invalid_expires
     ]
   )
 
