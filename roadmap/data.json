@@ -3935,7 +3935,7 @@
       "id": "99",
       "phase": 11,
       "bundle": "mcp",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Fix: JSON-RPC adapter crashes on a non-map handler result",
       "scores": {
         "d": 2,
@@ -3959,6 +3959,7 @@
       ],
       "body": "`attach_response_receipt/4` has three clauses: an `\"error\"` passthrough, a `:nested` clause guarded by `is_map(result)`, and a `:root` clause. In `:nested` mode with a non-map result the guard fails and the third clause does not match `:nested`, so the call raises `FunctionClauseError` — *after* `Replay.mark_used/2` has already claimed the credential. The caller is charged and gets a crash.\n\n`wrap_handler_response/2` explicitly accepts binary/list/number/boolean/nil results, so this shape is reachable through the documented handler contract. MCP `tools/call` results are always maps in practice, which is why it has not surfaced; the generic JSON-RPC transport makes it easier to hit.\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     }
