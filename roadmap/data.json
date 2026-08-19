@@ -611,7 +611,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "challenge_method_details/1 includes credentialTypes",
         "Default permit2Address = canonical; overridable via method_config",
@@ -1174,7 +1174,7 @@
         "33b"
       ],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Req plugin with attach/2 for pipeline integration",
         "Automatic 402 detection and retry",
@@ -1216,7 +1216,7 @@
         "33c"
       ],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Implements Transport behaviour for JSON-RPC messages",
         "Uses MPP.Mcp constants and types",
@@ -1300,7 +1300,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Implements MPP.Method behaviour",
         "challenge_method_details/1 returns invoice, paymentHash, network",
@@ -1337,7 +1337,7 @@
         19
       ],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Session lifecycle: open → bearer → topUp → close",
         "Per-unit metering with balance tracking",
@@ -1374,7 +1374,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Implements MPP.Method behaviour",
         "Pull mode: verify signed tx bytes, broadcast, confirm",
@@ -1450,7 +1450,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "MPP.Methods.Stellar implements the MPP.Method behaviour (pull XDR + push hash modes)",
         "Live Stellar testnet (Soroban RPC) integration: at least one real success and one relevant real error per mode; missing credentials flunk loudly with exact setup instructions",
@@ -1519,7 +1519,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "transferWithAuthorization flow matches the EIP-3009 semantics of Circle-owned USDC/EURC contracts (provider-owned authority) per draft-evm-charge-00.md:592-645",
         "challengeHash used as the EIP-3009 nonce; replay of the same authorization is rejected (regression test proves it)",
@@ -1647,7 +1647,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Server-side WS adapter for JSON-RPC + payment challenges",
         "Client-side `MPP.Client.Transport` impl for WS",
@@ -1684,7 +1684,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "JSON-RPC request/response with payment challenges on the same channel",
         "Error code and challenge placement match the MPP transport specification; reference SDKs are compatibility evidence",
@@ -1761,7 +1761,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "MPP.Methods.Hedera implements the Method behaviour and the current MPP Hedera charge draft",
         "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available",
@@ -1906,7 +1906,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "Audit confirms whether `MPP.Credential` already supports the `hash` credential type per latest spec",
         "If missing: parse / serialize / verify path for `hash` credentials added",
@@ -2985,7 +2985,7 @@
         40
       ],
       "assignee": "grok",
-      "model": "grok-4.5",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "MPP.Methods.USDC implements every normative profile in the current draft-usdc-charge specification: direct EVM EIP-3009, direct Solana, direct Stacks USDCx/SIP-010, and Circle Gateway Transfer",
         "USDC-specific native-asset identity, token-control, replay, and receipt requirements are enforced across all profiles",

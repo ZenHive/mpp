@@ -496,7 +496,7 @@ acceptance_criteria = [
 ]
 touches = ["lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
 """
@@ -971,7 +971,7 @@ acceptance_criteria = [
 ]
 touches = ["lib/mpp/client/transport.ex", "lib/mpp/client/transport/http.ex", "lib/mpp/client/multi_provider.ex", "lib/mpp/client/req.ex", "test/mpp/client/"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.
 
@@ -999,7 +999,7 @@ acceptance_criteria = [
 ]
 touches = ["lib/mpp/client/transport.ex", "lib/mpp/client/mcp.ex", "lib/mpp/mcp.ex", "lib/mpp/client/multi_provider.ex", "test/mpp/client/", "test/mpp/mcp_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Add the MCP client surface that completes payment-aware JSON-RPC tool calls. The low-level `MPP.Client.Transport.MCP` implements the shared Transport behaviour: detect error code -32042, extract `error.data.challenges`, and attach the credential at `params._meta["org.paymentauth/credential"]`. Above that boundary, provide payment-aware call orchestration that selects through Task 33c's shared policy, obtains explicit approval, pays through `MPP.Client.MultiProvider`, and retries once. Match the separation and callback timing in `refs/mppx/src/mcp/client/McpClient.ts`; use Task 32's `MPP.Mcp` constants and types.
 """
@@ -1055,7 +1055,7 @@ acceptance_criteria = [
 ]
 touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
 """
@@ -1079,7 +1079,7 @@ acceptance_criteria = [
 ]
 touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "lib/mpp/session/", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.
 """
@@ -1107,7 +1107,7 @@ acceptance_criteria = [
 ]
 touches = ["mix.exs", "lib/mpp/methods/solana.ex", "test/mpp/methods/solana_test.exs", "test/mpp/methods/solana_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement `MPP.Methods.Solana` for charge intent. Pull mode: client signs Solana transfer tx, sends signed bytes in credential; server optionally co-signs (fee payer), broadcasts, waits for confirmation. Push mode: client broadcasts tx, sends confirmed signature; server fetches tx from RPC and verifies payment details (amount, recipient, token). Challenge details include recipient (base58 pubkey), amount (lamports or token base units), currency ("sol" or mint address), network, decimals, tokenProgram, feePayer flag, feePayerKey, optional splits array. Requires Solana RPC client (external dep TBD).
 """
@@ -1161,7 +1161,7 @@ acceptance_criteria = [
 ]
 touches = ["mix.exs", "lib/mpp/methods/stellar.ex", "lib/mpp/errors.ex", "test/mpp/methods/stellar_test.exs", "test/mpp/methods/stellar_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.
 """
@@ -1203,7 +1203,7 @@ acceptance_criteria = [
 ]
 touches = ["mix.exs", "lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
 """
@@ -1281,7 +1281,7 @@ scores = { d = 5, b = 8, u = 7 }
 acceptance_criteria = ["Server-side WS adapter for JSON-RPC + payment challenges", "Client-side `MPP.Client.Transport` impl for WS", "Payment-required detection and credential attachment match the MPP transport specification; reference SDKs are compatibility evidence", "Retry/backoff posture matches upstream and a dropped/rejected connection does not amplify payment retries", "End-to-end integration test uses an actual local WebSocket client/server connection for successful pay-and-retry plus a relevant protocol/connection error; mock-only coverage is insufficient"]
 touches = ["mix.exs", "lib/mpp/client/transport.ex", "lib/mpp/transports/websocket/", "lib/mpp/mcp.ex", "test/mpp/transports/websocket/"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement MPP over WebSocket — server adapter for JSON-RPC carried over WS with payment challenges riding on subscription handshakes, and a client-side `MPP.Client.Transport` impl for WS. Read the current WS transport in `refs/mpp-rs` (server-side WS handler and the `alloy-transport-mpp` crate) at implementation time to confirm framing, error codes, challenge placement, and retry/backoff semantics (upstream has hardened against retry amplification — match that posture).
 
@@ -1300,7 +1300,7 @@ scores = { d = 4, b = 7, u = 7 }
 acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code and challenge placement match the MPP transport specification; reference SDKs are compatibility evidence", "Client-side `MPP.Client.Transport` implementation and server-side adapter usable from Plug", "End-to-end integration test over the real local Plug/JSON-RPC boundary covers successful payment retry and a relevant payment-required/error response"]
 touches = ["lib/mpp/client/transport.ex", "lib/mpp/transports/json_rpc/", "lib/mpp/plug.ex", "lib/mpp/mcp.ex", "test/mpp/transports/json_rpc/", "test/mpp/plug_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement the bare JSON-RPC transport binding (non-MCP-framed) required for SDK/spec parity, with payment challenges carried without MCP's tool/meta layer.
 
@@ -1337,7 +1337,7 @@ scores = { d = 6, b = 7, u = 7 }
 acceptance_criteria = ["MPP.Methods.Hedera implements the Method behaviour and the current MPP Hedera charge draft", "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available", "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction; missing credentials flunk loudly with exact setup instructions"]
 touches = ["mix.exs", "lib/mpp/methods/hedera.ex", "test/mpp/methods/hedera_test.exs", "test/mpp/methods/hedera_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.
 """
@@ -1441,7 +1441,7 @@ acceptance_criteria = [
 ]
 touches = ["lib/mpp/credential.ex", "lib/mpp/verifier.ex", "test/mpp/credential_test.exs", "test/mpp/verifier_test.exs"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a "parity confirmed" note; if not, add the parse / serialize / verify path.
 """
@@ -1990,7 +1990,7 @@ acceptance_criteria = ["MPP.Methods.USDC implements every normative profile in t
 out_of_scope = ["Re-implementing EIP-3009 primitives (Task 40)", "Re-implementing generic Solana transfer primitives (Task 21)"]
 touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/solana.ex", "lib/mpp/methods/stacks.ex", "test/mpp/methods/"]
 assignee = "grok"
-model = "grok-4.5"
+model = "grok-4.6"
 body = """
 Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.
 
