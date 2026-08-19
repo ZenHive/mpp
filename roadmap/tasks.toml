@@ -1016,7 +1016,7 @@ id = "33d"
 phase = 12
 bundle = "client-sdk"
 milestone = "v0_13"
-status = "in_progress"
+status = "done"
 title = "MCP client transport"
 scores = { d = 5, b = 9, u = 9 }
 depends_on = [32, "33b", "33c"]
@@ -1035,8 +1035,15 @@ model = "grok-4.6"
 body = """
 Add the MCP client surface that completes payment-aware JSON-RPC tool calls. The low-level `MPP.Client.Transport.MCP` implements the shared Transport behaviour: detect error code -32042, extract `error.data.challenges`, and attach the credential at `params._meta["org.paymentauth/credential"]`. Above that boundary, provide payment-aware call orchestration that selects through Task 33c's shared policy, obtains explicit approval, pays through `MPP.Client.MultiProvider`, and retries once. Match the separation and callback timing in `refs/mppx/src/mcp/client/McpClient.ts`; use Task 32's `MPP.Mcp` constants and types.
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1787105690396-0cf2c987, ab36765b6d9aaa1bc8b393516d1df4b399069684)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787105690396-0cf2c987"
 started_at = "2026-08-19"
 scored_at = "2026-08-02"
+done_at = "2026-08-19"
+shipped_in = "ab36765b6d9aaa1bc8b393516d1df4b399069684"
 
 [[task]]
 id = "33e"
