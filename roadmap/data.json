@@ -598,7 +598,7 @@
       "id": 38,
       "phase": 5,
       "bundle": "evm",
-      "status": "pending",
+      "status": "in_progress",
       "title": "EVM credentialTypes backfill",
       "scores": {
         "d": 3,
@@ -623,6 +623,7 @@
         "test/mpp/methods/evm_integration_test.exs"
       ],
       "body": "Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: [\"transaction\", \"hash\"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.\n",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
