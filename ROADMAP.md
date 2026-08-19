@@ -201,7 +201,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 21 | ✅ | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5] 🚀 |
-| Task 88 `[P]` | 🔄 | 🎁 **additional-methods** · Solana confidential transfer profile [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
+| Task 88 `[P]` | ✅ | 🎁 **additional-methods** · Solana confidential transfer profile [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
 <!-- TASKS:END -->
 
 ---
