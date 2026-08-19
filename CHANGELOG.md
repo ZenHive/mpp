@@ -6,13 +6,30 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.15.0] — 2026-08-19
+
+### Added
+
+- Durable Stripe subscription lifecycle: activations persist through
+  `MPP.Subscription.Store` on a method-neutral record,
+  `MPP.Methods.Stripe.Subscription.process_invoice/3` validates and durably
+  records paid renewal cycle invoices on canonical billing periods (atomic
+  event/invoice dedup — one payment per period under concurrent duplicate
+  webhooks), and `cancel/2` schedules Stripe cancellation at the end of the
+  last durably paid period.
 
 ### Changed
 
+- Tempo subscription renewal settlement now keeps its per-period dedup claim
+  after an ambiguous broadcast or transport error and releases it only on
+  proven non-inclusion (build/simulate rejection or a confirmed on-chain
+  revert), so a renewal retried after a broadcast timeout can no longer settle
+  the same period twice.
 - The payment-security mutation campaign runs nightly and through
   `workflow_dispatch` via `.github/workflows/mutation-security.yml`, while
-  remaining outside `mix ci` / `mix precommit.full`.
+  remaining outside `mix ci` / `mix precommit.full`. The mutant set now also
+  covers the EIP-3009 authorization dispatch clause and signer matching in
+  `MPP.Methods.EVM`.
 
 ## [0.14.0] — 2026-08-19
 

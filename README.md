@@ -201,12 +201,15 @@ Each route can have its own pricing — just mount `MPP.Plug` with different `am
 
 Set `intent: "subscription"` with `period_unit` and `period_count` to use the
 shared `MPP.Intents.Subscription` schema. `MPP.Methods.Stripe` activates a
-constrained fixed-price Stripe subscription and verifies its paid first invoice.
-`MPP.Methods.Tempo` activates a scoped access key, settles the first period, and
-exposes `MPP.Methods.Tempo.Subscription.authorize/2` for later renewals. Tempo
-subscriptions use `MPP.Subscription.ETSStore` by default; configure a shared
-`MPP.Subscription.Store` backend when renewals must coordinate across nodes or
-survive restarts.
+constrained fixed-price Stripe subscription, verifies its paid first invoice,
+and records the activation durably; `MPP.Methods.Stripe.Subscription.process_invoice/3`
+maps paid renewal cycle invoices onto canonical billing periods with atomic
+event/invoice dedup, and `cancel/2` schedules Stripe cancellation at the end of
+the last paid period. `MPP.Methods.Tempo` activates a scoped access key, settles
+the first period, and exposes `MPP.Methods.Tempo.Subscription.authorize/2` for
+later renewals. Both methods use `MPP.Subscription.ETSStore` by default;
+configure a shared `MPP.Subscription.Store` backend when renewals must
+coordinate across nodes or survive restarts.
 
 ## What This Means for Your API
 
