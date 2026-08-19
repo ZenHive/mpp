@@ -487,7 +487,7 @@ implemented = "Shipped MPP.Methods.EVM implementing on-chain payment verificatio
 id = 38
 phase = 5
 bundle = "evm"
-status = "in_progress"
+status = "done"
 title = "EVM credentialTypes backfill"
 scores = { d = 3, b = 7, u = 8 }
 acceptance_criteria = [
@@ -501,8 +501,15 @@ model = "grok-4.6"
 body = """
 Unified EVM spec (`draft-evm-charge-00`) requires `credentialTypes` + `permit2Address` in `methodDetails`. Add to `MPP.Methods.EVM.challenge_method_details/1`: emit `credentialTypes: ["transaction", "hash"]` (current capabilities) and `permit2Address` (default canonical `0x000000000022D473030F116dDEE9F6B43aC78BA3`, override via `method_config`). Spec-compliance win without needing Permit2 impl.
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1787099897796-77df65d0, 6536dd9646e80b3cd5a3a0dfabb305c998ed3cde)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787099897796-77df65d0"
 started_at = "2026-08-19"
 scored_at = "2026-08-02"
+done_at = "2026-08-19"
+shipped_in = "6536dd9646e80b3cd5a3a0dfabb305c998ed3cde"
 
 # ============================================================================
 # Tasks — Phase 6: Multi-Method Challenges (v0.2.0)
