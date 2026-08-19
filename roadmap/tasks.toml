@@ -2250,3 +2250,22 @@ Implement the optional confidential charge profile from draft-solana-charge-00 o
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
+
+[[task]]
+id = "89"
+phase = 12
+bundle = "client-sdk"
+status = "pending"
+title = "Tempo client provider: machine-token charge construction"
+scores = { d = 6, b = 8, u = 6 }
+markers = ["parallel"]
+depends_on = [84]
+acceptance_criteria = ["A challenge advertising machineTokenEnabled builds the canonical machine-token settlement calls (approve + swapTo via MPP.Methods.Tempo.MachineToken constants) instead of a plain TIP-20 transferWithMemo, matching refs/mppx/src/tempo/client/Charge.ts branching", "Attribution memo and chain pinning behavior is unchanged for the machine-token branch", "Unit coverage of the advertisement branch; one live Moderato success and one relevant live rejection through the built-in provider; missing credentials flunk loudly with export instructions"]
+touches = ["lib/mpp/client/providers/tempo.ex", "test/mpp/client/providers/"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+Extend MPP.Client.Providers.Tempo so a challenge advertising machineTokenEnabled constructs the machine-token settlement route instead of a plain TIP-20 transferWithMemo. Server-side verification shipped in Task 84 with client-side construction explicitly out of scope; the built-in provider (Task 33e) currently always builds transferWithMemo — also a dependency, expressed here in prose because rmap depends_on takes numeric ids only. Authority: verified MppcSwapper source + live Moderato receipts; refs/mppx/src/tempo/client/Charge.ts and refs/mpp-rs TempoProvider machine-token routing are compatibility evidence. Filed from the task-33e reviewer proposal (run run-1787109695556-70f46cbc).
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
