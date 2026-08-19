@@ -1158,7 +1158,7 @@
       "phase": 12,
       "bundle": "client-sdk",
       "milestone": "v0_13",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Payment-aware Req plugin",
       "scores": {
         "d": 5,
@@ -1191,6 +1191,7 @@
         "test/mpp/client/"
       ],
       "body": "Add `MPP.Client.Req` as a Req plugin that intercepts 402 responses, extracts the challenge, calls the configured provider's `pay/1`, and retries with the credential. Pattern: `Req.new() |> MPP.Client.Req.attach(provider: my_provider)`. Non-402 responses pass through untouched. This is the Elixir equivalent of mpp-rs `PaymentExt` for reqwest and mppx `Fetch.from()`.\n\nAbsorbs former Task 47 (superseded 2026-08-02): challenge selection/ordering is client-orchestration, not HTTP-wire-transport — mppx owns it in client orchestration (`refs/mppx/src/client/Mppx.ts`) and mpp-rs at the provider layer (`refs/mpp-rs/src/client/provider.rs:71`, selection policy, #371). Implement it here as a transport-neutral selection policy rather than a Transport.HTTP callback.\n",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
