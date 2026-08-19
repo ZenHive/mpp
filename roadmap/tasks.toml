@@ -817,7 +817,7 @@ implemented = "Added MPP.Methods.Tempo.SessionReceipt — a session-intent recei
 id = 30
 phase = 10
 bundle = "session"
-status = "in_progress"
+status = "done"
 title = "Channel state and voucher types"
 scores = { d = 5, b = 9, u = 8 }
 depends_on = [28, 29]
@@ -836,8 +836,15 @@ Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher`
 
 Note 2026-06-12: mpp-rs landed TIP-1034 session client primitives including precompile-backed voucher support (#288, commit 0d57f96) — the production-path successor to the contract-backed v1 channel. At pickup, read `refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs` and `refs/mpp-rs/src/client/tempo/session/` to decide whether to model v1 (contract) and v2 (precompile) voucher types together or stage v2 as a follow-up.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787105687221-9fcb62ee, bc016cf7fba0f6c86fc43917f3160cd74b1ab010)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787105687221-9fcb62ee"
 started_at = "2026-08-19"
 scored_at = "2026-08-02"
+done_at = "2026-08-19"
+shipped_in = "bc016cf7fba0f6c86fc43917f3160cd74b1ab010"
 
 [[task]]
 id = 31
