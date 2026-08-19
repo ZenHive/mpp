@@ -3368,7 +3368,7 @@
       "id": "87",
       "phase": 3,
       "bundle": "discovery",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Allow unpaid routes in MPP.Discovery.OpenApi",
       "scores": {
         "d": 2,
@@ -3399,6 +3399,7 @@
       ],
       "body": "Let mix mpp.openapi / MPP.Discovery.OpenApi.generate/1 omit x-payment-info and the 402 response when a route has payment: nil or no payment key. Today every generated route must include payment, so the generator cannot describe mixed free+paid surfaces. Authority: draft-payment-discovery-00 (only payable operations MUST carry x-payment-info); mppx src/discovery/OpenApi.ts createDocument adds 402 and x-payment-info only when route.payment is truthy (compatibility evidence). Filed from the task-42 reviewer proposal (run run-1787099901908-26fd5b7d).\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
