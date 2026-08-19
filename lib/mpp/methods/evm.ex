@@ -96,9 +96,8 @@ defmodule MPP.Methods.EVM do
   @required_config_keys ~w(rpc_url)
   @zero_address "0x0000000000000000000000000000000000000000"
 
-  # draft-evm-charge-00.md:235 (canonical Permit2) and :302-303 (credentialTypes).
+  # draft-evm-charge-00.md:235 (canonical Permit2)
   @canonical_permit2_address "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-  @credential_types ["transaction", "hash"]
 
   # Single-use dedup: an EVM tx hash is namespaced separately from Tempo's
   # "mpp:charge:" keyspace so one shared store can back both methods without
@@ -206,7 +205,7 @@ defmodule MPP.Methods.EVM do
     config = charge.method_details || %{}
 
     details = %{
-      "credentialTypes" => @credential_types,
+      "credentialTypes" => credential_types(),
       "permit2Address" => config["permit2_address"] || @canonical_permit2_address
     }
 

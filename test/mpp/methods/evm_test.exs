@@ -173,14 +173,15 @@ defmodule MPP.Methods.EVMTest do
       details = EVM.challenge_method_details(charge)
 
       refute Map.has_key?(details, "chainId")
-      assert details["credentialTypes"] == ["transaction", "hash"]
+      assert details["credentialTypes"] == ["hash"]
       assert details["permit2Address"] == @canonical_permit2
     end
 
-    test "includes credentialTypes for current capabilities", %{charge: charge} do
+    test "advertises exactly the credential types verify/2 accepts", %{charge: charge} do
       details = EVM.challenge_method_details(charge)
 
-      assert details["credentialTypes"] == ["transaction", "hash"]
+      assert details["credentialTypes"] == EVM.credential_types()
+      assert details["credentialTypes"] == ["hash"]
     end
 
     test "defaults permit2Address to the canonical Permit2 deployment", %{charge: charge} do
@@ -203,7 +204,7 @@ defmodule MPP.Methods.EVMTest do
       details = EVM.challenge_method_details(charge)
 
       assert details == %{
-               "credentialTypes" => ["transaction", "hash"],
+               "credentialTypes" => ["hash"],
                "permit2Address" => @canonical_permit2
              }
     end
@@ -240,7 +241,7 @@ defmodule MPP.Methods.EVMTest do
       request = Charge.to_request(%{charge | method_details: details})
 
       assert request["methodDetails"]["chainId"] == spec_details["chainId"]
-      assert request["methodDetails"]["credentialTypes"] == ["transaction", "hash"]
+      assert request["methodDetails"]["credentialTypes"] == ["hash"]
       assert request["methodDetails"]["permit2Address"] == @canonical_permit2
 
       for type <- request["methodDetails"]["credentialTypes"] do
@@ -275,7 +276,7 @@ defmodule MPP.Methods.EVMTest do
       assert {:ok, request} = Jason.decode(json)
 
       assert request["methodDetails"]["chainId"] == @chain_id
-      assert request["methodDetails"]["credentialTypes"] == ["transaction", "hash"]
+      assert request["methodDetails"]["credentialTypes"] == ["hash"]
       assert request["methodDetails"]["permit2Address"] == @canonical_permit2
     end
   end
