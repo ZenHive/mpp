@@ -2352,7 +2352,7 @@ scored_at = "2026-08-19"
 id = "91"
 phase = 10
 bundle = "session"
-status = "pending"
+status = "in_progress"
 title = "Release Tempo subscription activation claims after failed settlement"
 scores = { d = 6, b = 8, u = 7 }
 markers = ["parallel"]
@@ -2371,6 +2371,7 @@ Orchestrator decisions (resolved 2026-08-19):
 Authority: live Moderato settlement plus the existing renewal claim policy in this module. Reference SDKs are compatibility evidence only.
 """
 created_at = "2026-08-19"
+started_at = "2026-08-19"
 scored_at = "2026-08-19"
 
 [[task]]
