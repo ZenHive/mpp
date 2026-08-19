@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "3d7ff6bcb939dca7d4a8b0d4c44530574790852f3a2cd54e43b570fa6920d915",
+    "fingerprint_sha256": "8d7cfd6cc49500113ab797495d59a38b484a1ef7a301887610682cbeb655696f",
     "mutations": [
       {
         "id": "jcs-descending-key-order",
@@ -135,6 +135,20 @@
         "classification": "non-equivalent; authorizes the wrong amount"
       },
       {
+        "id": "evm-authorization-dispatch-hash-routed",
+        "class": "authorization-dispatch",
+        "status": "killed",
+        "evidence": "a well-formed EIP-3009 payload must settle through the authorization clause before the hash catch-all",
+        "classification": "non-equivalent; rejects authorization credentials by routing them through hash extraction"
+      },
+      {
+        "id": "evm-authorization-from-match-bypassed",
+        "class": "evm-authorization-signer-binding",
+        "status": "killed",
+        "evidence": "the EVM authorization test rejects a token/to/amount-matching Transfer from a different sender",
+        "classification": "non-equivalent; accepts settlement from an address other than the EIP-3009 signer"
+      },
+      {
         "id": "tempo-amount-match-bypassed",
         "class": "tempo-amount-authorization",
         "status": "killed",
@@ -159,6 +173,7 @@
     "canaries": [
       "jcs-descending-key-order",
       "verifier-request-pin-bypassed",
+      "evm-authorization-dispatch-hash-routed",
       "tempo-unknown-dispatch-accepted"
     ],
     "reviewed_survivors": [

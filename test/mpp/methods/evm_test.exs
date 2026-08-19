@@ -667,7 +667,7 @@ defmodule MPP.Methods.EVMTest do
       )
     end
 
-    test "settles a valid authorization and returns a receipt", %{charge: charge} do
+    test "routes a well-formed authorization before the hash credential catch-all", %{charge: charge} do
       charge = authorization_charge(charge)
       payload = authorization_payload(charge)
 
@@ -686,7 +686,7 @@ defmodule MPP.Methods.EVMTest do
       assert receipt.reference == @tx_hash
     end
 
-    test "rejects a settlement Transfer whose from is not the authorization signer", %{charge: charge} do
+    test "rejects a matching settlement Transfer whose from is not the authorization signer", %{charge: charge} do
       charge = authorization_charge(charge)
       payload = authorization_payload(charge)
 

@@ -36,13 +36,19 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     assert Enum.all?(get_in(ledger, ["campaign", "mutations"]), &(&1["status"] == "killed"))
   end
 
-  test "canonicalization, pinning and authorization canaries are mandatory" do
-    canary_classes =
+  test "canonicalization, pinning and authorization dispatch canaries are mandatory" do
+    canary_ids =
       SecurityMutations.all()
       |> Enum.filter(& &1.canary)
-      |> Enum.map(& &1.class)
+      |> Enum.map(& &1.id)
 
-    assert Enum.sort(canary_classes) == ["authorization-dispatch", "canonical-ordering", "pinned-fields"]
+    assert Enum.sort(canary_ids) ==
+             Enum.sort([
+               "jcs-descending-key-order",
+               "verifier-request-pin-bypassed",
+               "evm-authorization-dispatch-hash-routed",
+               "tempo-unknown-dispatch-accepted"
+             ])
   end
 
   test "a surviving canary fails the campaign even when the ledger says killed" do

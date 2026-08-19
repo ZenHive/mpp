@@ -96,6 +96,24 @@ defmodule MPP.Test.SecurityMutations do
         false
       ),
       mutation(
+        "evm-authorization-dispatch-hash-routed",
+        "authorization-dispatch",
+        "lib/mpp/methods/evm.ex",
+        ~s|  def verify(%{"type" => "authorization"} = payload, %Charge{} = charge) do\n|,
+        ~s|  def verify(%{"type" => "authorization-mutant"} = payload, %Charge{} = charge) do\n|,
+        ["test/mpp/methods/evm_test.exs"],
+        true
+      ),
+      mutation(
+        "evm-authorization-from-match-bypassed",
+        "evm-authorization-signer-binding",
+        "lib/mpp/methods/evm.ex",
+        "  defp from_matches?(transfer, expected_from), do: Onchain.Address.equal?(transfer.from, expected_from)\n",
+        "  defp from_matches?(_transfer, _expected_from), do: true\n",
+        ["test/mpp/methods/evm_test.exs"],
+        false
+      ),
+      mutation(
         "tempo-amount-match-bypassed",
         "tempo-amount-authorization",
         "lib/mpp/methods/tempo.ex",
