@@ -2,8 +2,10 @@ defmodule MPP.Methods.EVMTest do
   use ExUnit.Case, async: true
 
   alias MPP.Errors
+  alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM
+  alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -22,6 +24,21 @@ defmodule MPP.Methods.EVMTest do
   @amount "1000000"
   # 1_000_000 in hex = 0xF4240 — padded to 32 bytes for log data
   @amount_hex "0x" <> String.duplicate("0", 58) <> "0f4240"
+
+  # draft-evm-charge-00.md:235 — canonical Permit2 deployment
+  @canonical_permit2 "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  # draft-evm-charge-00.md:302-303 — valid credentialTypes values
+  @spec_credential_types ~w(permit2 authorization transaction hash)
+  # draft-evm-charge-00.md:1244-1253 — decoded challenge request example
+  @spec_example_request %{
+    "amount" => "1000000000000000000",
+    "currency" => "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7",
+    "recipient" => "0x742d35Cc6634C0532925a3b844Bc9e7595f8fE00",
+    "methodDetails" => %{
+      "chainId" => 4326,
+      "credentialTypes" => ["permit2"]
+    }
+  }
 
   # --- Dedup test stores (EVM-scoped names — reuse the MPP.Tempo.Store behaviour) ---
 
@@ -151,9 +168,115 @@ defmodule MPP.Methods.EVMTest do
       assert %{"chainId" => 1} = EVM.challenge_method_details(charge)
     end
 
-    test "returns nil when no chain_id configured", %{charge: charge} do
+    test "omits chainId when chain_id is not configured", %{charge: charge} do
       charge = %{charge | method_details: %{"rpc_url" => @rpc_url}}
-      assert is_nil(EVM.challenge_method_details(charge))
+      details = EVM.challenge_method_details(charge)
+
+      refute Map.has_key?(details, "chainId")
+      assert details["credentialTypes"] == ["transaction", "hash"]
+      assert details["permit2Address"] == @canonical_permit2
+    end
+
+    test "includes credentialTypes for current capabilities", %{charge: charge} do
+      details = EVM.challenge_method_details(charge)
+
+      assert details["credentialTypes"] == ["transaction", "hash"]
+    end
+
+    test "defaults permit2Address to the canonical Permit2 deployment", %{charge: charge} do
+      details = EVM.challenge_method_details(charge)
+
+      assert details["permit2Address"] == @canonical_permit2
+    end
+
+    test "overrides permit2Address from method_config", %{charge: charge} do
+      custom = "0x1111111111111111111111111111111111111111"
+      charge = %{charge | method_details: Map.put(charge.method_details, "permit2_address", custom)}
+      details = EVM.challenge_method_details(charge)
+
+      assert details["permit2Address"] == custom
+      refute Map.has_key?(details, "permit2_address")
+    end
+
+    test "handles nil method_details" do
+      {:ok, charge} = Charge.new(amount: @amount, currency: @token_address)
+      details = EVM.challenge_method_details(charge)
+
+      assert details == %{
+               "credentialTypes" => ["transaction", "hash"],
+               "permit2Address" => @canonical_permit2
+             }
+    end
+
+    test "does not leak server-only method_config keys", %{charge: charge} do
+      details = EVM.challenge_method_details(charge)
+
+      refute Map.has_key?(details, "rpc_url")
+      refute Map.has_key?(details, "chain_id")
+      refute Map.has_key?(details, "store")
+      refute Map.has_key?(details, "req_options")
+    end
+
+    test "cross-validates methodDetails against the draft-evm-charge-00 example" do
+      spec_details = @spec_example_request["methodDetails"]
+
+      # Spec example uses camelCase wire keys; credentialTypes values are from the
+      # registered set (draft-evm-charge-00.md:302-303). We advertise the hash-path
+      # types rather than permit2, and always include the required permit2Address.
+      assert Map.has_key?(spec_details, "chainId")
+      assert Map.has_key?(spec_details, "credentialTypes")
+      assert spec_details["credentialTypes"] != []
+      assert Enum.all?(spec_details["credentialTypes"], &(&1 in @spec_credential_types))
+
+      {:ok, charge} =
+        Charge.new(
+          amount: @spec_example_request["amount"],
+          currency: @spec_example_request["currency"],
+          recipient: @spec_example_request["recipient"]
+        )
+
+      charge = %{charge | method_details: %{"chain_id" => spec_details["chainId"]}}
+      details = EVM.challenge_method_details(charge)
+      request = Charge.to_request(%{charge | method_details: details})
+
+      assert request["methodDetails"]["chainId"] == spec_details["chainId"]
+      assert request["methodDetails"]["credentialTypes"] == ["transaction", "hash"]
+      assert request["methodDetails"]["permit2Address"] == @canonical_permit2
+
+      for type <- request["methodDetails"]["credentialTypes"] do
+        assert type in @spec_credential_types
+      end
+    end
+
+    test "402 challenge encodes credentialTypes and permit2Address in methodDetails" do
+      config =
+        PaymentPlug.init(
+          secret_key: "hmac-secret-for-evm-challenge-test",
+          realm: "api.example.com",
+          method: EVM,
+          amount: @amount,
+          currency: @token_address,
+          recipient: @recipient,
+          method_config: %{
+            "rpc_url" => @rpc_url,
+            "chain_id" => @chain_id
+          }
+        )
+
+      conn =
+        :get
+        |> Plug.Test.conn("/resource")
+        |> PaymentPlug.call(config)
+
+      assert conn.status == 402
+      [header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+      assert {:ok, challenge} = Headers.parse_challenge(header)
+      assert {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+      assert {:ok, request} = Jason.decode(json)
+
+      assert request["methodDetails"]["chainId"] == @chain_id
+      assert request["methodDetails"]["credentialTypes"] == ["transaction", "hash"]
+      assert request["methodDetails"]["permit2Address"] == @canonical_permit2
     end
   end
 

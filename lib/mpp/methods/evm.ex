@@ -30,6 +30,9 @@ defmodule MPP.Methods.EVM do
     * `"rpc_url"` — (required) JSON-RPC endpoint URL for the target EVM chain
     * `"chain_id"` — (optional) network chain ID, included in challenge details
       so the client knows which chain to transact on
+    * `"permit2_address"` — (optional) Permit2 contract advertised as
+      `permit2Address` in challenge `methodDetails`. Defaults to the canonical
+      deployment `0x000000000022D473030F116dDEE9F6B43aC78BA3`
     * `"store"` — (optional) replay-dedup store, **on by default** (see "Replay
       protection"): when absent, the app-started `MPP.Tempo.ConCacheStore` enforces
       single-use of each on-chain transaction hash out of the box. Pass a module
@@ -92,6 +95,10 @@ defmodule MPP.Methods.EVM do
 
   @required_config_keys ~w(rpc_url)
   @zero_address "0x0000000000000000000000000000000000000000"
+
+  # draft-evm-charge-00.md:235 (canonical Permit2) and :302-303 (credentialTypes).
+  @canonical_permit2_address "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  @credential_types ["transaction", "hash"]
 
   # Single-use dedup: an EVM tx hash is namespaced separately from Tempo's
   # "mpp:charge:" keyspace so one shared store can back both methods without
@@ -174,27 +181,32 @@ defmodule MPP.Methods.EVM do
 
   api(
     :challenge_method_details,
-    "Return EVM-specific fields (`chainId`) for the 402 challenge.",
+    "Return EVM-specific fields (`chainId`, `credentialTypes`, `permit2Address`) for the 402 challenge.",
     params: [
       charge: [
         kind: :value,
-        description: "Charge struct with method_details optionally containing `chain_id`"
+        description: "Charge struct with method_details optionally containing `chain_id` and `permit2_address`"
       ]
     ],
     returns: %{
-      type: :map_or_nil,
-      description: "Map with `chainId` key, or `nil` if no `chain_id` configured"
+      type: :map,
+      description: "Map with `credentialTypes` and `permit2Address`; includes `chainId` when `chain_id` is configured"
     }
   )
 
   @impl MPP.Method
-  @spec challenge_method_details(Charge.t()) :: map() | nil
+  @spec challenge_method_details(Charge.t()) :: map()
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
 
+    details = %{
+      "credentialTypes" => @credential_types,
+      "permit2Address" => config["permit2_address"] || @canonical_permit2_address
+    }
+
     case config["chain_id"] do
-      nil -> nil
-      chain_id -> %{"chainId" => chain_id}
+      nil -> details
+      chain_id -> Map.put(details, "chainId", chain_id)
     end
   end
 

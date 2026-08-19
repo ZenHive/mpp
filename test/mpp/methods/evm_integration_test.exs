@@ -339,6 +339,8 @@ defmodule MPP.Methods.EVMIntegrationTest do
       assert {:ok, request_map} = Jason.decode(request_json)
 
       assert request_map["methodDetails"]["chainId"] == @default_chain_id
+      assert request_map["methodDetails"]["credentialTypes"] == ["transaction", "hash"]
+      assert request_map["methodDetails"]["permit2Address"] == "0x000000000022D473030F116dDEE9F6B43aC78BA3"
     end
   end
 
