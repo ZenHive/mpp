@@ -34,6 +34,7 @@ defmodule MPP do
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
     * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
+    * `MPP.Methods.Solana` — Solana native SOL and SPL token charge verification
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
     * `MPP.Session.Channel` — Session channel state, balance, and action wire mapping
@@ -82,6 +83,7 @@ defmodule MPP do
       MPP.Methods.Stripe,
       MPP.Methods.Tempo,
       MPP.Methods.EVM,
+      MPP.Methods.Solana,
       MPP.BodyDigest,
       MPP.Amount,
       MPP.Expires,

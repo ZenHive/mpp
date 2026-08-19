@@ -117,6 +117,26 @@ end
 
 Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). The client broadcasts a transaction, then sends the hash as a credential.
 
+### Solana (SOL and SPL tokens)
+
+```elixir
+pipeline :paid_solana do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    method: MPP.Methods.Solana,
+    amount: "10000000",
+    currency: "sol",
+    recipient: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    method_config: %{
+      "rpc_url" => "https://api.mainnet-beta.solana.com",
+      "network" => "mainnet"
+    }
+end
+```
+
+Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs.
+
 **Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
 ### Multi-Method (Stripe + Tempo)
@@ -179,6 +199,7 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 | Stripe | MPP | Fiat (cards, wallets) | v0.1.0 |
 | Tempo | MPP | Stablecoins (TIP-20) | v0.2.0 |
 | EVM | MPP | Any EVM chain (ETH, USDC, ERC-20) | v0.3.0 |
+| Solana | MPP | Native SOL and SPL tokens | Unreleased |
 | Lightning | MPP | Bitcoin (BOLT11) | Future |
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
@@ -225,6 +246,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Tempo.Proof` | EIP-712 proof credentials for zero-amount Tempo flows |
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
+| `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Session.Channel` | Session channel state and contract-backed channel ID |

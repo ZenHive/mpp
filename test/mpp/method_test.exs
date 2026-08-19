@@ -100,6 +100,10 @@ defmodule MPP.MethodTest do
       assert "hash" in MPP.Methods.Tempo.credential_types()
       assert MPP.Methods.EVM.credential_types() == ["hash"]
     end
+
+    test "Solana declares transaction and signature" do
+      assert MPP.Methods.Solana.credential_types() == ["transaction", "signature"]
+    end
   end
 
   describe "challenge_method_details/1" do

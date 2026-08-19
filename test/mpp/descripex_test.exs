@@ -6,6 +6,7 @@ defmodule MPP.DescripexTest do
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
   alias MPP.Methods.EVM
+  alias MPP.Methods.Solana
   alias MPP.Methods.Stripe
   alias MPP.Methods.Tempo
 
@@ -21,6 +22,7 @@ defmodule MPP.DescripexTest do
     Stripe,
     Tempo,
     EVM,
+    Solana,
     MPP.BodyDigest,
     MPP.Amount,
     MPP.Expires,
@@ -154,7 +156,7 @@ defmodule MPP.DescripexTest do
     end
 
     test "method modules have /methods namespace" do
-      for mod <- [Stripe, Tempo] do
+      for mod <- [Stripe, Tempo, EVM, Solana] do
         {:docs_v1, _, _, _, _, meta, _} = Code.fetch_docs(mod)
 
         assert meta[:namespace] == "/methods",

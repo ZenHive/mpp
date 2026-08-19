@@ -80,6 +80,12 @@ defmodule MPP.MixProject do
       # consumer anything and makes an onchain minor a deliberate step here.
       {:onchain, "~> 0.12.0"},
 
+      # Solana RPC, legacy transaction codec, and System/Token/ATA instruction
+      # builders used by MPP.Methods.Solana. Already pulled by onchain; declared
+      # directly because this method calls Cartouche.Solana.* rather than an
+      # onchain wrapper. Three-segment for the same reason as onchain above.
+      {:cartouche, "~> 0.7.0"},
+
       # Tempo chain primitives (Tempo method) — sender-recovery plus
       # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
       # simulation (MPP.Methods.Tempo) calls directly. Same cartouche-floor
@@ -102,7 +108,7 @@ defmodule MPP.MixProject do
     """
     Elixir implementation of the Machine Payments Protocol (MPP) — HTTP 402
     payment middleware for AI agents and machine-to-machine commerce. Supports
-    Stripe, Tempo, and generic EVM payment methods with pluggable architecture.
+    Stripe, Tempo, generic EVM, and Solana payment methods with pluggable architecture.
     """
   end
 

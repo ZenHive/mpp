@@ -99,6 +99,8 @@ MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, n
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
+MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
+MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor gas-economics policy: bounds client gas fields before fee-payer co-sign (anti-drain)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false
@@ -165,6 +167,7 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 - `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
 - `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
+- `cartouche` — Solana RPC, legacy transaction codec, and System/Token/ATA instruction builders (Solana method)
 - `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
 
 Dev/test analysis stack (vibe_kit baseline, all `only: [:dev, :test], runtime: false`): `credo` (+ `ex_slop` plugin for AI-slop antipatterns, configured in `.credo.exs`), `dialyxir`, `ex_dna` (clone detection), `ex_ast` (structural search), `reach` (architecture/smell checks, policy in `.reach.exs`), plus `styler`, `sobelow`, `doctor`, `ex_unit_json`, `dialyzer_json`, `tidewave`.
