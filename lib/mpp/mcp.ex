@@ -24,7 +24,8 @@ defmodule MPP.Mcp do
 
     * `init/1` — build transport config from the same options as `MPP.Plug`
     * `call/3` — verify the request's credential, invoke the handler, attach
-      the receipt (or return a `-32042`/`-32602`/`-32043` error with challenges)
+      the receipt on `result._meta` (or envelope `_meta` when the result is not
+      an object), or return a `-32042`/`-32602`/`-32043` error with challenges
 
   ## Server Helpers
 
@@ -139,17 +140,19 @@ defmodule MPP.Mcp do
       config: [kind: :value, description: "MCP transport config from init/1"],
       handler: [
         kind: :value,
-        description: "Function receiving the request after verification and returning a JSON-RPC response or result map"
+        description:
+          "Function receiving the request after verification and returning a JSON-RPC response or result (object, string, list, number, boolean, or nil)"
       ]
     ],
     returns: %{
       type: :map,
-      description: "JSON-RPC response with payment-required/verification error, or successful result._meta receipt"
+      description:
+        "JSON-RPC response with payment-required/verification error, or successful result._meta receipt (envelope `_meta` when the result is not an object)"
     },
     composes_with: [:extract_credential, :payment_required_error, :attach_receipt]
   )
 
-  @spec call(map(), Config.t(), (map() -> map() | {:ok, map()} | {:error, map()})) :: map()
+  @spec call(map(), Config.t(), (map() -> term())) :: map()
   def call(%{} = request, %Config{} = config, handler) when is_function(handler, 1) do
     Adapter.call(request, config, handler, :nested)
   end

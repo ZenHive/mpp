@@ -26,6 +26,12 @@ defmodule MPP.Transports.JsonRpc.Adapter do
   @doc """
   Verify a JSON-RPC request and invoke `handler`, attaching the receipt at
   `:root` (generic JSON-RPC) or `:nested` (MCP `result._meta`).
+
+  `:nested` prefers `result._meta`. JSON-RPC results that are not objects
+  (string, list, number, boolean, nil) cannot carry `_meta`, so the receipt
+  is attached at envelope `_meta` — the same placement as `:root` — instead
+  of raising after `Replay.mark_used/2` or turning a successful payment into
+  an error.
   """
   @spec call(map(), Config.t(), (map() -> term()), receipt_at()) :: map()
   def call(%{} = request, %Config{} = config, handler, receipt_at)
@@ -188,7 +194,8 @@ defmodule MPP.Transports.JsonRpc.Adapter do
     Map.put(response, "result", Mcp.attach_receipt(result, receipt, challenge_id))
   end
 
-  defp attach_response_receipt(response, %Receipt{} = receipt, challenge_id, :root) do
+  defp attach_response_receipt(response, %Receipt{} = receipt, challenge_id, receipt_at)
+       when receipt_at in [:root, :nested] do
     Mcp.attach_receipt(response, receipt, challenge_id)
   end
 end

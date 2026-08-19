@@ -952,6 +952,31 @@ defmodule MPP.McpTest do
       refute Map.has_key?(problem, "retryAfter")
     end
 
+    test "attaches envelope _meta when a nested non-map result cannot carry result._meta" do
+      # wrap_handler_response/2 accepts these JSON-RPC result shapes. Nested
+      # receipt attachment used to raise FunctionClauseError after mark_used/2.
+      for result <- ["ok", [1, 2], 42, true, nil] do
+        config = server_config(store: start_replay_store!())
+        request = json_rpc_request_with_credential()
+
+        response = Mcp.call(request, config, fn _request -> result end)
+
+        assert response["jsonrpc"] == "2.0"
+        assert response["id"] == "req-1"
+        assert response["result"] === result
+        refute Map.has_key?(response, "error")
+
+        receipt = response["_meta"][Mcp.receipt_meta_key()]
+        assert receipt["status"] == "success"
+        assert receipt["method"] == "mock"
+        assert receipt["reference"] == "ref_mcp"
+
+        replay = Mcp.call(request, config, fn _req -> flunk("handler must not run on replay") end)
+        assert replay["error"]["code"] == -32_043
+        assert replay["error"]["data"]["problem"]["detail"] == "Payment credential already used"
+      end
+    end
+
     test "normalizes handler result maps and tagged tuples before attaching receipt" do
       bare_result =
         Mcp.call(json_rpc_request_with_credential(), server_config(), fn _request -> %{"content" => []} end)
