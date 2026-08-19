@@ -424,6 +424,14 @@ curl https://strip0x.com/openapi.json
 
 Try it and [open an issue](https://github.com/ZenHive/mpp/issues) if anything breaks.
 
+### Local demo
+
+No credentials needed — `mix mpp.demo` starts a demo 402 server on port 4402
+(`--port` to override) with a toy method that accepts a magic `"demo-token"`
+payload. The startup banner prints copy-paste curl commands for the full
+challenge → pay → receipt flow. Requires Bandit (`{:bandit, "~> 1.10", only: :dev}`
+when using mpp as a dependency).
+
 ## Continuous Integration
 
 GitHub Actions workflows (Elixir/OTP pinned via `.tool-versions`, so CI never
