@@ -30,6 +30,7 @@ defmodule MPP.DescripexTest do
     MPP.JCS,
     MPP.Verifier,
     MPP.Mcp,
+    MPP.Transports.JsonRpc,
     OpenApi,
     PaymentInfo,
     MPP.Client.PaymentProvider,

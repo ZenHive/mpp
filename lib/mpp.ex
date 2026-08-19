@@ -51,6 +51,7 @@ defmodule MPP do
     * `MPP.JCS` — RFC 8785 JSON Canonicalization Scheme for HMAC interop
     * `MPP.Verifier` — Transport-neutral payment credential verification
     * `MPP.Mcp` — MCP (JSON-RPC) transport constants and helpers
+    * `MPP.Transports.JsonRpc` — Bare JSON-RPC transport (root-level `_meta`, Plug adapter)
     * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
     * `MPP.Client.Providers.Tempo` — Built-in Tempo charge provider (chain-pinned, attribution-bound)
@@ -92,6 +93,7 @@ defmodule MPP do
       MPP.JCS,
       MPP.Verifier,
       MPP.Mcp,
+      MPP.Transports.JsonRpc,
       MPP.Discovery.OpenApi,
       MPP.Discovery.PaymentInfo,
       MPP.Client.PaymentProvider,

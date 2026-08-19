@@ -1,7 +1,7 @@
 defmodule MPP.Replay do
   @moduledoc false
-  # Shared credential-replay dedup used by BOTH transports — `MPP.Plug` (HTTP)
-  # and `MPP.Mcp` (JSON-RPC) — so they enforce identical single-use protection.
+  # Shared credential-replay dedup used by the HTTP Plug, MCP, and bare JSON-RPC
+  # transports — so they enforce identical single-use protection.
   # Extracted from `MPP.Plug` so the MCP transport can't silently skip the
   # replay guard the Plug applies by default (the two must stay byte-identical:
   # same key prefix, same carve-out, same error text). Keep this the single

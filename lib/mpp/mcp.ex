@@ -52,18 +52,13 @@ defmodule MPP.Mcp do
   alias MPP.JCS
   alias MPP.Plug.Config
   alias MPP.Receipt
-  alias MPP.Replay
-  alias MPP.Telemetry
-  alias MPP.Verifier
+  alias MPP.Transports.JsonRpc.Adapter
 
   # JSON-RPC error code: payment required (no credential provided)
   @payment_required_code -32_042
 
   # JSON-RPC error code: credential verification failed
   @verification_failed_code -32_043
-
-  # JSON-RPC error code: invalid params (malformed MCP credential)
-  @invalid_params_code -32_602
 
   # Metadata key for credentials in params._meta
   @credential_meta_key "org.paymentauth/credential"
@@ -137,7 +132,10 @@ defmodule MPP.Mcp do
     :call,
     "Run a JSON-RPC request through MPP server-side payment verification before invoking a handler.",
     params: [
-      request: [kind: :value, description: "JSON-RPC request map with params._meta payment credential"],
+      request: [
+        kind: :value,
+        description: "JSON-RPC request map; credential may be on params._meta or root `_meta`"
+      ],
       config: [kind: :value, description: "MCP transport config from init/1"],
       handler: [
         kind: :value,
@@ -153,16 +151,7 @@ defmodule MPP.Mcp do
 
   @spec call(map(), Config.t(), (map() -> map() | {:ok, map()} | {:error, map()})) :: map()
   def call(%{} = request, %Config{} = config, handler) when is_function(handler, 1) do
-    case authorize_request(request, config) do
-      {:ok, receipt, challenge_id} ->
-        request
-        |> handler.()
-        |> normalize_handler_response(request)
-        |> attach_response_receipt(receipt, challenge_id)
-
-      {:error, response} ->
-        response
-    end
+    Adapter.call(request, config, handler, :nested)
   end
 
   api(
@@ -385,161 +374,6 @@ defmodule MPP.Mcp do
   # -------------------------------------------------------------------
   # Private Helpers
   # -------------------------------------------------------------------
-
-  defp authorize_request(request, config) do
-    # JSON-RPC params may legally be an array (or an explicit null) — treat any
-    # non-map shape as carrying no credential, mirroring mppx's optional-chained
-    # `request.params?._meta` (refs/mppx/src/server/Transport.ts `getCredential`).
-    params =
-      case Map.get(request, "params", %{}) do
-        %{} = map -> map
-        _other -> %{}
-      end
-
-    case extract_credential(params) do
-      {:ok, credential} -> verify_mcp_credential(request, config, credential)
-      {:error, :no_credential} -> missing_credential_response(request, config)
-      {:error, reason} -> malformed_credential_response(request, config, reason)
-    end
-  end
-
-  defp missing_credential_response(request, config) do
-    error = Errors.new(:payment_required, "No payment credential provided")
-    challenges = generate_challenges(config)
-
-    {:error, error_response(request, @payment_required_code, "Payment Required", challenges, error)}
-  end
-
-  defp malformed_credential_response(request, config, reason) do
-    error = Errors.new(:malformed_credential, "#{reason}")
-    challenges = generate_challenges(config)
-
-    {:error, error_response(request, @invalid_params_code, error.title, challenges, error)}
-  end
-
-  defp verify_mcp_credential(request, config, credential) do
-    case find_method_entry(config, credential.challenge.method) do
-      nil ->
-        error = Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
-        challenges = generate_challenges(config)
-
-        {:error, error_response(request, @verification_failed_code, error.title, challenges, error)}
-
-      entry ->
-        verify_with_entry(request, config, credential, entry)
-    end
-  end
-
-  defp verify_with_entry(request, config, credential, entry) do
-    store = Replay.store_for(config, entry)
-
-    opts = [
-      secret_key: config.secret_key,
-      realm: config.realm,
-      method: entry.method,
-      charge: entry.charge,
-      method_config: entry.method_config,
-      digest: config.digest,
-      opaque: config.opaque
-    ]
-
-    # Same default replay dedup MPP.Plug applies — check before verify, claim
-    # after — so a verified MCP credential cannot be replayed across JSON-RPC
-    # requests for store-backed methods. A replay rejection never reaches
-    # Verifier.verify, so emit the same verify start/fail telemetry MPP.Plug
-    # emits for that branch (lib/mpp/plug.ex verify_credential).
-    case Replay.check_unused(store, credential) do
-      {:error, %Errors{} = error} ->
-        start_time = Telemetry.verify_start(credential, entry.charge, %{realm: config.realm})
-        Telemetry.verify_fail(credential, entry.charge, start_time, error, %{realm: config.realm})
-        {:error, error_response(request, mcp_error_code(error), error.title, generate_challenges(config), error)}
-
-      :ok ->
-        with {:ok, receipt} <- Verifier.verify(credential, opts),
-             :ok <- Replay.mark_used(store, credential) do
-          {:ok, receipt, credential.challenge.id}
-        else
-          {:error, %Errors{} = error} ->
-            challenges = generate_challenges(config)
-            {:error, error_response(request, mcp_error_code(error), error.title, challenges, error)}
-        end
-    end
-  end
-
-  defp find_method_entry(%Config{} = config, method_name) do
-    Enum.find(config.method_entries, fn entry ->
-      entry.method.method_name() == method_name
-    end)
-  end
-
-  # Reuses `MPP.Plug`'s challenge generation so the MCP and HTTP transports emit
-  # byte-identical challenges from the same config.
-  defp generate_challenges(%Config{} = config) do
-    Enum.map(config.method_entries, &MPP.Plug.generate_challenge(config, &1))
-  end
-
-  defp error_response(request, code, message, challenges, %Errors{} = error) do
-    data = %{
-      "httpStatus" => error.status,
-      "challenges" => Enum.map(challenges, &challenge_to_map/1),
-      "problem" => Errors.to_map(error)
-    }
-
-    data =
-      case error.retry_after do
-        seconds when is_integer(seconds) -> Map.put(data, "retryAfter", seconds)
-        nil -> data
-      end
-
-    %{
-      "jsonrpc" => "2.0",
-      "id" => Map.get(request, "id"),
-      "error" => %{
-        "code" => code,
-        "message" => message,
-        "data" => data
-      }
-    }
-  end
-
-  defp mcp_error_code(%Errors{type: "https://paymentauth.org/problems/payment-required"}), do: @payment_required_code
-
-  defp mcp_error_code(%Errors{type: "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"}),
-    do: @payment_required_code
-
-  defp mcp_error_code(%Errors{type: "https://paymentauth.org/problems/malformed-credential"}), do: @invalid_params_code
-  defp mcp_error_code(%Errors{}), do: @verification_failed_code
-
-  defp normalize_handler_response({:ok, response}, request) when is_map(response),
-    do: normalize_handler_response(response, request)
-
-  defp normalize_handler_response({:error, response}, request) when is_map(response),
-    do: normalize_handler_response(response, request)
-
-  defp normalize_handler_response(%{"jsonrpc" => _, "result" => _} = response, _request), do: response
-  defp normalize_handler_response(%{"jsonrpc" => _, "error" => _} = response, _request), do: response
-
-  defp normalize_handler_response(%{"result" => _} = response, request) do
-    response
-    |> Map.put_new("jsonrpc", "2.0")
-    |> Map.put_new("id", Map.get(request, "id"))
-  end
-
-  defp normalize_handler_response(%{"error" => _} = response, request) do
-    response
-    |> Map.put_new("jsonrpc", "2.0")
-    |> Map.put_new("id", Map.get(request, "id"))
-  end
-
-  defp normalize_handler_response(result, request) when is_map(result) do
-    %{"jsonrpc" => "2.0", "id" => Map.get(request, "id"), "result" => result}
-  end
-
-  defp attach_response_receipt(%{"error" => _} = response, _receipt, _challenge_id), do: response
-
-  defp attach_response_receipt(%{"result" => result} = response, %Receipt{} = receipt, challenge_id) do
-    Map.put(response, "result", attach_receipt(result, receipt, challenge_id))
-  end
 
   # Converts a Challenge struct to a string-keyed map for MCP wire format.
   # Decodes `request` from base64url to a native JSON object per the MCP transport spec:

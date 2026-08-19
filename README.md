@@ -252,6 +252,8 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
+| `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |
+| `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
 | `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments |
@@ -261,6 +263,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Client.Transport` | Client transport behaviour — 402 detection, challenge fetch, credential attach |
 | `MPP.Client.Transport.HTTP` | HTTP transport over `Req` |
 | `MPP.Client.Transport.MCP` | MCP/JSON-RPC transport: `-32042` detection, challenge extract, `_meta` credential attach |
+| `MPP.Client.Transport.JsonRpc` | Bare JSON-RPC transport: `-32042` detection, root-level `_meta` credential attach |
 | `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay, retry the tool call once |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |
 
@@ -308,6 +311,11 @@ MPP.Client.MCP.call(client, request, &MyTransport.send/1)
 `MPP.Client.MCP` does the same pay-and-retry over JSON-RPC: it detects `-32042`,
 selects a challenge, asks `on_payment_required` for approval, pays, and retries
 once with the credential at `params._meta["org.paymentauth/credential"]`.
+
+Generic (non-MCP) JSON-RPC uses root-level `_meta` so `params` can be an array.
+`MPP.Transports.JsonRpc.Plug` mounts on a Plug route; `MPP.Client.Transport.JsonRpc`
+attaches the credential at `_meta["org.paymentauth/credential"]` on the request
+envelope.
 
 ## Installation
 

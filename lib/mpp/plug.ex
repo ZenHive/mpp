@@ -36,6 +36,9 @@ defmodule MPP.Plug do
   3. Valid credential → request passes through with `Payment-Receipt` header + receipt in assigns
   4. Invalid credential → 402 with fresh challenge(s) + RFC 9457 error body
 
+  For JSON-RPC over HTTP (root-level `_meta`, not `Authorization` headers),
+  mount `MPP.Transports.JsonRpc.Plug` instead.
+
   ## Shared Options
 
     * `:secret_key` — (required) HMAC-SHA256 key for challenge binding
