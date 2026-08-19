@@ -99,7 +99,7 @@ MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset
 MPP.Verifier               — Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify)
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK); optional server-only Connect settlement routing
-MPP.Methods.Stripe.Subscription — Stripe fixed-price subscription activation + paid-first-invoice verification
+MPP.Methods.Stripe.Subscription — Stripe fixed-price subscription activation, durable renewal (process_invoice/3), and period-end cancellation (cancel/2)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
 MPP.Methods.Tempo.Subscription — Tempo access-key subscription activation, authorize/2 renewals, single-use claim lifecycle
@@ -121,7 +121,7 @@ MPP.Replay                 — Internal credential single-use dedup shared by th
 MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
-MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32043, meta keys), server transport adapter (init/1 + call/3 with replay dedup), server/client helpers
+MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32043, meta keys), server transport adapter (init/1 + call/3 with replay dedup), initialize capabilities/1, server/client helpers
 MPP.Transports.JsonRpc     — Bare JSON-RPC transport: root-level `_meta` credential/receipt, init/1 + call/3, Plug adapter
 MPP.Transports.WebSocket   — WS adapter: handshake challenge, credential/receipt frames, JSON-RPC message frames (library-agnostic)
 MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)

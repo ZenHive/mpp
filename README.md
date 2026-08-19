@@ -286,7 +286,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Subscription.ETSStore` | Application-started single-node subscription store |
 | `MPP.Subscription.Record` | Persisted recurring-payment authority and settlement state |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
-| `MPP.Methods.Stripe.Subscription` | Stripe fixed-price subscription activation and first-invoice verification |
+| `MPP.Methods.Stripe.Subscription` | Stripe fixed-price subscription activation, durable renewal (`process_invoice/3`), and period-end cancellation (`cancel/2`) |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.Subscription` | Tempo access-key subscription activation, authorization, and renewal |
 | `MPP.Methods.Tempo.KeyAuthorization` | Tempo subscription key-authorization wire codec and verifier |
@@ -304,7 +304,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
 | `MPP.Discovery.OpenApi` | OpenAPI 3.1.0 discovery document generation (`x-payment-info`, 402 responses; `mix mpp.openapi`) |
 | `MPP.Discovery.PaymentInfo` | Parser/normalizer for the `x-payment-info` discovery extension |
-| `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
+| `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), initialize `capabilities/1`, error codes, meta keys, client helpers |
 | `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |
 | `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |
 | `MPP.Transports.WebSocket` | WebSocket adapter: handshake `challenge`, `credential`/`receipt` frames, JSON-RPC `message` frames |

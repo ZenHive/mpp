@@ -6,6 +6,21 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- `MPP.Mcp.capabilities/1` builds the MCP `initialize` payment-capability
+  fragment (`experimental.payment.methods`) from transport config, including
+  each configured method's intents and `credentialTypes`.
+
+### Fixed
+
+- Nested JSON-RPC/MCP receipt attachment no longer raises after marking a
+  credential used when the handler returns a non-object JSON-RPC result
+  (string, list, number, boolean, or nil). The receipt is attached at
+  envelope `_meta` instead.
+
 ## [0.15.0] — 2026-08-19
 
 ### Added
