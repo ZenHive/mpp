@@ -146,19 +146,34 @@ defmodule MPP.Methods.EVMTest do
   end
 
   describe "validate_config!/1" do
+    # draft-evm-charge-00.md:276-291
+    # (tempoxyz/mpp-specs@582b8908cfd9c79446c45226622c678a6d5687ca):
+    # methodDetails.chainId is REQUIRED (EIP-155 chain ID).
     test "returns :ok with valid config" do
-      assert :ok = EVM.validate_config!(%{"rpc_url" => @rpc_url})
+      assert :ok = EVM.validate_config!(required_config())
     end
 
     test "raises on missing rpc_url" do
       assert_raise ArgumentError, ~r/rpc_url/, fn ->
-        EVM.validate_config!(%{})
+        EVM.validate_config!(%{"chain_id" => @chain_id})
       end
     end
 
     test "raises on nil rpc_url" do
       assert_raise ArgumentError, ~r/rpc_url/, fn ->
-        EVM.validate_config!(%{"rpc_url" => nil})
+        EVM.validate_config!(required_config(%{"rpc_url" => nil}))
+      end
+    end
+
+    test "raises on missing chain_id" do
+      assert_raise ArgumentError, ~r/chain_id/, fn ->
+        EVM.validate_config!(%{"rpc_url" => @rpc_url})
+      end
+    end
+
+    test "raises on nil chain_id" do
+      assert_raise ArgumentError, ~r/chain_id/, fn ->
+        EVM.validate_config!(required_config(%{"chain_id" => nil}))
       end
     end
   end
@@ -168,13 +183,36 @@ defmodule MPP.Methods.EVMTest do
       assert %{"chainId" => 1} = EVM.challenge_method_details(charge)
     end
 
-    test "omits chainId when chain_id is not configured", %{charge: charge} do
-      charge = %{charge | method_details: %{"rpc_url" => @rpc_url}}
-      details = EVM.challenge_method_details(charge)
+    test "Plug.init rejects missing chain_id instead of emitting a 402 that omits chainId" do
+      opts = [
+        secret_key: "hmac-secret-for-evm-challenge-test",
+        realm: "api.example.com",
+        method: EVM,
+        amount: @amount,
+        currency: @token_address,
+        recipient: @recipient,
+        method_config: %{"rpc_url" => @rpc_url}
+      ]
 
-      refute Map.has_key?(details, "chainId")
-      assert details["credentialTypes"] == ["hash"]
-      assert details["permit2Address"] == @canonical_permit2
+      assert_raise ArgumentError, ~r/chain_id/, fn ->
+        PaymentPlug.init(opts)
+      end
+    end
+
+    test "Plug.init rejects nil chain_id instead of emitting a 402 that omits chainId" do
+      opts = [
+        secret_key: "hmac-secret-for-evm-challenge-test",
+        realm: "api.example.com",
+        method: EVM,
+        amount: @amount,
+        currency: @token_address,
+        recipient: @recipient,
+        method_config: %{"rpc_url" => @rpc_url, "chain_id" => nil}
+      ]
+
+      assert_raise ArgumentError, ~r/chain_id/, fn ->
+        PaymentPlug.init(opts)
+      end
     end
 
     test "advertises exactly the credential types verify/2 accepts", %{charge: charge} do
@@ -629,32 +667,28 @@ defmodule MPP.Methods.EVMTest do
 
   describe "validate_config!/1 — store" do
     test "accepts a module implementing the Store behaviour" do
-      assert :ok = EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => MemoryStore})
+      assert :ok = EVM.validate_config!(required_config(%{"store" => MemoryStore}))
     end
 
     test "accepts {ConCacheStore, opts}" do
-      assert :ok =
-               EVM.validate_config!(%{
-                 "rpc_url" => @rpc_url,
-                 "store" => {ConCacheStore, ttl: 600}
-               })
+      assert :ok = EVM.validate_config!(required_config(%{"store" => {ConCacheStore, ttl: 600}}))
     end
 
     test "raises on a module that does not implement the Store behaviour" do
       assert_raise ArgumentError, ~r/must be a module implementing MPP.Tempo.Store/, fn ->
-        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => Enum})
+        EVM.validate_config!(required_config(%{"store" => Enum}))
       end
     end
 
     test "raises on an unsupported store tuple form" do
       assert_raise ArgumentError, ~r/tuple form is only supported/, fn ->
-        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => {MemoryStore, []}})
+        EVM.validate_config!(required_config(%{"store" => {MemoryStore, []}}))
       end
     end
 
     test "raises at init when ConCacheStore opts is not a keyword list" do
       assert_raise ArgumentError, ~r/must be a keyword list/, fn ->
-        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => {ConCacheStore, [1, 2, 3]}})
+        EVM.validate_config!(required_config(%{"store" => {ConCacheStore, [1, 2, 3]}}))
       end
     end
 
@@ -667,7 +701,7 @@ defmodule MPP.Methods.EVMTest do
       end
 
       assert_raise ArgumentError, ~r/check_and_mark/, fn ->
-        EVM.validate_config!(%{"rpc_url" => @rpc_url, "store" => GetPutOnlyStore})
+        EVM.validate_config!(required_config(%{"store" => GetPutOnlyStore}))
       end
     end
   end
@@ -789,6 +823,10 @@ defmodule MPP.Methods.EVMTest do
   end
 
   # --- Test helpers ---
+
+  defp required_config(extra \\ %{}) do
+    Map.merge(%{"rpc_url" => @rpc_url, "chain_id" => @chain_id}, extra)
+  end
 
   # Merges a dedup store into the charge's method_details.
   defp with_store(charge, store) do

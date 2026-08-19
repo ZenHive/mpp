@@ -28,8 +28,10 @@ defmodule MPP.Methods.EVM do
   ## Config Keys
 
     * `"rpc_url"` — (required) JSON-RPC endpoint URL for the target EVM chain
-    * `"chain_id"` — (optional) network chain ID, included in challenge details
-      so the client knows which chain to transact on
+    * `"chain_id"` — (required) EIP-155 chain ID of the target network,
+      advertised as `chainId` in challenge `methodDetails` (e.g. `1` for
+      Ethereum mainnet, `8453` for Base, `11155111` for Sepolia). Clients
+      reject challenges whose `chainId` they do not support.
     * `"permit2_address"` — (optional) Permit2 contract advertised as
       `permit2Address` in challenge `methodDetails`. Defaults to the canonical
       deployment `0x000000000022D473030F116dDEE9F6B43aC78BA3`
@@ -93,7 +95,10 @@ defmodule MPP.Methods.EVM do
 
   require Logger
 
-  @required_config_keys ~w(rpc_url)
+  # draft-evm-charge-00.md:276-291
+  # (tempoxyz/mpp-specs@582b8908cfd9c79446c45226622c678a6d5687ca):
+  # methodDetails.chainId is REQUIRED (EIP-155 chain ID).
+  @required_config_keys ~w(rpc_url chain_id)
   @zero_address "0x0000000000000000000000000000000000000000"
 
   # draft-evm-charge-00.md:235 (canonical Permit2)
@@ -121,7 +126,7 @@ defmodule MPP.Methods.EVM do
 
   api(
     :validate_config!,
-    "Validate EVM method_config at init time. Raises on missing `rpc_url`.",
+    "Validate EVM method_config at init time. Raises on missing `rpc_url` or `chain_id`.",
     params: [
       config: [kind: :value, description: "method_config map to validate"]
     ],
@@ -190,12 +195,12 @@ defmodule MPP.Methods.EVM do
     params: [
       charge: [
         kind: :value,
-        description: "Charge struct with method_details optionally containing `chain_id` and `permit2_address`"
+        description: "Charge struct with method_details containing required `chain_id` and optional `permit2_address`"
       ]
     ],
     returns: %{
       type: :map,
-      description: "Map with `credentialTypes` and `permit2Address`; includes `chainId` when `chain_id` is configured"
+      description: "Map with required `chainId` (EIP-155), `credentialTypes`, and `permit2Address`"
     }
   )
 

@@ -115,7 +115,7 @@ pipeline :paid_evm do
 end
 ```
 
-Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. The client broadcasts a transaction, then sends the hash as a credential.
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). The client broadcasts a transaction, then sends the hash as a credential.
 
 **Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
