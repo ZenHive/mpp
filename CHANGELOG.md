@@ -8,6 +8,14 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-19
+
+### Added
+
+- `MPP.Tempo.Store.dedup_capable?/1` and `MPP.Tempo.Store.update_capable?/1` — the
+  documented way to ask whether a configured store satisfies the dedup contract
+  (`get/1`, `put/2`, `check_and_mark/2`) or the atomic `update/3` contract.
+
 ### Changed
 
 - **`currency` is now preserved verbatim** instead of being lowercased.
@@ -24,21 +32,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   `recipient`, and `suggested_deposit` must be strings when present — mpp-rs types
   them `Option<String>`, so a non-string previously let us build a request the
   reference SDKs cannot parse. Non-strings return `{:error, :invalid_field_type}`.
-
-## [0.13.0] — 2026-08-18
-
-### Added
-
-- `MPP.Tempo.Store.dedup_capable?/1` and `MPP.Tempo.Store.update_capable?/1` — the
-  documented way to ask whether a configured store satisfies the dedup contract
-  (`get/1`, `put/2`, `check_and_mark/2`) or the atomic `update/3` contract.
-
-### Changed
-
 - Refreshed the published on-chain stack through `onchain 0.12.1` and
   `onchain_tempo 0.9.1`, together with the latest compatible shared upstreams.
 - Updated the development gates to QuickBEAM 0.11, Sobelow 0.15, and Tidewave
-  0.8.4, and refreshed the JS reference SDKs to Ox 1.6.3, viem 2.55.18, and
+  0.9.0, and refreshed the JS reference SDKs to Ox 1.6.3, viem 2.55.18, and
   esbuild 0.28.2. Full test output is retained so CI reports failing test
   identities and can apply ExUnit JSON's configured retry behavior.
 
