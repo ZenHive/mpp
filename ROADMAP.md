@@ -149,7 +149,7 @@
 > MCP (Model Context Protocol) support enables payments over JSON-RPC — critical for AI agent economy. Independent of sessions, can be built in parallel with Phase 10. Types alone are not enough here; both reference SDKs also expose concrete server/client MCP integration points.
 
 <!-- TASKS:BEGIN phase=11 -->
-> 2 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-11-mcp-transport).
+> 4 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-11-mcp-transport).
 <!-- TASKS:END -->
 
 ---
