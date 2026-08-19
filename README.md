@@ -183,7 +183,7 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
 
-**Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, zero-amount proof credentials, delegated access-key proof authorization, opt-in presenter-identity binding for hash/transaction credentials, and pluggable dedup stores with a built-in ETS+TTL option via ConCache, including per-store key prefixes for shared-cache tenancy.
+**Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, zero-amount proof credentials, delegated access-key proof authorization, opt-in presenter-identity binding for hash/transaction credentials, first-party machine-token (MPP Credits / machineUSD) charge payments via `"machine_token_enabled"`, and pluggable dedup stores with a built-in ETS+TTL option via ConCache, including per-store key prefixes for shared-cache tenancy.
 
 **Tempo security note:** Challenges expire by default. On routes without a configured static memo, Tempo payments must use challenge-bound attribution metadata; plain transfers are rejected by the hardened verifier. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast. Setting `"require_presenter_binding" => true` in the Tempo `method_config` additionally requires hash/transaction credential presenters to prove control of the transfer sender's wallet with a `"presenterSignature"` (the proof path's EIP-712 envelope, signed by the sender wallet or an authorized access key; the client signs `MPP.Methods.Tempo.Proof.hash/1` typed data) — closing the front-running residual documented in GHSA-34g7-vx6g-82mq. The requirement is advertised as `"presenterBinding": true` in the 402 method details. Opt-in because neither reference SDK binds the presenter on the hash path.
 
@@ -215,11 +215,16 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
 | `MPP.Methods.Tempo.HostedFeePayer` | Hosted `eth_fillTransaction` fee-payer fill support |
+| `MPP.Methods.Tempo.MachineToken` | Canonical first-party machine-token (MPP Credits) charge-route match |
 | `MPP.Methods.Tempo.Proof` | EIP-712 proof credentials for zero-amount Tempo flows |
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
+| `MPP.Session.Channel` | Session channel state and contract-backed channel ID |
+| `MPP.Session.Voucher` | EIP-712 voucher typed data and signature verification |
+| `MPP.Session.Store` | Behaviour for pluggable session-channel persistence |
+| `MPP.Session.ETSStore` | App-started ETS default session store |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), error codes, meta keys, client helpers |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
@@ -247,6 +252,15 @@ that path (`:cross_origin_redirect`, mpp-rs #379). Callers that drive
 `MPP.Client.Transport.HTTP` themselves must apply the same rule: do not call
 `set_credential/2` on a request whose origin (scheme/host/port) differs from the
 URL the caller asked for.
+
+```elixir
+client = MPP.Client.MCP.new(provider: my_provider)
+MPP.Client.MCP.call(client, request, &MyTransport.send/1)
+```
+
+`MPP.Client.MCP` does the same pay-and-retry over JSON-RPC: it detects `-32042`,
+selects a challenge, asks `on_payment_required` for approval, pays, and retries
+once with the credential at `params._meta["org.paymentauth/credential"]`.
 
 ## Installation
 

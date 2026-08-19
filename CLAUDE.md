@@ -90,11 +90,16 @@ MPP.Verifier               — Transport-neutral verification pipeline (HMAC, re
 MPP.Method                 — Behaviour for pluggable payment methods (verify/2)
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK); optional server-only Connect settlement routing
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
+MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor gas-economics policy: bounds client gas fields before fee-payer co-sign (anti-drain)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache; app-started as the default store
+MPP.Session.Channel        — Session channel state + contract-backed channel ID (keccak of identity fields)
+MPP.Session.Voucher        — EIP-712 voucher typed data + secp256k1 signature verification
+MPP.Session.Store          — Behaviour for pluggable session-channel persistence (get/put/update/delete)
+MPP.Session.ETSStore       — App-started ETS default session store (atomic update/2 within one node)
 MPP.Replay                 — Internal credential single-use dedup shared by the Plug and MCP transports (check_unused/mark_used, Tempo carve-out)
 MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)

@@ -2,10 +2,11 @@ defmodule MPP.Application do
   @moduledoc false
 
   # Starts the default replay-dedup store so replay protection is on by default
-  # (issue #7). A method or plug configured without an explicit
-  # `:store` uses this app-started ConCache instance (`MPP.Tempo.Store.default_store/0`).
-  # Operators wanting a shared/multi-node backend configure their own `:store`;
-  # `store: false` opts a route out entirely.
+  # (issue #7), and the default session-channel store. A method or plug
+  # configured without an explicit `:store` uses this app-started ConCache
+  # instance (`MPP.Tempo.Store.default_store/0`). Operators wanting a
+  # shared/multi-node backend configure their own `:store`; `store: false` opts
+  # a route out entirely. Session channels use `MPP.Session.ETSStore` by default.
 
   use Application
 

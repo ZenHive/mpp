@@ -8,6 +8,42 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Added
+
+- `MPP.Client.MCP` and `MPP.Client.Transport.MCP` — payment-aware MCP client:
+  detect `-32042` / payment-required metadata, select a challenge, obtain
+  approval, pay through `MPP.Client.MultiProvider`, and retry the original
+  JSON-RPC request once with the credential in `params._meta`.
+- `MPP.Session.Channel`, `MPP.Session.Voucher`, `MPP.Session.Store`, and
+  `MPP.Session.ETSStore` — contract-backed channel identity, EIP-712 voucher
+  verification, and an application-started ETS store for channel state.
+- Tempo first-party machine-token (MPP Credits / machineUSD) charge payments.
+  Set `"machine_token_enabled" => true` to advertise `machineTokenEnabled` and
+  accept the canonical `[approve, swapTo]` settlement route on Tempo mainnet
+  (`4217`) and Moderato (`42431`).
+- `MPP.Receipt` preserves method-specific top-level fields (`extensions`) and
+  optional `subscriptionId` through decode → encode (mpp-rs #383 / mppx
+  `looseObject`).
+
+### Changed
+
+- **EVM `"chain_id"` is required** in `method_config` and advertised as
+  `chainId` in challenge `methodDetails`. `MPP.Plug.init/1` raises when it is
+  missing or nil.
+- EVM advertised `credentialTypes` is derived from `credential_types/0`
+  (currently `["hash"]`).
+- Typed credential payloads (`payload.type`) are gated against
+  `Method.credential_types/0` before `method.verify/2`. `type="hash"` still
+  requires a structural hash payload.
+- WWW-Authenticate auth-param names are matched case-insensitively (RFC 9110
+  §11.2 / mppx #788). `id=` and `ID=` collide as `:duplicate_param`.
+
+### Fixed
+
+- A non-RFC-3339 `expires` value is rejected at challenge parse time
+  (`{:error, :invalid_expires}`) instead of surviving until verifier expiry
+  checks (mpp-rs #377).
+
 ## [0.13.0] — 2026-08-19
 
 ### Added

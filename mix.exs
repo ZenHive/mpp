@@ -35,7 +35,7 @@ defmodule MPP.MixProject do
     [
       extra_applications: [:logger],
       # Starts the default replay-dedup store (MPP.Tempo.ConCacheStore) so replay
-      # protection is on by default (issue #7).
+      # protection is on by default (issue #7), plus MPP.Session.ETSStore.
       mod: {MPP.Application, []}
     ]
   end
