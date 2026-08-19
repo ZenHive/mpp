@@ -367,6 +367,12 @@ MPP.Client.MCP.call(client, request, &MyTransport.send/1)
 selects a challenge, asks `on_payment_required` for approval, pays, and retries
 once with the credential at `params._meta["org.paymentauth/credential"]`.
 
+On the server side, `MPP.Mcp.init/1` validates the transport config and
+`MPP.Mcp.call/3` gates tool calls with replay dedup. Merge
+`MPP.Mcp.capabilities(config)` into the `initialize` result to advertise the
+configured payment methods, their intents, and credential types under
+`experimental.payment.methods` (draft-payment-transport-mcp-00).
+
 Generic (non-MCP) JSON-RPC uses root-level `_meta` so `params` can be an array.
 `MPP.Transports.JsonRpc.Plug` mounts on a Plug route; `MPP.Client.Transport.JsonRpc`
 attaches the credential at `_meta["org.paymentauth/credential"]` on the request
