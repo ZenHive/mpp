@@ -7,6 +7,8 @@ defmodule MPP.McpTest do
   alias MPP.Intents.Charge
   alias MPP.JCS
   alias MPP.Mcp
+  alias MPP.Plug.Config
+  alias MPP.Plug.MethodEntry
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
 
@@ -214,6 +216,37 @@ defmodule MPP.McpTest do
   # -------------------------------------------------------------------
   # Server Helpers
   # -------------------------------------------------------------------
+
+  describe "capabilities/1" do
+    test "advertises configured methods, intent, and credential types" do
+      charge = mock_charge()
+
+      config = %Config{
+        secret_key: @secret_key,
+        realm: @realm,
+        intent: "session",
+        method_entries: [
+          %MethodEntry{method: MockMethod, charge: charge, request: "mock-request"},
+          %MethodEntry{method: MPP.Methods.EVM, charge: charge, request: "evm-request"}
+        ]
+      }
+
+      assert Mcp.capabilities(config) == %{
+               experimental: %{
+                 payment: %{
+                   methods: %{
+                     "evm" => %{intents: ["session"], credentialTypes: ["authorization", "hash"]},
+                     "mock" => %{intents: ["session"], credentialTypes: []}
+                   }
+                 }
+               }
+             }
+    end
+
+    test "is registered for MCP API discovery" do
+      assert Enum.any?(MPP.describe(:mcp), &(&1.name == :capabilities))
+    end
+  end
 
   describe "payment_required_error/1" do
     test "builds error from single challenge" do

@@ -31,6 +31,7 @@ defmodule MPP.Mcp do
 
   Build JSON-RPC error responses and extract/attach payment data:
 
+    * `capabilities/1` — advertise configured payment methods and intents
     * `extract_credential/1` — pull credential from `params._meta`
     * `payment_required_error/1` — build `-32042` error with challenges
     * `verification_failed_error/2` — build `-32043` error with problem details
@@ -112,6 +113,29 @@ defmodule MPP.Mcp do
   # -------------------------------------------------------------------
   # Server Helpers
   # -------------------------------------------------------------------
+
+  api(
+    :capabilities,
+    "Build the payment capability map for an MCP `initialize` response.",
+    params: [config: [kind: :value, description: "Validated MCP transport config from init/1"]],
+    returns: %{
+      type: :map,
+      description: "MCP experimental payment capabilities grouped by configured method"
+    },
+    composes_with: [:init]
+  )
+
+  @spec capabilities(Config.t()) :: map()
+  def capabilities(%Config{} = config) do
+    methods =
+      Map.new(config.method_entries, fn entry ->
+        method = entry.method
+
+        {method.method_name(), %{intents: [config.intent], credentialTypes: method.credential_types()}}
+      end)
+
+    %{experimental: %{payment: %{methods: methods}}}
+  end
 
   api(
     :init,
