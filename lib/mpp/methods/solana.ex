@@ -611,6 +611,7 @@ defmodule MPP.Methods.Solana do
     case Base.decode16(Hex.strip_0x(value), case: :mixed) do
       {:ok, <<seed::binary-32>>} -> {:ok, seed}
       {:ok, <<seed::binary-32, _pub::binary-32>>} -> {:ok, seed}
+      _other -> {:error, Errors.new(:verification_failed, "Invalid fee_payer_private_key")}
     end
   end
 

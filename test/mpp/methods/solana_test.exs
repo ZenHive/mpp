@@ -1110,7 +1110,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
 
-      assert error.detail =~ "ATA creation is not allowed"
+      assert error.detail =~ "unexpected"
     end
 
     test "accepts idempotent ATA creation for a split recipient", context do
@@ -1838,6 +1838,78 @@ defmodule MPP.Methods.SolanaTest do
       assert error.detail =~ "unexpected transfer"
     end
 
+    test "rejects an extra SPL transfer on a native SOL charge", context do
+      %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      {source_ata, _} = ATA.find_address(payer, mint)
+      {dest_ata, _} = ATA.find_address(recipient, mint)
+
+      ixs = [
+        SystemProgram.transfer(payer, recipient, @amount),
+        TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 1, 6)
+      ]
+
+      message = Transaction.build_message(payer, ixs, @blockhash)
+      tx = Transaction.sign(message, [seed])
+
+      assert {:error, %Errors{} = error} = Instructions.verify_compiled(tx, charge, %{fee_payer: false})
+      assert error.detail =~ "unexpected"
+    end
+
+    test "rejects an extra SOL transfer on an SPL charge", context do
+      %{payer: payer, payer_seed: seed, recipient: recipient} = context
+      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      {source_ata, _} = ATA.find_address(payer, mint)
+      {dest_ata, _} = ATA.find_address(recipient, mint)
+
+      ixs = [
+        TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 1, 6),
+        SystemProgram.transfer(payer, recipient, 1)
+      ]
+
+      message = Transaction.build_message(payer, ixs, @blockhash)
+      tx = Transaction.sign(message, [seed])
+      {:ok, charge} = Charge.new(amount: "1", currency: @usdc_devnet, recipient: Keys.to_address(recipient))
+
+      assert {:error, %Errors{} = error} = Instructions.verify_compiled(tx, charge, %{fee_payer: false})
+      assert error.detail =~ "unexpected"
+    end
+
+    test "rejects a fee-payer-authorized SPL transfer", context do
+      %{recipient: recipient, fee_payer: fee_payer} = context
+      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      {source_ata, _} = ATA.find_address(fee_payer, mint)
+      {dest_ata, _} = ATA.find_address(recipient, mint)
+      ix = TokenProgram.transfer_checked(source_ata, mint, dest_ata, fee_payer, 1, 6)
+      message = Transaction.build_message(fee_payer, [ix], @blockhash)
+      tx = Transaction.sign_partial(message, %{})
+      {:ok, charge} = Charge.new(amount: "1", currency: @usdc_devnet, recipient: Keys.to_address(recipient))
+
+      assert {:error, %Errors{} = error} =
+               Instructions.verify_compiled(tx, charge, %{fee_payer: true, fee_payer_pubkey: fee_payer})
+
+      assert error.detail =~ "authority"
+    end
+
+    test "rejects ATA creation for the primary recipient", context do
+      %{payer: payer, payer_seed: seed, recipient: recipient} = context
+      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      {source_ata, _} = ATA.find_address(payer, mint)
+      {dest_ata, _} = ATA.find_address(recipient, mint)
+
+      ixs = [
+        ATA.create_idempotent(payer, recipient, mint),
+        TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 1, 6)
+      ]
+
+      message = Transaction.build_message(payer, ixs, @blockhash)
+      tx = Transaction.sign(message, [seed])
+      {:ok, charge} = Charge.new(amount: "1", currency: @usdc_devnet, recipient: Keys.to_address(recipient))
+
+      assert {:error, %Errors{} = error} = Instructions.verify_compiled(tx, charge, %{fee_payer: false})
+      assert error.detail =~ "authorized split"
+    end
+
     test "rejects a compute-unit price ceiling breach when fee paying", context do
       %{
         charge: charge,
@@ -1939,10 +2011,12 @@ defmodule MPP.Methods.SolanaTest do
       {dest_ata, _} = ATA.find_address(recipient, mint)
       {split_owner, _} = Keys.generate_keypair()
 
+      {split_ata, _} = ATA.find_address(split_owner, mint)
+
       ixs = [
         ATA.create_idempotent(payer, split_owner, other_mint),
         TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 9_000, 6),
-        TokenProgram.transfer_checked(source_ata, mint, split_owner |> ATA.find_address(mint) |> elem(0), payer, 1_000, 6)
+        TokenProgram.transfer_checked(source_ata, mint, split_ata, payer, 1_000, 6)
       ]
 
       message = Transaction.build_message(payer, ixs, @blockhash)

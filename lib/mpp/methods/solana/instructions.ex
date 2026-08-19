@@ -88,7 +88,7 @@ defmodule MPP.Methods.Solana.Instructions do
   @spec verify_compiled(Transaction.t(), Charge.t(), map()) :: :ok | {:error, Errors.t()}
   def verify_compiled(%Transaction{} = tx, %Charge{} = charge, opts) do
     with {:ok, classified} <- map_classify_error(classify_compiled(tx)),
-         :ok <- reject_unknown(classified),
+         :ok <- reject_disallowed_kinds(classified, charge),
          :ok <- reject_non_idempotent_ata(classified),
          :ok <- check_compute_budget(classified, opts),
          :ok <- check_ata_policy(classified, charge, opts),
@@ -309,13 +309,24 @@ defmodule MPP.Methods.Solana.Instructions do
 
   # --- policy ---
 
-  defp reject_unknown(classified) do
-    if Enum.any?(classified, &match?({:unknown, _}, &1)) do
+  # Pull-mode allow-list from draft-solana-charge-00 §10.1 / §13.6: only expected
+  # transfers for the charge asset, plus ATA-creation (SPL), memo, and compute-budget.
+  defp reject_disallowed_kinds(classified, charge) do
+    native? = native_sol?(charge.currency)
+
+    if Enum.any?(classified, &disallowed_kind?(&1, native?)) do
       {:error, Errors.new(:verification_failed, "Transaction contains unexpected instructions")}
     else
       :ok
     end
   end
+
+  defp disallowed_kind?({:sol_transfer, _}, true), do: false
+  defp disallowed_kind?({:spl_transfer, _}, false), do: false
+  defp disallowed_kind?({:ata_create, _}, false), do: false
+  defp disallowed_kind?({:memo, _}, _native?), do: false
+  defp disallowed_kind?({:compute_budget, _}, _native?), do: false
+  defp disallowed_kind?(_kind, _native?), do: true
 
   defp reject_non_idempotent_ata(classified) do
     if Enum.any?(classified, &match?({:ata_create, %{idempotent?: false}}, &1)) do
@@ -400,8 +411,8 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
-  defp ata_allowed_owners(legs, opts) do
-    legs
+  defp ata_allowed_owners([_primary | splits], opts) do
+    splits
     |> Enum.filter(fn leg ->
       if opts[:fee_payer], do: leg.ata_creation_required?, else: true
     end)
@@ -412,16 +423,15 @@ defmodule MPP.Methods.Solana.Instructions do
   defp reject_fee_payer_source(_classified, %{fee_payer_pubkey: nil}), do: :ok
 
   defp reject_fee_payer_source(classified, %{fee_payer: true, fee_payer_pubkey: fee_payer}) do
-    sourced =
-      Enum.any?(classified, fn
-        {:sol_transfer, %{source: ^fee_payer}} -> true
-        _other -> false
-      end)
+    cond do
+      Enum.any?(classified, &match?({:sol_transfer, %{source: ^fee_payer}}, &1)) ->
+        {:error, Errors.new(:verification_failed, "Fee payer must not be the source of a SOL transfer")}
 
-    if sourced do
-      {:error, Errors.new(:verification_failed, "Fee payer must not be the source of a SOL transfer")}
-    else
-      :ok
+      Enum.any?(classified, &match?({:spl_transfer, %{authority: ^fee_payer}}, &1)) ->
+        {:error, Errors.new(:verification_failed, "Fee payer must not be the authority of a token transfer")}
+
+      true ->
+        :ok
     end
   end
 
