@@ -22,6 +22,9 @@ defmodule MPP.Methods.Stripe.Subscription do
   @reserved_metadata_entries 2
   @metadata_key_max_bytes 40
   @metadata_value_max_bytes 500
+  # Credential IDs are interpolated into Stripe URLs. Default URI.encode/1 leaves
+  # `/` intact, so reject anything that is not a Stripe-style object id.
+  @stripe_object_id ~r/\A[a-z]+_[A-Za-z0-9_]+\z/
 
   @doc "Validate Stripe subscription configuration at Plug initialization."
   @spec validate_config!(map()) :: :ok
@@ -69,18 +72,74 @@ defmodule MPP.Methods.Stripe.Subscription do
          {:ok, price} <- create_price(subscription, customer, payment_method, product, secret_key, config),
          :ok <- validate_price(price, subscription, product),
          {:ok, stripe_subscription} <-
-           create_subscription(subscription, customer, payment_method, price, secret_key, config),
-         {:ok, invoice_id, item_period} <-
-           validate_subscription(stripe_subscription, customer, payment_method, price),
-         {:ok, invoice} <- retrieve_invoice(invoice_id, secret_key, config),
-         {:ok, paid_at} <-
-           validate_invoice(invoice, stripe_subscription, customer, payment_method, price, subscription, item_period) do
-      {:ok, receipt(subscription, stripe_subscription, invoice, challenge_id, paid_at)}
+           create_subscription(subscription, customer, payment_method, price, secret_key, config) do
+      confirm_activation(
+        stripe_subscription,
+        customer,
+        payment_method,
+        price,
+        subscription,
+        secret_key,
+        config,
+        challenge_id
+      )
     end
   end
 
   def verify(_payload, %Subscription{}) do
     {:error, Errors.new(:invalid_payload, "Stripe subscription credential payload must be an object")}
+  end
+
+  defp confirm_activation(
+         stripe_subscription,
+         customer,
+         payment_method,
+         price,
+         subscription,
+         secret_key,
+         config,
+         challenge_id
+       ) do
+    result =
+      with {:ok, invoice_id, item_period} <-
+             validate_subscription(stripe_subscription, customer, payment_method, price),
+           {:ok, invoice} <- retrieve_invoice(invoice_id, secret_key, config),
+           {:ok, paid_at} <-
+             validate_invoice(
+               invoice,
+               stripe_subscription,
+               customer,
+               payment_method,
+               price,
+               subscription,
+               item_period
+             ) do
+        {:ok, receipt(subscription, stripe_subscription, invoice, challenge_id, paid_at)}
+      end
+
+    case result do
+      {:ok, _receipt} = ok ->
+        ok
+
+      {:error, _reason} = error ->
+        cancel_created_subscription(stripe_subscription, subscription, customer, payment_method, secret_key, config)
+        error
+    end
+  end
+
+  defp cancel_created_subscription(stripe_subscription, subscription, customer, payment_method, secret_key, config) do
+    case stripe_subscription do
+      %{"id" => id} ->
+        if stripe_object_id?(id) do
+          key = idempotency_key("cancel", subscription, customer["id"], payment_method["id"], config)
+          _ = stripe_request(:delete, "/subscriptions/#{id}", [], secret_key, config, key)
+        end
+
+        :ok
+
+      _invalid ->
+        :ok
+    end
   end
 
   defp validate_profile!(subscription) do
@@ -127,14 +186,17 @@ defmodule MPP.Methods.Stripe.Subscription do
       Map.keys(payload) -- ["paymentMethod", "customer"] != [] ->
         {:error, Errors.new(:invalid_payload, "Stripe subscription credential contains unsupported fields")}
 
+      not stripe_object_id?(payment_method) ->
+        {:error, Errors.new(:invalid_payload, "Stripe subscription paymentMethod must be a Stripe object id")}
+
       is_nil(payload["customer"]) ->
         {:ok, payment_method, nil}
 
-      is_binary(payload["customer"]) and payload["customer"] != "" ->
+      stripe_object_id?(payload["customer"]) ->
         {:ok, payment_method, payload["customer"]}
 
       true ->
-        {:error, Errors.new(:invalid_payload, "Stripe subscription customer must be a non-empty string")}
+        {:error, Errors.new(:invalid_payload, "Stripe subscription customer must be a Stripe object id")}
     end
   end
 
@@ -311,7 +373,8 @@ defmodule MPP.Methods.Stripe.Subscription do
         {"default_payment_method", payment_method["id"]},
         {"collection_method", "charge_automatically"},
         {"payment_behavior", "error_if_incomplete"},
-        {"proration_behavior", "none"}
+        {"proration_behavior", "none"},
+        {"automatic_tax[enabled]", "false"}
       ] ++ metadata_params(metadata(subscription, config))
 
     key = idempotency_key("subscription", subscription, customer["id"], payment_method["id"], config)
@@ -353,7 +416,9 @@ defmodule MPP.Methods.Stripe.Subscription do
          %{"id" => price_id}
        )
        when is_binary(id) and is_binary(invoice_id) do
-    with :ok <- validate_subscription_item(item, id, price_id),
+    with :ok <- require_stripe_object_id(id, "Subscription"),
+         :ok <- require_stripe_object_id(invoice_id, "Invoice"),
+         :ok <- validate_subscription_item(item, id, price_id),
          :ok <- validate_automatic_tax(stripe_subscription) do
       {:ok, invoice_id, {item["current_period_start"], item["current_period_end"]}}
     end
@@ -500,7 +565,7 @@ defmodule MPP.Methods.Stripe.Subscription do
        )
        when is_integer(paid_at) do
     if amount == String.to_integer(subscription.amount) and currency == subscription.currency do
-      DateTime.from_unix(paid_at)
+      paid_at_datetime(paid_at)
     else
       invalid_invoice()
     end
@@ -510,6 +575,13 @@ defmodule MPP.Methods.Stripe.Subscription do
 
   defp invalid_invoice do
     {:error, Errors.new(:verification_failed, "Stripe first invoice does not match the subscription request")}
+  end
+
+  defp paid_at_datetime(paid_at) do
+    case DateTime.from_unix(paid_at) do
+      {:ok, datetime} -> {:ok, datetime}
+      {:error, _reason} -> invalid_invoice()
+    end
   end
 
   defp receipt(subscription, stripe_subscription, invoice, challenge_id, paid_at) do
@@ -611,6 +683,17 @@ defmodule MPP.Methods.Stripe.Subscription do
       _missing -> {:error, Errors.new(:verification_failed, "Stripe subscription requires #{key} configuration")}
     end
   end
+
+  defp require_stripe_object_id(id, kind) do
+    if stripe_object_id?(id) do
+      :ok
+    else
+      {:error, Errors.new(:verification_failed, "Stripe returned an invalid #{kind}")}
+    end
+  end
+
+  defp stripe_object_id?(id) when is_binary(id), do: Regex.match?(@stripe_object_id, id)
+  defp stripe_object_id?(_id), do: false
 
   defp validate_non_empty_config!(config, key) do
     if not (is_binary(config[key]) and config[key] != "") do

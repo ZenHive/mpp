@@ -686,6 +686,26 @@ defmodule MPP.Methods.StripeTest do
       refute Map.has_key?(request["methodDetails"], "intent")
     end
 
+    test "Plug init rejects Stripe Connect settlement for subscriptions" do
+      assert_raise ArgumentError, ~r/does not support Stripe Connect/, fn ->
+        PaymentPlug.init(
+          secret_key: @hmac_secret,
+          realm: @realm,
+          intent: "subscription",
+          method: Stripe,
+          amount: "5000",
+          currency: "usd",
+          period_unit: "week",
+          period_count: "1",
+          method_config: %{
+            "stripe_secret_key" => @stripe_secret_key,
+            "network_id" => @network_id,
+            "connect" => %{"stripe_account" => "acct_seller"}
+          }
+        )
+      end
+    end
+
     test "validates subscription-only method config at init" do
       valid = subscription_config()
       assert :ok = Stripe.validate_config!(valid)
@@ -767,9 +787,11 @@ defmodule MPP.Methods.StripeTest do
       assert subscription_params["proration_behavior"] == "none"
       assert subscription_params["items[0][quantity]"] == "1"
       assert subscription_params["default_payment_method"] == "pm_test"
+      assert subscription_params["automatic_tax[enabled]"] == "false"
 
       assert_received {:stripe_request, "GET", "/v1/invoices/in_test", %{}, invoice_headers}
       assert idempotency_header(invoice_headers) == nil
+      refute_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_test", _params, _headers}
     end
 
     test "reuses an existing customer-bound PaymentMethod without mutating either" do
@@ -801,6 +823,18 @@ defmodule MPP.Methods.StripeTest do
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
 
       assert error.detail == "Stripe first invoice does not match the subscription request"
+      assert_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_test", %{}, headers}
+      assert idempotency_header(headers) =~ "mpp-subscription-cancel-"
+    end
+
+    test "rejects an invoice paid_at that is not a valid Unix timestamp" do
+      stub_subscription_flow(
+        invoice_transform:
+          &put_in(&1, ["payments", "data", Access.at(0), "status_transitions", "paid_at"], 253_402_300_800)
+      )
+
+      assert {:error, %Errors{detail: "Stripe first invoice does not match the subscription request"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
     end
 
     test "rejects malformed subscription credentials before calling Stripe" do
@@ -814,6 +848,22 @@ defmodule MPP.Methods.StripeTest do
           ] do
         assert {:error, %Errors{type: type}} = Stripe.verify(payload, stripe_subscription())
         assert type =~ "invalid-payload"
+      end
+
+      refute_received {:stripe_request, _method, _path, _params, _headers}
+    end
+
+    test "rejects credential ids that would traverse Stripe API paths" do
+      for payload <- [
+            %{"paymentMethod" => "../customers/cus_test"},
+            %{"paymentMethod" => "pm_input/../customers"},
+            %{"paymentMethod" => "pm_input", "customer" => "cus_test/../payment_methods"}
+          ] do
+        assert {:error, %Errors{type: type, detail: detail}} =
+                 Stripe.verify(payload, stripe_subscription())
+
+        assert type =~ "invalid-payload"
+        assert detail =~ "Stripe object id"
       end
 
       refute_received {:stripe_request, _method, _path, _params, _headers}
@@ -856,6 +906,10 @@ defmodule MPP.Methods.StripeTest do
         {[price_transform: &Map.put(&1, "unit_amount", 4999)], %{"paymentMethod" => "pm_input"}, "Price does not match"},
         {[price_transform: fn _price -> %{} end], %{"paymentMethod" => "pm_input"}, "Price does not match"},
         {[subscription_transform: &Map.put(&1, "status", "incomplete")], %{"paymentMethod" => "pm_input"},
+         "Subscription does not match"},
+        {[subscription_transform: &Map.put(&1, "id", "sub_test/../invoices")], %{"paymentMethod" => "pm_input"},
+         "invalid Subscription"},
+        {[subscription_transform: fn _subscription -> %{} end], %{"paymentMethod" => "pm_input"},
          "Subscription does not match"},
         {[
            subscription_transform: fn stripe_subscription ->
@@ -1200,6 +1254,10 @@ defmodule MPP.Methods.StripeTest do
     end
   end
 
+  defp stub_subscription_response(%{method: "DELETE", request_path: "/v1/subscriptions/sub_test"} = conn, _params, _state) do
+    Req.Test.json(conn, %{"id" => "sub_test", "status" => "canceled"})
+  end
+
   defp stub_subscription_response(%{method: "POST", request_path: path} = conn, params, state) do
     case path do
       "/v1/customers" ->
@@ -1244,7 +1302,7 @@ defmodule MPP.Methods.StripeTest do
           {:ok, body, conn} = Plug.Conn.read_body(conn)
           {URI.decode_query(body), conn}
 
-        "GET" ->
+        _other ->
           {%{}, conn}
       end
 
