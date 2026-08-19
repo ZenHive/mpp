@@ -327,8 +327,8 @@ defmodule MPP.Test.SecurityMutationCampaign do
     surviving_canaries = Enum.filter(survivors, & &1.canary)
 
     cond do
-      survivors != [] -> {:error, {:unclassified_survivors, Enum.map(survivors, & &1.id)}}
       surviving_canaries != [] -> {:error, {:surviving_canaries, Enum.map(surviving_canaries, & &1.id)}}
+      survivors != [] -> {:error, {:unclassified_survivors, Enum.map(survivors, & &1.id)}}
       invalid != [] -> {:error, {:ledger_result_mismatch, invalid}}
       true -> :ok
     end
