@@ -57,7 +57,7 @@ defmodule MPP.MixProject do
       {:ex_unit_json, "~> 0.6.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test]},
-      {:tidewave, "~> 0.6", only: :dev},
+      {:tidewave, "~> 0.9", only: :dev},
       {:bandit, "~> 1.12.0", only: :dev},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
 
