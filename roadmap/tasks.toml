@@ -2457,3 +2457,39 @@ Apply the Task 91 policy symmetrically to renewal: release the claim only on pro
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
+
+[[task]]
+id = "95"
+phase = 13
+bundle = "utilities"
+status = "pending"
+title = "Extend the payment-security mutant set to EIP-3009 authorization checks"
+scores = { d = 3, b = 7, u = 5 }
+depends_on = [40, 82]
+acceptance_criteria = ["A mutant that drops (or hash-routes) the EVM type=authorization dispatch clause is killed by a test asserting a well-formed authorization payload is never accepted as a hash credential", "A mutant that forces from_matches?/2 true (or drops the and-clause) is killed by the wrong-Transfer.from rejection test", "Both mutants apply exactly once, ledger fingerprints updated, mix mutation.security green"]
+touches = ["test/mutation/", "lib/mpp/methods/evm.ex"]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Task 40 added EIP-3009 authorization credentials to MPP.Methods.EVM with two new security-critical checks the mutation campaign does not cover: (1) verify/2 dispatches type=authorization in a clause preceding the hash catch-all - no mutant covers dropping that clause (Tempo has an authorization-dispatch canary; EVM does not); (2) the reviewer-added from_matches?(transfer, expected_from) binding (spec section 6.2 step 10) has no mutant covering its removal - the original implementer fixture passed with a Transfer.from that was not the EIP-3009 signer. Evidence: run run-1787125024720-2d6d3db3 reviewer report.
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
+
+[[task]]
+id = "96"
+phase = 13
+bundle = "stripe"
+status = "pending"
+title = "Stripe subscription durable state, renewal, and cancellation"
+scores = { d = 7, b = 8, u = 5 }
+depends_on = [90]
+acceptance_criteria = ["Stripe subscriptions persist in a method-neutral local store (MPP.Subscription.Record is not overloaded with Tempo-only fields)", "Paid Stripe invoices map onto canonical billing periods anchored at the first invoice; renewals are idempotent - no more than one local payment record per canonical period under duplicate webhooks/retries", "Cancellation takes effect at the end of the last paid period per draft-stripe-subscription-00", "One live renewal success and one relevant live error against the Stripe test API; missing STRIPE_SECRET_KEY flunks with exact export instructions"]
+touches = ["lib/mpp/methods/stripe/subscription.ex", "lib/mpp/subscription/record.ex", "lib/mpp/subscription/store.ex", "test/mpp/methods/stripe_test.exs", "test/mpp/methods/stripe_integration_test.exs"]
+assignee = "codex"
+model = "gpt-5.6-sol"
+body = """
+Task 90 shipped the Stripe subscription activation verify path but returns a receipt without calling MPP.Subscription.Store - renewals, webhook period accounting, and cancellation from draft-stripe-subscription-00 are unimplemented, and MPP.Subscription.Record still encodes Tempo key-authorization fields only. Persist activations in a method-neutral store shape, process renewals idempotently, cancel at end of last paid period. Authority: the Stripe test API (live calls) plus draft-stripe-subscription-00; the Tempo subscription module is reference material for the store shape, not for Stripe semantics. Evidence: run run-1787125026787-c23729f0 reviewer report.
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
