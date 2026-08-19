@@ -187,7 +187,7 @@
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
-| Task 95 | ⬜ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0] 🎯 |
+| Task 95 | 🔄 | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0] 🎯 |
 | Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93] ⚠️ |
 <!-- TASKS:END -->
 
