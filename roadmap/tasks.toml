@@ -1050,7 +1050,7 @@ id = "33e"
 phase = 12
 bundle = "client-sdk"
 milestone = "v0_13"
-status = "pending"
+status = "in_progress"
 title = "Built-in charge providers"
 scores = { d = 6, b = 10, u = 10 }
 depends_on = ["33a", "33b"]
@@ -1073,6 +1073,7 @@ Note 2026-06-29: the 0.6.1 server hardening made challenge-bound attribution met
 
 Note 2026-06-30: server-side route/request chain binding shipped in Task 45. The built-in Tempo provider still needs the client-side counterpart: it must pin the challenge's advertised chain before constructing or signing a payment, matching the reference SDK security posture.
 """
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 # ============================================================================

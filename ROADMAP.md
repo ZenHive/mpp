@@ -11,11 +11,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (4 of 7 done · 0 in progress)
+**Focus phase:** 12 — Client SDK (4 of 7 done · 1 in progress)
 
 **Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport on 2026-08-19
 
-**Up next:** Task 33e — Built-in charge providers [D:6/B:10/U:10 → Eff:1.67] 🚀
+**Up next:** Task 85 — Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -163,7 +163,7 @@
 | Task 33b | ✅ | 🎁 **client-sdk** · HTTP client transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 33c | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Payment-aware Req plugin [D:5/B:10/U:10 → Eff:2.0] 🎯 |
 | Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8] 🚀 |
-| Task 33e | ⬜ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67] 🚀 |
+| Task 33e | 🔄 | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 | Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋 |
 <!-- TASKS:END -->
