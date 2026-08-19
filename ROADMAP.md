@@ -227,7 +227,7 @@
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 40 | ⬜ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67] 🚀 |
 | Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17] 📋 |
-| Task 79 | 🔄 | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14] 📋 |
+| Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
