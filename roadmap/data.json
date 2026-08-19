@@ -3902,7 +3902,7 @@
       "id": "98",
       "phase": 11,
       "bundle": "mcp",
-      "status": "pending",
+      "status": "in_progress",
       "title": "MCP initialize payment-capability helper",
       "scores": {
         "d": 2,
@@ -3927,6 +3927,7 @@
       ],
       "body": "An MCP server behind `MPP.Mcp.call/3` has to tell clients which payment methods and intents it accepts before they attempt a call, but MPP ships no helper for the `initialize` capability map — so every server hand-rolls it. `api_toolkit` currently maintains its own `ApiToolkit.MCP.Payment.capabilities/1` building `%{experimental: %{payment: %{methods: %{name => %{intents: [...]}}}}}`, and mppx/mpp-rs will each need the same. Owning it here also pins the shape cross-SDK instead of letting three implementations drift.\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
