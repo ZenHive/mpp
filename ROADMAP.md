@@ -137,7 +137,7 @@
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
 | Task 30 | ✅ | 🎁 **session** · Channel state and voucher types [D:5/B:9/U:8 → Eff:1.7] 🚀 |
 | Task 31 | ✅ | 🎁 **session** · Session credential actions [D:5/B:9/U:8 → Eff:1.7] 🚀 |
-| Task 50 | ⬜ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42] 📋 |
+| Task 50 | 🔄 | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42] 📋 |
 <!-- TASKS:END -->
 
 ---
