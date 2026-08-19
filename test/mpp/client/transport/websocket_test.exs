@@ -117,6 +117,18 @@ defmodule MPP.Client.Transport.WebSocketTest do
     end
   end
 
+  describe "receipt?/1 and error?/1" do
+    test "discriminate handshake terminal frames from challenges" do
+      assert Transport.receipt?(%{"type" => "receipt", "receipt" => %{}})
+      refute Transport.receipt?(%{"type" => "challenge"})
+      refute Transport.receipt?("nope")
+
+      assert Transport.error?(%{"type" => "error", "error" => "malformed MPP frame"})
+      refute Transport.error?(%{"type" => "receipt"})
+      refute Transport.error?(nil)
+    end
+  end
+
   describe "Retry" do
     test "defaults match alloy-transport-mpp / alloy-pubsub" do
       state = Retry.new()

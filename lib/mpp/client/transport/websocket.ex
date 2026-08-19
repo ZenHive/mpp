@@ -82,4 +82,26 @@ defmodule MPP.Client.Transport.WebSocket do
   def set_credential(_request, %Credential{} = credential) do
     Frame.credential_frame(Headers.format_credential(credential))
   end
+
+  api(:receipt?, "Return true if the frame is a server `receipt`.",
+    params: [
+      response: [kind: :value, description: "Decoded WS frame"]
+    ],
+    returns: %{type: :boolean, description: "true for a `receipt` frame"}
+  )
+
+  @spec receipt?(term()) :: boolean()
+  def receipt?(%{"type" => "receipt"}), do: true
+  def receipt?(_response), do: false
+
+  api(:error?, "Return true if the frame is a server protocol `error`.",
+    params: [
+      response: [kind: :value, description: "Decoded WS frame"]
+    ],
+    returns: %{type: :boolean, description: "true for an `error` frame"}
+  )
+
+  @spec error?(term()) :: boolean()
+  def error?(%{"type" => "error"}), do: true
+  def error?(_response), do: false
 end
