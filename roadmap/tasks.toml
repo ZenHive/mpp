@@ -850,7 +850,7 @@ shipped_in = "bc016cf7fba0f6c86fc43917f3160cd74b1ab010"
 id = 31
 phase = 10
 bundle = "session"
-status = "pending"
+status = "in_progress"
 title = "Session credential actions"
 scores = { d = 5, b = 9, u = 8 }
 depends_on = [30]
@@ -869,6 +869,7 @@ Implement the four session credential actions: `open` (client deposits, opens ch
 
 Note 2026-08-18 (sdk-delta-watch): the upstream session runtime moved substantially in Aug 2026 — mppx removed the legacy contract-backed Tempo sessions entirely (#749, commit e2b2a8a), added session credential lifecycle hooks (#710), scheduled settlement for streaming session charges (#733), now requires explicit custom session escrow (#792, commit 3de6560), and fixed fallback closes with stale receipt spend + close-accounting validation (#785, commit c326dc9); mpp-rs settles machineUSD sessions atomically (#387). At pickup, re-read refs/mppx/src/tempo/session/ and refs/mpp-rs/src/protocol/methods/tempo/ before modeling channel/voucher types — the legacy-channel removal upstream makes the precompile-voucher path (see the 2026-06-12 note) the only current target.
 """
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 # ============================================================================
