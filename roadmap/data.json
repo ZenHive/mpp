@@ -1570,7 +1570,7 @@
       "id": 40,
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "in_progress",
+      "status": "done",
       "title": "EVM EIP-3009 authorization credential",
       "scores": {
         "d": 6,
@@ -1596,9 +1596,16 @@
         "test/mpp/methods/evm_test.exs",
         "test/mpp/methods/evm_integration_test.exs"
       ],
+      "shipped_in": "19c5024fda8f0625c53a099d41373e0600927c5a",
       "body": "Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.\n",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-02",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787125024720-2d6d3db3, 19c5024fda8f0625c53a099d41373e0600927c5a).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787125024720-2d6d3db3",
       "cross_repo": []
     },
     {

@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport, Task 33e — Built-in charge providers, Task 89 — Tempo client provider: machine-token charge construction on 2026-08-19
 
-**Up next:** Task 94 — Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀
+**Up next:** Task 81 — Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -229,7 +229,7 @@
 |------|--------|-------|
 | Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:8/U:7 → Eff:1.07] 📋 |
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:8/U:8 → Eff:1.14] 📋 |
-| Task 40 | 🔄 | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67] 🚀 |
+| Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67] 🚀 |
 | Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17] 📋 |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0] 📋 |
