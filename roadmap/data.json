@@ -456,7 +456,7 @@
       "id": 42,
       "phase": 3,
       "bundle": "discovery",
-      "status": "pending",
+      "status": "in_progress",
       "title": "OpenAPI discovery document generation",
       "scores": {
         "d": 4,
@@ -486,6 +486,7 @@
         "test/mpp/discovery/"
       ],
       "body": "Add `mix mpp.openapi` (and `MPP.Discovery.OpenApi.generate/1`) emitting OpenAPI 3.1.0 documents with `x-payment-info` per-operation and `x-service-info` at the document level. Read the latest discovery extension at `paymentauth.org` and in `refs/mpp-specs/specs/extensions/draft-payment-discovery-*.md` at implementation time to confirm the current shape — the spec now uses a multi-offer `offers` array with single-offer shorthand on parse. Cross-check the generated document against mppx's OpenAPI output for an equivalent endpoint config. Complements (does not replace) `mix mpp.manifest`.\n",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
