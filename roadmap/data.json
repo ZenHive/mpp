@@ -1735,7 +1735,7 @@
       "id": 49,
       "phase": 17,
       "bundle": "transport-jsonrpc",
-      "status": "in_progress",
+      "status": "done",
       "title": "JSON-RPC transport (non-MCP)",
       "scores": {
         "d": 4,
@@ -1763,10 +1763,17 @@
         "test/mpp/transports/json_rpc/",
         "test/mpp/plug_test.exs"
       ],
+      "shipped_in": "2fdacced55cbd36fc8a92c9cb8ce615f961fea1a",
       "body": "Implement the bare JSON-RPC transport binding (non-MCP-framed) required for SDK/spec parity, with payment challenges carried without MCP's tool/meta layer.\n\nAt pickup time, read the bare-JSON-RPC transport adapters in `refs/mpp-rs` and `refs/mppx` (the non-MCP paths) plus the spec's transport section at `paymentauth.org` to confirm error codes and challenge placement.\n",
       "created_at": "2026-05-16",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-02",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787114004772-629ad58a, 2fdacced55cbd36fc8a92c9cb8ce615f961fea1a).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787114004772-629ad58a",
       "cross_repo": []
     },
     {
