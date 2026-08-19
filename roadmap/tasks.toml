@@ -1358,7 +1358,7 @@ scored_at = "2026-08-02"
 id = 49
 phase = 17
 bundle = "transport-jsonrpc"
-status = "pending"
+status = "in_progress"
 title = "JSON-RPC transport (non-MCP)"
 scores = { d = 4, b = 7, u = 7 }
 acceptance_criteria = ["JSON-RPC request/response with payment challenges on the same channel", "Error code and challenge placement match the MPP transport specification; reference SDKs are compatibility evidence", "Client-side `MPP.Client.Transport` implementation and server-side adapter usable from Plug", "End-to-end integration test over the real local Plug/JSON-RPC boundary covers successful payment retry and a relevant payment-required/error response"]
@@ -1371,6 +1371,7 @@ Implement the bare JSON-RPC transport binding (non-MCP-framed) required for SDK/
 At pickup time, read the bare-JSON-RPC transport adapters in `refs/mpp-rs` and `refs/mppx` (the non-MCP paths) plus the spec's transport section at `paymentauth.org` to confirm error codes and challenge placement.
 """
 created_at = "2026-05-16"
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 [[task]]
