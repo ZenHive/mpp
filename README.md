@@ -197,6 +197,17 @@ Requests without payment get a `402 Payment Required` with a challenge. Requests
 
 Each route can have its own pricing — just mount `MPP.Plug` with different `amount`/`currency` per pipeline or scope.
 
+### Recurring subscriptions
+
+Set `intent: "subscription"` with `period_unit` and `period_count` to use the
+shared `MPP.Intents.Subscription` schema. `MPP.Methods.Stripe` activates a
+constrained fixed-price Stripe subscription and verifies its paid first invoice.
+`MPP.Methods.Tempo` activates a scoped access key, settles the first period, and
+exposes `MPP.Methods.Tempo.Subscription.authorize/2` for later renewals. Tempo
+subscriptions use `MPP.Subscription.ETSStore` by default; configure a shared
+`MPP.Subscription.Store` backend when renewals must coordinate across nodes or
+survive restarts.
+
 ## What This Means for Your API
 
 Today, monetizing an API means building a billing system: user accounts, API key provisioning, usage tracking, rate limiting, a pricing page, a dashboard. That's months of work before you earn a cent.
@@ -259,6 +270,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Method` | Behaviour for pluggable payment methods |
 | `MPP.Intents.Charge` | Charge intent request schema |
 | `MPP.Intents.Session` | Session intent request schema (pay-as-you-go) |
+| `MPP.Intents.Subscription` | Shared recurring-subscription intent schema |
 | `MPP.Session.Channel` | Session channel state, balance, and action wire mapping |
 | `MPP.Session.Voucher` | EIP-712 voucher typed data and signature verification |
 | `MPP.Session.Payload` | Session credential payload schema (`open` / `voucher` / `topUp` / `close`) |
@@ -266,8 +278,12 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Session.Method` | `use` wrapper that dispatches `verify/2` through session actions |
 | `MPP.Session.Store` | Pluggable session-channel persistence |
 | `MPP.Session.ETSStore` | ETS-backed default session store |
+| `MPP.Subscription.Store` | Pluggable recurring-subscription persistence |
+| `MPP.Subscription.ETSStore` | Application-started single-node subscription store |
 | `MPP.Methods.Stripe` | Stripe SPT payment verification |
+| `MPP.Methods.Stripe.Subscription` | Stripe fixed-price subscription activation and first-invoice verification |
 | `MPP.Methods.Tempo` | Tempo on-chain TIP-20 transfer verification via `onchain_tempo` |
+| `MPP.Methods.Tempo.Subscription` | Tempo access-key subscription activation, authorization, and renewal |
 | `MPP.Methods.Tempo.FeePayerPolicy` | Fee-payer gas and fee-token sponsorship policy |
 | `MPP.Methods.Tempo.HostedFeePayer` | Hosted `eth_fillTransaction` fee-payer fill support |
 | `MPP.Methods.Tempo.MachineToken` | Canonical first-party machine-token (MPP Credits) charge-route construction and match |

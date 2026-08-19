@@ -100,6 +100,17 @@ defmodule MPP.Methods.Tempo do
 
   Both may additionally carry `"presenterSignature" => "0x..."` (see below).
 
+  ## Recurring subscriptions
+
+  Routes configured with `intent: "subscription"` use the shared
+  `MPP.Intents.Subscription` schema and delegate activation and renewal to
+  `MPP.Methods.Tempo.Subscription`. Subscription configuration requires
+  `"rpc_url"`, `"chain_id"`, and `"subscription_access_key_private_key"`.
+  It accepts a `"subscription_store"` implementing `MPP.Subscription.Store`;
+  the application-started `MPP.Subscription.ETSStore` is the single-node
+  default. Subscription fee sponsorship supports the local fee-payer path,
+  not `"fee_payer_url"`.
+
   ## Presenter Binding
 
   On the hash/transaction paths, dedup is keyed on the tx hash alone — nothing in the

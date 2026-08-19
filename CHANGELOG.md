@@ -10,6 +10,16 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- Shared recurring-subscription intents with Stripe Billing activation, Tempo
+  access-key activation and renewal, and an application-started ETS subscription
+  store with a behaviour for durable shared backends.
+- Library-agnostic WebSocket server and client transports with typed MPP frames,
+  bounded reconnect backoff, and protection against paying twice after an
+  unacknowledged credential.
+- A payment-security mutation campaign covering credential binding, replay,
+  canonicalization, and on-chain authorization invariants.
+- Tempo client-side construction of the canonical machine-token
+  `[approve, swapTo]` charge route when the challenge advertises support.
 - Bare JSON-RPC payment transport via `MPP.Transports.JsonRpc`, including a
   Plug server adapter and client transport with root-level `_meta` credentials
   and receipts.
@@ -48,6 +58,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- Updated Req from 0.7.2 to 0.7.3 for its published security fix.
 - `MPP.Discovery.OpenApi` accepts unpaid routes. Routes with `payment: nil` or
   no payment key emit a normal success response without `x-payment-info` or a
   `402` response, while payable operations retain both payment extensions.
@@ -64,6 +75,14 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- Tempo subscription activation releases its single-use claim after a confirmed
+  reverted settlement, while ambiguous broadcasts and mismatched confirmed
+  transfers remain claimed to prevent duplicate settlement.
+- Stripe subscription activation rejects path-bearing resource IDs, cancels a
+  created subscription when first-invoice verification fails, and rejects
+  unsupported Billing state such as automatic tax.
+- Session voucher verification rejects signatures whose EIP-712 domain is
+  incomplete.
 - A non-RFC-3339 `expires` value is rejected at challenge parse time
   (`{:error, :invalid_expires}`) instead of surviving until verifier expiry
   checks (mpp-rs #377).

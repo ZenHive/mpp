@@ -32,7 +32,9 @@ defmodule MPP do
     * `MPP.Errors` — RFC 9457 Problem Detail error types
     * `MPP.Method` — Behaviour for pluggable payment methods
     * `MPP.Methods.Stripe` — Stripe SPT payment verification
+    * `MPP.Methods.Stripe.Subscription` — Stripe fixed-price subscription activation
     * `MPP.Methods.Tempo` — Tempo on-chain TIP-20 payment verification
+    * `MPP.Methods.Tempo.Subscription` — Tempo access-key subscription activation and renewal
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Methods.Solana` — Solana native SOL and SPL token charge verification
     * `MPP.Methods.NearIntents` — NEAR Intents hash-credential charge verification via 1Click + origin RPC
@@ -46,6 +48,8 @@ defmodule MPP do
     * `MPP.Session.Method` — `use` wrapper that dispatches `verify/2` through session actions
     * `MPP.Session.Store` — Pluggable session-channel persistence
     * `MPP.Session.ETSStore` — ETS-backed default session store
+    * `MPP.Subscription.Store` — Pluggable recurring-subscription persistence
+    * `MPP.Subscription.ETSStore` — Application-started single-node subscription store
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Expires` — Expiration timestamp helpers (duration offsets, assert!)
