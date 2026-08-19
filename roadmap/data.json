@@ -1903,7 +1903,7 @@
       "id": 55,
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "in_progress",
+      "status": "done",
       "title": "Hash credential type audit + spec backfill",
       "scores": {
         "d": 2,
@@ -1929,10 +1929,17 @@
         "test/mpp/credential_test.exs",
         "test/mpp/verifier_test.exs"
       ],
+      "shipped_in": "ab1e3ac00a1903c31d9a81eb3d0b54924d8c9936",
       "body": "Audit our `MPP.Credential` against the latest spec at `paymentauth.org` (and `refs/mpp-specs/specs/`) for the `hash` credential type — the spec recently backfilled this as a first-class type alongside `transaction` / `bearer` / `signature`. Cross-check against the latest mppx and mpp-rs hash-credential handling. If our impl already covers it, the audit closes with a \"parity confirmed\" note; if not, add the parse / serialize / verify path.\n",
       "created_at": "2026-05-27",
       "started_at": "2026-08-19",
+      "done_at": "2026-08-19",
       "scored_at": "2026-08-02",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1787099893496-8782da5a, ab1e3ac00a1903c31d9a81eb3d0b54924d8c9936).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787099893496-8782da5a",
       "cross_repo": []
     },
     {

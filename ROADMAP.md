@@ -35,7 +35,7 @@
 | Task 6 | ✅ | 🎁 **core-protocol** · ChargeRequest intent schema [D:2/B:8/U:8 → Eff:4.0?] 🎯 |
 | Task 7 | ✅ | 🎁 **core-protocol** · Method behaviour [D:3/B:10/U:10 → Eff:3.33?] 🎯 |
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
-| Task 55 | 🔄 | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75] 🎯 |
+| Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75] 🎯 |
 <!-- TASKS:END -->
 
 ---
