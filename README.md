@@ -137,6 +137,10 @@ end
 
 Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs.
 
+### NEAR Intents (1Click)
+
+Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
+
 **Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
 ### Multi-Method (Stripe + Tempo)
@@ -248,6 +252,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
+| `MPP.Methods.NearIntents` | NEAR Intents hash-credential charges via 1Click Swap + origin RPC |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
