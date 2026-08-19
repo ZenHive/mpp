@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport on 2026-08-19
 
-**Up next:** Task 85 — Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯
+**Up next:** Task 87 — Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -82,7 +82,7 @@
 |------|--------|-------|
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 | Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5] 🎯 |
-| Task 85 `[P]` | ⬜ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 85 `[P]` | 🔄 | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---

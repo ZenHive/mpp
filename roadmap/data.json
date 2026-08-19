@@ -3256,7 +3256,7 @@
       "id": "85",
       "phase": 5,
       "bundle": "evm",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Require chainId in EVM challenge configuration",
       "scores": {
         "d": 3,
@@ -3290,6 +3290,7 @@
       ],
       "body": "Align EVM challenge configuration with the current unified EVM Charge draft. The canonical specification marks methodDetails.chainId as REQUIRED, but MPP.Methods.EVM currently documents chain_id as optional, omits it when absent, and validates only rpc_url. Make invalid configuration fail at initialization so every emitted EVM challenge carries an explicit target chain. Preserve the existing native-ETH extension and leave new credential implementations to their existing roadmap tasks.\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-19",
       "cross_repo": []
     },
