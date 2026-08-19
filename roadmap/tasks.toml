@@ -2555,7 +2555,7 @@ scored_at = "2026-08-19"
 id = "98"
 phase = 11
 bundle = "mcp"
-status = "in_progress"
+status = "done"
 title = "MCP initialize payment-capability helper"
 scores = { d = 2, b = 7, u = 8 }
 acceptance_criteria = ["`MPP.Mcp.capabilities/1` takes an `MPP.Plug.Config.t()` and returns the payment capability map for the MCP `initialize` response", "Methods sourced from `config.method_entries`, intents from `config.intent`, credential types from `method.credential_types/0`", "Shape cross-checked against mppx's server transport capability advertisement rather than invented", "Registered in the Discoverable registry so `MPP.describe(:mcp)` covers it"]
@@ -2565,9 +2565,16 @@ model = "gpt-5.6-sol"
 body = """
 An MCP server behind `MPP.Mcp.call/3` has to tell clients which payment methods and intents it accepts before they attempt a call, but MPP ships no helper for the `initialize` capability map — so every server hand-rolls it. `api_toolkit` currently maintains its own `ApiToolkit.MCP.Payment.capabilities/1` building `%{experimental: %{payment: %{methods: %{name => %{intents: [...]}}}}}`, and mppx/mpp-rs will each need the same. Owning it here also pins the shape cross-SDK instead of letting three implementations drift.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1787148540814-7d01d4d1, 83bd113960de536058c5fa936aa316e1aeff706c)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1787148540814-7d01d4d1"
 created_at = "2026-08-19"
 started_at = "2026-08-19"
 scored_at = "2026-08-19"
+done_at = "2026-08-19"
+shipped_in = "83bd113960de536058c5fa936aa316e1aeff706c"
 
 [[task]]
 id = "99"
