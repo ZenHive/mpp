@@ -994,7 +994,7 @@
       "id": 30,
       "phase": 10,
       "bundle": "session",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Channel state and voucher types",
       "scores": {
         "d": 5,
@@ -1024,6 +1024,7 @@
         "test/mpp/session/"
       ],
       "body": "Add `MPP.Session.Channel` for channel state management and `MPP.Session.Voucher` for EIP-712 typed voucher verification. Channel state: channel_id, payer, recipient, token, deposit, cumulative_amount, status. Channel ID = `keccak256(abi.encode(payer, payee, token, salt, authorizedSigner, escrowContract, chainId))`. Voucher: channel_id, cumulative_amount, signature. Channel store behaviour (`MPP.Session.Store`) for pluggable persistence. Action values are camelCase in JSON (`\"open\"` / `\"topUp\"` / `\"voucher\"` / `\"close\"`); use snake_case only for Elixir atoms.\n\nNote 2026-06-12: mpp-rs landed TIP-1034 session client primitives including precompile-backed voucher support (#288, commit 0d57f96) — the production-path successor to the contract-backed v1 channel. At pickup, read `refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs` and `refs/mpp-rs/src/client/tempo/session/` to decide whether to model v1 (contract) and v2 (precompile) voucher types together or stage v2 as a follow-up.\n",
+      "started_at": "2026-08-19",
       "scored_at": "2026-08-02",
       "cross_repo": []
     },
