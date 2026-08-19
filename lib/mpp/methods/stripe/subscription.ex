@@ -910,7 +910,7 @@ defmodule MPP.Methods.Stripe.Subscription do
   defp insert_renewal_payment(record, period, invoice_id, event_id, timestamp) do
     invoice_recorded? = Enum.any?(record.payments, fn {_index, paid} -> paid.reference == invoice_id end)
 
-    if invoice_recorded? or period <= record.last_charged_period do
+    if invoice_recorded? or period != record.last_charged_period + 1 do
       renewal_error()
     else
       paid = payment(period, invoice_id, timestamp, [event_id])
@@ -996,6 +996,9 @@ defmodule MPP.Methods.Stripe.Subscription do
     Store.update(subscription_store, record.subscription_id, fn
       %Record{in_flight_reference: reference} = current when reference == record.in_flight_reference ->
         {:ok, %{current | cancellation_effective_at: effective_at, in_flight_reference: nil}}
+
+      %Record{method: "stripe", cancellation_effective_at: ^effective_at} = current ->
+        {:ok, %{current | in_flight_reference: nil}}
 
       %Record{} ->
         {:error, Errors.new(:verification_failed, @subscription_store_error)}

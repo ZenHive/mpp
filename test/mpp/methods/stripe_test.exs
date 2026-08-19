@@ -949,6 +949,41 @@ defmodule MPP.Methods.StripeTest do
       assert record.payments |> Map.keys() |> Enum.sort() == [0, 1]
     end
 
+    test "rejects a skipped canonical period and the same invoice on a later period" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_period_two", 2)))
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.process_invoice("evt_period_two", "in_period_two", subscription.method_details)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_renewal", 1)))
+
+      assert {:ok, %Receipt{}} =
+               StripeSubscription.process_invoice("evt_renewal", "in_renewal", subscription.method_details)
+
+      reused =
+        "in_renewal"
+        |> stripe_renewal_invoice_fixture(2)
+        |> Map.put("id", "in_renewal")
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, reused))
+
+      assert {:error, %Errors{detail: "Stripe renewal invoice does not match the subscription"}} =
+               StripeSubscription.process_invoice("evt_reused_invoice", "in_renewal", subscription.method_details)
+
+      Req.Test.stub(Stripe, &Req.Test.json(&1, stripe_renewal_invoice_fixture("in_period_two", 2)))
+
+      assert {:ok, %Receipt{reference: "in_period_two"}} =
+               StripeSubscription.process_invoice("evt_period_two", "in_period_two", subscription.method_details)
+
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      assert record.last_charged_period == 2
+      assert record.payments |> Map.keys() |> Enum.sort() == [0, 1, 2]
+    end
+
     test "rejects a renewal whose Stripe period drifts from the activation anchor" do
       stub_subscription_flow()
       subscription = stripe_subscription()
@@ -1110,6 +1145,38 @@ defmodule MPP.Methods.StripeTest do
                  "in_after_cancel",
                  subscription.method_details
                )
+    end
+
+    test "records one cancellation under concurrent cancel requests" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+      test_pid = self()
+
+      Req.Test.stub(Stripe, fn conn ->
+        {params, conn} = capture_stripe_request(conn, test_pid)
+
+        Req.Test.json(conn, %{
+          "id" => "sub_test",
+          "cancel_at" => String.to_integer(params["cancel_at"]),
+          "cancel_at_period_end" => true
+        })
+      end)
+
+      results =
+        1..8
+        |> Enum.map(fn _index ->
+          Task.async(fn ->
+            StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
+          end)
+        end)
+        |> Task.await_many()
+
+      assert Enum.all?(results, &match?({:ok, %Record{cancellation_effective_at: ~U[2023-11-15 22:13:20Z]}}, &1))
+      assert {:ok, canceled} = Store.get(subscription_store(), activation.subscription_id)
+      assert canceled.cancellation_effective_at == ~U[2023-11-15 22:13:20Z]
+      assert canceled.in_flight_reference == nil
     end
 
     test "releases a cancellation claim when Stripe rejects the update" do

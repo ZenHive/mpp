@@ -387,7 +387,14 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
       renewal_event =
         stripe_secret_key
-        |> stripe_get!("/events?" <> URI.encode_query([{"type", "invoice.paid"}, {"limit", "100"}]))
+        |> stripe_get!(
+          "/events?" <>
+            URI.encode_query([
+              {"type", "invoice.paid"},
+              {"limit", "100"},
+              {"created[gte]", Integer.to_string(frozen_time)}
+            ])
+        )
         |> Map.fetch!("data")
         |> Enum.find(&(get_in(&1, ["data", "object", "id"]) == renewal_invoice_id))
 
@@ -404,6 +411,15 @@ defmodule MPP.Methods.StripeIntegrationTest do
       assert renewed.last_charged_period == 1
       assert map_size(renewed.payments) == 2
       assert renewed.payments[1].event_ids == [event_id]
+
+      assert {:ok, canceled} = StripeSubscription.cancel(activation.subscription_id, method_config)
+      assert canceled.cancellation_effective_at == DateTime.shift(activation_record.billing_anchor, day: 2)
+
+      stripe_subscription =
+        stripe_get!(stripe_secret_key, "/subscriptions/#{activation.extensions["stripeSubscription"]}")
+
+      assert stripe_subscription["cancel_at"] == DateTime.to_unix(canceled.cancellation_effective_at)
+      assert {:ok, ^canceled} = StripeSubscription.cancel(activation.subscription_id, method_config)
 
       assert {:error, error} =
                StripeSubscription.process_invoice(
