@@ -115,7 +115,7 @@ pipeline :paid_evm do
 end
 ```
 
-Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). The client broadcasts a transaction, then sends the hash as a credential.
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce.
 
 ### Solana (SOL and SPL tokens)
 

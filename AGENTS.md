@@ -649,6 +649,7 @@ MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, n
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
 MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
+MPP.Methods.EVM.Authorization — EIP-3009 transferWithAuthorization credential (challengeHash nonce) for USDC/EURC
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC

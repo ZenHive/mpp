@@ -221,7 +221,32 @@ defmodule MPP.Methods.EVMTest do
     test "advertises exactly the credential types verify/2 accepts", %{charge: charge} do
       details = EVM.challenge_method_details(charge)
 
-      assert details["credentialTypes"] == EVM.credential_types()
+      assert details["credentialTypes"] == ["hash"]
+      assert "hash" in EVM.credential_types()
+      assert "authorization" in EVM.credential_types()
+    end
+
+    test "advertises authorization ahead of hash for known USDC when private_key is set", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "private_key", "0x" <> String.duplicate("11", 32))
+      }
+
+      details = EVM.challenge_method_details(charge)
+
+      assert details["credentialTypes"] == ["authorization", "hash"]
+      refute Map.has_key?(details, "private_key")
+    end
+
+    test "does not advertise authorization for native ETH even with a settlement key", %{charge: charge} do
+      {:ok, eth} = Charge.new(amount: "1", currency: "ETH", recipient: @recipient)
+
+      eth = %{
+        eth
+        | method_details: Map.put(charge.method_details, "private_key", "0x" <> String.duplicate("11", 32))
+      }
+
+      details = EVM.challenge_method_details(eth)
       assert details["credentialTypes"] == ["hash"]
     end
 
@@ -244,10 +269,8 @@ defmodule MPP.Methods.EVMTest do
       {:ok, charge} = Charge.new(amount: @amount, currency: @token_address)
       details = EVM.challenge_method_details(charge)
 
-      assert details == %{
-               "credentialTypes" => ["hash"],
-               "permit2Address" => @canonical_permit2
-             }
+      assert details["credentialTypes"] == ["hash"]
+      assert details["permit2Address"] == @canonical_permit2
     end
 
     test "does not leak server-only method_config keys", %{charge: charge} do
@@ -319,6 +342,19 @@ defmodule MPP.Methods.EVMTest do
       assert request["methodDetails"]["chainId"] == @chain_id
       assert request["methodDetails"]["credentialTypes"] == ["hash"]
       assert request["methodDetails"]["permit2Address"] == @canonical_permit2
+    end
+  end
+
+  describe "validate_config!/1 — authorization domain" do
+    test "accepts a complete EIP-712 domain map" do
+      assert :ok =
+               EVM.validate_config!(required_config(%{"authorization" => %{"name" => "USDC", "version" => "2"}}))
+    end
+
+    test "raises on a partial authorization domain" do
+      assert_raise ArgumentError, ~r/authorization/, fn ->
+        EVM.validate_config!(required_config(%{"authorization" => %{"name" => "USDC"}}))
+      end
     end
   end
 
@@ -585,6 +621,88 @@ defmodule MPP.Methods.EVMTest do
 
       payload = %{"hash" => @tx_hash}
       assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
+    end
+  end
+
+  describe "verify/2 — authorization dispatch" do
+    alias MPP.Test.EVMAuthorization
+
+    @challenge_id "aB3cDeF4gHiJkLmN"
+    @realm "api.example.com"
+
+    defp authorization_charge(charge, extra \\ %{}) do
+      %{
+        charge
+        | method_details:
+            Map.merge(
+              charge.method_details,
+              Map.merge(
+                %{
+                  "private_key" => EVMAuthorization.private_key(),
+                  "challenge_id" => @challenge_id,
+                  "realm" => @realm,
+                  "authorization" => %{"name" => "USD Coin", "version" => "2"}
+                },
+                extra
+              )
+            )
+      }
+    end
+
+    defp authorization_payload(charge, overrides \\ []) do
+      EVMAuthorization.payload(
+        Map.merge(
+          %{
+            currency: charge.currency,
+            name: "USD Coin",
+            version: "2",
+            chain_id: @chain_id,
+            recipient: charge.recipient,
+            amount: charge.amount,
+            challenge_id: @challenge_id,
+            realm: @realm
+          },
+          Map.new(overrides)
+        )
+      )
+    end
+
+    test "settles a valid authorization and returns a receipt", %{charge: charge} do
+      charge = authorization_charge(charge)
+      payload = authorization_payload(charge)
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_call" => "0x" <> String.duplicate("0", 64),
+          "eth_getTransactionCount" => "0x1",
+          "eth_estimateGas" => "0x186a0",
+          "eth_sendRawTransaction" => @tx_hash,
+          "eth_getTransactionReceipt" => receipt_with_transfer()
+        })
+      end)
+
+      assert {:ok, %Receipt{} = receipt} = EVM.verify(payload, charge)
+      assert receipt.method == "evm"
+      assert receipt.reference == @tx_hash
+    end
+
+    test "rejects a zero-amount authorization charge", %{charge: charge} do
+      charge = authorization_charge(%{charge | amount: "0"})
+      payload = authorization_payload(charge)
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "proof credential"
+    end
+
+    test "rejects replay when authorizationState is already true", %{charge: charge} do
+      charge = authorization_charge(charge)
+      payload = authorization_payload(charge)
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{"eth_call" => "0x" <> String.duplicate("0", 63) <> "1"})
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
+      assert error.detail =~ "already used"
     end
   end
 

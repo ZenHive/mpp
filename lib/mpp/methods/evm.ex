@@ -41,6 +41,13 @@ defmodule MPP.Methods.EVM do
       implementing `MPP.Tempo.Store` (Redis/Postgres for multi-node) or
       `{MPP.Tempo.ConCacheStore, opts}`; a configured store MUST implement the atomic
       `check_and_mark/2`. Pass `store: false` to opt out (not recommended)
+    * `"private_key"` — (required for `type="authorization"`) server-only
+      secp256k1 key used to submit `transferWithAuthorization` (pays gas)
+    * `"authorization"` — (optional) EIP-712 domain `%{"name" => ..., "version" => ...}`
+      for a custom EIP-3009 token. Known Circle USDC/EURC contracts are
+      resolved automatically
+    * `"max_fee_per_gas"` / `"max_priority_fee_per_gas"` — (optional) EIP-1559
+      fees for authorization settlement, as wei integers or `{n, :gwei}` tuples
     * `"req_options"` — (optional) merged into the `Onchain.RPC` call as
       `:req_options` (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
 
@@ -57,18 +64,26 @@ defmodule MPP.Methods.EVM do
   The store's TTL must be ≥ your challenge `expires_in` (a good default is 2×) so a
   hash cannot be evicted and replayed while its challenge is still valid.
 
-  **Residual limitation:** a store makes each transaction single-use, but the
-  hash-pointer credential carries no on-chain binding to a *specific* challenge — so
-  on its *first* presentation, any unrelated transfer that happens to match
-  `token`/`to`/`amount` is accepted. Binding a payment to one challenge on-chain is
-  the EIP-3009 authorization path (nonce = `keccak256(challengeId ‖ realm)`), tracked
-  separately in the roadmap; prefer it when per-challenge attribution is required.
+  **Residual limitation of `type="hash"`:** a store makes each transaction
+  single-use, but the hash-pointer credential carries no on-chain binding to a
+  *specific* challenge — so on its *first* presentation, any unrelated transfer
+  that happens to match `token`/`to`/`amount` is accepted. Prefer
+  `type="authorization"` when the token implements EIP-3009: the nonce is the
+  `challengeHash`, so the authorization can settle only that challenge.
 
   ## Credential Payload
 
-  The credential `payload` map must contain:
+  Two charge payload types are accepted:
 
-    * `"hash"` — (required) 0x-prefixed transaction hash (32 bytes, 66 hex chars)
+    * `type="hash"` (or an untyped `"hash"` field) — client-broadcast transaction
+      hash. The server fetches the receipt and matches `token`/`to`/`amount`.
+    * `type="authorization"` — EIP-3009 `transferWithAuthorization` for tokens
+      that implement it (Circle USDC/EURC). The client signs off-chain; the
+      server submits the authorization and pays gas. The EIP-3009 nonce MUST be
+      `keccak256(challenge.id <> challenge.realm)` (`challengeHash`). Advertised
+      only when the currency is a known EIP-3009 token (or
+      `"authorization" => %{"name" => ..., "version" => ...}` is configured)
+      and `"private_key"` is set for settlement.
 
   ## Currency Conventions
 
@@ -88,6 +103,7 @@ defmodule MPP.Methods.EVM do
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Methods.EVM.Authorization
   alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -118,11 +134,11 @@ defmodule MPP.Methods.EVM do
   @spec method_name() :: String.t()
   def method_name, do: "evm"
 
-  api(:credential_types, "Return the EVM charge payload types currently implemented: hash.")
+  api(:credential_types, "Return the EVM charge payload types currently implemented: authorization and hash.")
 
   @impl MPP.Method
   @spec credential_types() :: [String.t()]
-  def credential_types, do: ~w(hash)
+  def credential_types, do: ~w(authorization hash)
 
   api(
     :validate_config!,
@@ -144,6 +160,7 @@ defmodule MPP.Methods.EVM do
     end
 
     validate_store!(config["store"])
+    Authorization.validate_config!(config["authorization"])
     :ok
   end
 
@@ -151,7 +168,8 @@ defmodule MPP.Methods.EVM do
     params: [
       payload: [
         kind: :value,
-        description: ~s{Credential payload map with `"hash"` (0x-prefixed transaction hash)}
+        description:
+          ~s{Credential payload map: `"hash"` (0x-prefixed transaction hash) or `type="authorization"` EIP-3009 fields}
       ],
       charge: [
         kind: :value,
@@ -164,6 +182,22 @@ defmodule MPP.Methods.EVM do
 
   @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(%{"type" => "authorization"} = payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+    store = Store.resolve(config["store"])
+
+    with :ok <- reject_non_proof_for_zero_amount(charge),
+         :ok <- require_recipient(charge),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
+         {:ok, hash} <- Authorization.settle(payload, charge),
+         :ok <- check_hash_unused(store, hash),
+         {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config),
+         :ok <- commit_hash_used(store, hash) do
+      {:ok, receipt}
+    end
+  end
+
+  @impl MPP.Method
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
     store = Store.resolve(config["store"])
@@ -210,7 +244,7 @@ defmodule MPP.Methods.EVM do
     config = charge.method_details || %{}
 
     details = %{
-      "credentialTypes" => credential_types(),
+      "credentialTypes" => advertised_credential_types(charge),
       "permit2Address" => config["permit2_address"] || @canonical_permit2_address
     }
 
@@ -218,6 +252,11 @@ defmodule MPP.Methods.EVM do
       nil -> details
       chain_id -> Map.put(details, "chainId", chain_id)
     end
+  end
+
+  @spec advertised_credential_types(Charge.t()) :: [String.t()]
+  defp advertised_credential_types(charge) do
+    if Authorization.offered?(charge), do: ~w(authorization hash), else: ~w(hash)
   end
 
   # --- ERC-20 verification ---
