@@ -246,8 +246,15 @@ defmodule MPP.Session.Actions do
     chain_id = Keyword.get(opts, :chain_id)
     signer = signature_signer(payload, opts)
 
+    # Fail closed: a presented signature must be verifiable. Missing EIP-712
+    # domain config (escrow_contract / chain_id / authorized_signer) is a
+    # caller configuration error, never a reason to skip verification.
     if is_nil(escrow) or is_nil(chain_id) or is_nil(signer) do
-      :ok
+      {:error,
+       Errors.new(
+         :invalid_signature,
+         "voucher signature cannot be verified: escrow_contract, chain_id, and authorized_signer must all be configured"
+       )}
     else
       verify_voucher_signature(payload, escrow, chain_id, signer)
     end

@@ -8,6 +8,7 @@ defmodule MPP.Session.ActionsTest do
   alias MPP.Session.ETSStore
   alias MPP.Session.Payload
   alias MPP.Session.Store
+  alias MPP.Test.SessionSigning
 
   @channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
   @payer "0x1111111111111111111111111111111111111111"
@@ -74,7 +75,10 @@ defmodule MPP.Session.ActionsTest do
             "session_store" => store,
             "payer" => @payer,
             "token" => @token,
-            "method" => "mocksession"
+            "method" => "mocksession",
+            "escrowContract" => @tip1034_escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => @signer
           }
         )
 
@@ -194,11 +198,37 @@ defmodule MPP.Session.ActionsTest do
 
       assert String.contains?(malformed.type, "invalid-signature")
 
+      fresh_channel = "0x" <> String.duplicate("cd", 32)
+
+      open_with_payload_signer = %{
+        "action" => "open",
+        "type" => "transaction",
+        "channelId" => fresh_channel,
+        "transaction" => @transaction,
+        "cumulativeAmount" => Integer.to_string(@tip1034_amount),
+        "signature" => SessionSigning.sign_voucher(fresh_channel, @tip1034_amount, @tip1034_escrow, 42_431),
+        "authorizedSigner" => @signer
+      }
+
       assert {:ok, _} =
-               :voucher
-               |> tip1034_payload(@tip1034_amount, @tip1034_signature)
-               |> Map.put("authorizedSigner", @signer)
-               |> Actions.dispatch(Keyword.delete(signed_opts, :authorized_signer))
+               Actions.dispatch(open_with_payload_signer, Keyword.delete(signed_opts, :authorized_signer))
+    end
+
+    test "fails closed when a signature is presented without a complete EIP-712 domain", %{opts: opts} do
+      payload = Map.put(open_payload(100), "signature", @signature)
+
+      for missing <- [:escrow_contract, :chain_id, :authorized_signer] do
+        domain_opts =
+          opts
+          |> Keyword.put(:escrow_contract, @tip1034_escrow)
+          |> Keyword.put(:chain_id, 42_431)
+          |> Keyword.put(:authorized_signer, @signer)
+          |> Keyword.delete(missing)
+
+        assert {:error, %Errors{} = error} = Actions.dispatch(payload, domain_opts)
+        assert String.contains?(error.type, "invalid-signature")
+        assert error.detail =~ "must all be configured"
+      end
     end
   end
 
@@ -355,7 +385,10 @@ defmodule MPP.Session.ActionsTest do
             "session_store" => store,
             "payer" => @payer,
             "token" => @token,
-            "minVoucherDelta" => "nope"
+            "minVoucherDelta" => "nope",
+            "escrowContract" => @tip1034_escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => @signer
           }
         )
 
@@ -372,7 +405,7 @@ defmodule MPP.Session.ActionsTest do
       "channelId" => @channel_id,
       "transaction" => @transaction,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @signature
+      "signature" => sign(@channel_id, amount)
     }
   end
 
@@ -381,7 +414,7 @@ defmodule MPP.Session.ActionsTest do
       "action" => "voucher",
       "channelId" => @channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @signature
+      "signature" => sign(@channel_id, amount)
     }
   end
 
@@ -414,8 +447,12 @@ defmodule MPP.Session.ActionsTest do
       "action" => "close",
       "channelId" => @channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @signature
+      "signature" => sign(@channel_id, amount)
     }
+  end
+
+  defp sign(channel_id, amount) do
+    SessionSigning.sign_voucher(channel_id, amount, @tip1034_escrow, 42_431)
   end
 
   defp base_opts(store) do
@@ -426,7 +463,10 @@ defmodule MPP.Session.ActionsTest do
       recipient: @recipient,
       token: @token,
       request_amount: 10,
-      method_name: "mocksession"
+      method_name: "mocksession",
+      escrow_contract: @tip1034_escrow,
+      chain_id: 42_431,
+      authorized_signer: @signer
     ]
   end
 

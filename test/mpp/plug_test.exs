@@ -7,14 +7,16 @@ defmodule MPP.PlugTest do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+
+  # --- Mock Methods ---
+
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Session.ETSStore
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.SessionSigning
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
-
-  # --- Mock Methods ---
 
   defmodule MockMethod do
     @moduledoc false
@@ -124,6 +126,7 @@ defmodule MPP.PlugTest do
   end
 
   defmodule MockTempoMethod do
+    # --- Helpers ---
     @moduledoc false
     use MPP.Method
 
@@ -140,14 +143,12 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- Helpers ---
-
   @secret_key "test-secret-key-for-plug"
   @session_channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
+  @session_escrow "0x4d50500000000000000000000000000000000000"
   @session_payer "0x1111111111111111111111111111111111111111"
   @session_recipient "0x2222222222222222222222222222222222222222"
   @session_token "0x3333333333333333333333333333333333333333"
-  @session_signature "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
   @base_opts [
     secret_key: @secret_key,
     realm: "api.test.com",
@@ -234,6 +235,8 @@ defmodule MPP.PlugTest do
     Jason.decode!(conn.resp_body)
   end
 
+  # --- init/1 (single-method, backwards compat) ---
+
   defp get_resp_header(conn, header) do
     case Plug.Conn.get_resp_header(conn, header) do
       [value | _] -> value
@@ -250,8 +253,6 @@ defmodule MPP.PlugTest do
     start_supervised!({ConCacheStore, name: cache_name})
     {ConCacheStore, name: cache_name}
   end
-
-  # --- init/1 (single-method, backwards compat) ---
 
   describe "init/1" do
     test "returns Config struct with valid opts" do
@@ -358,8 +359,6 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- init/1 multi-method ---
-
   describe "init/1 multi-method" do
     test "returns Config with multiple MethodEntry structs" do
       config =
@@ -460,6 +459,7 @@ defmodule MPP.PlugTest do
           realm: "api.test.com",
           methods: [
             [method: MockMethod, amount: "1000", currency: "usd", method_config: %{"key" => "a"}],
+            # --- init/1 multi-method ---
             [method: MockMethodB, amount: "500", currency: "usd", method_config: %{"key" => "b"}]
           ]
         )
@@ -469,8 +469,6 @@ defmodule MPP.PlugTest do
       assert entry_b.method_config == %{"key" => "b"}
     end
   end
-
-  # --- No credential → 402 ---
 
   describe "call/2 without credential" do
     setup do
@@ -572,6 +570,7 @@ defmodule MPP.PlugTest do
       first_conn =
         :get
         |> Plug.Test.conn("/premium")
+        # --- No credential → 402 ---
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
@@ -639,8 +638,6 @@ defmodule MPP.PlugTest do
       refute second_conn.halted
     end
   end
-
-  # --- Valid credential → pass-through ---
 
   describe "call/2 with valid credential" do
     setup do
@@ -743,6 +740,7 @@ defmodule MPP.PlugTest do
       conn =
         :get
         |> Plug.Test.conn("/premium")
+        # --- Valid credential → pass-through ---
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
@@ -808,8 +806,6 @@ defmodule MPP.PlugTest do
       assert body["detail"] =~ "opaque"
     end
   end
-
-  # --- Invalid credential scenarios ---
 
   describe "call/2 with invalid credentials" do
     setup do
@@ -931,6 +927,8 @@ defmodule MPP.PlugTest do
       assert Plug.Conn.get_resp_header(conn, "retry-after") == ["17"]
       assert [_challenge] = Plug.Conn.get_resp_header(conn, "www-authenticate")
 
+      # --- Invalid credential scenarios ---
+
       body = decode_json_body(conn)
       assert body["type"] == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
       refute Map.has_key?(body, "retry_after")
@@ -965,8 +963,6 @@ defmodule MPP.PlugTest do
       assert challenge.realm == "api.test.com"
     end
   end
-
-  # --- Cross-route replay prevention ---
 
   describe "cross-route replay prevention" do
     test "rejects credential with wrong amount" do
@@ -1058,8 +1054,6 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- Expiration ---
-
   describe "challenge expiration" do
     test "includes expires field by default" do
       config = init_config()
@@ -1144,6 +1138,7 @@ defmodule MPP.PlugTest do
 
       headers = get_all_resp_headers(conn, "www-authenticate")
 
+      # --- Cross-route replay prevention ---
       realms =
         Enum.map(headers, fn h ->
           {:ok, c} = Headers.parse_challenge(h)
@@ -1235,6 +1230,7 @@ defmodule MPP.PlugTest do
     end
 
     test "no matching Accept-Payment falls back to all challenges", %{config: config} do
+      # --- Expiration ---
       conn =
         :get
         |> Plug.Test.conn("/premium")
@@ -1244,8 +1240,6 @@ defmodule MPP.PlugTest do
       assert Enum.sort(challenge_methods(conn)) == ["mock", "tempo"]
     end
   end
-
-  # --- Multi-method credential routing ---
 
   describe "call/2 multi-method credential routing" do
     setup do
@@ -1339,8 +1333,6 @@ defmodule MPP.PlugTest do
     end
   end
 
-  # --- Multi-method cross-route replay ---
-
   describe "multi-method cross-route replay" do
     test "credential for method A at price X rejected when method A has price Y" do
       config_cheap =
@@ -1379,8 +1371,6 @@ defmodule MPP.PlugTest do
       assert body["type"] =~ "credential-mismatch"
     end
   end
-
-  # --- Coverage: unexpected verify error and malformed expires ---
 
   describe "verify_credential/4 catch-all error" do
     test "unexpected error type from method returns 402 with verification_failed" do
@@ -1458,7 +1448,10 @@ defmodule MPP.PlugTest do
           method_config: %{
             "deposit" => 1_000,
             "payer" => @session_payer,
-            "token" => @session_token
+            "token" => @session_token,
+            "escrowContract" => @session_escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => SessionSigning.signer_address()
           },
           store: false
         )
@@ -1492,6 +1485,7 @@ defmodule MPP.PlugTest do
         |> Plug.Test.conn("/stream")
         |> call_plug(config)
 
+      # --- Multi-method credential routing ---
       assert conn.status == 402
       {:ok, challenge} = Headers.parse_challenge(get_resp_header(conn, "www-authenticate"))
       assert challenge.intent == "session"
@@ -1584,6 +1578,7 @@ defmodule MPP.PlugTest do
 
     opts = [
       secret_key: @secret_key,
+      # --- Multi-method cross-route replay ---
       realm: "api.test.com",
       intent: "subscription",
       method: MPP.Methods.Tempo,
@@ -1618,16 +1613,17 @@ defmodule MPP.PlugTest do
       "channelId" => @session_channel_id,
       "transaction" => "0x76abcd",
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @session_signature
+      "signature" => session_sign(amount)
     }
   end
 
+  # --- Coverage: unexpected verify error and malformed expires ---
   defp session_voucher_payload(amount) do
     %{
       "action" => "voucher",
       "channelId" => @session_channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @session_signature
+      "signature" => session_sign(amount)
     }
   end
 
@@ -1646,7 +1642,11 @@ defmodule MPP.PlugTest do
       "action" => "close",
       "channelId" => @session_channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @session_signature
+      "signature" => session_sign(amount)
     }
+  end
+
+  defp session_sign(amount) do
+    SessionSigning.sign_voucher(@session_channel_id, amount, @session_escrow, 42_431)
   end
 end

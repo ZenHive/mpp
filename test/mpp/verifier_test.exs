@@ -11,6 +11,7 @@ defmodule MPP.VerifierTest do
   alias MPP.Methods.Stripe
   alias MPP.Receipt
   alias MPP.Session.ETSStore
+  alias MPP.Test.SessionSigning
   alias MPP.Verifier
 
   defmodule MockMethod do
@@ -294,14 +295,16 @@ defmodule MPP.VerifierTest do
       start_supervised!(ETSStore.child_spec(name: store_name))
       session = build_session()
 
+      channel_id = "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
+      escrow = "0x4d50500000000000000000000000000000000000"
+
       payload = %{
         "action" => "open",
         "type" => "transaction",
-        "channelId" => "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e",
+        "channelId" => channel_id,
         "transaction" => "0x76abcd",
         "cumulativeAmount" => "80",
-        "signature" =>
-          "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
+        "signature" => SessionSigning.sign_voucher(channel_id, 80, escrow, 42_431)
       }
 
       credential = build_session_credential(session, payload)
@@ -314,7 +317,10 @@ defmodule MPP.VerifierTest do
             "session_store" => {ETSStore, [name: store_name]},
             "deposit" => 1_000,
             "payer" => "0x1111111111111111111111111111111111111111",
-            "token" => "0x3333333333333333333333333333333333333333"
+            "token" => "0x3333333333333333333333333333333333333333",
+            "escrowContract" => escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => SessionSigning.signer_address()
           }
         )
 
