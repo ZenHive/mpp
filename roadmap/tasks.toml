@@ -2416,3 +2416,23 @@ Task 82 shipped `mix mutation.security` and a checked-in kill ledger, but the de
 """
 created_at = "2026-08-19"
 scored_at = "2026-08-19"
+
+[[task]]
+id = "94"
+phase = 13
+bundle = "tempo"
+status = "pending"
+title = "Keep Tempo subscription renewal claims after ambiguous broadcast"
+scores = { d = 4, b = 8, u = 7 }
+depends_on = [91]
+acceptance_criteria = ["A renewal whose broadcast or transport result is ambiguous keeps the in-flight claim so the same period cannot be settled twice", "A confirmed renewal revert still releases the in-flight claim and a retry can proceed", "A confirmed renewal that did not credit the recipient remains blocked", "Unit tests cover keep-on-ambiguous-broadcast and release-on-confirmed-revert; live Moderato integration covers one forced retryable renewal revert and one non-retryable missed-recipient case; missing credentials flunk with exact export instructions"]
+touches = ["lib/mpp/methods/tempo/subscription.ex", "test/mpp/methods/tempo/subscription_test.exs", "test/mpp/methods/tempo/subscription_integration_test.exs"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+Task 91 made ACTIVATION release its dedup claim only on proven non-inclusion (simulate/validation rejection, confirmed revert) and keep it on ambiguous broadcast/transport errors. RENEWAL still classifies every build/simulate/broadcast error as retryable (settle_renewal/3 with-else maps any {:error, reason} to {:retryable, reason}) and complete_renewal/4 then releases the in-flight period claim - so an eth_sendRawTransactionSync timeout after the node accepted the tx lets a retry charge the same period twice.
+
+Apply the Task 91 policy symmetrically to renewal: release the claim only on proven non-inclusion; keep it on ambiguous broadcast/transport; a confirmed missed-recipient stays blocked. Authority: live Moderato settlement behavior plus the activation policy shipped in this module (run run-1787125033044-df3d8867 reviewer evidence).
+"""
+created_at = "2026-08-19"
+scored_at = "2026-08-19"
