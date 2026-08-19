@@ -206,14 +206,17 @@ defmodule MPP.Methods.StripeIntegrationTest do
   end
 
   describe "Stripe Connect settlement" do
-    test "destination charge routes funds to a connected account", %{stripe_secret_key: stripe_secret_key} do
+    test "destination charge settles on and routes funds to a connected account", %{
+      stripe_secret_key: stripe_secret_key
+    } do
       connect_account =
         System.get_env("STRIPE_CONNECT_ACCOUNT") ||
           flunk("""
           Missing Stripe Connect test account!
 
           Set this environment variable to a connected account id (acct_...) that
-          exists under your platform's Stripe test mode:
+          exists under your platform's Stripe test mode with active
+          card_payments and transfers capabilities:
             export STRIPE_CONNECT_ACCOUNT="acct_..."
 
           Create one at: https://dashboard.stripe.com/test/connect/accounts/overview
@@ -221,7 +224,9 @@ defmodule MPP.Methods.StripeIntegrationTest do
             STRIPE_SECRET_KEY=sk_test_... STRIPE_CONNECT_ACCOUNT=acct_... mix test --include integration
           """)
 
-      # Route the full payment (@amount) to the connected account as a destination charge.
+      # Settle on the connected account and route the full payment there. Making
+      # the destination the settlement merchant also supports cross-region test
+      # accounts, which Stripe rejects for platform-settled destination charges.
       config =
         MPP.Plug.init(
           secret_key: @hmac_secret,
@@ -232,7 +237,10 @@ defmodule MPP.Methods.StripeIntegrationTest do
           method_config: %{
             "stripe_secret_key" => stripe_secret_key,
             "network_id" => "internal",
-            "connect" => %{"transfer_data" => %{"destination" => connect_account}}
+            "connect" => %{
+              "on_behalf_of" => connect_account,
+              "transfer_data" => %{"destination" => connect_account}
+            }
           }
         )
 
