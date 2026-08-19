@@ -1256,7 +1256,7 @@ scored_at = "2026-08-02"
 id = 40
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "EVM EIP-3009 authorization credential"
 scores = { d = 6, b = 10, u = 10 }
 acceptance_criteria = [
@@ -1271,6 +1271,7 @@ model = "grok-4.6"
 body = """
 Implement `authorization` credential type per `draft-evm-charge-00.md:592-645` for USDC/EURC `transferWithAuthorization`. Use `challengeHash` as EIP-3009 nonce for replay protection.
 """
+started_at = "2026-08-19"
 scored_at = "2026-08-02"
 
 [[task]]
