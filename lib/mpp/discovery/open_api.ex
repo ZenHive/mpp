@@ -47,8 +47,7 @@ defmodule MPP.Discovery.OpenApi do
         description: "Keyword list or map with `info`, non-empty `routes`, and optional `service_info`"
       ]
     ],
-    returns: %{type: :map, description: "JSON-compatible OpenAPI 3.1.0 document"},
-    errors: [:invalid_config]
+    returns: %{type: :map, description: "JSON-compatible OpenAPI 3.1.0 document"}
   )
 
   @spec generate(keyword() | map()) :: map()
@@ -87,6 +86,7 @@ defmodule MPP.Discovery.OpenApi do
     payment_info =
       route
       |> fetch_required!(:payment)
+      |> mapish!("x-payment-info")
       |> parse_payment_info!()
 
     operation =
@@ -142,13 +142,16 @@ defmodule MPP.Discovery.OpenApi do
     Map.put(document, "x-service-info", normalize_service_info!(service_info))
   end
 
-  defp normalize_service_info!(service_info) when is_map(service_info) do
-    service_info = reject_unknown_keys!(service_info, ~w(categories docs), "x-service-info")
-    normalized = normalize_categories!(service_info)
-    normalize_docs!(normalized, service_info)
-  end
+  defp normalize_service_info!(service_info) do
+    service_info =
+      service_info
+      |> mapish!("x-service-info")
+      |> reject_unknown_keys!(~w(categories docs), "x-service-info")
 
-  defp normalize_service_info!(_service_info), do: raise(ArgumentError, "x-service-info must be a map")
+    service_info
+    |> normalize_categories!()
+    |> normalize_docs!(service_info)
+  end
 
   defp normalize_categories!(service_info) do
     case Map.fetch(service_info, "categories") do
@@ -174,13 +177,12 @@ defmodule MPP.Discovery.OpenApi do
     end
   end
 
-  defp normalize_doc_links!(docs) when is_map(docs) do
+  defp normalize_doc_links!(docs) do
     docs
+    |> mapish!("x-service-info.docs")
     |> reject_unknown_keys!(~w(apiReference homepage llms), "x-service-info.docs")
     |> Map.new(fn {key, uri} -> {key, require_uri!(uri, key)} end)
   end
-
-  defp normalize_doc_links!(_docs), do: raise(ArgumentError, "x-service-info docs must be a map")
 
   defp require_uri!(uri, _field) when is_binary(uri) do
     case URI.new(uri) do
@@ -217,6 +219,40 @@ defmodule MPP.Discovery.OpenApi do
 
   defp require_string!(value, _field) when is_binary(value), do: value
   defp require_string!(value, field), do: raise(ArgumentError, "OpenAPI #{field} must be a string: #{inspect(value)}")
+
+  defp mapish!(value, label) do
+    case stringify_config(value) do
+      %{} = map -> map
+      _other -> raise ArgumentError, "#{label} must be a map or keyword list: #{inspect(value)}"
+    end
+  end
+
+  defp stringify_config(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn {key, value}, acc ->
+      string_key = config_key!(key)
+
+      if Map.has_key?(acc, string_key) do
+        raise ArgumentError, "duplicate OpenAPI config key after normalization: #{string_key}"
+      end
+
+      Map.put(acc, string_key, stringify_config(value))
+    end)
+  end
+
+  defp stringify_config([{_key, _value} | _] = list) do
+    if Keyword.keyword?(list) do
+      stringify_config(Map.new(list))
+    else
+      Enum.map(list, &stringify_config/1)
+    end
+  end
+
+  defp stringify_config(list) when is_list(list), do: Enum.map(list, &stringify_config/1)
+  defp stringify_config(value), do: value
+
+  defp config_key!(key) when is_atom(key), do: Atom.to_string(key)
+  defp config_key!(key) when is_binary(key), do: key
+  defp config_key!(key), do: raise(ArgumentError, "OpenAPI config keys must be atoms or strings: #{inspect(key)}")
 
   defp fetch_required!(container, key) do
     case config_value(container, key, :missing) do

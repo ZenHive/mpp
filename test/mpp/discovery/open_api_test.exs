@@ -5,8 +5,10 @@ defmodule MPP.Discovery.OpenApiTest do
 
   describe "generate/1" do
     test "matches mppx OpenApi output for an equivalent standard offer" do
-      # Cross-validated by executing mppx 0.8.17 generateProxy/1. Source at
-      # c004d2c8e115fc18a8ef21154723488ed1710a6d: src/discovery/OpenApi.ts.
+      # Semantic match of mppx generateProxy → createDocument for this config.
+      # Source: wevm/mppx@c004d2c8 src/discovery/OpenApi.ts (402+200 responses,
+      # PaymentInfo.parse wrapping shorthand into offers). Map equality, not
+      # JSON byte order — mppx emits info/openapi/paths and 402 before 200.
       document =
         OpenApi.generate(
           info: %{title: "test-realm", version: "1.0.0"},
@@ -95,6 +97,45 @@ defmodule MPP.Discovery.OpenApiTest do
       assert document["paths"]["/search"]["get"]["responses"]["402"] == %{"description" => "Payment Required"}
     end
 
+    test "accepts Elixir atom-key and keyword-list payment and service_info" do
+      document =
+        OpenApi.generate(
+          info: [title: "Keyword API", version: "1.0.0"],
+          service_info: [
+            categories: ["search"],
+            docs: [homepage: "https://example.com"]
+          ],
+          routes: [
+            [
+              method: :get,
+              path: "/paid",
+              payment: [intent: "charge", method: "tempo", amount: "10", currency: "usd"]
+            ]
+          ]
+        )
+
+      assert document["info"] == %{"title" => "Keyword API", "version" => "1.0.0"}
+
+      assert document["x-service-info"] == %{
+               "categories" => ["search"],
+               "docs" => %{"homepage" => "https://example.com"}
+             }
+
+      assert document["paths"]["/paid"]["get"]["x-payment-info"]["offers"] == [
+               %{"intent" => "charge", "method" => "tempo", "amount" => "10", "currency" => "usd"}
+             ]
+    end
+
+    test "rejects mixed atom and string keys that would collide" do
+      valid = valid_config()
+      route = hd(valid[:routes])
+      payment = Map.put(route[:payment], :intent, "session")
+
+      assert_raise ArgumentError, ~r/duplicate OpenAPI config key after normalization: intent/, fn ->
+        OpenApi.generate(Keyword.put(valid, :routes, [Keyword.put(route, :payment, payment)]))
+      end
+    end
+
     test "rejects invalid document and route config" do
       valid = valid_config()
 
@@ -120,6 +161,8 @@ defmodule MPP.Discovery.OpenApiTest do
       assert_route_error(valid, :summary, 42, ~r/summary must be a string/)
       assert_route_error(valid, :request_body, [], ~r/request_body must be a map/)
       assert_route_error(valid, :payment, %{"offers" => []}, ~r/invalid x-payment-info/)
+      assert_route_error(valid, :payment, [{"intent", "charge"}], ~r/x-payment-info must be a map or keyword list/)
+      assert_route_error(valid, :payment, %{1 => "charge"}, ~r/keys must be atoms or strings/)
     end
 
     test "rejects duplicate operations" do
