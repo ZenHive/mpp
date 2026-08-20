@@ -1,6 +1,6 @@
 defmodule MPP.Session.Method do
   @moduledoc """
-  Convenience `use` wrapper that implements `MPP.Method.verify/2` by dispatching
+  Convenience `use` wrapper that implements `c:MPP.Method.verify/2` by dispatching
   session credential actions through `MPP.Session.Actions`.
 
   Methods that `use MPP.Session.Method` still implement `method_name/0`.
