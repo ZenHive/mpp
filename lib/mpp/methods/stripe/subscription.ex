@@ -32,6 +32,7 @@ defmodule MPP.Methods.Stripe.Subscription do
   # `/` intact, so reject anything that is not a Stripe-style object id.
   @stripe_object_id ~r/\A[a-z]+_[A-Za-z0-9_]+\z/
   @renewal_invoice_error "Stripe renewal invoice does not match the subscription"
+  @lifecycle_event_error "Stripe subscription lifecycle event does not match the subscription"
   @subscription_store_error "Stripe subscription store unavailable"
 
   @doc "Validate Stripe subscription configuration at Plug initialization."
@@ -115,6 +116,39 @@ defmodule MPP.Methods.Stripe.Subscription do
 
   def process_invoice(_event_id, _invoice_id, _config) do
     {:error, Errors.new(:invalid_payload, "Stripe renewal requires event, invoice, and configuration values")}
+  end
+
+  @doc "Process a Stripe subscription event after its webhook signature has been verified."
+  @spec process_event(map(), map()) :: {:ok, Record.t()} | {:error, Errors.t()}
+  def process_event(%{"id" => event_id} = event, config) when is_binary(event_id) and is_map(config) do
+    with :ok <- require_stripe_object_id(event_id, "Event") do
+      apply_lifecycle_event(event, config)
+    end
+  end
+
+  def process_event(_event, _config) do
+    {:error, Errors.new(:invalid_payload, "Stripe lifecycle processing requires an event and configuration")}
+  end
+
+  @doc "Stop Stripe collection for an unpaid invoice after its canonical period closes."
+  @spec void_stale_invoice(String.t(), String.t(), DateTime.t(), map()) ::
+          {:ok, Record.t()} | {:error, Errors.t()}
+  def void_stale_invoice(subscription_id, invoice_id, %DateTime{} = as_of, config)
+      when is_binary(subscription_id) and is_binary(invoice_id) and is_map(config) do
+    with :ok <- require_stripe_object_id(invoice_id, "Invoice"),
+         {:ok, record} <- fetch_record(store(config), subscription_id),
+         :ok <- require_stripe_record(record) do
+      case Map.get(closed_invoices(record), invoice_id) do
+        nil -> do_void_stale_invoice(record, invoice_id, as_of, config)
+        %{status: "closing"} -> do_void_stale_invoice(record, invoice_id, as_of, config)
+        _closed -> {:ok, record}
+      end
+    end
+  end
+
+  def void_stale_invoice(_subscription_id, _invoice_id, _as_of, _config) do
+    {:error,
+     Errors.new(:invalid_payload, "Stripe stale invoice closure requires subscription, invoice, time, and configuration")}
   end
 
   @doc "Schedule cancellation at the end of the last durably paid billing period."
@@ -713,14 +747,299 @@ defmodule MPP.Methods.Stripe.Subscription do
     Errors.new(:verification_failed, "Stripe subscription activation conflicts with durable state")
   end
 
+  defp apply_lifecycle_event(
+         %{
+           "id" => event_id,
+           "type" => "customer.subscription.deleted",
+           "created" => created,
+           "data" => %{"object" => subscription}
+         },
+         config
+       ) do
+    record_revocation(event_id, subscription, created, ["canceled"], config)
+  end
+
+  defp apply_lifecycle_event(
+         %{
+           "id" => event_id,
+           "type" => "customer.subscription.updated",
+           "created" => created,
+           "data" => %{"object" => subscription}
+         },
+         config
+       ) do
+    record_revocation(event_id, subscription, created, ["canceled", "unpaid"], config)
+  end
+
+  defp apply_lifecycle_event(_event, _config), do: lifecycle_error()
+
+  defp record_revocation(event_id, subscription, created, statuses, config) do
+    with {:ok, stripe_id, challenge_id, effective_at} <-
+           revocation_identity(subscription, created, statuses),
+         subscription_id = subscription_id(challenge_id, stripe_id),
+         {:ok, record} <- fetch_record(store(config), subscription_id),
+         :ok <- require_stripe_record(record, stripe_id) do
+      update_revocation(record, event_id, effective_at, config)
+    end
+  end
+
+  defp revocation_identity(
+         %{"id" => stripe_id, "status" => status, "metadata" => %{"mpp_challenge_id" => challenge_id}} = subscription,
+         created,
+         statuses
+       )
+       when is_binary(challenge_id) and challenge_id != "" and is_integer(created) do
+    effective_at = subscription["canceled_at"] || subscription["ended_at"] || created
+
+    with true <- status in statuses and is_integer(effective_at),
+         :ok <- require_stripe_object_id(stripe_id, "Subscription"),
+         {:ok, datetime} <- DateTime.from_unix(effective_at) do
+      {:ok, stripe_id, challenge_id, datetime}
+    else
+      _error -> lifecycle_error()
+    end
+  end
+
+  defp revocation_identity(_subscription, _created, _statuses), do: lifecycle_error()
+
+  defp update_revocation(record, event_id, effective_at, config) do
+    case Store.update(store(config), record.subscription_id, fn current ->
+           mark_revoked(current, record.method_state.stripe_subscription_id, event_id, effective_at)
+         end) do
+      {:ok, updated} -> {:ok, updated}
+      {:error, %Errors{} = error} -> {:error, error}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+    end
+  end
+
+  defp mark_revoked(%Record{method: "stripe"} = record, stripe_id, event_id, effective_at) do
+    with :ok <- require_stripe_record(record, stripe_id) do
+      event_ids = Enum.uniq((record.method_state[:revocation_event_ids] || []) ++ [event_id])
+      method_state = Map.put(record.method_state, :revocation_event_ids, event_ids)
+
+      {:ok,
+       %{
+         record
+         | cancellation_effective_at: earliest_effective_at(record.cancellation_effective_at, effective_at),
+           method_state: method_state
+       }}
+    end
+  end
+
+  defp mark_revoked(%Record{}, _stripe_id, _event_id, _effective_at), do: lifecycle_error()
+  defp mark_revoked(:not_found, _stripe_id, _event_id, _effective_at), do: lifecycle_error()
+
+  defp earliest_effective_at(nil, effective_at), do: effective_at
+
+  defp earliest_effective_at(current, effective_at) do
+    if DateTime.before?(effective_at, current), do: effective_at, else: current
+  end
+
+  defp do_void_stale_invoice(record, invoice_id, as_of, config) do
+    with {:ok, secret_key} <- require_config(config, "stripe_secret_key"),
+         {:ok, invoice, period} <- prepare_stale_invoice(record, invoice_id, as_of, secret_key, config),
+         {:ok, claimed} <- claim_stale_invoice(record, invoice_id, period, as_of, config) do
+      case stop_invoice_collection(invoice, claimed, invoice_id, secret_key, config) do
+        {:ok, status} -> finalize_stale_invoice(claimed, invoice_id, period, status, config)
+        {:error, %Errors{} = error} -> release_stale_invoice(claimed, invoice_id, config, error)
+      end
+    else
+      {:error, :already_closed, current} -> {:ok, current}
+      {:error, %Errors{} = error} -> {:error, error}
+    end
+  end
+
+  defp prepare_stale_invoice(record, invoice_id, as_of, secret_key, config) do
+    with {:ok, invoice} <- retrieve_invoice(invoice_id, secret_key, config),
+         {:ok, stripe_id, _challenge_id, item_period} <- renewal_identity(invoice, invoice_id),
+         :ok <- require_stripe_record(record, stripe_id),
+         {:ok, period} <- canonical_period(record, item_period),
+         true <- period > record.last_charged_period,
+         true <- DateTime.to_unix(as_of) >= elem(item_period, 1),
+         :ok <- validate_unpaid_invoice(invoice, record, item_period) do
+      {:ok, invoice, period}
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _mismatch -> lifecycle_error()
+    end
+  end
+
+  defp validate_unpaid_invoice(
+         %{
+           "status" => status,
+           "customer" => customer_id,
+           "currency" => currency,
+           "amount_paid" => 0,
+           "total" => amount,
+           "discounts" => [],
+           "total_discount_amounts" => [],
+           "total_taxes" => [],
+           "automatic_tax" => %{"enabled" => false}
+         } = invoice,
+         record,
+         item_period
+       )
+       when status in ["draft", "open", "void", "uncollectible"] do
+    state = record.method_state
+    stripe_subscription = %{"id" => state.stripe_subscription_id}
+    price = %{"id" => state.price_id}
+    expected_amount = String.to_integer(record.subscription.amount)
+
+    if customer_id == state.customer_id and currency == record.subscription.currency and
+         amount == expected_amount do
+      validate_invoice_line(invoice, stripe_subscription, price, record.subscription, item_period)
+    else
+      lifecycle_error()
+    end
+  end
+
+  defp validate_unpaid_invoice(_invoice, _record, _item_period), do: lifecycle_error()
+
+  defp claim_stale_invoice(record, invoice_id, period, as_of, config) do
+    case Store.update(store(config), record.subscription_id, fn
+           %Record{method: "stripe"} = current ->
+             claim_stale_invoice_record(current, invoice_id, period, as_of)
+
+           %Record{} ->
+             lifecycle_error()
+
+           :not_found ->
+             lifecycle_error()
+         end) do
+      {:error, {:already_closed, current}} -> {:error, :already_closed, current}
+      {:ok, claimed} -> {:ok, claimed}
+      {:error, %Errors{} = error} -> {:error, error}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+    end
+  end
+
+  defp claim_stale_invoice_record(record, invoice_id, period, as_of) do
+    case Map.get(closed_invoices(record), invoice_id) do
+      nil ->
+        closure = %{period: period, status: "closing", timestamp: DateTime.to_iso8601(as_of)}
+        {:ok, put_closed_invoice(record, invoice_id, closure)}
+
+      %{period: ^period, status: "closing"} ->
+        {:ok, record}
+
+      %{period: ^period} ->
+        {:error, {:already_closed, record}}
+
+      _other ->
+        lifecycle_error()
+    end
+  end
+
+  defp stop_invoice_collection(%{"status" => "open"}, record, invoice_id, secret_key, config) do
+    key = invoice_closure_key("void", record.subscription_id, invoice_id)
+
+    with {:ok, response} <-
+           post_object(
+             "/invoices/#{URI.encode(invoice_id)}/void",
+             [],
+             secret_key,
+             config,
+             key,
+             "Stripe stale invoice voiding failed"
+           ),
+         :ok <- validate_stopped_invoice(response, invoice_id, "void") do
+      {:ok, "void"}
+    end
+  end
+
+  defp stop_invoice_collection(%{"status" => "draft"}, record, invoice_id, secret_key, config) do
+    key = invoice_closure_key("disable", record.subscription_id, invoice_id)
+
+    with {:ok, response} <-
+           post_object(
+             "/invoices/#{URI.encode(invoice_id)}",
+             [{"auto_advance", "false"}],
+             secret_key,
+             config,
+             key,
+             "Stripe stale invoice collection disabling failed"
+           ),
+         :ok <- validate_stopped_invoice(response, invoice_id, "draft") do
+      {:ok, "collection_disabled"}
+    end
+  end
+
+  defp stop_invoice_collection(%{"status" => status, "auto_advance" => false}, _record, _invoice_id, _key, _config)
+       when status in ["void", "uncollectible"], do: {:ok, status}
+
+  defp validate_stopped_invoice(%{"id" => id, "status" => status, "auto_advance" => false}, id, status), do: :ok
+
+  defp validate_stopped_invoice(_invoice, _id, _status), do: lifecycle_error()
+
+  defp finalize_stale_invoice(record, invoice_id, period, status, config) do
+    update = &finalize_stale_invoice_record(&1, invoice_id, period, status)
+
+    case Store.update(store(config), record.subscription_id, update) do
+      {:ok, updated} -> {:ok, updated}
+      {:error, %Errors{} = error} -> {:error, error}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+    end
+  end
+
+  defp finalize_stale_invoice_record(%Record{} = record, invoice_id, period, status) do
+    case Map.get(closed_invoices(record), invoice_id) do
+      %{period: ^period, status: "closing"} = closure ->
+        {:ok, put_closed_invoice(record, invoice_id, %{closure | status: status})}
+
+      %{period: ^period, status: ^status} ->
+        {:ok, record}
+
+      _other ->
+        lifecycle_error()
+    end
+  end
+
+  defp finalize_stale_invoice_record(:not_found, _invoice_id, _period, _status), do: lifecycle_error()
+
+  defp release_stale_invoice(record, invoice_id, config, error) do
+    _ =
+      Store.update(store(config), record.subscription_id, fn
+        %Record{} = current ->
+          case Map.get(closed_invoices(current), invoice_id) do
+            %{status: "closing"} ->
+              {:ok, put_closed_invoices(current, Map.delete(closed_invoices(current), invoice_id))}
+
+            _other ->
+              {:ok, current}
+          end
+
+        :not_found ->
+          {:error, :subscription_not_found}
+      end)
+
+    {:error, error}
+  end
+
+  defp closed_invoices(record), do: record.method_state[:closed_invoices] || %{}
+
+  defp put_closed_invoice(record, invoice_id, closure) do
+    put_closed_invoices(record, Map.put(closed_invoices(record), invoice_id, closure))
+  end
+
+  defp put_closed_invoices(record, invoices) do
+    %{record | method_state: Map.put(record.method_state, :closed_invoices, invoices)}
+  end
+
+  defp invoice_closure_key(action, subscription_id, invoice_id) do
+    digest = :crypto.hash(:sha256, [subscription_id, ":", invoice_id])
+    "mpp-subscription-#{action}-invoice-#{Base.url_encode64(digest, padding: false)}"
+  end
+
   defp validate_renewal(invoice, invoice_id, config) do
     with {:ok, stripe_subscription_id, challenge_id, item_period} <-
            renewal_identity(invoice, invoice_id),
          subscription_id = subscription_id(challenge_id, stripe_subscription_id),
          {:ok, record} <- fetch_record(store(config), subscription_id),
          :ok <- require_stripe_record(record, stripe_subscription_id),
+         :ok <- require_recordable_invoice(record, invoice_id),
          {:ok, paid_at} <- validate_renewal_invoice(invoice, record, item_period),
          {:ok, period} <- canonical_period(record, item_period),
+         :ok <- require_timely_payment(paid_at, elem(item_period, 1)),
          :ok <- require_payable_period(record, period, elem(item_period, 0)) do
       {:ok, record, period, DateTime.to_iso8601(paid_at)}
     end
@@ -865,6 +1184,14 @@ defmodule MPP.Methods.Stripe.Subscription do
     if period_start < DateTime.to_unix(effective_at), do: :ok, else: renewal_error()
   end
 
+  defp require_recordable_invoice(record, invoice_id) do
+    if Map.has_key?(closed_invoices(record), invoice_id), do: renewal_error(), else: :ok
+  end
+
+  defp require_timely_payment(paid_at, period_end) do
+    if DateTime.to_unix(paid_at) < period_end, do: :ok, else: renewal_error()
+  end
+
   defp record_renewal(record, period, invoice_id, event_id, timestamp, config) do
     case Store.update(store(config), record.subscription_id, fn current ->
            update_renewal(current, period, invoice_id, event_id, timestamp)
@@ -882,12 +1209,17 @@ defmodule MPP.Methods.Stripe.Subscription do
          event_id,
          timestamp
        ) do
-    event_payment = Enum.find_value(record.payments, &payment_for_event(&1, event_id))
+    period_start = record |> shift_period(period) |> DateTime.to_unix()
 
-    case event_payment do
-      %{reference: ^invoice_id, period: ^period} -> {:ok, record}
-      nil -> update_renewal_period(record, period, invoice_id, event_id, timestamp)
-      _other -> renewal_error()
+    with :ok <- require_recordable_invoice(record, invoice_id),
+         :ok <- require_payable_period(record, period, period_start) do
+      event_payment = Enum.find_value(record.payments, &payment_for_event(&1, event_id))
+
+      case event_payment do
+        %{reference: ^invoice_id, period: ^period} -> {:ok, record}
+        nil -> update_renewal_period(record, period, invoice_id, event_id, timestamp)
+        _other -> renewal_error()
+      end
     end
   end
 
@@ -995,7 +1327,12 @@ defmodule MPP.Methods.Stripe.Subscription do
   defp finalize_cancellation(subscription_store, record, effective_at) do
     Store.update(subscription_store, record.subscription_id, fn
       %Record{in_flight_reference: reference} = current when reference == record.in_flight_reference ->
-        {:ok, %{current | cancellation_effective_at: effective_at, in_flight_reference: nil}}
+        {:ok,
+         %{
+           current
+           | cancellation_effective_at: earliest_effective_at(current.cancellation_effective_at, effective_at),
+             in_flight_reference: nil
+         }}
 
       %Record{method: "stripe", cancellation_effective_at: ^effective_at} = current ->
         {:ok, %{current | in_flight_reference: nil}}
@@ -1048,6 +1385,7 @@ defmodule MPP.Methods.Stripe.Subscription do
   defp require_stripe_record(%Record{}, _expected_stripe_id), do: renewal_error()
 
   defp renewal_error, do: {:error, Errors.new(:verification_failed, @renewal_invoice_error)}
+  defp lifecycle_error, do: {:error, Errors.new(:verification_failed, @lifecycle_event_error)}
 
   defp payment(period, reference, timestamp, event_ids) do
     %{period: period, reference: reference, timestamp: timestamp, event_ids: event_ids}

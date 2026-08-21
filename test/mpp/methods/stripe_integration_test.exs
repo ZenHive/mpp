@@ -27,6 +27,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
   @stripe_api_version "2026-02-25.clover"
   @test_clock_timeout_ms 60_000
   @test_clock_poll_ms 500
+  @stripe_list_limit "100"
 
   @spt_endpoint "https://api.stripe.com/v1/test_helpers/shared_payment/granted_tokens"
 
@@ -431,6 +432,159 @@ defmodule MPP.Methods.StripeIntegrationTest do
       assert error.detail == "Stripe Invoice retrieval failed"
     end
 
+    test "records a live deleted event idempotently without deleting durable state", %{
+      stripe_secret_key: stripe_secret_key
+    } do
+      started_at = System.system_time(:second)
+      customer_id = create_test_customer!(stripe_secret_key, "deleted-event")
+      payment_method_id = attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_visa")
+      store = start_subscription_store!()
+      config = subscription_plug_config(stripe_secret_key, store)
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      on_exit(fn -> archive_test_products!(stripe_secret_key, challenge.id) end)
+      on_exit(fn -> delete_test_customer!(stripe_secret_key, customer_id) end)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"paymentMethod" => payment_method_id, "customer" => customer_id}
+      }
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert %Receipt{} = activation = conn_200.assigns[:mpp_receipt]
+      stripe_subscription_id = activation.extensions["stripeSubscription"]
+      deleted = stripe_delete!(stripe_secret_key, "/subscriptions/#{stripe_subscription_id}")
+      assert deleted["id"] == stripe_subscription_id
+      assert deleted["status"] == "canceled"
+      assert is_integer(deleted["canceled_at"])
+
+      event =
+        wait_for_event!(
+          stripe_secret_key,
+          "customer.subscription.deleted",
+          stripe_subscription_id,
+          started_at
+        )
+
+      assert get_in(event, ["data", "object", "metadata", "mpp_challenge_id"]) == challenge.id
+      method_config = subscription_method_config(stripe_secret_key, store)
+      assert {:ok, revoked} = StripeSubscription.process_event(event, method_config)
+      assert {:ok, ^revoked} = StripeSubscription.process_event(event, method_config)
+      assert revoked.cancellation_effective_at == DateTime.from_unix!(deleted["canceled_at"])
+      assert revoked.method_state.revocation_event_ids == [event["id"]]
+      assert {:ok, ^revoked} = Store.get(store, activation.subscription_id)
+    end
+
+    test "voids a live unpaid renewal after its canonical period closes", %{
+      stripe_secret_key: stripe_secret_key
+    } do
+      frozen_time = System.system_time(:second)
+
+      test_clock =
+        stripe_post!(
+          stripe_secret_key,
+          "/test_helpers/test_clocks",
+          [{"frozen_time", Integer.to_string(frozen_time)}, {"name", "MPP stale invoice integration"}]
+        )
+
+      assert %{"id" => "clock_" <> _rest = test_clock_id, "status" => "ready"} = test_clock
+      on_exit(fn -> delete_test_clock!(stripe_secret_key, test_clock_id) end)
+
+      customer_id = create_test_customer!(stripe_secret_key, "stale-invoice", test_clock: test_clock_id)
+      payment_method_id = attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_visa")
+      store = start_subscription_store!()
+      config = subscription_plug_config(stripe_secret_key, store)
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      on_exit(fn -> archive_test_products!(stripe_secret_key, challenge.id) end)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"paymentMethod" => payment_method_id, "customer" => customer_id}
+      }
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> MPP.Plug.call(config)
+
+      assert %Receipt{} = activation = conn_200.assigns[:mpp_receipt]
+      assert {:ok, activation_record} = Store.get(store, activation.subscription_id)
+      stripe_subscription_id = activation.extensions["stripeSubscription"]
+      failing_payment_method = attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_chargeCustomerFail")
+
+      updated =
+        stripe_post!(
+          stripe_secret_key,
+          "/subscriptions/#{stripe_subscription_id}",
+          [{"default_payment_method", failing_payment_method}]
+        )
+
+      assert updated["default_payment_method"] == failing_payment_method
+      first_renewal_start = DateTime.shift(activation_record.billing_anchor, day: 1)
+
+      stripe_post!(
+        stripe_secret_key,
+        "/test_helpers/test_clocks/#{test_clock_id}/advance",
+        [{"frozen_time", Integer.to_string(DateTime.to_unix(DateTime.shift(first_renewal_start, hour: 2)))}]
+      )
+
+      wait_for_test_clock!(stripe_secret_key, test_clock_id)
+      stale_invoice = wait_for_renewal_status!(stripe_secret_key, stripe_subscription_id, "open")
+      assert stale_invoice["amount_paid"] == 0
+      assert stale_invoice["auto_advance"] == true
+      second_period_start = DateTime.shift(activation_record.billing_anchor, day: 2)
+
+      stripe_post!(
+        stripe_secret_key,
+        "/test_helpers/test_clocks/#{test_clock_id}/advance",
+        [{"frozen_time", Integer.to_string(DateTime.to_unix(second_period_start))}]
+      )
+
+      wait_for_test_clock!(stripe_secret_key, test_clock_id)
+      method_config = subscription_method_config(stripe_secret_key, store)
+
+      assert {:ok, closed} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 stale_invoice["id"],
+                 second_period_start,
+                 method_config
+               )
+
+      assert {:ok, ^closed} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 stale_invoice["id"],
+                 second_period_start,
+                 method_config
+               )
+
+      voided = stripe_get!(stripe_secret_key, "/invoices/#{stale_invoice["id"]}")
+      assert voided["status"] == "void"
+      assert voided["amount_paid"] == 0
+      assert voided["auto_advance"] == false
+
+      assert {:error, error} =
+               StripeSubscription.process_invoice(
+                 "evt_late_stale_invoice",
+                 stale_invoice["id"],
+                 method_config
+               )
+
+      assert error.detail == "Stripe renewal invoice does not match the subscription"
+      assert {:ok, unchanged} = Store.get(store, activation.subscription_id)
+      assert Map.keys(unchanged.payments) == [0]
+    end
+
     test "rejects a first invoice that requires customer action", %{
       stripe_secret_key: stripe_secret_key
     } do
@@ -711,11 +865,15 @@ defmodule MPP.Methods.StripeIntegrationTest do
   end
 
   defp wait_for_paid_renewal!(stripe_secret_key, stripe_subscription_id) do
-    deadline = System.monotonic_time(:millisecond) + @test_clock_timeout_ms
-    poll_paid_renewal!(stripe_secret_key, stripe_subscription_id, deadline)
+    wait_for_renewal_status!(stripe_secret_key, stripe_subscription_id, "paid")
   end
 
-  defp poll_paid_renewal!(stripe_secret_key, stripe_subscription_id, deadline) do
+  defp wait_for_renewal_status!(stripe_secret_key, stripe_subscription_id, status) do
+    deadline = System.monotonic_time(:millisecond) + @test_clock_timeout_ms
+    poll_renewal_status!(stripe_secret_key, stripe_subscription_id, status, deadline)
+  end
+
+  defp poll_renewal_status!(stripe_secret_key, stripe_subscription_id, status, deadline) do
     invoices =
       stripe_secret_key
       |> stripe_get!(
@@ -724,21 +882,57 @@ defmodule MPP.Methods.StripeIntegrationTest do
       )
       |> Map.fetch!("data")
 
-    case Enum.find(invoices, &(&1["billing_reason"] == "subscription_cycle" and &1["status"] == "paid")) do
-      nil -> wait_for_paid_renewal_retry!(stripe_secret_key, stripe_subscription_id, invoices, deadline)
+    case Enum.find(invoices, &(&1["billing_reason"] == "subscription_cycle" and &1["status"] == status)) do
+      nil -> wait_for_renewal_retry!(stripe_secret_key, stripe_subscription_id, status, invoices, deadline)
       invoice -> invoice
     end
   end
 
-  defp wait_for_paid_renewal_retry!(stripe_secret_key, stripe_subscription_id, invoices, deadline) do
+  defp wait_for_renewal_retry!(stripe_secret_key, stripe_subscription_id, status, invoices, deadline) do
     if System.monotonic_time(:millisecond) < deadline do
       receive do
       after
-        @test_clock_poll_ms -> poll_paid_renewal!(stripe_secret_key, stripe_subscription_id, deadline)
+        @test_clock_poll_ms -> poll_renewal_status!(stripe_secret_key, stripe_subscription_id, status, deadline)
       end
     else
       summary = Enum.map(invoices, &Map.take(&1, ["id", "billing_reason", "status"]))
-      flunk("Stripe did not pay a renewal invoice: #{inspect(summary)}")
+      flunk("Stripe renewal invoice did not reach #{status}: #{inspect(summary)}")
+    end
+  end
+
+  defp wait_for_event!(stripe_secret_key, event_type, object_id, created_at) do
+    deadline = System.monotonic_time(:millisecond) + @test_clock_timeout_ms
+    poll_event!(stripe_secret_key, event_type, object_id, created_at, deadline)
+  end
+
+  defp poll_event!(stripe_secret_key, event_type, object_id, created_at, deadline) do
+    events =
+      stripe_secret_key
+      |> stripe_get!(
+        "/events?" <>
+          URI.encode_query([
+            {"type", event_type},
+            {"limit", @stripe_list_limit},
+            {"created[gte]", Integer.to_string(created_at)}
+          ])
+      )
+      |> Map.fetch!("data")
+
+    case Enum.find(events, &(get_in(&1, ["data", "object", "id"]) == object_id)) do
+      nil -> wait_for_event_retry!(stripe_secret_key, event_type, object_id, created_at, events, deadline)
+      event -> event
+    end
+  end
+
+  defp wait_for_event_retry!(stripe_secret_key, event_type, object_id, created_at, events, deadline) do
+    if System.monotonic_time(:millisecond) < deadline do
+      receive do
+      after
+        @test_clock_poll_ms -> poll_event!(stripe_secret_key, event_type, object_id, created_at, deadline)
+      end
+    else
+      summary = Enum.map(events, &Map.take(&1, ["id", "type"]))
+      flunk("Stripe did not emit #{event_type} for #{object_id}: #{inspect(summary)}")
     end
   end
 
