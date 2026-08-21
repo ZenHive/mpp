@@ -4,7 +4,12 @@ defmodule MPP.Transports.WebSocketTest do
   alias MPP.Client.Transport.WebSocket, as: ClientTransport
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
+  alias MPP.Session.Channel
+  alias MPP.Session.ETSStore
+  alias MPP.Session.Store
+  alias MPP.Test.SessionSigning
   alias MPP.Transports.WebSocket
+  alias MPP.Transports.WebSocket.Session
 
   @secret_key "test-secret-key-for-websocket"
   @realm "ws.example.com"
@@ -237,5 +242,387 @@ defmodule MPP.Transports.WebSocketTest do
       assert frame["type"] == "challenge"
       assert is_binary(frame["challenge"]["id"])
     end
+  end
+
+  defmodule MockSessionMethod do
+    @moduledoc false
+    use MPP.Session.Method
+
+    @impl MPP.Method
+    def method_name, do: "mocksession"
+
+    @impl MPP.Method
+    def validate_config!(_config), do: :ok
+  end
+
+  defmodule ErrorStore do
+    @moduledoc false
+    def get(_channel_id), do: {:error, :down}
+    def put(_channel), do: :ok
+    def update(_channel_id, _fun), do: {:error, :timeout}
+    def delete(_channel_id), do: :ok
+  end
+
+  describe "session metering" do
+    @channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
+    @payer "0x1111111111111111111111111111111111111111"
+    @recipient "0x2222222222222222222222222222222222222222"
+    @token "0x3333333333333333333333333333333333333333"
+    @escrow "0x4d50500000000000000000000000000000000000"
+
+    defp session_store do
+      name = :"#{__MODULE__}.meter.#{System.unique_integer([:positive])}"
+      start_supervised!(ETSStore.child_spec(name: name))
+      {ETSStore, [name: name]}
+    end
+
+    defp meter_session(store, overrides \\ []) do
+      [
+        handler: fn %{"method" => "eth_chainId"} -> "0xa61" end,
+        secret_key: @secret_key,
+        realm: @realm,
+        intent: "session",
+        method: MockSessionMethod,
+        amount: "50",
+        currency: @token,
+        recipient: @recipient,
+        suggested_deposit: "1000",
+        session_store: store,
+        method_config: %{
+          "deposit" => 1_000,
+          "payer" => @payer,
+          "token" => @token,
+          "escrowContract" => @escrow,
+          "chainId" => 42_431,
+          "authorizedSigner" => SessionSigning.signer_address()
+        },
+        store: false,
+        tick_cost: 50,
+        generate: ["chunk-1", "chunk-2", "chunk-3"]
+      ]
+      |> Keyword.merge(overrides)
+      |> WebSocket.init()
+    end
+
+    defp put_channel!(store, opts) do
+      {:ok, channel} =
+        Channel.new(
+          channel_id: @channel_id,
+          payer: @payer,
+          recipient: @recipient,
+          token: @token,
+          deposit: Keyword.get(opts, :deposit, 1_000),
+          cumulative_amount: Keyword.get(opts, :cumulative, 100),
+          spent: Keyword.get(opts, :spent, 0)
+        )
+
+      {:ok, channel} = Channel.activate(channel)
+      :ok = Store.put(store, channel)
+      channel
+    end
+
+    test "init requires session intent for generate" do
+      assert_raise ArgumentError, ~r/intent: "session"/, fn ->
+        session(generate: ["x"], tick_cost: 1)
+      end
+    end
+
+    test "init rejects a non-list generate" do
+      assert_raise ArgumentError, ~r/generate must be a list/, fn ->
+        meter_session(session_store(), generate: "nope")
+      end
+    end
+
+    test "start_metering requires an authorized session" do
+      sess = meter_session(session_store())
+
+      assert_raise ArgumentError, ~r/authorized/, fn ->
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      end
+    end
+
+    test "tick deducts, emits data, then needVoucher when the channel is exhausted" do
+      store = session_store()
+      put_channel!(store, cumulative: 100, spent: 0)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {sess, frames} =
+        WebSocket.start_metering(sess,
+          channel_id: @channel_id,
+          generate: ["chunk-1", "chunk-2", "chunk-3"],
+          tick_cost: 50
+        )
+
+      assert Enum.map(frames, & &1["type"]) == ["message", "message", "needVoucher"]
+      assert Enum.at(frames, 0)["data"] == "chunk-1"
+      assert Enum.at(frames, 1)["data"] == "chunk-2"
+      nv = Enum.at(frames, 2)
+      assert nv["channelId"] == @channel_id
+      assert nv["requiredCumulative"] == "150"
+      assert nv["acceptedCumulative"] == "100"
+      assert nv["deposit"] == "1000"
+      assert sess.status == :awaiting_voucher
+
+      {_sess, []} = WebSocket.tick(sess)
+    end
+
+    test "tick resumes after a voucher raises the ceiling and finishes with a session receipt" do
+      store = session_store()
+      put_channel!(store, cumulative: 50, spent: 0)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {sess, frames} =
+        WebSocket.start_metering(sess,
+          channel_id: @channel_id,
+          generate: ["a", "b"],
+          tick_cost: 50
+        )
+
+      assert List.last(frames)["type"] == "needVoucher"
+
+      {:ok, _channel} =
+        Store.update(store, @channel_id, fn channel ->
+          Channel.apply_voucher(channel, 200)
+        end)
+
+      {sess, resume} = WebSocket.tick(%{sess | status: :authorized})
+      assert Enum.map(resume, & &1["type"]) == ["message", "receipt"]
+      assert hd(resume)["data"] == "b"
+      receipt = List.last(resume)["receipt"]
+      assert receipt["intent"] == "session"
+      assert receipt["channelId"] == @channel_id
+      assert receipt["acceptedCumulative"] == "200"
+      assert receipt["spent"] == "100"
+      assert receipt["units"] == 2
+      assert sess.status == :complete
+    end
+
+    test "message while awaiting a voucher is rejected" do
+      store = session_store()
+      put_channel!(store, cumulative: 50, spent: 0)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {sess, _frames} =
+        WebSocket.start_metering(sess,
+          channel_id: @channel_id,
+          generate: ["only", "more"],
+          tick_cost: 50
+        )
+
+      assert sess.status == :awaiting_voucher
+      {_sess, [frame]} = WebSocket.handle_frame(%{"type" => "message", "data" => %{}}, sess)
+      assert frame == %{"type" => "error", "error" => "voucher required"}
+    end
+
+    test "tick errors when the channel is missing or closed" do
+      store = session_store()
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {_sess, [missing]} =
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
+
+      assert missing["error"] == "session channel not found"
+
+      put_channel!(store, cumulative: 100)
+      {:ok, _} = Store.update(store, @channel_id, &Channel.close/1)
+
+      {_sess, [closed]} =
+        WebSocket.start_metering(%{sess | status: :authorized},
+          channel_id: @channel_id,
+          generate: ["x"],
+          tick_cost: 50
+        )
+
+      assert closed["error"] == "session channel is closed"
+    end
+
+    test "tick with an unbound meter reports an error" do
+      store = session_store()
+      sess = meter_session(store)
+      {sess, _} = WebSocket.open(sess)
+      sess = %{sess | status: :authorized}
+      {_sess, [frame]} = WebSocket.tick(sess)
+      assert frame["error"] == "session channel is not bound"
+    end
+
+    test "empty generate emits a session receipt immediately" do
+      store = session_store()
+      put_channel!(store, cumulative: 100, spent: 10)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+      {sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
+      assert frame["type"] == "receipt"
+      assert frame["receipt"]["spent"] == "10"
+      assert sess.status == :complete
+    end
+
+    test "empty generate without a channel reports not found" do
+      store = session_store()
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {_sess, [frame]} =
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
+
+      assert frame["error"] == "session channel not found"
+    end
+
+    test "tick after a session receipt is a no-op" do
+      store = session_store()
+      put_channel!(store, cumulative: 100, spent: 10)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+      {sess, _} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
+      assert sess.status == :complete
+      {_sess, []} = WebSocket.tick(sess)
+    end
+
+    test "bind_channel ignores a payload without a channelId" do
+      sess = meter_session(session_store())
+      refute sess.meter.channel_id
+      bound = Session.bind_channel(sess, %{"action" => "open"})
+      refute bound.meter.channel_id
+    end
+
+    test "finish reports a store get error" do
+      {sess, _} = WebSocket.open(meter_session(__MODULE__.ErrorStore, generate: []))
+      sess = %{sess | status: :authorized}
+      {_sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
+      assert frame["error"] =~ "session store error"
+    end
+
+    test "tick reports a store update error" do
+      {sess, _} = WebSocket.open(meter_session(__MODULE__.ErrorStore, generate: []))
+      sess = %{sess | status: :authorized}
+      {_sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
+      assert frame["error"] =~ "session deduct failed"
+    end
+
+    test "init defaults tick_cost from the session amount" do
+      store = session_store()
+
+      sess =
+        WebSocket.init(
+          handler: fn %{"method" => "eth_chainId"} -> "0xa61" end,
+          secret_key: @secret_key,
+          realm: @realm,
+          intent: "session",
+          method: MockSessionMethod,
+          amount: "50",
+          currency: @token,
+          recipient: @recipient,
+          suggested_deposit: "1000",
+          session_store: store,
+          method_config: %{
+            "deposit" => 1_000,
+            "payer" => @payer,
+            "token" => @token,
+            "escrowContract" => @escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => SessionSigning.signer_address()
+          },
+          store: false,
+          generate: ["x"]
+        )
+
+      assert sess.meter.tick_cost == 50
+    end
+
+    test "init requires a positive tick_cost when the session amount is not a unit count" do
+      store = session_store()
+
+      assert_raise ArgumentError, ~r/positive :tick_cost/, fn ->
+        WebSocket.init(
+          handler: fn _ -> %{} end,
+          secret_key: @secret_key,
+          realm: @realm,
+          intent: "session",
+          method: MockSessionMethod,
+          amount: "0.5",
+          currency: @token,
+          recipient: @recipient,
+          suggested_deposit: "1000",
+          session_store: store,
+          method_config: %{"deposit" => 1_000, "payer" => @payer, "token" => @token},
+          store: false,
+          generate: ["x"]
+        )
+      end
+    end
+
+    test "open credential drains until needVoucher; a voucher credential resumes and finishes" do
+      store = session_store()
+      {sess, [challenge_text]} = WebSocket.open(meter_session(store, generate: ["chunk-1", "chunk-2"]))
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+
+      {sess, open_texts} =
+        WebSocket.handle_text(credential_text(challenge, session_open_payload(100)), sess)
+
+      open_frames = decode_all(open_texts)
+      assert Enum.map(open_frames, & &1["type"]) == ["receipt", "message", "needVoucher"]
+      assert Enum.at(open_frames, 1)["data"] == "chunk-1"
+      nv = List.last(open_frames)
+      assert nv["requiredCumulative"] == "150"
+      assert nv["acceptedCumulative"] == "100"
+      assert sess.status == :awaiting_voucher
+
+      {sess, voucher_texts} =
+        WebSocket.handle_text(credential_text(challenge, session_voucher_payload(200)), sess)
+
+      voucher_frames = decode_all(voucher_texts)
+      assert Enum.map(voucher_frames, & &1["type"]) == ["receipt", "message", "receipt"]
+      assert Enum.at(voucher_frames, 1)["data"] == "chunk-2"
+      session_receipt = List.last(voucher_frames)["receipt"]
+      assert session_receipt["intent"] == "session"
+      assert session_receipt["channelId"] == @channel_id
+      assert session_receipt["acceptedCumulative"] == "200"
+      assert session_receipt["spent"] == "200"
+      assert sess.status == :complete
+
+      rpc = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_chainId", "params" => []}
+      {_sess, [message_text]} = WebSocket.handle_text(Jason.encode!(%{"type" => "message", "data" => rpc}), sess)
+      {:ok, message_frame} = WebSocket.decode_frame(message_text)
+      assert Jason.decode!(message_frame["data"]) == %{"jsonrpc" => "2.0", "id" => 1, "result" => "0xa61"}
+    end
+  end
+
+  defp decode_all(texts) do
+    Enum.map(texts, fn text ->
+      assert {:ok, frame} = WebSocket.decode_frame(text)
+      frame
+    end)
+  end
+
+  defp credential_text(challenge, payload) do
+    Jason.encode!(ClientTransport.set_credential(%{}, %Credential{challenge: challenge, payload: payload}))
+  end
+
+  defp session_open_payload(amount) do
+    %{
+      "action" => "open",
+      "type" => "transaction",
+      "channelId" => @channel_id,
+      "transaction" => "0x76abcd",
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => session_sign(amount)
+    }
+  end
+
+  defp session_voucher_payload(amount) do
+    %{
+      "action" => "voucher",
+      "channelId" => @channel_id,
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => session_sign(amount)
+    }
+  end
+
+  defp session_sign(amount) do
+    SessionSigning.sign_voucher(@channel_id, amount, @escrow, 42_431)
   end
 end

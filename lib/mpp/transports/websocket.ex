@@ -11,8 +11,14 @@ defmodule MPP.Transports.WebSocket do
   `credential` frame (`Payment <base64url>`). A successful verify yields a
   `receipt` frame; JSON-RPC then travels in `message` frames.
 
+  Session-intent sockets can run the mpp-rs metering loop (`ws_session.rs`):
+  `tick/1` deducts per generated item, emits `needVoucher` when the channel
+  is exhausted, waits for a voucher credential, then resumes and finishes
+  with a session receipt. Pass `:generate` and optional `:tick_cost` to
+  `init/1`, or call `start_metering/2` after the handshake.
+
   Wire format matches mpp-rs `server::ws` / `alloy-transport-mpp`
-  (`refs/mpp-rs/src/server/ws.rs`,
+  (`refs/mpp-rs/src/server/ws.rs`, `refs/mpp-rs/src/server/ws_session.rs`,
   `refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs`):
 
     * Client → server: `credential`, `message`
@@ -29,18 +35,20 @@ defmodule MPP.Transports.WebSocket do
   alias MPP.Transports.JsonRpc
   alias MPP.Transports.JsonRpc.Adapter
   alias MPP.Transports.WebSocket.Frame
+  alias MPP.Transports.WebSocket.Session
 
-  @type status :: :open | :authorized
+  @type status :: :open | :authorized | :awaiting_voucher | :complete
 
   @type t :: %__MODULE__{
           config: Config.t(),
           handler: (map() -> term()),
           status: status(),
-          challenge: Challenge.t() | nil
+          challenge: Challenge.t() | nil,
+          meter: Session.Meter.t() | nil
         }
 
   @enforce_keys [:config, :handler]
-  defstruct [:config, :handler, status: :open, challenge: nil]
+  defstruct [:config, :handler, status: :open, challenge: nil, meter: nil]
 
   api(:init, "Build a WebSocket session from the same endpoint options as `MPP.Plug`, plus a JSON-RPC `:handler`.",
     params: [
@@ -54,13 +62,15 @@ defmodule MPP.Transports.WebSocket do
 
   @spec init(keyword()) :: t()
   def init(opts) when is_list(opts) do
-    {handler, plug_opts} = Keyword.pop(opts, :handler)
+    {handler, opts} = Keyword.pop(opts, :handler)
 
     if !is_function(handler, 1) do
       raise ArgumentError, "MPP.Transports.WebSocket requires :handler (arity-1 function)"
     end
 
-    %__MODULE__{config: JsonRpc.init(plug_opts), handler: handler}
+    config = JsonRpc.init(drop_meter_opts(opts))
+    {meter, _opts} = Session.parse_opts(opts, config)
+    %__MODULE__{config: config, handler: handler, meter: meter}
   end
 
   api(:open, "Emit the subscription-handshake challenge frame for a newly accepted socket.",
@@ -196,6 +206,34 @@ defmodule MPP.Transports.WebSocket do
   @spec message_frame(term()) :: map()
   def message_frame(data), do: Frame.message_frame(data)
 
+  api(
+    :start_metering,
+    "Bind a channel and drain metered session data until a voucher is needed or the generator is empty.",
+    params: [
+      session: [kind: :value, description: "Authorized WebSocket session"],
+      opts: [
+        kind: :value,
+        description: "Keyword with :channel_id, :generate (list of data items), and optional :tick_cost"
+      ]
+    ],
+    returns: %{type: :tuple, description: "`{session, [frame_map]}`"}
+  )
+
+  @spec start_metering(t(), keyword()) :: {t(), [map()]}
+  def start_metering(%__MODULE__{} = session, opts) when is_list(opts) do
+    Session.start(session, opts)
+  end
+
+  api(:tick, "Deduct per remaining generated item until needVoucher, a session receipt, or an error.",
+    params: [
+      session: [kind: :value, description: "Authorized or awaiting-voucher session with metering bound"]
+    ],
+    returns: %{type: :tuple, description: "`{session, [frame_map]}`"}
+  )
+
+  @spec tick(t()) :: {t(), [map()]}
+  def tick(%__MODULE__{} = session), do: Session.drain(session)
+
   defp handle_credential(%{"credential" => authorization}, session) when is_binary(authorization) do
     case Headers.parse_credential(authorization) do
       {:ok, %Credential{} = credential} ->
@@ -210,7 +248,11 @@ defmodule MPP.Transports.WebSocket do
     {session, [Frame.error_frame("malformed credential")]}
   end
 
-  defp handle_message(frame, %{status: :authorized} = session) do
+  defp handle_message(_frame, %{status: :awaiting_voucher} = session) do
+    {session, [Frame.error_frame("voucher required")]}
+  end
+
+  defp handle_message(frame, %{status: status} = session) when status in [:authorized, :complete] do
     case Frame.unwrap_message_data(frame) do
       {:ok, request} when is_map(request) ->
         response = dispatch_rpc(session, request)
@@ -247,8 +289,15 @@ defmodule MPP.Transports.WebSocket do
 
       %{"_meta" => meta} ->
         receipt = Map.get(meta, JsonRpc.receipt_meta_key(), %{})
-        {%{session | status: :authorized}, [Frame.receipt_frame(receipt)]}
+        session = %{session | status: :authorized}
+        session = Session.bind_channel(session, credential.payload)
+        {session, drain_frames} = Session.drain(session)
+        {session, [Frame.receipt_frame(receipt) | drain_frames]}
     end
+  end
+
+  defp drop_meter_opts(opts) do
+    Keyword.drop(opts, [:generate, :tick_cost])
   end
 
   defp dispatch_rpc(%{handler: handler}, request) do

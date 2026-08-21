@@ -13,6 +13,9 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
     * A drop after a credential was sent and before the receipt is fatal,
       so a rejected or half-open socket cannot amplify payment retries.
     * A second challenge while a payment is in flight is fatal.
+    * A second `needVoucher` while a voucher is in flight is fatal
+      (`refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs` handle_text
+      NeedVoucher). Sending the voucher sets `credential_awaiting_receipt`.
     * Close codes `1012` (Restart) and `1013` (Try Again Later) are the
       only non-fatal close codes, and only when no credential is awaiting
       a receipt.
@@ -37,6 +40,7 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
           | :credential_sent
           | :receipt
           | :challenge
+          | :need_voucher
           | :handshake_timeout
           | :provider_error
           | :server_error
@@ -58,6 +62,7 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
           fatal?: boolean(),
           fatal_reason: atom() | nil,
           payment_in_flight?: boolean(),
+          voucher_in_flight?: boolean(),
           awaiting_receipt?: boolean()
         }
 
@@ -69,6 +74,7 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
             fatal?: false,
             fatal_reason: nil,
             payment_in_flight?: false,
+            voucher_in_flight?: false,
             awaiting_receipt?: false
 
   api(:new, "Build a retry state with mpp-rs / alloy-transport-mpp defaults.",
@@ -112,11 +118,19 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
   end
 
   def transition(%__MODULE__{} = state, :credential_sent) do
-    {:continue, %{state | payment_in_flight?: false, awaiting_receipt?: true}}
+    {:continue, %{state | payment_in_flight?: false, voucher_in_flight?: false, awaiting_receipt?: true}}
   end
 
   def transition(%__MODULE__{} = state, :receipt) do
-    {:continue, %{state | awaiting_receipt?: false, payment_in_flight?: false}}
+    {:continue, %{state | awaiting_receipt?: false, payment_in_flight?: false, voucher_in_flight?: false}}
+  end
+
+  def transition(%__MODULE__{voucher_in_flight?: true} = state, :need_voucher) do
+    latch(state, :second_voucher_in_flight)
+  end
+
+  def transition(%__MODULE__{} = state, :need_voucher) do
+    {:continue, %{state | voucher_in_flight?: true}}
   end
 
   def transition(%__MODULE__{payment_in_flight?: true} = state, :challenge) do
@@ -167,12 +181,16 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
     params: [
       state: [kind: :value, description: "Retry state"]
     ],
-    returns: %{type: :boolean, description: "false when fatal, a pay is in flight, or a receipt is outstanding"}
+    returns: %{
+      type: :boolean,
+      description: "false when fatal, a pay or voucher is in flight, or a receipt is outstanding"
+    }
   )
 
   @spec should_pay?(t()) :: boolean()
   def should_pay?(%__MODULE__{} = state) do
-    not state.fatal? and not state.payment_in_flight? and not state.awaiting_receipt?
+    not state.fatal? and not state.payment_in_flight? and not state.voucher_in_flight? and
+      not state.awaiting_receipt?
   end
 
   api(:reconnect?, "Return true if a socket-level reconnect is still allowed.",
@@ -215,12 +233,13 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
   def transient_close?(_code), do: false
 
   defp latch(state, reason) do
-    {{:fatal, reason}, %{state | fatal?: true, fatal_reason: reason, payment_in_flight?: false}}
+    {{:fatal, reason},
+     %{state | fatal?: true, fatal_reason: reason, payment_in_flight?: false, voucher_in_flight?: false}}
   end
 
   defp transient(state) do
     attempts = state.attempts + 1
-    next = %{state | attempts: attempts, payment_in_flight?: false}
+    next = %{state | attempts: attempts, payment_in_flight?: false, voucher_in_flight?: false}
 
     if attempts >= state.max_retries do
       latch(next, :max_retries)

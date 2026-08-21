@@ -117,7 +117,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
     end
   end
 
-  describe "receipt?/1 and error?/1" do
+  describe "receipt?/1, error?/1, and need_voucher?/1" do
     test "discriminate handshake terminal frames from challenges" do
       assert Transport.receipt?(%{"type" => "receipt", "receipt" => %{}})
       refute Transport.receipt?(%{"type" => "challenge"})
@@ -126,6 +126,25 @@ defmodule MPP.Client.Transport.WebSocketTest do
       assert Transport.error?(%{"type" => "error", "error" => "malformed MPP frame"})
       refute Transport.error?(%{"type" => "receipt"})
       refute Transport.error?(nil)
+    end
+
+    test "need_voucher? and voucher_request parse the mpp-rs wire keys" do
+      frame = %{
+        "type" => "needVoucher",
+        "channelId" => "0xabc",
+        "requiredCumulative" => "2000",
+        "acceptedCumulative" => "1000",
+        "deposit" => "5000"
+      }
+
+      assert Transport.need_voucher?(frame)
+      refute Transport.need_voucher?(%{"type" => "receipt"})
+      refute Transport.need_voucher?("nope")
+
+      assert {:ok, request} = Transport.voucher_request(frame)
+      assert request.channel_id == "0xabc"
+      assert request.required_cumulative == "2000"
+      assert {:error, :invalid_need_voucher} = Transport.voucher_request(%{"type" => "needVoucher"})
     end
   end
 
@@ -268,6 +287,35 @@ defmodule MPP.Client.Transport.WebSocketTest do
     test "delay_ms with a huge attempt count stays capped" do
       state = %{Retry.new() | attempts: 40}
       assert Retry.delay_ms(state) == 30_000
+    end
+
+    test "needVoucher while a voucher is in flight is fatal" do
+      {:continue, state} = Retry.transition(Retry.new(), :need_voucher)
+      assert state.voucher_in_flight?
+      refute Retry.should_pay?(state)
+
+      {{:fatal, :second_voucher_in_flight}, state} = Retry.transition(state, :need_voucher)
+      refute Retry.should_pay?(state)
+      {{:fatal, :second_voucher_in_flight}, _} = Retry.transition(state, :pay_started)
+    end
+
+    test "voucher send awaits receipt and a later receipt allows another voucher" do
+      {:continue, state} = Retry.transition(Retry.new(), :need_voucher)
+      {:continue, state} = Retry.transition(state, :credential_sent)
+      assert state.awaiting_receipt?
+      refute state.voucher_in_flight?
+      refute Retry.should_pay?(state)
+
+      {:continue, state} = Retry.transition(state, :receipt)
+      assert Retry.should_pay?(state)
+      {:continue, state} = Retry.transition(state, :need_voucher)
+      assert state.voucher_in_flight?
+    end
+
+    test "pay_started while a voucher is in flight is refused" do
+      {:continue, state} = Retry.transition(Retry.new(), :need_voucher)
+      {{:fatal, :payment_retry_refused}, state} = Retry.transition(state, :pay_started)
+      assert state.pay_count == 0
     end
   end
 end

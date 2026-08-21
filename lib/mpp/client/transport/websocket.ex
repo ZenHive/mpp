@@ -104,4 +104,46 @@ defmodule MPP.Client.Transport.WebSocket do
   @spec error?(term()) :: boolean()
   def error?(%{"type" => "error"}), do: true
   def error?(_response), do: false
+
+  api(:need_voucher?, "Return true if the frame is a server `needVoucher` top-up request.",
+    params: [
+      response: [kind: :value, description: "Decoded WS frame"]
+    ],
+    returns: %{type: :boolean, description: "true for a `needVoucher` frame"}
+  )
+
+  @spec need_voucher?(term()) :: boolean()
+  def need_voucher?(%{"type" => "needVoucher"}), do: true
+  def need_voucher?(_response), do: false
+
+  api(:voucher_request, "Parse channel and cumulative fields from a `needVoucher` frame.",
+    params: [
+      response: [kind: :value, description: "Decoded WS `needVoucher` frame"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description: "`{:ok, request}` or `{:error, :invalid_need_voucher}`"
+    },
+    errors: [:invalid_need_voucher]
+  )
+
+  @spec voucher_request(term()) :: {:ok, map()} | {:error, :invalid_need_voucher}
+  def voucher_request(%{
+        "type" => "needVoucher",
+        "channelId" => channel_id,
+        "requiredCumulative" => required,
+        "acceptedCumulative" => accepted,
+        "deposit" => deposit
+      })
+      when is_binary(channel_id) and is_binary(required) and is_binary(accepted) and is_binary(deposit) do
+    {:ok,
+     %{
+       channel_id: channel_id,
+       required_cumulative: required,
+       accepted_cumulative: accepted,
+       deposit: deposit
+     }}
+  end
+
+  def voucher_request(_response), do: {:error, :invalid_need_voucher}
 end
