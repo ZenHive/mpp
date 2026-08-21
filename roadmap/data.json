@@ -3647,7 +3647,7 @@
       "id": "92",
       "phase": 17,
       "bundle": "transport-ws",
-      "status": "in_progress",
+      "status": "done",
       "title": "WebSocket session metering: needVoucher loop and voucher-in-flight latch",
       "scores": {
         "d": 6,
@@ -3676,10 +3676,17 @@
         "test/mpp/transports/websocket/",
         "test/mpp/client/transport/"
       ],
+      "shipped_in": "1b0d4cbdc3548791062fbd2b64ff49eb353eb280",
       "body": "Task 48 shipped the charge handshake over WebSocket. mpp-rs additionally drives session top-ups over the same socket: a needVoucher frame requests the next voucher, a second NeedVoucher while a voucher is in flight is fatal, and a voucher send sets credential_awaiting_receipt. Our code only builds need_voucher_frame/1; Retry has no voucher-in-flight event and Transports.WebSocket does not run the metering loop. Authority: refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs (~L934-960) and refs/mpp-rs/src/server/ws_session.rs as the protocol-in-practice reference, cross-checked with the transport spec. Filed from the task-48 reviewer proposal (run run-1787120716249-bc01b1bb).\n",
       "created_at": "2026-08-19",
       "started_at": "2026-08-21",
+      "done_at": "2026-08-21",
       "scored_at": "2026-08-19",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1787272281930-10e0e46d, 1b0d4cbdc3548791062fbd2b64ff49eb353eb280).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "codex",
+      "verification_ref": "harness-run:run-1787272281930-10e0e46d",
       "cross_repo": []
     },
     {
