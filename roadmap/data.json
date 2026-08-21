@@ -3862,7 +3862,7 @@
       "id": "97",
       "phase": 6,
       "bundle": "stripe",
-      "status": "in_progress",
+      "status": "done",
       "title": "Stripe subscription lifecycle conformance: deleted-event revocation and stale invoice voiding",
       "scores": {
         "d": 5,
@@ -3894,10 +3894,17 @@
         "test/mpp/methods/stripe_test.exs",
         "test/mpp/methods/stripe_integration_test.exs"
       ],
+      "shipped_in": "fece563c523ae28a62090e47401649a9baae9231",
       "body": "Task 96 shipped durable Stripe subscription state, canonical-period renewal accounting, and cancel/2 — but two normative behaviors from draft-stripe-subscription-00 remain (run run-1787143475109-5e2b6677 review evidence):\n\n1. Stripe-initiated cancellation: treat `customer.subscription.deleted` (and equivalent cancellation state) as revocation for future renewals. After webhook authenticity checks, mark the matching method-neutral subscription record so `process_invoice` rejects periods whose start is at or after the deletion — without deleting the record. Duplicate deleted events must be idempotent.\n\n2. Stale invoice collection: if a renewal invoice is still unpaid when a later canonical period begins, drive the Stripe invoice to a non-collectible state (void / mark uncollectible / disable automatic collection) so a late Stripe retry cannot collect a closed period. Local `process_invoice` already rejects non-consecutive and already-charged periods; this task closes the Stripe-side hole.\n\nAuthority: Stripe live test API (test clocks) + draft-stripe-subscription-00 in refs/mpp-specs. Missing STRIPE_SECRET_KEY must flunk with exact export instructions, never skip.\n",
       "created_at": "2026-08-19",
       "started_at": "2026-08-21",
+      "done_at": "2026-08-21",
       "scored_at": "2026-08-19",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1787272284132-62222438, fece563c523ae28a62090e47401649a9baae9231).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1787272284132-62222438",
       "cross_repo": []
     },
     {
