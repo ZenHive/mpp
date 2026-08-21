@@ -1253,6 +1253,9 @@ defmodule MPP.Methods.StripeTest do
       active = stripe_deleted_subscription_event("evt_active", 1_700_043_200)
       active = put_in(active, ["data", "object", "status"], "active")
 
+      assert {:error, %Errors{detail: "Stripe returned an invalid Event"}} =
+               StripeSubscription.process_event(%{"id" => "not-an-event"}, subscription_config())
+
       assert {:error, %Errors{detail: "Stripe subscription lifecycle event does not match the subscription"}} =
                StripeSubscription.process_event(active, subscription_config())
 
@@ -1542,6 +1545,100 @@ defmodule MPP.Methods.StripeTest do
                  "in_mismatched",
                  close_time,
                  subscription.method_details
+               )
+    end
+
+    test "finalizes already-stopped invoices and concurrent closed claims without mutating Stripe" do
+      stub_subscription_flow()
+      subscription = stripe_subscription()
+      assert {:ok, activation} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+      close_time = ~U[2023-11-16 22:13:20Z]
+      test_pid = self()
+
+      already_void =
+        "in_already_void"
+        |> stripe_unpaid_renewal_invoice_fixture(1, "void")
+        |> Map.put("auto_advance", true)
+
+      Req.Test.stub(Stripe, fn conn ->
+        {_params, conn} = capture_stripe_request(conn, test_pid)
+        Req.Test.json(conn, already_void)
+      end)
+
+      assert {:ok, voided} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 "in_already_void",
+                 close_time,
+                 subscription.method_details
+               )
+
+      assert voided.method_state.closed_invoices["in_already_void"].status == "void"
+      refute_received {:stripe_request, "POST", "/v1/invoices/in_already_void/void", _params, _headers}
+
+      already_uncollectible =
+        "in_already_uncollectible"
+        |> stripe_unpaid_renewal_invoice_fixture(1, "uncollectible")
+        |> Map.delete("auto_advance")
+
+      Req.Test.stub(Stripe, fn conn ->
+        {_params, conn} = capture_stripe_request(conn, test_pid)
+        Req.Test.json(conn, already_uncollectible)
+      end)
+
+      assert {:ok, uncollectible} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 "in_already_uncollectible",
+                 close_time,
+                 subscription.method_details
+               )
+
+      assert uncollectible.method_state.closed_invoices["in_already_uncollectible"].status == "uncollectible"
+      refute_received {:stripe_request, "POST", "/v1/invoices/in_already_uncollectible", _params, _headers}
+
+      refute_received {:stripe_request, "POST", "/v1/invoices/in_already_uncollectible/mark_uncollectible", _params,
+                       _headers}
+
+      assert {:ok, record} = Store.get(subscription_store(), activation.subscription_id)
+      concurrent = stripe_unpaid_renewal_invoice_fixture("in_already_closed", 1, "open")
+      Req.Test.stub(Stripe, &Req.Test.json(&1, concurrent))
+
+      closed_record =
+        put_in(record.method_state[:closed_invoices], %{
+          "in_already_closed" => %{period: 1, status: "void", timestamp: DateTime.to_iso8601(close_time)}
+        })
+
+      charged_record = %{record | last_charged_period: 1}
+
+      config =
+        Map.put(
+          subscription.method_details,
+          "subscription_store",
+          {StripeLifecycleStore, get: {:ok, record}, update: {:apply, closed_record}}
+        )
+
+      assert {:ok, ^closed_record} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 "in_already_closed",
+                 close_time,
+                 config
+               )
+
+      charged_config =
+        Map.put(
+          subscription.method_details,
+          "subscription_store",
+          {StripeLifecycleStore, get: {:ok, record}, update: {:apply, charged_record}}
+        )
+
+      assert {:error, %Errors{detail: "Stripe subscription lifecycle event does not match the subscription"}} =
+               StripeSubscription.void_stale_invoice(
+                 activation.subscription_id,
+                 "in_already_closed",
+                 close_time,
+                 charged_config
                )
     end
 

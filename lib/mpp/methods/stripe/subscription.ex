@@ -914,19 +914,23 @@ defmodule MPP.Methods.Stripe.Subscription do
   end
 
   defp claim_stale_invoice_record(record, invoice_id, period, as_of) do
-    case Map.get(closed_invoices(record), invoice_id) do
-      nil ->
-        closure = %{period: period, status: "closing", timestamp: DateTime.to_iso8601(as_of)}
-        {:ok, put_closed_invoice(record, invoice_id, closure)}
+    if period <= record.last_charged_period do
+      lifecycle_error()
+    else
+      case Map.get(closed_invoices(record), invoice_id) do
+        nil ->
+          closure = %{period: period, status: "closing", timestamp: DateTime.to_iso8601(as_of)}
+          {:ok, put_closed_invoice(record, invoice_id, closure)}
 
-      %{period: ^period, status: "closing"} ->
-        {:ok, record}
+        %{period: ^period, status: "closing"} ->
+          {:ok, record}
 
-      %{period: ^period} ->
-        {:error, {:already_closed, record}}
+        %{period: ^period} ->
+          {:error, {:already_closed, record}}
 
-      _other ->
-        lifecycle_error()
+        _other ->
+          lifecycle_error()
+      end
     end
   end
 
@@ -964,8 +968,10 @@ defmodule MPP.Methods.Stripe.Subscription do
     end
   end
 
-  defp stop_invoice_collection(%{"status" => status, "auto_advance" => false}, _record, _invoice_id, _key, _config)
+  defp stop_invoice_collection(%{"status" => status}, _record, _invoice_id, _secret_key, _config)
        when status in ["void", "uncollectible"], do: {:ok, status}
+
+  defp stop_invoice_collection(_invoice, _record, _invoice_id, _secret_key, _config), do: lifecycle_error()
 
   defp validate_stopped_invoice(%{"id" => id, "status" => status, "auto_advance" => false}, id, status), do: :ok
 
