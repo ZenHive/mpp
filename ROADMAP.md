@@ -61,6 +61,7 @@
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
 | Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0] 🎯 |
 | Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0] 🎯 |
+| Task 100 | ⬜ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:3/B:6/U:4 → Eff:1.67] 🚀 |
 <!-- TASKS:END -->
 
 ---

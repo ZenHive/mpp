@@ -465,7 +465,7 @@
       },
       "eff": 2.0,
       "dep_layer": 0,
-      "unlocks": 1,
+      "unlocks": 2,
       "markers": [
         "parallel"
       ],
@@ -3423,7 +3423,7 @@
       },
       "eff": 2.0,
       "dep_layer": 1,
-      "unlocks": 0,
+      "unlocks": 1,
       "markers": [
         "parallel"
       ],
@@ -3991,6 +3991,47 @@
       "verified": true,
       "verified_by": "cursor",
       "verification_ref": "harness-run:run-1787148543741-ebce1277",
+      "cross_repo": []
+    },
+    {
+      "id": "100",
+      "phase": 3,
+      "bundle": "discovery",
+      "status": "pending",
+      "title": "Accept parameters on MPP.Discovery.OpenApi routes",
+      "scores": {
+        "d": 3,
+        "b": 6,
+        "u": 4
+      },
+      "eff": 1.67,
+      "dep_layer": 2,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [
+        87
+      ],
+      "assignee": "human",
+      "acceptance_criteria": [
+        "A route carrying :parameters emits a spec-valid OpenAPI 3.1 `parameters` array on its operation, covering at least `in: query` and `in: path` with `name`, `required`, `schema` and optional `description`",
+        "A route without :parameters is byte-identical to what 0.16.0 generates for it",
+        "Malformed parameter input raises ArgumentError at generation time, consistent with the module's existing route validation, with the offending field named",
+        "A path template with a placeholder and no matching `in: path` parameter is rejected rather than silently published",
+        "Tests cover a paid GET with query parameters alongside a free POST with a request body, and assert the whole document still validates as OpenAPI 3.1.0",
+        "mix precommit.full is green"
+      ],
+      "out_of_scope": [
+        "Deriving parameters automatically from any framework's route metadata — the caller supplies them",
+        "Response body schemas beyond the existing 200/402 descriptions",
+        "Changing x-payment-info or the payment extension in any way"
+      ],
+      "touches": [
+        "lib/mpp/discovery/",
+        "test/mpp/discovery/"
+      ],
+      "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n",
+      "created_at": "2026-08-21",
+      "scored_at": "2026-08-21",
       "cross_repo": []
     }
   ]
