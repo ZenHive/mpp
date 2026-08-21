@@ -182,7 +182,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       open_frame =
         ClientTransport.set_credential(%{}, %Credential{
           challenge: challenge,
-          payload: session_open_payload(100)
+          payload: session_open_payload(50)
         })
 
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(open_frame))
@@ -200,7 +200,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       assert ClientTransport.need_voucher?(need_voucher)
       assert {:ok, request} = ClientTransport.voucher_request(need_voucher)
       assert request.channel_id == @channel_id
-      assert request.required_cumulative == "150"
+      assert request.required_cumulative == "100"
       {:continue, retry} = Retry.transition(retry, :need_voucher)
       assert retry.voucher_in_flight?
       refute Retry.should_pay?(retry)
@@ -208,28 +208,31 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       voucher_frame =
         ClientTransport.set_credential(%{}, %Credential{
           challenge: challenge,
-          payload: session_voucher_payload(200)
+          payload: session_voucher_payload(100)
         })
 
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(voucher_frame))
       {:continue, retry} = Retry.transition(retry, :credential_sent)
       assert retry.awaiting_receipt?
 
-      {voucher_receipt, client} = recv_frame!(client)
-      assert voucher_receipt["type"] == "receipt"
-      {:continue, retry} = Retry.transition(retry, :receipt)
-      assert Retry.should_pay?(retry)
-
       {resumed, client} = recv_frame!(client)
       assert resumed["type"] == "message"
       assert resumed["data"] == "chunk-2"
+      refute Retry.should_pay?(retry)
 
       {session_receipt, client} = recv_frame!(client)
       assert session_receipt["type"] == "receipt"
       assert session_receipt["receipt"]["intent"] == "session"
       assert session_receipt["receipt"]["channelId"] == @channel_id
-      assert session_receipt["receipt"]["acceptedCumulative"] == "200"
-      assert session_receipt["receipt"]["spent"] == "200"
+      assert session_receipt["receipt"]["acceptedCumulative"] == "100"
+      assert session_receipt["receipt"]["spent"] == "100"
+      assert session_receipt["receipt"]["units"] == 2
+      {:continue, retry} = Retry.transition(retry, :receipt)
+      assert Retry.should_pay?(retry)
+
+      assert {:ok, channel} = MPP.Session.Store.get(store, @channel_id)
+      assert channel.spent == 100
+      assert channel.units == 2
 
       rpc = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_chainId", "params" => []}
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(WebSocket.message_frame(rpc)))

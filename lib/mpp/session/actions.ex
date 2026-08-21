@@ -319,7 +319,7 @@ defmodule MPP.Session.Actions do
       chain_id: Map.get(details, "chainId") || Map.get(details, "chain_id"),
       authorized_signer: Map.get(details, "authorizedSigner") || Map.get(details, "authorized_signer"),
       min_voucher_delta: Map.get(details, "minVoucherDelta") || Map.get(details, "min_voucher_delta", 1),
-      request_amount: session.amount,
+      request_amount: Map.get(details, "request_amount", session.amount),
       method_name: Map.get(details, "method", "session")
     ]
   end

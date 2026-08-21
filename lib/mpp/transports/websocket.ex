@@ -15,7 +15,7 @@ defmodule MPP.Transports.WebSocket do
   `tick/1` deducts per generated item, emits `needVoucher` when the channel
   is exhausted, waits for a voucher credential, then resumes and finishes
   with a session receipt. Pass `:generate` and optional `:tick_cost` to
-  `init/1`, or call `start_metering/2` after the handshake.
+  `init/1`; use `generate: nil` to bind data later with `start_metering/2`.
 
   Wire format matches mpp-rs `server::ws` / `alloy-transport-mpp`
   (`refs/mpp-rs/src/server/ws.rs`, `refs/mpp-rs/src/server/ws_session.rs`,
@@ -36,6 +36,8 @@ defmodule MPP.Transports.WebSocket do
   alias MPP.Transports.JsonRpc.Adapter
   alias MPP.Transports.WebSocket.Frame
   alias MPP.Transports.WebSocket.Session
+
+  @metered_session_request_amount 0
 
   @type status :: :open | :authorized | :awaiting_voucher | :complete
 
@@ -70,6 +72,7 @@ defmodule MPP.Transports.WebSocket do
 
     config = JsonRpc.init(drop_meter_opts(opts))
     {meter, _opts} = Session.parse_opts(opts, config)
+    config = websocket_config(config, meter)
     %__MODULE__{config: config, handler: handler, meter: meter}
   end
 
@@ -208,9 +211,9 @@ defmodule MPP.Transports.WebSocket do
 
   api(
     :start_metering,
-    "Bind a channel and drain metered session data until a voucher is needed or the generator is empty.",
+    "Bind data on a metering-enabled session and drain until a voucher is needed or the list is empty.",
     params: [
-      session: [kind: :value, description: "Authorized WebSocket session"],
+      session: [kind: :value, description: "Authorized WebSocket session initialized with :generate"],
       opts: [
         kind: :value,
         description: "Keyword with :channel_id, :generate (list of data items), and optional :tick_cost"
@@ -289,16 +292,34 @@ defmodule MPP.Transports.WebSocket do
 
       %{"_meta" => meta} ->
         receipt = Map.get(meta, JsonRpc.receipt_meta_key(), %{})
+        receipt_frames = verification_receipt_frames(session, receipt)
         session = %{session | status: :authorized}
         session = Session.bind_channel(session, credential.payload)
         {session, drain_frames} = Session.drain(session)
-        {session, [Frame.receipt_frame(receipt) | drain_frames]}
+        {session, receipt_frames ++ drain_frames}
     end
   end
+
+  defp verification_receipt_frames(%{status: :awaiting_voucher}, _receipt), do: []
+  defp verification_receipt_frames(_session, receipt), do: [Frame.receipt_frame(receipt)]
 
   defp drop_meter_opts(opts) do
     Keyword.drop(opts, [:generate, :tick_cost])
   end
+
+  defp websocket_config(%Config{intent: "session"} = config, %Session.Meter{}) do
+    entries =
+      Enum.map(config.method_entries, fn entry ->
+        %{
+          entry
+          | method_config: Map.put(entry.method_config, "request_amount", @metered_session_request_amount)
+        }
+      end)
+
+    %{config | method_entries: entries}
+  end
+
+  defp websocket_config(config, _meter), do: config
 
   defp dispatch_rpc(%{handler: handler}, request) do
     request

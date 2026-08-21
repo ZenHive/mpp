@@ -277,6 +277,20 @@ defmodule MPP.Transports.WebSocketTest do
     end
 
     defp meter_session(store, overrides \\ []) do
+      store
+      |> session_options()
+      |> Keyword.merge(overrides)
+      |> WebSocket.init()
+    end
+
+    defp unmetered_session(store) do
+      store
+      |> session_options()
+      |> Keyword.drop([:generate, :tick_cost])
+      |> WebSocket.init()
+    end
+
+    defp session_options(store) do
       [
         handler: fn %{"method" => "eth_chainId"} -> "0xa61" end,
         secret_key: @secret_key,
@@ -300,8 +314,6 @@ defmodule MPP.Transports.WebSocketTest do
         tick_cost: 50,
         generate: ["chunk-1", "chunk-2", "chunk-3"]
       ]
-      |> Keyword.merge(overrides)
-      |> WebSocket.init()
     end
 
     defp put_channel!(store, opts) do
@@ -339,6 +351,39 @@ defmodule MPP.Transports.WebSocketTest do
       assert_raise ArgumentError, ~r/authorized/, fn ->
         WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
       end
+    end
+
+    test "start_metering requires a session initialized for metering" do
+      store = session_store()
+      {sess, [challenge_text]} = WebSocket.open(unmetered_session(store))
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+
+      {sess, [_receipt]} =
+        WebSocket.handle_text(credential_text(challenge, session_open_payload(50)), sess)
+
+      assert_raise ArgumentError, ~r/initialized with :generate/, fn ->
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
+      end
+    end
+
+    test "start_metering validates options before deducting" do
+      store = session_store()
+      put_channel!(store, cumulative: 100, spent: 0)
+      {sess, _} = WebSocket.open(meter_session(store, generate: []))
+      sess = %{sess | status: :authorized}
+
+      assert_raise ArgumentError, ~r/generate must be a list/, fn ->
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: "invalid", tick_cost: 50)
+      end
+
+      assert_raise ArgumentError, ~r/positive :tick_cost/, fn ->
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 0)
+      end
+
+      assert {:ok, channel} = Store.get(store, @channel_id)
+      assert channel.spent == 0
+      assert channel.units == 0
     end
 
     test "tick deducts, emits data, then needVoucher when the channel is exhausted" do
@@ -554,6 +599,12 @@ defmodule MPP.Transports.WebSocketTest do
       end
     end
 
+    test "init rejects an explicit non-positive tick_cost even when amount is valid" do
+      assert_raise ArgumentError, ~r/positive :tick_cost/, fn ->
+        meter_session(session_store(), tick_cost: 0)
+      end
+    end
+
     test "open credential drains until needVoucher; a voucher credential resumes and finishes" do
       store = session_store()
       {sess, [challenge_text]} = WebSocket.open(meter_session(store, generate: ["chunk-1", "chunk-2"]))
@@ -561,33 +612,81 @@ defmodule MPP.Transports.WebSocketTest do
       {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
 
       {sess, open_texts} =
-        WebSocket.handle_text(credential_text(challenge, session_open_payload(100)), sess)
+        WebSocket.handle_text(credential_text(challenge, session_open_payload(50)), sess)
 
       open_frames = decode_all(open_texts)
       assert Enum.map(open_frames, & &1["type"]) == ["receipt", "message", "needVoucher"]
       assert Enum.at(open_frames, 1)["data"] == "chunk-1"
       nv = List.last(open_frames)
-      assert nv["requiredCumulative"] == "150"
-      assert nv["acceptedCumulative"] == "100"
+      assert nv["requiredCumulative"] == "100"
+      assert nv["acceptedCumulative"] == "50"
       assert sess.status == :awaiting_voucher
 
       {sess, voucher_texts} =
-        WebSocket.handle_text(credential_text(challenge, session_voucher_payload(200)), sess)
+        WebSocket.handle_text(credential_text(challenge, session_voucher_payload(100)), sess)
 
       voucher_frames = decode_all(voucher_texts)
-      assert Enum.map(voucher_frames, & &1["type"]) == ["receipt", "message", "receipt"]
-      assert Enum.at(voucher_frames, 1)["data"] == "chunk-2"
+      assert Enum.map(voucher_frames, & &1["type"]) == ["message", "receipt"]
+      assert hd(voucher_frames)["data"] == "chunk-2"
       session_receipt = List.last(voucher_frames)["receipt"]
       assert session_receipt["intent"] == "session"
       assert session_receipt["channelId"] == @channel_id
-      assert session_receipt["acceptedCumulative"] == "200"
-      assert session_receipt["spent"] == "200"
+      assert session_receipt["acceptedCumulative"] == "100"
+      assert session_receipt["spent"] == "100"
+      assert session_receipt["units"] == 2
       assert sess.status == :complete
+
+      assert {:ok, channel} = Store.get(store, @channel_id)
+      assert channel.spent == 100
+      assert channel.units == 2
 
       rpc = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_chainId", "params" => []}
       {_sess, [message_text]} = WebSocket.handle_text(Jason.encode!(%{"type" => "message", "data" => rpc}), sess)
       {:ok, message_frame} = WebSocket.decode_frame(message_text)
       assert Jason.decode!(message_frame["data"]) == %{"jsonrpc" => "2.0", "id" => 1, "result" => "0xa61"}
+    end
+
+    test "an unmetered session retains its one-time handshake charge" do
+      store = session_store()
+      {sess, [challenge_text]} = WebSocket.open(unmetered_session(store))
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+
+      {_sess, [receipt_text]} =
+        WebSocket.handle_text(credential_text(challenge, session_open_payload(50)), sess)
+
+      assert {:ok, receipt_frame} = WebSocket.decode_frame(receipt_text)
+      assert receipt_frame["receipt"]["spent"] == "50"
+      assert receipt_frame["receipt"]["units"] == 1
+      assert {:ok, channel} = Store.get(store, @channel_id)
+      assert channel.spent == 50
+      assert channel.units == 1
+    end
+
+    test "start_metering after the handshake charges only generated items" do
+      store = session_store()
+      {sess, [challenge_text]} = WebSocket.open(meter_session(store, generate: nil))
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+
+      {sess, [_receipt]} =
+        WebSocket.handle_text(credential_text(challenge, session_open_payload(50)), sess)
+
+      assert {:ok, opened} = Store.get(store, @channel_id)
+      assert opened.spent == 0
+      assert opened.units == 0
+
+      {sess, [message, receipt]} =
+        WebSocket.start_metering(sess,
+          channel_id: @channel_id,
+          generate: ["chunk"],
+          tick_cost: 50
+        )
+
+      assert message["type"] == "message"
+      assert receipt["receipt"]["spent"] == "50"
+      assert receipt["receipt"]["units"] == 1
+      assert sess.status == :complete
     end
   end
 

@@ -86,6 +86,30 @@ defmodule MPP.Session.ActionsTest do
       assert receipt.method == "mocksession"
       assert receipt.extensions["spent"] == "10"
     end
+
+    test "verify/2 honors the server-only request amount override", %{store: store} do
+      {:ok, session} =
+        Session.new(
+          amount: "10",
+          currency: @token,
+          recipient: @recipient,
+          suggested_deposit: "1000",
+          method_details: %{
+            "session_store" => store,
+            "payer" => @payer,
+            "token" => @token,
+            "method" => "mocksession",
+            "escrowContract" => @tip1034_escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => @signer,
+            "request_amount" => 0
+          }
+        )
+
+      assert {:ok, receipt} = Actions.verify(open_payload(50), session)
+      assert receipt.extensions["spent"] == "0"
+      assert receipt.extensions["units"] == 0
+    end
   end
 
   describe "open" do

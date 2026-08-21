@@ -18,7 +18,7 @@ defmodule MPP.Transports.WebSocket.Session do
     @type t :: %__MODULE__{
             channel_id: String.t() | nil,
             tick_cost: pos_integer(),
-            remaining: [term()],
+            remaining: [term()] | nil,
             store: Store.store_ref()
           }
 
@@ -30,14 +30,15 @@ defmodule MPP.Transports.WebSocket.Session do
   @doc "Pull `:generate` / `:tick_cost` off Plug opts and build a meter when present."
   @spec parse_opts(keyword(), Config.t()) :: {Meter.t() | nil, keyword()}
   def parse_opts(opts, %Config{} = config) when is_list(opts) do
+    metering? = Keyword.has_key?(opts, :generate)
     {generate, opts} = Keyword.pop(opts, :generate)
     {tick_cost, opts} = Keyword.pop(opts, :tick_cost)
 
-    case generate do
-      nil ->
+    case {metering?, generate} do
+      {false, nil} ->
         {nil, opts}
 
-      remaining when is_list(remaining) ->
+      {true, remaining} when is_list(remaining) or is_nil(remaining) ->
         if config.intent != "session" do
           raise ArgumentError, ~s(MPP.Transports.WebSocket :generate requires intent: "session")
         end
@@ -50,17 +51,21 @@ defmodule MPP.Transports.WebSocket.Session do
 
         {meter, opts}
 
-      _other ->
-        raise ArgumentError, "MPP.Transports.WebSocket :generate must be a list"
+      {_metering?, _other} ->
+        raise ArgumentError, "MPP.Transports.WebSocket :generate must be a list or nil"
     end
   end
 
   @doc "Bind a channel and drain until needVoucher, a session receipt, or an error."
   @spec start(ws(), keyword()) :: {ws(), [map()]}
-  def start(%WebSocket{status: :authorized} = session, opts) when is_list(opts) do
+  def start(%WebSocket{status: :authorized, meter: %Meter{}} = session, opts) when is_list(opts) do
     channel_id = Keyword.fetch!(opts, :channel_id)
     remaining = Keyword.get(opts, :generate, [])
     tick_cost = Keyword.get(opts, :tick_cost, default_tick_cost(session.config))
+
+    if !is_list(remaining) do
+      raise ArgumentError, "MPP.Transports.WebSocket :generate must be a list"
+    end
 
     session = %{
       session
@@ -73,6 +78,10 @@ defmodule MPP.Transports.WebSocket.Session do
     }
 
     drain(session)
+  end
+
+  def start(%WebSocket{status: :authorized, meter: nil}, _opts) do
+    raise ArgumentError, "start_metering/2 requires a WebSocket initialized with :generate"
   end
 
   def start(%WebSocket{}, _opts) do
@@ -100,6 +109,7 @@ defmodule MPP.Transports.WebSocket.Session do
   defp drain_acc(%WebSocket{meter: nil} = session, acc), do: {session, acc}
   defp drain_acc(%WebSocket{status: :awaiting_voucher} = session, acc), do: {session, acc}
   defp drain_acc(%WebSocket{status: :complete} = session, acc), do: {session, acc}
+  defp drain_acc(%WebSocket{meter: %Meter{remaining: nil}} = session, acc), do: {session, acc}
 
   defp drain_acc(%WebSocket{meter: %Meter{channel_id: nil}} = session, acc) do
     {session, acc ++ [Frame.error_frame("session channel is not bound")]}
@@ -209,7 +219,7 @@ defmodule MPP.Transports.WebSocket.Session do
 
   defp tick_cost(cost, _config) when is_integer(cost) and cost > 0, do: cost
 
-  defp tick_cost(_cost, %Config{} = config) do
+  defp tick_cost(nil, %Config{} = config) do
     case default_tick_cost(config) do
       cost when is_integer(cost) and cost > 0 ->
         cost
@@ -217,6 +227,10 @@ defmodule MPP.Transports.WebSocket.Session do
       _other ->
         raise ArgumentError, "MPP.Transports.WebSocket metering requires a positive :tick_cost"
     end
+  end
+
+  defp tick_cost(_cost, %Config{}) do
+    raise ArgumentError, "MPP.Transports.WebSocket metering requires a positive :tick_cost"
   end
 
   defp default_tick_cost(%Config{method_entries: [entry | _]}) do
