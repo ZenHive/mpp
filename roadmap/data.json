@@ -4011,7 +4011,8 @@
       "depends_on": [
         87
       ],
-      "assignee": "human",
+      "assignee": "grok",
+      "model": "grok-4.6",
       "acceptance_criteria": [
         "A route carrying :parameters emits a spec-valid OpenAPI 3.1 `parameters` array on its operation, covering at least `in: query` and `in: path` with `name`, `required`, `schema` and optional `description`",
         "A route without :parameters is byte-identical to what 0.16.0 generates for it",

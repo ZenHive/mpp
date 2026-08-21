@@ -2630,7 +2630,8 @@ depends_on = [87]
 acceptance_criteria = ["A route carrying :parameters emits a spec-valid OpenAPI 3.1 `parameters` array on its operation, covering at least `in: query` and `in: path` with `name`, `required`, `schema` and optional `description`", "A route without :parameters is byte-identical to what 0.16.0 generates for it", "Malformed parameter input raises ArgumentError at generation time, consistent with the module's existing route validation, with the offending field named", "A path template with a placeholder and no matching `in: path` parameter is rejected rather than silently published", "Tests cover a paid GET with query parameters alongside a free POST with a request body, and assert the whole document still validates as OpenAPI 3.1.0", "mix precommit.full is green"]
 out_of_scope = ["Deriving parameters automatically from any framework's route metadata — the caller supplies them", "Response body schemas beyond the existing 200/402 descriptions", "Changing x-payment-info or the payment extension in any way"]
 touches = ["lib/mpp/discovery/", "test/mpp/discovery/"]
-assignee = "human"
+assignee = "grok"
+model = "grok-4.6"
 body = """
 `MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.
 
