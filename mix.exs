@@ -97,12 +97,14 @@ defmodule MPP.MixProject do
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
 
-      # Self-describing APIs. Three-segment on purpose (caps at < 0.13.0):
-      # descripex 0.12.0 changed `short_name` in describe/1 output from atom to
-      # string at a *minor* bump, which the previous `~> 0.11` would have
-      # absorbed silently. A 0.x package that breaks on minor earns the tighter
-      # form; raise the cap deliberately after reading its CHANGELOG.
-      {:descripex, "~> 0.12.0"}
+      # Self-describing APIs.
+      # Two-segment on purpose: the three-segment cap turned every descripex
+      # minor into a forced nine-repo release cascade, while the committed
+      # `mix.lock` already blocks a silent in-family upgrade — a new descripex
+      # lands only through a deliberate `mix deps.update` behind `mix ci`. The
+      # break-on-minor history that earned the cap (0.12.0 turned `short_name`
+      # from atom to string) is being retired at descripex, not paid for here.
+      {:descripex, "~> 0.12"}
     ]
   end
 
