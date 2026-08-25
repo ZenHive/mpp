@@ -4034,6 +4034,41 @@
       "created_at": "2026-08-21",
       "scored_at": "2026-08-21",
       "cross_repo": []
+    },
+    {
+      "id": "101",
+      "phase": 7,
+      "bundle": "release",
+      "status": "pending",
+      "title": "Raise the cartouche and onchain caps to admit cartouche 0.8 and onchain 0.13, and verify the signing paths under them",
+      "scores": {
+        "d": 3,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 2.33,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "human",
+      "acceptance_criteria": [
+        "mix.exs declares two-segment bounds admitting cartouche 0.8 and onchain 0.13, and the comments describe the actual policy rather than the retired three-segment rationale",
+        "mix.lock resolves cartouche 0.8.x, onchain 0.13.x, hieroglyph 1.7.x and a compatible descripex",
+        "mix compile --warnings-as-errors is clean and mix test passes",
+        "Every direct Curvy.sign_payload/2 call site in lib/ and test/ is exercised by a passing test under the 32-byte digest guard, so the guard is demonstrated satisfied rather than assumed",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "The mpp 0.17.0 version bump, CHANGELOG entries for the unreleased lib/ work, and the Hex publish itself",
+        "Adopting Cartouche.Filter or the node-custody RPC methods — no mpp call site wants them; the hand-rolled eth_fillTransaction is a Tempo 0x76 sponsorship exchange that cartouche's V1/V2/Call wrapper cannot serve",
+        "Changing the Tempo 0x76 hosted fee-payer protocol",
+        "Strict ABI decoding — onchain task 88 owns the core surface"
+      ],
+      "body": "mpp is the only repo in the family still capped below the current upstreams. `{:onchain, \"~> 0.12.0\"}` (mix.exs:83) excludes onchain 0.13.0 and `{:cartouche, \"~> 0.7.0\"}` (mix.exs:89) excludes cartouche 0.8.0; `{:descripex, \"~> 0.12\"}` already admits 0.13.x (mix.exs:107). The lock is correspondingly behind at cartouche 0.7.0, descripex 0.12.1, hieroglyph 1.6.1 and onchain 0.12.1. Nothing consumes mpp, so these three-segment caps protect no stranger — and the committed lock already prevents a silent in-family upgrade, so they are cost without cover. Raise both to two segments, correct the comments that currently describe them as deliberate, and refresh the transitive graph in one pass.\n\nWhat the upstreams actually change here was traced on 2026-08-25 and is narrower than the CHANGELOG headlines suggest. The 32-byte `sign_payload/2` match is reached — production calls sit at lib/mpp/client/providers/tempo.ex:249 and lib/mpp/methods/tempo/subscription_transaction.ex:100 — but every input already conforms: they receive `Proof.hash/1` (which returns 256 bits, lib/mpp/methods/tempo/proof.ex:51), `Voucher.hash!/3` or `Hash.keccak/1`. The two raw-message call sites use `Curvy.sign/2`, which keccaks internally before reaching the guard. `algorithm/1` enforcement, the CloudKMS DER change and the `Cartouche.Transaction.V4` short-r/s raise are all unreachable: mpp has no backend carrier, no CloudKMS reference and no V4 usage — EVM settlement goes through `Onchain.Signer` (lib/mpp/methods/evm/authorization.ex:429) and Tempo and Solana are separate transaction families.\n\nSo the expected outcome is a green suite, and the value of the task is turning that expectation into evidence before the caps move. Treat a failure as information about cartouche 0.8.0's less-advertised changes — it also altered invalid access-list encoding, V3/V4 validation, revert labelling and low-s normalization — rather than as something to work around by re-pinning.\n\nThis unblocks the mpp 0.17.0 release, which is separately owed: seven files under lib/ are unreleased against the published 0.16.0 tarball.\n",
+      "created_at": "2026-08-25",
+      "scored_at": "2026-08-25",
+      "cross_repo": []
     }
   ]
 }
