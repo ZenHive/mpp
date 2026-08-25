@@ -75,24 +75,23 @@ defmodule MPP.MixProject do
       {:npm, "~> 0.7.4", only: [:dev, :test], runtime: false},
 
       # On-chain verification (Tempo and EVM methods). Floor requires the
-      # Onchain.RPC surface the EVM method delegates to; it also pulls
-      # `cartouche ~> 0.6` (and therefore req 0.6.x) rather than permitting an
-      # existing lock on cartouche 0.5.x to sit indefinitely.
-      # Three-segment: mpp is a leaf app, so capping at the next minor costs no
-      # consumer anything and makes an onchain minor a deliberate step here.
-      {:onchain, "~> 0.12.0"},
+      # Onchain.RPC surface the EVM method delegates to.
+      # Two-segment like descripex below: nothing consumes mpp, and the
+      # committed mix.lock already blocks a silent in-family upgrade — a new
+      # minor lands only through a deliberate `mix deps.update` behind `mix ci`.
+      {:onchain, "~> 0.13"},
 
       # Solana RPC, legacy transaction codec, and System/Token/ATA instruction
       # builders used by MPP.Methods.Solana. Already pulled by onchain; declared
       # directly because this method calls Cartouche.Solana.* rather than an
-      # onchain wrapper. Three-segment for the same reason as onchain above.
-      {:cartouche, "~> 0.7.0"},
+      # onchain wrapper. Two-segment for the same reason as onchain above.
+      {:cartouche, "~> 0.8"},
 
       # Tempo chain primitives (Tempo method) — sender-recovery plus
       # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
-      # simulation (MPP.Methods.Tempo) calls directly. Same cartouche-floor
-      # reason, and three-segment for the same reason, as onchain above.
-      {:onchain_tempo, "~> 0.9.0"},
+      # simulation (MPP.Methods.Tempo) calls directly. Two-segment for the
+      # same reason as onchain above.
+      {:onchain_tempo, "~> 0.9"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
