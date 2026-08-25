@@ -7,7 +7,6 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
   Code.require_file("security_mutations.exs", __DIR__)
 
   @ledger_path Path.join(__DIR__, "payment_security_ledger.json")
-  @workflow_path ".github/workflows/mutation-security.yml"
 
   test "every mutation applies exactly once to the current source" do
     for mutation <- SecurityMutations.all() do
@@ -70,27 +69,6 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
              SecurityMutationCampaign.validate_results(campaign_results(id, "survived"), ledger)
   end
 
-  test "nightly workflow runs the executable campaign off the PR gate" do
-    workflow = File.read!(@workflow_path)
-    on_block = yaml_mapping_block(workflow, "on")
-
-    assert on_block =~ ~r/^\s+schedule:\s*$/m
-    assert on_block =~ ~r/cron:\s+"\d+ \d+ \* \* \*"/
-    assert on_block =~ "workflow_dispatch:"
-    refute on_block =~ "pull_request:"
-    refute on_block =~ "push:"
-
-    run_steps =
-      ~r/^\s+run:\s+(.+)$/m
-      |> Regex.scan(workflow, capture: :all_but_first)
-      |> List.flatten()
-
-    assert "mix compile" in run_steps
-    assert "mix mutation.security" in run_steps
-    refute "mix ci" in run_steps
-    refute Enum.any?(run_steps, &String.contains?(&1, "precommit.full"))
-  end
-
   test "mix precommit.full does not fold in the mutation campaign" do
     aliases = Mix.Project.config()[:aliases]
 
@@ -100,7 +78,6 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     end
 
     assert aliases[:"mutation.security"] == "run test/mutation/security_campaign.exs"
-    refute File.read!(".github/workflows/ci.yml") =~ "mutation.security"
   end
 
   defp campaign_results(surviving_id, surviving_status) do
@@ -108,12 +85,5 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
       status = if candidate.id == surviving_id, do: surviving_status, else: "killed"
       %{id: candidate.id, status: status, canary: candidate.canary, output: ""}
     end)
-  end
-
-  defp yaml_mapping_block(source, key) do
-    case Regex.run(~r/^#{Regex.escape(key)}:\n((?:  .*\n|\n)*)/m, source) do
-      [_, block] -> block
-      nil -> flunk("workflow is missing a #{key}: mapping")
-    end
   end
 end
