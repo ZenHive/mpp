@@ -4039,7 +4039,7 @@
       "id": "101",
       "phase": 7,
       "bundle": "release",
-      "status": "pending",
+      "status": "done",
       "title": "Raise the cartouche and onchain caps to admit cartouche 0.8 and onchain 0.13, and verify the signing paths under them",
       "scores": {
         "d": 3,
@@ -4065,9 +4065,12 @@
         "Changing the Tempo 0x76 hosted fee-payer protocol",
         "Strict ABI decoding — onchain task 88 owns the core surface"
       ],
+      "shipped_in": "5bc89af0ee902b2474eb6e63fb0e8d463ee59438",
       "body": "mpp is the only repo in the family still capped below the current upstreams. `{:onchain, \"~> 0.12.0\"}` (mix.exs:83) excludes onchain 0.13.0 and `{:cartouche, \"~> 0.7.0\"}` (mix.exs:89) excludes cartouche 0.8.0; `{:descripex, \"~> 0.12\"}` already admits 0.13.x (mix.exs:107). The lock is correspondingly behind at cartouche 0.7.0, descripex 0.12.1, hieroglyph 1.6.1 and onchain 0.12.1. Nothing consumes mpp, so these three-segment caps protect no stranger — and the committed lock already prevents a silent in-family upgrade, so they are cost without cover. Raise both to two segments, correct the comments that currently describe them as deliberate, and refresh the transitive graph in one pass.\n\nWhat the upstreams actually change here was traced on 2026-08-25 and is narrower than the CHANGELOG headlines suggest. The 32-byte `sign_payload/2` match is reached — production calls sit at lib/mpp/client/providers/tempo.ex:249 and lib/mpp/methods/tempo/subscription_transaction.ex:100 — but every input already conforms: they receive `Proof.hash/1` (which returns 256 bits, lib/mpp/methods/tempo/proof.ex:51), `Voucher.hash!/3` or `Hash.keccak/1`. The two raw-message call sites use `Curvy.sign/2`, which keccaks internally before reaching the guard. `algorithm/1` enforcement, the CloudKMS DER change and the `Cartouche.Transaction.V4` short-r/s raise are all unreachable: mpp has no backend carrier, no CloudKMS reference and no V4 usage — EVM settlement goes through `Onchain.Signer` (lib/mpp/methods/evm/authorization.ex:429) and Tempo and Solana are separate transaction families.\n\nSo the expected outcome is a green suite, and the value of the task is turning that expectation into evidence before the caps move. Treat a failure as information about cartouche 0.8.0's less-advertised changes — it also altered invalid access-list encoding, V3/V4 validation, revert labelling and low-s normalization — rather than as something to work around by re-pinning.\n\nThis unblocks the mpp 0.17.0 release, which is separately owed: seven files under lib/ are unreleased against the published 0.16.0 tarball.\n",
       "created_at": "2026-08-25",
+      "done_at": "2026-08-25",
       "scored_at": "2026-08-25",
+      "implemented": "Raised mix.exs to two-segment bounds (onchain ~> 0.13, cartouche ~> 0.8, onchain_tempo ~> 0.9) and rewrote the comments to the lock-guards-upgrades policy. Lock now resolves onchain 0.13.0, cartouche 0.8.0, hieroglyph 1.7.0, zen_websocket 0.7.1; descripex stays 0.12.1 (onchain_tempo 0.9.1 still requires ~> 0.12.0 — needs an upstream onchain_tempo release). mix ci green. Both lib/ Curvy.sign_payload/2 sites covered in the suite (Providers.Tempo 100%, SubscriptionTransaction 97.87% with signing line covered); support-helper sites exercised by the default suite; the three integration tests using sign_proof_payload! passed live against Moderato.",
       "cross_repo": []
     }
   ]
