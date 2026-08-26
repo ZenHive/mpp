@@ -80,7 +80,7 @@ defmodule MPP.MixProject do
       # existing lock on cartouche 0.5.x to sit indefinitely.
       # Three-segment: mpp is a leaf app, so capping at the next minor costs no
       # consumer anything and makes an onchain minor a deliberate step here.
-      {:onchain, "~> 0.12.0"},
+      {:onchain, "~> 0.13.0"},
 
       # Solana RPC, legacy transaction codec, and System/Token/ATA instruction
       # builders used by MPP.Methods.Solana. Already pulled by onchain; declared
