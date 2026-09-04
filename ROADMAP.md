@@ -36,6 +36,8 @@
 | Task 7 | ✅ | 🎁 **core-protocol** · Method behaviour [D:3/B:10/U:10 → Eff:3.33?] 🎯 |
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
 | Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
+| Task 103 | ⬜ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67] 🎯 |
+| Task 105 | ⬜ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:5/B:8/U:8 → Eff:1.6] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -121,7 +123,7 @@
 > Cross-SDK gap analysis (2026-04-04) identified missing protocol features in mppx and mpp-rs that our library lacks. These are small, independent modules — all `[P]` parallelizable.
 
 <!-- TASKS:BEGIN phase=9 -->
-> 35 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
+> 37 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
 <!-- TASKS:END -->
 
 ---
@@ -150,7 +152,7 @@
 > MCP (Model Context Protocol) support enables payments over JSON-RPC — critical for AI agent economy. Independent of sessions, can be built in parallel with Phase 10. Types alone are not enough here; both reference SDKs also expose concrete server/client MCP integration points.
 
 <!-- TASKS:BEGIN phase=11 -->
-> 4 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-11-mcp-transport).
+> 5 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-11-mcp-transport).
 <!-- TASKS:END -->
 
 ---

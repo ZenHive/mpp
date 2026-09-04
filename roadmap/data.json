@@ -4019,18 +4019,18 @@
         "Malformed parameter input raises ArgumentError at generation time, consistent with the module's existing route validation, with the offending field named",
         "A path template with a placeholder and no matching `in: path` parameter is rejected rather than silently published",
         "Tests cover a paid GET with query parameters alongside a free POST with a request body, and assert the whole document still validates as OpenAPI 3.1.0",
+        "A route carrying :response_schema (or an equivalently named field) emits `content.<media-type>.schema` on its 200 response per mpp-specs draft-payment-discovery-01 (commit 532d5af); a route without one keeps the description-only 200 byte-identical to 0.16.0",
         "mix precommit.full is green"
       ],
       "out_of_scope": [
         "Deriving parameters automatically from any framework's route metadata — the caller supplies them",
-        "Response body schemas beyond the existing 200/402 descriptions",
         "Changing x-payment-info or the payment extension in any way"
       ],
       "touches": [
         "lib/mpp/discovery/",
         "test/mpp/discovery/"
       ],
-      "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n",
+      "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n\nExtended 2026-09-04 (sdk-delta-watch): mpp-specs #326 (commit 532d5af) revised the discovery draft to -01 and asks generators to describe the success response's output schema so a calling agent knows what it gets back, not only what it sends. It shares this task's write-set (`normalize_route!/1`), so it is folded in here rather than filed as a sibling: accept an optional per-route success-response schema alongside `:parameters` and emit it on the 200 response. x-payment-info is unchanged by that draft.\n",
       "created_at": "2026-08-21",
       "scored_at": "2026-08-21",
       "cross_repo": []
@@ -4109,6 +4109,217 @@
       "body": "MPP.Methods.Tempo.FeePayerPolicy validates gas, fee, validity-window, nonce-key, access-list, call-value and canonical-call fields of a client-built 0x76 transaction before the sponsor co-signs, but two signed envelope fields are not inspected at all. Close that gap so the sponsor policy bounds every field of the envelope it pays for: the charge path must reject a transaction that carries either field, and the subscription activation path must accept only the exact key authorization the server already verified for that activation. Pre-simulation (Task 59) does not cover this class because the transactions execute successfully; the defect is what the sponsor pays for, not whether the call reverts.\n\nKeep public artifacts sanitized: two private advisories (reported 2026-09-02, both HIGH) carry the mechanism, measured gas figures and PoC. Read them at pickup; do not copy exploit detail into tasks.toml, ROADMAP.md, CHANGELOG.md, code comments or commit messages until the advisories are published with the patched release. Ships as a patch release; the advisories are published the same day naming it.\n\nHand-built in the operator's session because the threat detail lives in private advisories a dispatched cross-family reviewer cannot read (same reason as Task 68's sibling) and the operator claimed the work.\n",
       "created_at": "2026-09-04",
       "started_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
+    },
+    {
+      "id": "103",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives",
+      "scores": {
+        "d": 3,
+        "b": 8,
+        "u": 8
+      },
+      "eff": 2.67,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "A downstream response with a non-2xx status carries no Payment-Receipt header on both the Plug and JSON-RPC transports",
+        "A downstream 2xx response that set its own Cache-Control keeps those directives and additionally carries `private`",
+        "A downstream 2xx response that set no Cache-Control carries `private` exactly as 0.16.0 did",
+        "Existing 402 / error responses still carry `no-store`",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "MCP and WebSocket transports (no HTTP caching semantics)",
+        "Changing what the receipt contains"
+      ],
+      "touches": [
+        "lib/mpp/plug.ex",
+        "lib/mpp/transports/json_rpc/plug.ex",
+        "test/mpp/plug_test.exs",
+        "test/mpp/transports/"
+      ],
+      "body": "The core spec (§11.10) requires every response carrying a Payment-Receipt to be marked `Cache-Control: private`, and a receipt only belongs on a response that actually delivered the paid resource. MPP.Plug and the JSON-RPC plug adapter currently write both headers on the conn before handing it to the downstream application; the invariant must instead hold at send time, regardless of what the application does with the response afterwards. mpp-rs #399 (commit 3c75742, `src/server/middleware.rs`) is the reference shape: attach the receipt only when the final status is 2xx, and merge `private` into any Cache-Control value the application already set rather than replacing it. Port the same two upstream tests (no receipt on an error response; existing Cache-Control preserved with `private` appended). Update the mpp-rs #381 row in docs/security-parity.md once shipped. Full threat detail lives in a private advisory; keep public artifacts to the invariant.\n",
+      "created_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
+    },
+    {
+      "id": "104",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Key the Tempo pre-broadcast dedup reserve on the canonical transaction, not the caller-supplied encoding",
+      "scores": {
+        "d": 4,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 1.75,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-4.6",
+      "acceptance_criteria": [
+        "The same signed transaction presented under two different valid encodings reserves one slot and yields one receipt (deterministic unit test plus a Moderato integration test)",
+        "The reserve key and the post-broadcast dedup key are derived from the same canonical bytes",
+        "Sponsored and non-sponsored paths both canonicalize before any RPC",
+        "Existing FeePayerPolicy checks run on the canonical transaction",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "Changing the MPP.Tempo.Store behaviour",
+        "Presenter binding (Task 75)"
+      ],
+      "touches": [
+        "lib/mpp/methods/tempo.ex",
+        "test/mpp/methods/tempo_test.exs",
+        "test/mpp/methods/tempo_integration_test.exs"
+      ],
+      "body": "One signed Tempo transaction must map to exactly one dedup reserve slot, whatever byte encoding the client chose to present it in. MPP.Methods.Tempo currently keys the pre-broadcast reserve on the raw hex the client sent, while the post-broadcast record is keyed on the canonical hash; the two never meet. mppx #818 (commit adcf3b5, `src/tempo/server/Charge.ts`) is the reference shape: canonicalize the transaction (deserialize then re-serialize) before the reserve and the broadcast, and key the reserve on the keccak256 of the canonical bytes. `onchain_tempo` only re-encodes inside `cosign_fee_payer` today, so a public `serialize/1` there is a likely prerequisite (premise unverified — confirm against the current onchain_tempo release before building; if missing, ship it there first and bump the dep). Include a Moderato integration test that presents the same signed transaction under two encodings and shows exactly one receipt is issued. Full threat detail lives in a private advisory; keep public artifacts to the invariant.\n",
+      "created_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
+    },
+    {
+      "id": "105",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Support the `header` challenge parameter and the Payment-Authorization credential header",
+      "scores": {
+        "d": 5,
+        "b": 8,
+        "u": 8
+      },
+      "eff": 1.6,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "A challenge carrying header=\"Payment-Authorization\" parses, round-trips through format, and its id matches the id computed by mppx and mpp-rs for the same inputs (cross_validation test)",
+        "A challenge without `header` produces exactly the 0.16.0 id and wire bytes",
+        "MPP.Plug configured to advertise the alternate header rejects a credential presented in `Authorization` and accepts it in `Payment-Authorization`; an unconfigured Plug behaves exactly as before",
+        "MPP.Client.Req and Transport.HTTP pay a server that advertises `header` and attach the credential to the named header",
+        "An mpp-specs issue (or the amended spec) is cited in the delivery for the HMAC slot position",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "MCP / JSON-RPC / WebSocket transports (no HTTP header selection)",
+        "Loosening rejection of other unknown auth-params"
+      ],
+      "touches": [
+        "lib/mpp/headers.ex",
+        "lib/mpp/challenge.ex",
+        "lib/mpp/credential.ex",
+        "lib/mpp/plug.ex",
+        "lib/mpp/plug/config.ex",
+        "lib/mpp/client/transport/http.ex",
+        "lib/mpp/client/req.ex",
+        "test/mpp/"
+      ],
+      "body": "mpp-specs #328 (commit ccab885, specs/core/draft-httpauth-payment-00.md) adds an optional `header` challenge auth-param naming an alternate credential header (`Payment-Authorization`) so a resource can require both ordinary authorization and payment. Both SDKs shipped it: mppx #821 (commit 4e4810a, src/Challenge.ts) and mpp-rs #400 (commit a58b747, `requires_auth`). Today MPP.Headers hard-rejects any unknown auth-param, so our client cannot pay a conformant server that advertises `header`, and MPP.Plug reads credentials only from `Authorization`.\n\nOpen decision, decided vetoably: the spec text appends `header` as an eighth HMAC slot after `opaque`, while mppx and mpp-rs both insert it immediately before `opaque`. Ship the SDK layout (two independent implementations agree; interop is the point of the feature) and file an mpp-specs issue citing the discrepancy — unless the spec has been amended by pickup, in which case follow the amended spec and say which you found. Header-less challenges must keep the current seven-slot input byte-for-byte.\n\nScope: parse and echo `header` (client ignores or honors it, never rejects the challenge); conditional HMAC slot; a Plug/Config option to advertise it and read the credential from the named header only; client transports attach the credential to the advertised header; `Cache-Control: private` / `no-store` on responses to requests bearing a non-Authorization credential (already the case, add the assertion). Cross-validate the challenge id against both reference SDKs with a `:cross_validation` test. Task 83 kept the strict unknown-param whitelist deliberately; this task adds `header` to the whitelist, it does not loosen the whitelist.\n",
+      "created_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
+    },
+    {
+      "id": "106",
+      "phase": 11,
+      "bundle": "mcp",
+      "status": "pending",
+      "title": "Align MCP payment error codes with the spec: -32602 for invalid payload, -32603 internal payment error, retry on -32043 re-challenge",
+      "scores": {
+        "d": 3,
+        "b": 6,
+        "u": 6
+      },
+      "eff": 2.0,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-4.6",
+      "acceptance_criteria": [
+        "Server mapping: each MPP problem type maps to the spec's JSON-RPC code, including -32602 for invalid-payload and -32603 for internal-payment-error, with a table-driven test",
+        "Client: a -32043 response carrying challenges triggers exactly one re-payment attempt and then surfaces the error; a -32043 without challenges is surfaced immediately",
+        "Cross-validation test compares our code table with mppx's exported constants",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "Bare JSON-RPC and WebSocket transport code changes beyond the shared mapping",
+        "New payment methods"
+      ],
+      "touches": [
+        "lib/mpp/mcp.ex",
+        "lib/mpp/transports/json_rpc/",
+        "lib/mpp/client/transport/mcp.ex",
+        "lib/mpp/client/mcp.ex",
+        "test/mpp/mcp_test.exs",
+        "test/mpp/transports/",
+        "test/mpp/client/"
+      ],
+      "body": "mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes with the spec: `invalid-payload` problems map to -32602, an `internal-payment-error` problem type maps to -32603, and a client receiving -32043 with challenges attached treats it as a re-challenge and retries payment a bounded number of times. Our MPP.Mcp constants and the JSON-RPC adapter map only -32042/-32602/-32043 today, and MPP.Client.Transport.MCP / MPP.Client.MCP do not retry on -32043. Bring the server mapping and the client retry behaviour to the same table, with the spec's MCP section as the authority and mppx as the compatibility reference. Bound retries so a malicious server cannot drain a client wallet through repeated re-challenges (one retry, mirroring the existing single-retry rule).\n",
+      "created_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
+    },
+    {
+      "id": "107",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Verify Tempo charge proofs and access keys signed with P-256 and WebAuthn keys",
+      "scores": {
+        "d": 6,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.08,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-5.6-sol",
+      "acceptance_criteria": [
+        "A Tempo charge proof signed by a P-256 access key verifies on Moderato and yields a receipt; the same proof with a tampered signature is rejected",
+        "A WebAuthn-enveloped signature is verified or explicitly rejected with a descriptive error naming the unsupported type, never a crash",
+        "secp256k1 behaviour is byte-for-byte unchanged (existing tests untouched)",
+        "Key type is carried on the access key record and the simulation request rather than hardcoded",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "Client-side signing with non-secp256k1 keys",
+        "Subscription key authorizations for non-secp256k1 keys unless the same primitive covers them for free"
+      ],
+      "touches": [
+        "lib/mpp/methods/tempo/signature_envelope.ex",
+        "lib/mpp/methods/tempo/proof.ex",
+        "lib/mpp/methods/tempo/access_key.ex",
+        "lib/mpp/methods/tempo.ex",
+        "test/mpp/methods/tempo/"
+      ],
+      "body": "mpp-rs #391 (commit 175bea7, src/protocol/methods/tempo/proof.rs) accepts Tempo proof signatures and access keys of additional key types (P-256 and WebAuthn envelopes, as issued by Tempo Wallet per the v0.12.0 release notes). Our MPP.Methods.Tempo.SignatureEnvelope accepts only 65-byte secp256k1 signatures and the keychain 0x03/0x04 envelopes, and access_key / subscription hardcode `key_type: :secp256k1`, so a charge from a wallet holding a non-secp256k1 access key is rejected with \"invalid proof signature\". Rejecting is fail-closed, so this is an interop gap, not a security one.\n\nAdd verification for the key types Tempo's keychain precompile actually recognizes, with the Tempo protocol documentation and the on-chain keychain contract as the authority and mpp-rs / mppx as compatibility references. The signature recovery for the transaction sender lives in onchain_tempo (`recover_sender/2` accepts only 65-byte signatures — premise from a read of deps/onchain_tempo 0.10.0; confirm at pickup); if the primitive belongs there, ship it there first and bump the dep. Each accepted key type needs a Moderato integration test against a real access key of that type, plus a negative test per type for a malformed or wrong-key signature.\n",
+      "created_at": "2026-09-04",
       "scored_at": "2026-09-04",
       "cross_repo": []
     }
