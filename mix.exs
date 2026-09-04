@@ -102,8 +102,9 @@ defmodule MPP.MixProject do
       # `mix.lock` already blocks a silent in-family upgrade — a new descripex
       # lands only through a deliberate `mix deps.update` behind `mix ci`. The
       # break-on-minor history that earned the cap (0.12.0 turned `short_name`
-      # from atom to string) is being retired at descripex, not paid for here.
-      {:descripex, "~> 0.12"}
+      # from atom to string) was retired at descripex: 1.0.0 adopts SemVer and
+      # names the covered surface, so `~> 1.0` now means what it says.
+      {:descripex, "~> 1.0"}
     ]
   end
 
