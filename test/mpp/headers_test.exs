@@ -821,7 +821,7 @@ defmodule MPP.HeadersTest do
       description = "1 × Classmatic — General Admission 🎟️"
 
       {:ok, header} =
-        QuickBEAM.call(rt, "MppxChallenge.serialize", [
+        QuickBEAM.call(rt, "mppxSerialize", [
           Map.put(
             %{
               "id" => "abc123",
@@ -844,7 +844,7 @@ defmodule MPP.HeadersTest do
       challenge = make_challenge(method: "tempo", description: description)
       header = Headers.format_challenge(challenge)
 
-      {:ok, mppx_parsed} = QuickBEAM.call(rt, "MppxChallenge.deserialize", [header])
+      {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
 
       assert mppx_parsed["description"] == description
     end

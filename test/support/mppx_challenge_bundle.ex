@@ -34,8 +34,9 @@ defmodule MPP.Test.MppxChallengeBundle do
   @doc """
   Loads the mppx Challenge bundle into a QuickBEAM runtime.
 
-  After this call, `MppxChallenge.serialize(challenge)` and
-  `MppxChallenge.deserialize(header)` are available in the runtime.
+  After this call, `mppxSerialize(challenge)` and `mppxDeserialize(header)`
+  are available as flat globals in the runtime (`QuickBEAM.call/3` resolves a
+  bare global name only, not a dotted `MppxChallenge.serialize` path).
 
   Note: the bundle is generated from our own entry point by esbuild — not
   arbitrary user input — so evaluating it directly is safe here.
@@ -45,6 +46,14 @@ defmodule MPP.Test.MppxChallengeBundle do
     bundle = get_bundle!()
     {:ok, _} = QuickBEAM.eval(rt, "globalThis.self = globalThis; globalThis.window = globalThis")
     {:ok, _} = QuickBEAM.call(rt, "eval", [bundle])
+
+    {:ok, _} =
+      QuickBEAM.eval(
+        rt,
+        "globalThis.mppxSerialize = (c) => MppxChallenge.serialize(c); " <>
+          "globalThis.mppxDeserialize = (h) => MppxChallenge.deserialize(h); 1"
+      )
+
     :ok
   end
 

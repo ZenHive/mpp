@@ -335,7 +335,7 @@ defmodule MPP.Headers do
     adjusted = codepoint - 0x10000
     high = 0xD800 + div(adjusted, 0x400)
     low = 0xDC00 + rem(adjusted, 0x400)
-    escape_codepoint(high) <> escape_codepoint(low)
+    [escape_codepoint(high), escape_codepoint(low)]
   end
 
   # --- Private: Auth-param parsing ---
