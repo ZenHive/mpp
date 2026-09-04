@@ -35,9 +35,9 @@ mpp-specs: no advisories.
 
 Every advisory published on `ZenHive/mpp`, with its CVE assignment. Hex packages fall under the
 **Erlang Ecosystem Foundation CNA** — GitHub declines to assign for them and routes requests to
-the EEF (`cna@erlef.org`), which assigned the first three on 2026-07-17. A CNA-assigned CVE is not
+the EEF (`cna@erlef.org`), which assigned the first three on 2026-07-17 and the next four on 2026-08-19. A CNA-assigned CVE is not
 backlinked automatically — the ID was attached to each GitHub advisory via
-`gh api -X PATCH repos/ZenHive/mpp/security-advisories/<ghsa> -f cve_id=<cve>` on 2026-08-18.
+`gh api -X PATCH repos/ZenHive/mpp/security-advisories/<ghsa> -f cve_id=<cve>` (2026-08-18 and 2026-09-04).
 OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 
 | Advisory | CVE | Sev | Fixed in | Subject |
@@ -45,13 +45,13 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-vv77-66rf-pm86` | `CVE-2026-59695` | HIGH 8.3 | 0.6.0 | Unbounded `max_fee_per_gas` in Tempo fee-payer — single-request wallet drain |
 | `GHSA-qpxh-ff8m-c62v` | `CVE-2026-59694` | HIGH 8.3 | 0.6.0 | Unbounded access list in Tempo fee-payer inflates gas cost per payment |
 | `GHSA-vj8p-hp9x-gh47` | `CVE-2026-59252` | HIGH 8.2 | 0.6.0 | Missing `gas_limit` validation in Tempo fee-payer enables wallet drain |
-| `GHSA-wvj9-hmjr-7359` | — (requested 2026-08-18) | MEDIUM | 0.6.1 | Hardening backfill from the upstream SDK audit — **not** a single discrete vulnerability; a CVE is likely inappropriate here |
-| `GHSA-w8j7-7qc3-5f24` | — (requested 2026-08-18) | MEDIUM | 0.7.0 | Non-atomic Tempo hash-credential dedup — replay under a concurrent race |
-| `GHSA-vp5h-xh25-44wf` | — (requested 2026-08-18) | HIGH | 0.7.0 | EVM on-chain transfer proof not single-use — cross-challenge replay |
-| `GHSA-34g7-vx6g-82mq` | — (requested 2026-08-18) | HIGH | 0.8.0 | Static Tempo memo disables per-challenge attribution binding — third-party replay |
-| `GHSA-j4j7-7xpr-c7cr` | — (requested 2026-08-18) | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
-| `GHSA-5qrp-r24c-w6jr` | — (not yet requested) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
-| `GHSA-rpwj-vrf7-4x36` | — (not yet requested) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
+| `GHSA-wvj9-hmjr-7359` | — (not requested: hardening backfill, not a discrete vulnerability) | MEDIUM | 0.6.1 | Hardening backfill from the upstream SDK audit — **not** a single discrete vulnerability; a CVE is likely inappropriate here |
+| `GHSA-w8j7-7qc3-5f24` | `CVE-2026-73829` | MEDIUM | 0.7.0 | Non-atomic Tempo hash-credential dedup — replay under a concurrent race |
+| `GHSA-vp5h-xh25-44wf` | `CVE-2026-67581` | HIGH | 0.7.0 | EVM on-chain transfer proof not single-use — cross-challenge replay |
+| `GHSA-34g7-vx6g-82mq` | `CVE-2026-73136` | HIGH | 0.8.0 | Static Tempo memo disables per-challenge attribution binding — third-party replay |
+| `GHSA-j4j7-7xpr-c7cr` | `CVE-2026-73541` | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
+| `GHSA-5qrp-r24c-w6jr` | — (requested 2026-09-04) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
+| `GHSA-rpwj-vrf7-4x36` | — (requested 2026-09-04) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18.
