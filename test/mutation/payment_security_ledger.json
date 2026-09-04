@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "recorded_at": "2026-08-19",
-  "implementation_base_commit": "7b420c90844851bf270bad6399d214b5d5b7640c",
+  "recorded_at": "2026-09-04",
+  "implementation_base_commit": "0482572b47e1ffe1537ab80ab613d47b92833c2d",
   "authorities": {
     "paymentauth_spec": {
       "commit": "f9506cd3472d10f31b4a6c790b3fe6b0ff377f96",
@@ -38,9 +38,9 @@
     "elixir": "1.20.2",
     "mix": "1.20.2",
     "stream_data": "1.4.0",
-    "ex_unit_json": "0.6.0",
-    "onchain": "0.12.1",
-    "onchain_tempo": "0.9.1"
+    "ex_unit_json": "0.6.1",
+    "onchain": "0.14.0",
+    "onchain_tempo": "0.10.0"
   },
   "live_integration_evidence": [
     {
@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "1fd3c160e1e4e19d1791c27b3e9814a0123da58d688739c716518c16f9eebd77",
+    "fingerprint_sha256": "916c43450a23158c8f044865725eb0150e4c314aa78ae295fb46fe58cc5bc3b7",
     "mutations": [
       {
         "id": "jcs-descending-key-order",

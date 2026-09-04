@@ -7,8 +7,8 @@ latest released `0.x` version on Hex and the `main` branch.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.10.x  | :white_check_mark: |
-| < 0.10  | :x:                |
+| 0.16.x  | :white_check_mark: |
+| < 0.16  | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -41,8 +41,9 @@ following especially seriously:
   accepting an unconfirmed, underpaid, or replayed payment.
 - Wire-format and canonicalization (`MPP.JCS`, `MPP.BodyDigest`, `MPP.Headers`,
   `MPP.Receipt`) — encoding/canonicalization mismatches that break cross-SDK HMAC interop.
-- Fee-payer gas-economics policy (`MPP.Methods.Tempo.FeePayerPolicy`) — sponsor
-  gas-draining via unbounded client gas fields before co-sign.
+- Fee-payer sponsor policy (`MPP.Methods.Tempo.FeePayerPolicy`) — sponsor
+  gas-draining or unintended account-state changes via any client-controlled
+  `0x76` envelope field before co-sign.
 - Transaction dedup / replay handling (`MPP.Tempo.Store` implementations).
 
 ### Out of scope
