@@ -28,7 +28,6 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   @gas_limit 8_000_000
   @max_fee_per_gas 25_000_000_000
   @recipient_private_key "0x1111111111111111111111111111111111111111111111111111111111111111"
-  @moderato_blocked_recipient "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
   test "activates a root-authorized access key and settles the first period on Moderato" do
     access_key_private_key = access_key_private_key!()
@@ -53,20 +52,25 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     assert DateTime.compare(record.billing_anchor, DateTime.utc_now()) in [:lt, :eq]
   end
 
-  test "rejects a confirmed activation whose transfer is redirected away from the recipient" do
+  test "holds the activation claim on Moderato when the confirmed transfer misses the recipient" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
     payer = fresh_wallet!(rpc_url)
     sponsor = fresh_wallet!(rpc_url)
+    {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
     {_store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
-    subscription = subscription(config, @moderato_blocked_recipient)
+    subscription = subscription(config, recipient)
     signature = signed_authorization(subscription, payer, access_key_private_key)
-
     payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-    assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
+    missed = %{subscription | method_details: force_first_broadcast_missed_recipient(config, rpc_url)}
+
+    assert {:error, %Errors{} = error} = Subscription.verify(payload, missed)
     assert error.detail == "subscription transfer was not credited to the recipient"
 
+    # Unlike a confirmed revert, a confirmed transfer that missed the recipient
+    # may still have moved funds — the claim stays held so the credential cannot
+    # be replayed into a second settlement.
     assert {:error, %Errors{detail: "subscription activation credential already used"}} =
              Subscription.verify(payload, subscription)
   end
