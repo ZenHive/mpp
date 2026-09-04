@@ -35,6 +35,25 @@ defmodule MPP.Discovery.PaymentInfoTest do
                })
     end
 
+    test "ignores an unknown extension key alongside offers (mppx #815)" do
+      payment_info = %{
+        "offers" => [%{"intent" => "charge", "method" => "tempo", "amount" => "1"}],
+        "x-custom-extension" => "ignored"
+      }
+
+      assert {:ok, %{"offers" => [%{"intent" => "charge", "method" => "tempo", "amount" => "1"}]}} =
+               PaymentInfo.parse(payment_info)
+    end
+
+    test "still rejects a flat offer field alongside offers even with an unknown key present (mppx #815)" do
+      assert {:error, :mixed_offer_forms} =
+               PaymentInfo.parse(%{
+                 "offers" => [%{"intent" => "charge", "method" => "tempo", "amount" => "1"}],
+                 "amount" => "1",
+                 "x-custom-extension" => "ignored"
+               })
+    end
+
     test "rejects invalid offers containers" do
       assert {:error, :empty_offers} = PaymentInfo.parse(%{"offers" => []})
       assert {:error, :invalid_payment_info} = PaymentInfo.parse(%{"offers" => "invalid"})

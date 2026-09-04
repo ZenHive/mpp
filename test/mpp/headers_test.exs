@@ -76,6 +76,49 @@ defmodule MPP.HeadersTest do
         Headers.format_challenge(challenge)
       end
     end
+
+    test "escapes non-Latin-1 characters as \\uXXXX, matching mppx (#813)" do
+      # mppx test fixture: refs/mppx/src/Challenge.test.ts (mppx #813) —
+      # "1 × Classmatic — General Admission" escapes only the em dash (U+2014);
+      # × (U+00D7) is within Latin-1 and stays raw.
+      challenge = make_challenge(description: "1 × Classmatic — General Admission")
+      header = Headers.format_challenge(challenge)
+
+      assert header =~ ~s(description="1 × Classmatic \\u2014 General Admission")
+      # Header bytes must all be <= 0xFF (ByteString-safe), same invariant mppx
+      # added the escape to guarantee.
+      assert header |> String.to_charlist() |> Enum.all?(&(&1 <= 0xFF))
+    end
+
+    test "escapes code points outside the BMP as a UTF-16 surrogate pair, matching mppx (#813)" do
+      # mppx test fixture: 'Tickets 🎟️ "VIP"' -> 'Tickets 🎟️ \"VIP\"'
+      challenge = make_challenge(description: ~s(Tickets 🎟️ "VIP"))
+      header = Headers.format_challenge(challenge)
+
+      assert header =~ ~s(description="Tickets \\ud83c\\udf9f\\ufe0f \\"VIP\\"")
+    end
+
+    test "ASCII-only header bytes are unchanged (wire-format invariant)" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "stripe",
+            intent: "charge",
+            request: "eyJhbW91bnQiOiIxMDAifQ",
+            expires: "2025-01-15T12:05:00Z",
+            description: "ASCII only description"
+          ],
+          @secret
+        )
+
+      header = Headers.format_challenge(challenge)
+
+      assert header ==
+               ~s(Payment id="HGb2KJqR61oq7-wrzqwk9ASBmADSJg7M7NZPcMYk2qc", realm="api.example.com", method="stripe", ) <>
+                 ~s(intent="charge", request="eyJhbW91bnQiOiIxMDAifQ", expires="2025-01-15T12:05:00Z", ) <>
+                 ~s(description="ASCII only description")
+    end
   end
 
   describe "parse_challenge/1" do
@@ -212,6 +255,52 @@ defmodule MPP.HeadersTest do
       header = ~s(Payment id="a\\x", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
       assert {:ok, parsed} = Headers.parse_challenge(header)
       assert parsed.id == "ax"
+    end
+
+    test "decodes \\uXXXX non-Latin-1 escapes, matching mppx (#813)" do
+      header =
+        ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", ) <>
+          ~s(description="1 × Classmatic \\u2014 General Admission")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.description == "1 × Classmatic — General Admission"
+    end
+
+    test "decodes a UTF-16 surrogate pair \\uXXXX escape into the original code point" do
+      header =
+        ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", ) <>
+          ~s(description="Tickets \\ud83c\\udf9f\\ufe0f \\"VIP\\"")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.description == ~s(Tickets 🎟️ "VIP")
+    end
+
+    test "round-trips a description with an em dash and a CJK string through format then parse" do
+      challenge = make_challenge(description: "北京 — 東京 café")
+      header = Headers.format_challenge(challenge)
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.description == "北京 — 東京 café"
+    end
+
+    test "rejects \\u not followed by 4 hex digits (never silently dropped)" do
+      header = ~s(Payment id="a\\u12", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
+    test "rejects \\u followed by fewer than 4 characters at end of string" do
+      header = ~s(Payment id="a\\u1)
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
+    test "rejects an unpaired high surrogate escape" do
+      header = ~s(Payment id="a\\ud83c b", realm="c", method="d", intent="e", request="eyJhIjoxfQ")
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
+    test "rejects a lone low surrogate escape with no preceding high surrogate" do
+      header = ~s(Payment id="a\\udc00", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
     end
 
     test "rejects bare newline in quoted string" do
@@ -704,6 +793,60 @@ defmodule MPP.HeadersTest do
         assert {:error, _} = Credential.decode(bad)
         assert {:error, _} = Headers.parse_credential("Payment " <> bad)
       end
+    end
+  end
+
+  # --- Cross-validation against mppx's Challenge.serialize/deserialize (mppx #813) ---
+  #
+  # Deterministic but requires a JS toolchain (QuickBEAM + node + npx/esbuild +
+  # the `zod`/`ox` npm packages mppx's Challenge.ts imports). Excluded from the
+  # default gate; run explicitly with `mix test.json --include cross_validation`.
+  describe "cross-validation: \\uXXXX escape vs mppx Challenge (mppx #813)" do
+    @describetag :cross_validation
+
+    setup do
+      if !Code.ensure_loaded?(QuickBEAM) do
+        flunk("""
+        QuickBEAM not available. This test requires the dev/test dependency stack.
+        """)
+      end
+
+      {:ok, rt} = QuickBEAM.start(apis: :browser)
+      MPP.Test.MppxChallengeBundle.load!(rt)
+      on_exit(fn -> if Process.alive?(rt), do: QuickBEAM.stop(rt) end)
+      %{rt: rt}
+    end
+
+    test "mppx serializes a non-Latin-1 description and we parse it identically", %{rt: rt} do
+      description = "1 × Classmatic — General Admission 🎟️"
+
+      {:ok, header} =
+        QuickBEAM.call(rt, "MppxChallenge.serialize", [
+          Map.put(
+            %{
+              "id" => "abc123",
+              "realm" => "api.example.com",
+              "method" => "tempo",
+              "intent" => "charge",
+              "request" => %{"amount" => "1000000"}
+            },
+            "description",
+            description
+          )
+        ])
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.description == description
+    end
+
+    test "we serialize a non-Latin-1 description and mppx parses it identically", %{rt: rt} do
+      description = "1 × Classmatic — General Admission 🎟️"
+      challenge = make_challenge(method: "tempo", description: description)
+      header = Headers.format_challenge(challenge)
+
+      {:ok, mppx_parsed} = QuickBEAM.call(rt, "MppxChallenge.deserialize", [header])
+
+      assert mppx_parsed["description"] == description
     end
   end
 end

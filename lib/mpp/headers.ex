@@ -293,6 +293,11 @@ defmodule MPP.Headers do
 
   # Escapes a value for use inside a quoted-string (RFC 9110 Section 5.6.4).
   # Rejects CR/LF which would produce invalid header text or break HMAC binding.
+  #
+  # Code points above U+00FF (non-Latin-1) are additionally escaped as
+  # `\uXXXX`, matching mppx (refs/mppx/src/Challenge.ts:333-343, mppx #813):
+  # header values must be byte-safe, and a raw em dash, smart quote, or emoji
+  # in a `description` would otherwise produce an invalid header value.
   defp escape_quoted(value) do
     if String.contains?(value, ["\r", "\n"]) do
       raise ArgumentError,
@@ -302,6 +307,35 @@ defmodule MPP.Headers do
     value
     |> String.replace("\\", "\\\\")
     |> String.replace("\"", "\\\"")
+    |> escape_non_latin1()
+  end
+
+  # Escapes code points above U+00FF as `\uXXXX` (lowercase hex, zero-padded
+  # to 4 digits — matches mppx's `charCodeAt(0).toString(16).padStart(4, '0')`,
+  # refs/mppx/src/Challenge.ts:343 / mppx #813 test fixture `—`).
+  #
+  # mppx's regex operates per UTF-16 code unit, so a code point outside the
+  # Basic Multilingual Plane (e.g. an emoji) is escaped as two separate
+  # `\uXXXX` sequences — the UTF-16 surrogate pair. We split the same way so
+  # the wire bytes match exactly.
+  defp escape_non_latin1(value) do
+    value
+    |> String.to_charlist()
+    |> Enum.map(&escape_codepoint/1)
+    |> IO.iodata_to_binary()
+  end
+
+  defp escape_codepoint(codepoint) when codepoint <= 0xFF, do: <<codepoint::utf8>>
+
+  defp escape_codepoint(codepoint) when codepoint <= 0xFFFF do
+    "\\u" <> (codepoint |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(4, "0"))
+  end
+
+  defp escape_codepoint(codepoint) do
+    adjusted = codepoint - 0x10000
+    high = 0xD800 + div(adjusted, 0x400)
+    low = 0xDC00 + rem(adjusted, 0x400)
+    escape_codepoint(high) <> escape_codepoint(low)
   end
 
   # --- Private: Auth-param parsing ---
@@ -396,6 +430,8 @@ defmodule MPP.Headers do
     end
   end
 
+  defguardp hex_digit?(c) when c in ?0..?9 or c in ?a..?f or c in ?A..?F
+
   # State machine for parsing a quoted string with escape handling.
   # Rejects CRLF to prevent header injection.
   defp parse_quoted_string("", _acc), do: {:error, :invalid_auth_params}
@@ -407,12 +443,61 @@ defmodule MPP.Headers do
 
   defp parse_quoted_string("\\\\" <> rest, acc), do: parse_quoted_string(rest, ["\\" | acc])
   defp parse_quoted_string("\\\"" <> rest, acc), do: parse_quoted_string(rest, ["\"" | acc])
+
+  # `\uXXXX` (lowercase `u`, exactly 4 hex digits) decodes mppx's non-Latin-1
+  # escape (refs/mppx/src/Challenge.ts:333-343, mppx #813). Only a lowercase
+  # `\u` triggers this — an uppercase `\U` or any other letter falls through
+  # to the generic single-char escape below, same as mppx's degrade path.
+  defp parse_quoted_string("\\u" <> <<a, b, c, d, rest::binary>>, acc)
+       when hex_digit?(a) and hex_digit?(b) and hex_digit?(c) and hex_digit?(d) do
+    code_unit = String.to_integer(<<a, b, c, d>>, 16)
+    decode_unicode_escape(code_unit, rest, acc)
+  end
+
+  # Malformed `\u` escape (not followed by exactly 4 hex digits) — rejected
+  # outright rather than silently degrading to a literal "u" followed by
+  # whatever partial hex text came after it.
+  defp parse_quoted_string("\\u" <> _rest, _acc), do: {:error, :invalid_auth_params}
+
   defp parse_quoted_string("\\" <> <<char, rest::binary>>, acc), do: parse_quoted_string(rest, [<<char>> | acc])
   defp parse_quoted_string("\r" <> _rest, _acc), do: {:error, :invalid_auth_params}
   defp parse_quoted_string("\n" <> _rest, _acc), do: {:error, :invalid_auth_params}
 
   defp parse_quoted_string(<<char, rest::binary>>, acc) do
     parse_quoted_string(rest, [<<char>> | acc])
+  end
+
+  # A code unit in the high-surrogate range must be immediately followed by
+  # another `\uXXXX` escape decoding to a low surrogate — together they
+  # represent one code point outside the Basic Multilingual Plane, encoded
+  # the same way mppx's UTF-16-based escape splits it (mppx #813). An
+  # unpaired surrogate cannot be represented as valid UTF-8, so it is
+  # rejected rather than silently corrupted or dropped.
+  defp decode_unicode_escape(code_unit, rest, acc) when code_unit in 0xD800..0xDBFF do
+    case rest do
+      <<"\\u", a, b, c, d, rest2::binary>>
+      when hex_digit?(a) and hex_digit?(b) and hex_digit?(c) and hex_digit?(d) ->
+        low = String.to_integer(<<a, b, c, d>>, 16)
+
+        if low in 0xDC00..0xDFFF do
+          codepoint = 0x10000 + (code_unit - 0xD800) * 0x400 + (low - 0xDC00)
+          parse_quoted_string(rest2, [<<codepoint::utf8>> | acc])
+        else
+          {:error, :invalid_auth_params}
+        end
+
+      _ ->
+        {:error, :invalid_auth_params}
+    end
+  end
+
+  # A lone low surrogate with no preceding high surrogate is invalid.
+  defp decode_unicode_escape(code_unit, _rest, _acc) when code_unit in 0xDC00..0xDFFF do
+    {:error, :invalid_auth_params}
+  end
+
+  defp decode_unicode_escape(code_unit, rest, acc) do
+    parse_quoted_string(rest, [<<code_unit::utf8>> | acc])
   end
 
   # Takes characters until a comma, whitespace, or end of input (unquoted token).

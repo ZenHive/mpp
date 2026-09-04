@@ -6,6 +6,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- `WWW-Authenticate` quoted auth-param values now escape and decode `\uXXXX`
+  for non-Latin-1 characters, matching mppx (#813)
+- `x-payment-info` with `offers` now ignores unknown sibling extension keys
+  instead of rejecting the document (mppx #815)
+
 ## [0.16.0] — 2026-08-20
 
 ### Added

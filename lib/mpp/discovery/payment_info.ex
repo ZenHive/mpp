@@ -37,10 +37,13 @@ defmodule MPP.Discovery.PaymentInfo do
 
   @spec parse(term()) :: {:ok, t()} | {:error, reason()}
   def parse(%{"offers" => offers} = payment_info) do
-    if map_size(payment_info) == 1 do
-      parse_offers(offers)
-    else
+    # Only the spec-defined flat offer fields conflict with `offers` — an
+    # unrelated extension key alongside `offers` is ignored, not rejected.
+    # Matches mppx (refs/mppx/src/discovery/Discovery.ts:42, mppx #815).
+    if Enum.any?(@offer_fields, &Map.has_key?(payment_info, &1)) do
       {:error, :mixed_offer_forms}
+    else
+      parse_offers(offers)
     end
   end
 
