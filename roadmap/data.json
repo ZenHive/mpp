@@ -4072,6 +4072,45 @@
       "scored_at": "2026-08-25",
       "implemented": "Raised mix.exs to two-segment bounds (onchain ~> 0.13, cartouche ~> 0.8, onchain_tempo ~> 0.9) and rewrote the comments to the lock-guards-upgrades policy. Lock now resolves onchain 0.13.0, cartouche 0.8.0, hieroglyph 1.7.0, zen_websocket 0.7.1; descripex stays 0.12.1 (onchain_tempo 0.9.1 still requires ~> 0.12.0 — needs an upstream onchain_tempo release). mix ci green. Both lib/ Curvy.sign_payload/2 sites covered in the suite (Providers.Tempo 100%, SubscriptionTransaction 97.87% with signing line covered); support-helper sites exercised by the default suite; the three integration tests using sign_proof_payload! passed live against Moderato.",
       "cross_repo": []
+    },
+    {
+      "id": "102",
+      "phase": 9,
+      "bundle": "utilities",
+      "status": "in_progress",
+      "title": "Bound the remaining 0x76 envelope fields in the Tempo fee-payer sponsor policy",
+      "scores": {
+        "d": 4,
+        "b": 9,
+        "u": 9
+      },
+      "eff": 2.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "security"
+      ],
+      "depends_on": [],
+      "assignee": "human",
+      "acceptance_criteria": [
+        "FeePayerPolicy.measure/3 and validate/3 reject a client-built 0x76 transaction whose EIP-7702 authorization list is non-empty or malformed, with a descriptive error and before any RPC call",
+        "By default the policy rejects a 15-field 0x76 transaction (one carrying a key authorization); a caller that has verified a KeyAuthorization can pin the exact expected field and only that byte-identical field is accepted",
+        "Tempo subscription activation still co-signs and confirms on Moderato; a renewal transaction carrying a key authorization is rejected",
+        "Moderato integration tests show a padded charge transaction rejected with no sponsor broadcast while a legitimate sponsored transfer still confirms",
+        "Two new mutants in test/mutation/security_mutations.exs cover each bypass and the ledger fingerprint is regenerated",
+        "MPP.Methods.Tempo.FeePayerPolicy stays at 100% line coverage; mix ci passes",
+        "CHANGELOG describes the shape of the hardening only; version bumped to 0.16.1; SECURITY.md supported-versions table updated"
+      ],
+      "out_of_scope": [
+        "Reworking MPP.Methods.Tempo.HostedFeePayer's handling of the key-authorization field (tracked separately)",
+        "Any new method_config knob for the policy",
+        "Upstream reference-SDK fixes"
+      ],
+      "body": "MPP.Methods.Tempo.FeePayerPolicy validates gas, fee, validity-window, nonce-key, access-list, call-value and canonical-call fields of a client-built 0x76 transaction before the sponsor co-signs, but two signed envelope fields are not inspected at all. Close that gap so the sponsor policy bounds every field of the envelope it pays for: the charge path must reject a transaction that carries either field, and the subscription activation path must accept only the exact key authorization the server already verified for that activation. Pre-simulation (Task 59) does not cover this class because the transactions execute successfully; the defect is what the sponsor pays for, not whether the call reverts.\n\nKeep public artifacts sanitized: two private advisories (reported 2026-09-02, both HIGH) carry the mechanism, measured gas figures and PoC. Read them at pickup; do not copy exploit detail into tasks.toml, ROADMAP.md, CHANGELOG.md, code comments or commit messages until the advisories are published with the patched release. Ships as a patch release; the advisories are published the same day naming it.\n\nHand-built in the operator's session because the threat detail lives in private advisories a dispatched cross-family reviewer cannot read (same reason as Task 68's sibling) and the operator claimed the work.\n",
+      "created_at": "2026-09-04",
+      "started_at": "2026-09-04",
+      "scored_at": "2026-09-04",
+      "cross_repo": []
     }
   ]
 }

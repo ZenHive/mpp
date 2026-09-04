@@ -13,7 +13,7 @@
 <!-- FOCUS:BEGIN -->
 **Focus phase:** 12 — Client SDK (6 of 8 done · 0 in progress)
 
-**Last shipped:** Task 33c — Payment-aware Req plugin, Task 33d — MCP client transport, Task 33e — Built-in charge providers, Task 89 — Tempo client provider: machine-token charge construction on 2026-08-19
+**Last shipped:** no recent shipments
 
 **Up next:** Task 81 — Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋
 <!-- FOCUS:END -->
@@ -35,7 +35,7 @@
 | Task 6 | ✅ | 🎁 **core-protocol** · ChargeRequest intent schema [D:2/B:8/U:8 → Eff:4.0?] 🎯 |
 | Task 7 | ✅ | 🎁 **core-protocol** · Method behaviour [D:3/B:10/U:10 → Eff:3.33?] 🎯 |
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
-| Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75] 🎯 |
+| Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -59,7 +59,7 @@
 |------|--------|-------|
 | Task 11 | ✅ | 🎁 **descripex** · Descripex annotations [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
-| Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0] 🎯 |
+| Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
 | Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0] 🎯 |
 | Task 100 | ⬜ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:3/B:6/U:4 → Eff:1.67] 🚀 |
 <!-- TASKS:END -->
@@ -82,7 +82,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
-| Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 85 `[P]` | ✅ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
@@ -121,7 +121,7 @@
 > Cross-SDK gap analysis (2026-04-04) identified missing protocol features in mppx and mpp-rs that our library lacks. These are small, independent modules — all `[P]` parallelizable.
 
 <!-- TASKS:BEGIN phase=9 -->
-> 34 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
+> 35 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
 <!-- TASKS:END -->
 
 ---
@@ -136,9 +136,9 @@
 | Task 28 | ✅ | 🎁 **session** · Session error types [D:2/B:5/U:7 → Eff:3.0?] 🎯 |
 | Task 29 | ✅ | 🎁 **session** · Session intent schema [D:4/B:7/U:8 → Eff:1.88?] 🚀 |
 | Task 41 | ✅ | 🎁 **session** · Tempo SessionReceipt [D:2/B:5/U:6 → Eff:2.75?] 🎯 |
-| Task 30 | ✅ | 🎁 **session** · Channel state and voucher types [D:5/B:9/U:8 → Eff:1.7] 🚀 |
-| Task 31 | ✅ | 🎁 **session** · Session credential actions [D:5/B:9/U:8 → Eff:1.7] 🚀 |
-| Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42] 📋 |
+| Task 30 | ✅ | 🎁 **session** · Channel state and voucher types [D:5/B:9/U:8 → Eff:1.7?] 🚀 |
+| Task 31 | ✅ | 🎁 **session** · Session credential actions [D:5/B:9/U:8 → Eff:1.7?] 🚀 |
+| Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42?] 📋 |
 | Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08] 📋 |
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
 <!-- TASKS:END -->
@@ -164,11 +164,11 @@
 |------|--------|-------|
 | Task 33a | ✅ | 🎁 **client-sdk** · Client PaymentProvider behaviour [D:3/B:8/U:9 → Eff:2.83?] 🎯 |
 | Task 33b | ✅ | 🎁 **client-sdk** · HTTP client transport [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
-| Task 33c | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Payment-aware Req plugin [D:5/B:10/U:10 → Eff:2.0] 🎯 |
-| Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8] 🚀 |
-| Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67] 🚀 |
+| Task 33c | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Payment-aware Req plugin [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
+| Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8?] 🚀 |
+| Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
-| Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋 |
+| Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06?] 📋 |
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
@@ -183,8 +183,8 @@
 <!-- TASKS:BEGIN phase=13 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:6/B:8/U:8 → Eff:1.33] 📋 |
-| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:8/B:9/U:8 → Eff:1.06] 📋 |
+| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:6/B:8/U:8 → Eff:1.33?] 📋 |
+| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:8/B:9/U:8 → Eff:1.06?] 📋 |
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
@@ -203,7 +203,7 @@
 <!-- TASKS:BEGIN phase=14 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 21 | ✅ | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5] 🚀 |
+| Task 21 | ✅ | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5?] 🚀 |
 | Task 88 `[P]` | ✅ | 🎁 **additional-methods** · Solana confidential transfer profile [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
 <!-- TASKS:END -->
 
@@ -218,7 +218,7 @@
 <!-- TASKS:BEGIN phase=15 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:10/U:8 → Eff:1.12] 📋 |
+| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:10/U:8 → Eff:1.12?] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -230,12 +230,12 @@
 <!-- TASKS:BEGIN phase=16 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:8/U:7 → Eff:1.07] 📋 |
-| Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:8/U:8 → Eff:1.14] 📋 |
-| Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67] 🚀 |
-| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17] 📋 |
-| Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14] 📋 |
-| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0] 📋 |
+| Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:8/U:7 → Eff:1.07?] 📋 |
+| Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:8/U:8 → Eff:1.14?] 📋 |
+| Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
+| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17?] 📋 |
+| Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
+| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0?] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
