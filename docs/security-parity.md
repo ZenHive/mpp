@@ -50,6 +50,8 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-vp5h-xh25-44wf` | — (requested 2026-08-18) | HIGH | 0.7.0 | EVM on-chain transfer proof not single-use — cross-challenge replay |
 | `GHSA-34g7-vx6g-82mq` | — (requested 2026-08-18) | HIGH | 0.8.0 | Static Tempo memo disables per-challenge attribution binding — third-party replay |
 | `GHSA-j4j7-7xpr-c7cr` | — (requested 2026-08-18) | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
+| `GHSA-5qrp-r24c-w6jr` | — (not yet requested) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
+| `GHSA-rpwj-vrf7-4x36` | — (not yet requested) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18.
@@ -66,6 +68,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 | mppx #501 escape challenge quoted strings | Header / CRLF injection in `WWW-Authenticate` | `escape_quoted/1` raises on CR/LF — `headers.ex:369-377`; parser rejects CR/LF in values `headers.ex:478-479` |
 | mppx #497 require expiring nonce for fee payer | Fixed-nonce replay of sponsored tx | `@expiring_nonce_key` checked in `FeePayerPolicy` — `fee_payer_policy.ex:224-230` |
 | Inbound `GHSA-vv77-66rf-pm86` (no gas limit) + `GHSA-qpxh-ff8m-c62v` (access list) | Gas-price / total-fee / validity / access-list drain of sponsor wallet | `FeePayerPolicy` five ceilings + empty-access-list check — `fee_payer_policy.ex:76-81,191-263` |
+| Inbound `GHSA-5qrp-r24c-w6jr` (EIP-7702 list) + `GHSA-rpwj-vrf7-4x36` (key authorization) | Sponsor gas drain and free account delegation / key provisioning through the two `0x76` envelope fields the policy never read | `FeePayerPolicy` requires an empty authorization list and rejects a key authorization on the charge path; subscription activation pins the exact verified authorization via `expect_key_authorization/2` — `fee_payer_policy.ex:229-231,376-410` (Task 102, ships 0.16.1) |
 | mppx #602 non-canonical fee-payer tx (intrinsic-gas family) | Padded/non-canonical calldata or nonzero call `value` inflates the sponsor's intrinsic gas within the price ceilings | `FeePayerPolicy` rejects nonzero per-call value + requires byte-exact-canonical calldata for recognized TIP-20/DEX selectors before co-sign — `fee_payer_policy.ex` (0.9.0) |
 | mpp-rs #293 / mppx #534 (`e80feeb`) pre-broadcast simulation | Sponsor commits gas for a co-signed tx that would revert on-chain | `MPP.Methods.Tempo` simulates the full co-signed tx via `eth_simulateV1` before broadcast on both paths; reverting → reject, -32601 → graceful skip, other RPC error → fail closed — `tempo.ex` (Task 59, done) |
 | mpp-rs #219 prevent caching of 402 | Intermediary caches serving stale challenges | `cache-control: no-store` on all error responses — `plug.ex:293` |
@@ -116,7 +119,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 
 ## Open hardening items
 
-**4 open items** as of 2026-09-04 — two inbound reports under triage (fix in progress, Task 102) and two draft advisories from the 2026-09-04 upstream sweep (tracked as Tasks 103 and 104). Detail stays in the private advisories until each ships. Before that, **0 open items** as of 2026-08-02. Every advisory tracked against this repo is published with its
+**2 open items** as of 2026-09-04 — two draft advisories from the 2026-09-04 upstream sweep (tracked as Tasks 103 and 104). Detail stays in the private advisories until each ships. The two inbound HIGH reports from that day shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
 patched release (latest: `GHSA-j4j7-7xpr-c7cr`, fixed in 0.12.0); the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
 (published 2026-06-29). When a new gap is found, its detail goes to a **private draft security
