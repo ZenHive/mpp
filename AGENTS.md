@@ -312,10 +312,15 @@ Hand-build when harness cannot perform or judge the work:
 - Work requiring live human/browser judgment, such as exploratory visual identity; routine spec-anchored UI remains dispatchable
 - A harness gap — file via `rmap new`, fix harness, re-dispatch; do not work around the gap inside the target task
 
-**🚨 The routing gate fires at `assignee =`, not at dispatch time.** rmap requires `assignee` + `model` at task creation, so the inline-vs-dispatch decision is made — and frozen — the moment the task is filed: a task carrying an agent assignee reads as "routing already decided" to every later session, and this section never gets consulted again. Two rules close that hole:
+**🚨 The routing gate fires at `assignee =`, not at dispatch time.** rmap requires `assignee` + `model` at task creation, so the inline-vs-dispatch decision is made — and frozen — the moment the task is filed: a task carrying an agent assignee reads as "routing already decided" to every later session, and this section never gets consulted again. Three rules close that hole:
 
 - **Filing a task: run this section BEFORE typing `assignee` — and a FILED task defaults to an agent.** The inline-vs-dispatch question above governs work you can execute *now*: inline-doable work is done inline and never filed. A task that reaches filing is cross-session by definition, so default-route it to a dispatch agent with a pinned `model` (roster spread per § "Delegation roster"); `assignee = "human"` must be earned by a hand-build reason named in the body — an operator-gated step (license, credential, purchase), no-spec visual identity, harness-loop-in-flux, or the user claiming the work. (Flipped 2026-08-13 from the old default-`human` rule after trading_dashboard tasks 86/87 — both dispatchable — were filed `human` by reflex. The ccxt_client-470 lesson survives with its real moral: a D2 one-file fix should be *done inline*, not filed at all — the filing was the defect, not the assignee.) Mirrored as question 6 of `task-writing.md`'s Pre-Creation Gate.
 - **Reviewer `proposed_tasks` carry no routing authority.** Proposals arrive dispatch-shaped (suggested scores/markers), but the orchestrator owns routing the same way it owns filing — re-route each proposal through this gate instead of inheriting dispatchability from its shape. Sibling of task-writing's "Re-Generalize an Agent's Decomposition": that filters whose *architecture* a task encodes; this filters whose *routing* it encodes.
+- **🚨 Under `dispatch_mode: "auto"` there is no such thing as an open decision in a task body — decide it at filing or don't file the task `pending`.** `task-writing.md`'s gate 6 permits a `pending` task to carry named open decisions because "the orchestrator asks before it dispatches." That sentence assumes a human-driven orchestrator seat between the queue and the run. **A cron poller is not that seat**: in `:auto` mode it dispatches the ready set unattended on its schedule, reads no bodies, and asks no one — so the decision reaches an implementer as a question addressed to nobody, and the implementer answers it silently. Before filing into an auto-dispatching project, check `autonomy-status` (per-project `dispatch_mode` + `effective`) and `project_registry-lookup`, then:
+  - **Decide it yourself and write the decision in, vetoable.** Name the choice, the reasoning, and the alternatives you rejected. `critical-rules.md` § SURFACE THE OVERRIDE is satisfied by a decision the operator can read and reverse; it does not require a blocking question.
+  - **When one premise could genuinely flip the answer, ship the decision with an evidence gate** — "ship (a) unless a live probe disproves X, in which case (b); say in the delivery which you found." That is a decision the implementer can execute, not a question it must route back.
+  - **`blocked` is still not the escape hatch.** It hides the task from the queue, so the decision is never surfaced at all — the same failure with a quieter shape. Reserve it for an external blocker with an unblock path.
+  - Under `:manual` cron mode the parked-decision drain (`dispatch-pending` / `dispatch-approve`) *does* restore the asking seat, and gate 6 reads as written. Know which mode the project is in before relying on it. (Observed 2026-08-28 on bourse: two tasks filed `pending` with "open decision the operator owns, answer it before building" into a project on `dispatch_mode: auto` at `0 * * * *` — the next poll was 24 minutes out and would have dispatched both.)
 
 ### Running a Task
 
@@ -360,7 +365,7 @@ Hand-build when harness cannot perform or judge the work:
 
 Failed runs retain the worktree at `result.worktree_path` for inspection. Approved runs keep branch `harness/<run-id>` after worktree teardown. Use `dispatch-verdict_detail` for the reviewer report, ratings, checks, concerns, proposed tasks, warning flag, and `reviewer_diff_size` — no harness-run mechanical per-check stdout.
 
-**The verdict artifact** `.harness/review.json` is `{verdict, report, checks, concerns, proposed_tasks, facets, skills, ratings}`: `verdict` (`approve`/`reject`) is the gate; `report` is the reviewer's prose; `checks` is the reviewer-written record of commands run and their pass/fail claim; `concerns` is the reviewer's self-flagged caveat list; `proposed_tasks` is an optional list of structured discovery proposals (`title`, `body`, suggested scores/markers, and evidence); **`facets`** (open-vocabulary routing KEY — the kind of task) and **`skills`** (v0_13 two-axis rubric, routing VALUE) feed per-facet capability routing; `ratings` is the legacy flat-score fallback. Harness persists proposals verbatim but never files them. After a run lands, the orchestrator reads them from `dispatch-verdict_detail`, dedupes/merges them against the live pending set, and files only warranted tasks through its own task-writing gate. Reviewers never edit `roadmap/tasks.toml`, `roadmap/data.json`, `ROADMAP.md`, or `CHANGELOG.md`; those files are excluded from delivery commits alongside `.harness/`. Approved runs with non-empty concerns or a reviewer-authored failed check surface a warning fact; harness never auto-blocks or classifies prose. The artifact lives under `.harness/` (excluded from staging) so it never rides in the deliverable commit.
+**The verdict artifact** `.harness/review.json` is `{verdict, run_id, review_attempt, report, checks, concerns, proposed_tasks, facets, skills, ratings}`: `verdict` (`approve`/`reject`) is the gate; `run_id` and `review_attempt` fence the file to the reviewer invocation that wrote it (echoed from `HARNESS_RUN_ID` / `HARNESS_REVIEW_ATTEMPT`; a mismatch is treated as missing); `report` is the reviewer's prose; `checks` is the reviewer-written record of commands run and their pass/fail claim; `concerns` is the reviewer's self-flagged caveat list; `proposed_tasks` is an optional list of structured discovery proposals (`title`, `body`, suggested scores/markers, and evidence); **`facets`** (open-vocabulary routing KEY — the kind of task) and **`skills`** (v0_13 two-axis rubric, routing VALUE) feed per-facet capability routing; `ratings` is the legacy flat-score fallback. Harness persists proposals verbatim but never files them. After a run lands, the orchestrator reads them from `dispatch-verdict_detail`, dedupes/merges them against the live pending set, and files only warranted tasks through its own task-writing gate. Reviewers never edit `roadmap/tasks.toml`, `roadmap/data.json`, `ROADMAP.md`, or `CHANGELOG.md`; those files are excluded from delivery commits alongside `.harness/`. Approved runs with non-empty concerns or a reviewer-authored failed check surface a warning fact; harness never auto-blocks or classifies prose. The artifact lives under `.harness/` (excluded from staging) so it never rides in the deliverable commit. The file is removed before every reviewer spawn so a killed reviewer's stale approve cannot settle the run.
 
 **External-system evidence is reviewer-owned judgment.** When acceptance criteria touch an API or external service, the reviewer must look for reality rather than plausibility: a live success call, a relevant live error, the provider's official docs/spec/SDK for semantic meaning, and an integration test pinning the observed domain semantics. Third-party clients, aggregators, wrappers, and reference implementations (including CCXT) are compatibility/reference evidence only; they never establish correctness or override the provider-owned contract. Mocks, fixtures, and the implementer's self-report are not independent evidence. Missing credentials or an unreachable sandbox are surfaced as a failed check/concern (or rejection when the criterion cannot be verified), never silently treated as green. The lander records the reviewer identity plus `harness-run:<run-id>` as rmap verification provenance.
 
@@ -432,19 +437,42 @@ working:
 ```bash
 # one notification per landed task, exits when the whole wave is in
 cd <source-checkout>
-WAVE="615 623 569 619"; seen=""
+WAVE="615 623 569 619"; seen=""; BASE=$(git rev-parse origin/<target>)
+DEADLINE=$(($(date +%s) + 10800))  # bound the wait; tune to the wave's slowest run
 while true; do
   git fetch -q origin <target> || true
   for t in $WAVE; do
     case " $seen " in *" $t "*) continue;; esac
-    if git log --oneline origin/<target> | grep -q "task $t -> done"; then
+    if git log --oneline "$BASE"..origin/<target> | grep -q "task $t -> done"; then
       echo "LANDED task $t"; seen="$seen $t"
     fi
   done
   [ "$(echo $seen | wc -w)" -eq "$(echo $WAVE | wc -w)" ] && { echo "WAVE COMPLETE"; break; }
+  [ "$(date +%s)" -gt "$DEADLINE" ] && {
+    echo "DEADLINE EXCEEDED — wave incomplete"
+    git log --oneline "$BASE"..origin/<target> | grep "task.*-> done" | sed 's/.*task \([0-9]*\).*/  landed: \1/' || echo "  (no tasks landed in range)"
+    for t in $WAVE; do
+      case " $seen " in *" $t "*) continue;; esac
+      echo "  missing: $t"
+    done
+    break
+  }
   sleep 60
 done
 ```
+
+🚨 **The baseline is load-bearing — grep the range, never the whole log.** A task that
+landed before already carries `roadmap: task <id> -> done (shipped …)` in the history, and a
+task that was reset and re-dispatched carries one per attempt. Without `BASE`, the watcher
+matches those stale commits on its first iteration and reports `LANDED` before the implementer
+has written a line — the same false-green this whole section exists to prevent, wearing the
+costume of the fix. Observed 2026-08-29 on bourse task 687, which had landed and been reset four
+times: the unbaselined watcher exited successfully within a second of arming.
+
+The deadline branch is the other half. A run that fails review or blocks on a land conflict never
+produces a landing commit, so a watcher with no bound waits forever on a wave that is already
+dead; on expiry it must print what did land in the range and name what did not, so the missing
+tasks get reconciled through `dispatch-status` instead of assumed.
 
 Poll `dispatch-status <run-id>` only to diagnose a run that the watcher shows as *not*
 landing — a `:failed` verdict, a rebase conflict that retained the branch, a hung
@@ -459,6 +487,19 @@ before assuming anything.
 Same root cause as the duplicate-land trap above, seen from the dispatch side: **origin is
 the source of truth for what landed** — not an await return value, not a local
 `tasks.toml`, not a transcript.
+
+**Herdr panes are an optional operator convenience for watching, never a harness
+surface.** When the orchestrator session runs inside Herdr (`HERDR_ENV=1` — the
+operator's default), the wave watcher above and ad-hoc run babysitting can run
+*visibly*: `herdr pane split --current --no-focus` + `pane run` for the watcher
+loop, an attach pane tailing `dispatch-transcript` for a run under scrutiny,
+`herdr worktree open --path <retained-worktree>` to inspect a failed run, and
+`herdr notification show "…" --sound done` as a configured witness-notification
+sink. Strictly operator-side: dispatched agents stay headless over Ports, and
+Herdr's `idle`/`blocked` classification is never a harness signal (adjudicated —
+harness repo `docs/orchestration-library-evaluation.md`, Addendum 2026-08-25,
+incl. the deliberately unmitigated `HERDR_*` env-inheritance risk for dispatched
+agents).
 
 **Cron manual-approval mode.** A per-project cron poller in `:auto` mode dispatches unattended; in `:manual` mode it **parks** each dispatch decision instead of enqueuing — drain the parked decisions with `dispatch-pending` and approve them with `dispatch-approve`, keeping the orchestrator in the loop for autonomous polling.
 
@@ -543,6 +584,11 @@ The two blind classes, both real-correctness, both passing every per-task check:
 
 We run our own full archive Ethereum node on `blockwatch-one`. Available across all onchain projects.
 
+**This file is operator infrastructure — how *we* reach *our* node.** It is not a
+statement about what the libraries may assume. Our node is a privileged environment;
+consumers of these open-source packages run Alchemy, Infura, or a pruned Geth. The design
+law for that is `node-portability.md` — read it before wrapping any RPC method.
+
 **Access from Mac:**
 
 Reth binds JSON-RPC to `127.0.0.1` only — an SSH tunnel is the intended access path.
@@ -579,12 +625,19 @@ ETHEREUM_API_URL=http://localhost:8545 mix test.json --quiet --include integrati
 ```
 
 **If RPC connection fails (timeout, connection refused):** check the agent state and the
-log above — that is the whole diagnosis. Do NOT try to fix networking or rebind ports.
-Substituting a public provider is a poor fallback for the archive-dependent suites: a
-hosted endpoint may answer `-32001 Unable to complete request` for historical-block calls
-such as `eth_feeHistory` at block 20,000,000 depending on plan and load. If the agent is
-running and the node still doesn't answer, ask Tito to verify the node is up on
-blockwatch-one.
+log above — that is the whole diagnosis. Do NOT try to fix networking or rebind ports. If
+the agent is running and the node still doesn't answer, ask Tito to verify the node is up
+on blockwatch-one.
+
+**Don't silently swap in a public provider to get the archive-dependent suites green** —
+a hosted endpoint may answer `-32001 Unable to complete request` for historical-block
+calls such as `eth_feeHistory` at block 20,000,000 depending on plan and load, so a red
+run there tells you nothing about the code. That is a statement about *reproducing an
+archive-node test run*, *not* a ranking of endpoints — and it is the whole of its scope.
+For library work the polarity is reversed: the hosted provider is the majority consumer
+environment and our archive node is the outlier, so a hosted endpoint's refusal is
+first-class evidence about the library rather than an obstacle to route around. See
+`node-portability.md`.
 
 ## Sepolia Testnet
 
