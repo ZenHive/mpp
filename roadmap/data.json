@@ -4077,7 +4077,7 @@
       "id": "102",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Bound the remaining 0x76 envelope fields in the Tempo fee-payer sponsor policy",
       "scores": {
         "d": 4,
@@ -4106,10 +4106,17 @@
         "Any new method_config knob for the policy",
         "Upstream reference-SDK fixes"
       ],
+      "shipped_in": "0482572",
       "body": "MPP.Methods.Tempo.FeePayerPolicy validates gas, fee, validity-window, nonce-key, access-list, call-value and canonical-call fields of a client-built 0x76 transaction before the sponsor co-signs, but two signed envelope fields are not inspected at all. Close that gap so the sponsor policy bounds every field of the envelope it pays for: the charge path must reject a transaction that carries either field, and the subscription activation path must accept only the exact key authorization the server already verified for that activation. Pre-simulation (Task 59) does not cover this class because the transactions execute successfully; the defect is what the sponsor pays for, not whether the call reverts.\n\nKeep public artifacts sanitized: two private advisories (reported 2026-09-02, both HIGH) carry the mechanism, measured gas figures and PoC. Read them at pickup; do not copy exploit detail into tasks.toml, ROADMAP.md, CHANGELOG.md, code comments or commit messages until the advisories are published with the patched release. Ships as a patch release; the advisories are published the same day naming it.\n\nHand-built in the operator's session because the threat detail lives in private advisories a dispatched cross-family reviewer cannot read (same reason as Task 68's sibling) and the operator claimed the work.\n",
       "created_at": "2026-09-04",
       "started_at": "2026-09-04",
+      "done_at": "2026-09-04",
       "scored_at": "2026-09-04",
+      "implemented": "FeePayerPolicy.validate/3 now rejects a non-empty aa_authorization_list (field 12) and fails closed on envelope field count; a key_authorization field (15-field envelope) is rejected unless the server pinned the verified struct via the new expect_key_authorization/2, which SubscriptionTransaction does on activation (nil on renewal). Two sponsor-intrinsic-gas mutants added, all 16 killed; FeePayerPolicy 100% line coverage; offline suite 1901/0; Moderato integration: both padded-envelope rejections asserted with sponsor pathUSD balance unchanged, legitimate sponsored transfers still confirm. Released as 0.16.1 (mix.exs, CHANGELOG shape-only Security entry, SECURITY.md 0.16.x). Opus + codex review passes: no bypass path, indices confirmed against onchain_tempo, mpp-rs, mppx.",
+      "delivered_by": "claude-fable (subagent implementer)",
+      "verified": true,
+      "verified_by": "opus code-reviewer + codex cross-family review",
+      "verification_ref": "session_011SPBefe1NJz5GF62ti94fh",
       "cross_repo": []
     },
     {

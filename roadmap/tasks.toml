@@ -2675,7 +2675,7 @@ shipped_in = "5bc89af0ee902b2474eb6e63fb0e8d463ee59438"
 id = "102"
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "done"
 title = "Bound the remaining 0x76 envelope fields in the Tempo fee-payer sponsor policy"
 scores = { d = 4, b = 9, u = 9 }
 markers = ["security"]
@@ -2689,9 +2689,16 @@ Keep public artifacts sanitized: two private advisories (reported 2026-09-02, bo
 
 Hand-built in the operator's session because the threat detail lives in private advisories a dispatched cross-family reviewer cannot read (same reason as Task 68's sibling) and the operator claimed the work.
 """
+implemented = "FeePayerPolicy.validate/3 now rejects a non-empty aa_authorization_list (field 12) and fails closed on envelope field count; a key_authorization field (15-field envelope) is rejected unless the server pinned the verified struct via the new expect_key_authorization/2, which SubscriptionTransaction does on activation (nil on renewal). Two sponsor-intrinsic-gas mutants added, all 16 killed; FeePayerPolicy 100% line coverage; offline suite 1901/0; Moderato integration: both padded-envelope rejections asserted with sponsor pathUSD balance unchanged, legitimate sponsored transfers still confirm. Released as 0.16.1 (mix.exs, CHANGELOG shape-only Security entry, SECURITY.md 0.16.x). Opus + codex review passes: no bypass path, indices confirmed against onchain_tempo, mpp-rs, mppx."
+delivered_by = "claude-fable (subagent implementer)"
+verified = true
+verified_by = "opus code-reviewer + codex cross-family review"
+verification_ref = "session_011SPBefe1NJz5GF62ti94fh"
 created_at = "2026-09-04"
 started_at = "2026-09-04"
 scored_at = "2026-09-04"
+done_at = "2026-09-04"
+shipped_in = "0482572"
 
 [[task]]
 id = "103"
