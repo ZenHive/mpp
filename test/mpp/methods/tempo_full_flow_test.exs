@@ -189,11 +189,12 @@ defmodule MPP.Methods.TempoFullFlowTest do
     test "rejects transaction with non-empty fee_token" do
       config = init_tempo_config(fee_payer_config())
 
-      # Build tx with placeholder but non-empty fee_token
-      # Manual RLP construction: fee_payer_signature = <<0x00>>, fee_token = token_bytes
-      token_bytes = decode_address(@token_address)
+      # A signed sponsor-shaped envelope (placeholder, expiring nonce, in-window
+      # valid_before) whose only defect is a NON-EMPTY fee_token.
       call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
-      tx_hex = build_tempo_tx_with_fee_token(call, token_bytes)
+
+      tx_hex =
+        build_tempo_tx(calls: [call], chain_id: @chain_id, fee_payer: true, fee_token: decode_address(@token_address))
 
       body =
         submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
@@ -530,45 +531,4 @@ defmodule MPP.Methods.TempoFullFlowTest do
   end
 
   # --- Transaction builders ---
-
-  # Builds a 0x76 tx with fee_payer_signature placeholder (0x00) but non-empty fee_token.
-  # Used to test fee_token validation.
-  defp build_tempo_tx_with_fee_token(call, fee_token_bytes) do
-    chain_id_bin = :binary.encode_unsigned(@chain_id)
-
-    # calls: [[to, value, input]]
-    [to_bin, value_bin, input] = call
-
-    fields = [
-      chain_id_bin,
-      # max_priority_fee_per_gas
-      <<1>>,
-      # max_fee_per_gas
-      <<1>>,
-      # gas_limit
-      :binary.encode_unsigned(21_000),
-      # calls
-      [[to_bin, value_bin, input]],
-      # access_list
-      [],
-      # nonce_key (expiring — so the tx clears the validity check and the
-      # fee_token check is what rejects it)
-      expiring_nonce_key(),
-      # nonce
-      <<>>,
-      # valid_before (future — same reason)
-      :binary.encode_unsigned(future_valid_before()),
-      # valid_after
-      <<>>,
-      # fee_token (NON-EMPTY — this is what we're testing)
-      fee_token_bytes,
-      # fee_payer_signature (placeholder)
-      <<0x00>>,
-      # aa_authorization_list
-      []
-    ]
-
-    rlp = ExRLP.encode(fields)
-    "0x76" <> Base.encode16(rlp, case: :lower)
-  end
 end

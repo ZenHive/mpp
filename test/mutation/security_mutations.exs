@@ -156,6 +156,36 @@ defmodule MPP.Test.SecurityMutations do
         """,
         ["test/mpp/methods/tempo_test.exs"],
         true
+      ),
+      mutation(
+        "tempo-authorization-list-check-bypassed",
+        "sponsor-intrinsic-gas",
+        "lib/mpp/methods/tempo/fee_payer_policy.ex",
+        """
+              list when is_list(list) ->
+                {:error, "fee-payer transaction must not declare an authorization list (\#{length(list)} entries)"}
+        """,
+        """
+              list when is_list(list) ->
+                :ok
+        """,
+        ["test/mpp/methods/tempo/fee_payer_policy_test.exs", "test/mpp/methods/tempo_test.exs"],
+        false
+      ),
+      mutation(
+        "tempo-key-authorization-check-bypassed",
+        "sponsor-intrinsic-gas",
+        "lib/mpp/methods/tempo/fee_payer_policy.ex",
+        """
+              is_nil(expected) ->
+                {:error, "fee-payer transaction must not carry a key authorization"}
+        """,
+        """
+              is_nil(expected) ->
+                :ok
+        """,
+        ["test/mpp/methods/tempo/fee_payer_policy_test.exs", "test/mpp/methods/tempo_test.exs"],
+        false
       )
     ]
   end

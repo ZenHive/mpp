@@ -1,6 +1,7 @@
 defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.SubscriptionTransaction
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Address
@@ -214,6 +215,52 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
              )
 
     assert reason =~ "gas"
+  end
+
+  test "sponsored activation pins the verified key authorization in the sponsor policy" do
+    subscription = SubscriptionHelpers.subscription()
+    {_serialized, authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+    sponsored = sponsored_config(subscription)
+
+    assert {:ok, tx, _memo} =
+             SubscriptionTransaction.build(
+               subscription,
+               authorization,
+               SubscriptionHelpers.root_address(),
+               sponsored,
+               "sponsored"
+             )
+
+    assert Enum.count_until(tx.fields, 16) == 15
+    assert Enum.at(tx.fields, 13) == authorization.field
+
+    # The same envelope is exactly what the activation policy accepts and what
+    # the renewal policy (no authorization expected) refuses to sponsor.
+    now = System.os_time(:second)
+    policy = FeePayerPolicy.resolve(sponsored["chain_id"], sponsored["fee_payer_policy"])
+
+    assert :ok = FeePayerPolicy.validate(tx, FeePayerPolicy.expect_key_authorization(policy, authorization), now)
+    assert {:error, reason} = FeePayerPolicy.validate(tx, policy, now)
+    assert reason =~ "must not carry a key authorization"
+  end
+
+  test "sponsored renewal builds a plain envelope that the unpinned sponsor policy accepts" do
+    subscription = SubscriptionHelpers.subscription()
+    sponsored = sponsored_config(subscription)
+
+    assert {:ok, renewal, _memo} =
+             SubscriptionTransaction.build(
+               subscription,
+               nil,
+               SubscriptionHelpers.root_address(),
+               sponsored,
+               "renewal:sub_1:2"
+             )
+
+    assert Enum.count_until(renewal.fields, 15) == 14
+
+    policy = FeePayerPolicy.resolve(sponsored["chain_id"], sponsored["fee_payer_policy"])
+    assert :ok = FeePayerPolicy.validate(renewal, policy, System.os_time(:second))
   end
 
   defp config do

@@ -3,7 +3,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
 
   import MPP.Test.TempoTestHelpers
 
+  alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
+  alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
 
   doctest FeePayerPolicy
@@ -399,6 +401,159 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
       unknown = <<0xDE, 0xAD, 0xBE, 0xEF>> <> <<0::256>>
       assert FeePayerPolicy.validate(valid_tx(calls: [build_call(@token, unknown)]), policy) == :ok
+    end
+  end
+
+  describe "validate/2 — authorization list" do
+    # One EIP-7702 entry: [chain_id, address, nonce, y_parity, r, s]. The policy
+    # rejects on presence alone, so the entry contents are irrelevant.
+    defp authorization_entry, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>]
+
+    test "rejects a transaction with a single-entry authorization list" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx(authorization_list: [authorization_entry()])
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "authorization list (1 entries)"
+    end
+
+    test "rejects a transaction with a multi-entry authorization list" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx(authorization_list: for(_ <- 1..7, do: authorization_entry()))
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
+      assert reason =~ "authorization list (7 entries)"
+    end
+
+    test "accepts an empty authorization list" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      assert FeePayerPolicy.validate(valid_tx(authorization_list: []), policy) == :ok
+    end
+
+    test "fails closed when the authorization-list field is malformed (non-list scalar)" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx()
+      corrupted = %{tx | fields: List.replace_at(tx.fields, TxFields.aa_authorization_list(), <<1>>)}
+
+      assert {:error, reason} = FeePayerPolicy.validate(corrupted, policy)
+      assert reason =~ "malformed aa_authorization_list"
+    end
+  end
+
+  describe "validate/3 — key authorization pinning" do
+    defp verified_authorization do
+      {_serialized, authorization, _rpc} =
+        SubscriptionHelpers.signed_authorization(SubscriptionHelpers.subscription())
+
+      authorization
+    end
+
+    defp key_auth_tx(authorization, opts \\ []) do
+      valid_tx([key_authorization: authorization.field, valid_before: @now + 60] ++ opts)
+    end
+
+    test "rejects a transaction carrying a key authorization by default" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = key_auth_tx(verified_authorization())
+      assert length(tx.fields) == TxFields.signed_with_key_auth_field_count()
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)
+      assert reason =~ "must not carry a key authorization"
+    end
+
+    test "accepts the exact key authorization the policy expects" do
+      authorization = verified_authorization()
+
+      policy =
+        @moderato_chain_id
+        |> FeePayerPolicy.resolve(nil)
+        |> FeePayerPolicy.expect_key_authorization(authorization)
+
+      assert policy.expected_key_authorization == authorization.field
+      assert FeePayerPolicy.validate(key_auth_tx(authorization), policy, @now) == :ok
+    end
+
+    test "rejects a key authorization that differs from the expected one" do
+      authorization = verified_authorization()
+
+      policy =
+        @moderato_chain_id
+        |> FeePayerPolicy.resolve(nil)
+        |> FeePayerPolicy.expect_key_authorization(authorization)
+
+      # Flip one byte of the root signature inside the envelope field.
+      [inner, <<first::8, rest::binary>>] = authorization.field
+      mutated = %{authorization | field: [inner, <<Bitwise.bxor(first, 1)::8, rest::binary>>]}
+
+      assert {:error, reason} = FeePayerPolicy.validate(key_auth_tx(mutated), policy, @now)
+      assert reason =~ "does not match the verified authorization"
+    end
+
+    test "rejects a 14-field transaction when a key authorization is expected" do
+      policy =
+        @moderato_chain_id
+        |> FeePayerPolicy.resolve(nil)
+        |> FeePayerPolicy.expect_key_authorization(verified_authorization())
+
+      tx = valid_tx(valid_before: @now + 60)
+      assert length(tx.fields) == TxFields.signed_field_count()
+
+      assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)
+      assert reason =~ "missing the expected key authorization"
+    end
+
+    test "rejects an envelope with an unexpected field count" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      tx = valid_tx(valid_before: @now + 60)
+      extra = List.duplicate([], 2)
+      oversized = %{tx | fields: Enum.take(tx.fields, 13) ++ extra ++ Enum.drop(tx.fields, 13)}
+      assert Enum.count_until(oversized.fields, 17) == 16
+
+      # 16 fields is neither the plain nor the key-authorization envelope shape,
+      # so the answer is the same whether or not a key authorization is expected.
+      assert {:error, reason} = FeePayerPolicy.validate(oversized, policy, @now)
+      assert reason =~ "unexpected 0x76 field count (16)"
+
+      pinned = FeePayerPolicy.expect_key_authorization(policy, verified_authorization())
+      assert {:error, ^reason} = FeePayerPolicy.validate(oversized, pinned, @now)
+    end
+
+    test "expect_key_authorization/2 with nil clears a pinned authorization" do
+      authorization = verified_authorization()
+
+      policy =
+        @moderato_chain_id
+        |> FeePayerPolicy.resolve(nil)
+        |> FeePayerPolicy.expect_key_authorization(authorization)
+        |> FeePayerPolicy.expect_key_authorization(nil)
+
+      assert policy.expected_key_authorization == nil
+      assert {:error, reason} = FeePayerPolicy.validate(key_auth_tx(authorization), policy, @now)
+      assert reason =~ "must not carry a key authorization"
+    end
+
+    test "resolve/2 never pins a key authorization from overrides" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, %{"expected_key_authorization" => [<<1>>]})
+      assert policy.expected_key_authorization == nil
+    end
+
+    test "measure/3 reports the same envelope-field errors as validate/3" do
+      authorization = verified_authorization()
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+      pinned = FeePayerPolicy.expect_key_authorization(policy, authorization)
+
+      cases = [
+        {valid_tx(authorization_list: [authorization_entry()]), policy},
+        {key_auth_tx(authorization), policy},
+        {valid_tx(valid_before: @now + 60), pinned}
+      ]
+
+      for {tx, p} <- cases do
+        assert {:error, reason} = FeePayerPolicy.measure(tx, p, @now)
+        assert {:error, ^reason} = FeePayerPolicy.validate(tx, p, @now)
+      end
+
+      assert {:ok, %{total_fee: _, valid_before: _}} = FeePayerPolicy.measure(key_auth_tx(authorization), pinned, @now)
     end
   end
 end

@@ -24,6 +24,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoAccessKey
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
@@ -1057,32 +1058,19 @@ defmodule MPP.Methods.TempoIntegrationTest do
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
-      # Build raw 0x76 with placeholder sig but non-empty fee_token
+      # A signed 0x76 envelope with the fee-payer placeholder, sponsor-valid
+      # economics and validity window, but a NON-EMPTY fee_token — so the
+      # fee_token check is the one that rejects it.
       token_bytes = TempoTestHelpers.decode_address(@path_usd)
       calldata = TempoTestHelpers.transfer_calldata(recipient_address, @transfer_amount)
-      call = [token_bytes, <<>>, calldata]
 
-      fields = [
-        :binary.encode_unsigned(@chain_id),
-        <<1>>,
-        <<1>>,
-        :binary.encode_unsigned(21_000),
-        [call],
-        [],
-        # nonce_key: expiring (so the validity gate passes and fee_token is the rejection)
-        TempoTestHelpers.expiring_nonce_key(),
-        <<>>,
-        # valid_before: future (same reason)
-        :binary.encode_unsigned(TempoTestHelpers.future_valid_before()),
-        <<>>,
-        # fee_token: NON-EMPTY (this is what we're testing)
-        token_bytes,
-        # fee_payer_signature: placeholder
-        <<0x00>>,
-        []
-      ]
-
-      tx_hex = "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+      tx_hex =
+        TempoTestHelpers.build_tempo_tx(
+          calls: [[token_bytes, <<>>, calldata]],
+          chain_id: @chain_id,
+          fee_payer: true,
+          fee_token: token_bytes
+        )
 
       body = submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
       assert body["type"] =~ "verification-failed"
@@ -1114,6 +1102,63 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "expiring nonce key"
+    end
+
+    test "rejects a sponsored tx carrying an authorization list before the sponsor pays anything", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
+      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> fee_payer_key_hex)
+      balance_before = fee_token_balance!(fee_payer_address, rpc_url)
+
+      challenge = request_challenge!(config)
+      entries = for _ <- 1..7, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>]
+
+      tx_hex =
+        TempoTestHelpers.build_tempo_tx(
+          calls: [bound_payment_call(recipient_address, @transfer_amount, challenge)],
+          chain_id: @chain_id,
+          fee_payer: true,
+          authorization_list: entries
+        )
+
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => tx_hex})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "authorization list (7 entries)"
+
+      # Nothing was co-signed or broadcast: the sponsor's fee-token balance is untouched.
+      assert fee_token_balance!(fee_payer_address, rpc_url) == balance_before
+    end
+
+    test "rejects a sponsored tx carrying a key authorization before the sponsor pays anything", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
+      config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
+      {:ok, fee_payer_address} = Onchain.Signer.address_from_key("0x" <> fee_payer_key_hex)
+      balance_before = fee_token_balance!(fee_payer_address, rpc_url)
+
+      challenge = request_challenge!(config)
+
+      {_serialized, authorization, _rpc} =
+        SubscriptionHelpers.signed_authorization(SubscriptionHelpers.subscription())
+
+      tx_hex =
+        TempoTestHelpers.build_tempo_tx(
+          calls: [bound_payment_call(recipient_address, @transfer_amount, challenge)],
+          chain_id: @chain_id,
+          fee_payer: true,
+          key_authorization: authorization.field
+        )
+
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => tx_hex})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "must not carry a key authorization"
+
+      assert fee_token_balance!(fee_payer_address, rpc_url) == balance_before
     end
 
     test "rejects a sponsored tx whose validity window exceeds the policy", %{
@@ -1624,6 +1669,17 @@ defmodule MPP.Methods.TempoIntegrationTest do
         The Tempo Moderato testnet faucet may be down or rate-limited.
         Set TEMPO_RPC_URL to override: export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
         """)
+    end
+  end
+
+  # Reads the pathUSD balance of `address_hex` via `eth_call balanceOf`.
+  defp fee_token_balance!(address_hex, rpc_url) do
+    {:ok, address_bin} = Onchain.Address.validate(address_hex)
+    data = "0x" <> Base.encode16(Onchain.Tempo.TIP20.balance_of_calldata(address_bin), case: :lower)
+
+    case Onchain.RPC.eth_call(@path_usd, data, rpc_url: rpc_url) do
+      {:ok, "0x" <> hex} -> String.to_integer(hex, 16)
+      {:error, reason} -> flunk("Failed to read fee-payer balance: #{inspect(reason)}")
     end
   end
 

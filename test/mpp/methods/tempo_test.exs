@@ -15,6 +15,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.FailingPutStore
+  alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
@@ -2683,6 +2684,88 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.detail =~ "access list"
+    end
+
+    # Records every RPC the method attempts so the tests below can prove the
+    # envelope-field policy rejects before any node traffic (no simulate, no
+    # broadcast, no hosted fill).
+    defp record_rpc_calls do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]})
+      end)
+    end
+
+    defp authorization_list_entries(count), do: for(_ <- 1..count, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>])
+
+    defp verified_key_authorization do
+      {_serialized, authorization, _rpc} =
+        SubscriptionHelpers.signed_authorization(SubscriptionHelpers.subscription())
+
+      authorization.field
+    end
+
+    test "rejects a transaction with a non-empty authorization list before any RPC call", %{charge: charge} do
+      record_rpc_calls()
+      tx_hex = econ_tx(authorization_list: authorization_list_entries(7))
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "authorization list"
+      refute_received {:rpc_call, _method}
+    end
+
+    test "rejects a transaction with a single authorization-list entry", %{charge: charge} do
+      record_rpc_calls()
+      tx_hex = econ_tx(authorization_list: authorization_list_entries(1))
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "authorization list (1 entries)"
+      refute_received {:rpc_call, _method}
+    end
+
+    test "rejects a transaction carrying a key authorization before any RPC call", %{charge: charge} do
+      record_rpc_calls()
+      tx_hex = econ_tx(key_authorization: verified_key_authorization())
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "must not carry a key authorization"
+      refute_received {:rpc_call, _method}
+    end
+
+    test "hosted fee payer never fills a transaction carrying an authorization list or key authorization", %{
+      charge: charge
+    } do
+      charge = %{
+        charge
+        | method_details:
+            charge.method_details
+            |> Map.drop(["fee_payer", "fee_payer_private_key"])
+            |> Map.merge(%{"fee_payer_url" => "https://sponsor.moderato.tempo.xyz", "sponsor_budget_id" => "hosted"})
+      }
+
+      record_rpc_calls()
+
+      for {opts, expected_detail} <- [
+            {[authorization_list: authorization_list_entries(3)], "must not declare an authorization list"},
+            {[key_authorization: verified_key_authorization()], "must not carry a key authorization"}
+          ] do
+        payload = %{"type" => "transaction", "signature" => econ_tx(opts)}
+        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert error.type =~ "verification-failed"
+        assert error.detail =~ expected_detail
+      end
+
+      refute_received {:rpc_call, "eth_fillTransaction"}
+      refute_received {:rpc_call, _method}
     end
 
     test "honors a fee_payer_policy override", %{charge: charge} do

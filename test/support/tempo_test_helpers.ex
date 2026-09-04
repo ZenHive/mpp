@@ -25,8 +25,10 @@ defmodule MPP.Test.TempoTestHelpers do
   Builds a hex-encoded 0x76 Tempo Transaction with the given calls and chain_id.
 
   Gas economics (`:gas_limit`, `:max_fee_per_gas`, `:max_priority_fee_per_gas`),
-  `:access_list`, the `:nonce_key` (raw binary at field 6), and `:valid_before`
-  (unix seconds at field 8) are overridable. When `fee_payer: true`, they default
+  `:access_list`, `:authorization_list` (field 12), `:key_authorization` (the
+  optional 15th-field RLP list, inserted before the sender signature when given),
+  `:fee_token` (raw 20-byte binary at field 10), the `:nonce_key` (raw binary at
+  field 6), and `:valid_before` (unix seconds at field 8) are overridable. When `fee_payer: true`, they default
   to realistic sponsor values that pass `MPP.Methods.Tempo.FeePayerPolicy`
   (expiring nonce key, `valid_before` 20s out — inside Moderato's 30s window); pass explicit overrides to
   exercise the gas-draining / replay-window attack vectors. Non-fee-payer builds
@@ -47,6 +49,9 @@ defmodule MPP.Test.TempoTestHelpers do
     max_fee = Keyword.get(opts, :max_fee_per_gas, if(fee_payer?, do: 1_000_000_000, else: 0))
     max_priority = Keyword.get(opts, :max_priority_fee_per_gas, max_fee)
     access_list = Keyword.get(opts, :access_list, [])
+    authorization_list = Keyword.get(opts, :authorization_list, [])
+    key_authorization = Keyword.get(opts, :key_authorization)
+    fee_token = Keyword.get(opts, :fee_token, <<>>)
 
     nonce_key = Keyword.get(opts, :nonce_key, if(fee_payer?, do: @expiring_nonce_key, else: <<>>))
     # Moderato's nonce manager rejects an expiring `valid_before` more than 30s past the
@@ -65,10 +70,12 @@ defmodule MPP.Test.TempoTestHelpers do
       <<>>,
       rlp_uint(valid_before),
       <<>>,
-      <<>>,
+      fee_token,
       fee_payer_sig,
-      []
+      authorization_list
     ]
+
+    base_fields = if key_authorization, do: base_fields ++ [key_authorization], else: base_fields
 
     # Sign the base fields with the fixed test key (mirrors onchain_tempo's
     # Builder.sign_and_encode) so the sender is recoverable. The fee-token and

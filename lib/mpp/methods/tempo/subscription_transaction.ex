@@ -50,7 +50,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          {:ok, sender_signature} <- sign_keychain(base_fields, access_key, access_key_address, source_address),
          fields = base_fields ++ [sender_signature],
          {:ok, tx} <- deserialize(fields),
-         :ok <- validate_sponsor_policy(tx, config, sponsored?, now),
+         :ok <- validate_sponsor_policy(tx, config, sponsored?, now, authorization),
          {:ok, tx} <- maybe_cosign(tx, source_address, config) do
       {:ok, tx, hex(memo)}
     else
@@ -162,12 +162,17 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     end
   end
 
-  defp validate_sponsor_policy(_tx, _config, false, _now), do: :ok
+  defp validate_sponsor_policy(_tx, _config, false, _now, _authorization), do: :ok
 
-  defp validate_sponsor_policy(tx, config, true, now) do
+  defp validate_sponsor_policy(tx, config, true, now, authorization) do
     defaults = %{"max_gas" => @default_gas_limit, "max_total_fee" => 200_000_000_000_000_000}
     overrides = Map.merge(defaults, config["fee_payer_policy"] || %{})
-    policy = FeePayerPolicy.resolve(config["chain_id"], overrides)
+
+    policy =
+      config["chain_id"]
+      |> FeePayerPolicy.resolve(overrides)
+      |> FeePayerPolicy.expect_key_authorization(authorization)
+
     FeePayerPolicy.validate(tx, policy, now)
   end
 

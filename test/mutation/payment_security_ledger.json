@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "8d7cfd6cc49500113ab797495d59a38b484a1ef7a301887610682cbeb655696f",
+    "fingerprint_sha256": "1fd3c160e1e4e19d1791c27b3e9814a0123da58d688739c716518c16f9eebd77",
     "mutations": [
       {
         "id": "jcs-descending-key-order",
@@ -168,6 +168,20 @@
         "status": "killed",
         "evidence": "generated unknown credential types are rejected as invalid payloads",
         "classification": "non-equivalent; accepts an unsupported authorization domain"
+      },
+      {
+        "id": "tempo-authorization-list-check-bypassed",
+        "class": "sponsor-intrinsic-gas",
+        "status": "killed",
+        "evidence": "fee-payer policy and Tempo method tests reject a sponsored envelope with a non-empty authorization list before any RPC",
+        "classification": "non-equivalent; sponsors intrinsic gas and persistent delegations the payment never needs"
+      },
+      {
+        "id": "tempo-key-authorization-check-bypassed",
+        "class": "sponsor-intrinsic-gas",
+        "status": "killed",
+        "evidence": "fee-payer policy and Tempo method tests reject a sponsored envelope carrying a key authorization the server did not pin",
+        "classification": "non-equivalent; sponsors intrinsic gas and access-key provisioning the payment never needs"
       }
     ],
     "canaries": [

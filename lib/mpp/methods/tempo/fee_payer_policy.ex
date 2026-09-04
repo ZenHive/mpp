@@ -9,8 +9,10 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   GHSA-qpxh-ff8m-c62v — access-list padding). The same family covers *intrinsic*
   gas: padded/non-canonical calldata or a nonzero call `value` inflate what the
   sponsor pays without changing the decoded payment intent (mppx #602). This
-  module bounds the client-supplied gas fields, the total fee budget, the access
-  list, per-call value, and calldata canonicality before the server co-signs.
+  module bounds every signed envelope field the client controls — the gas
+  fields, the total fee budget, the access list, the EIP-7702 authorization
+  list, the optional key-authorization field, per-call value, and calldata
+  canonicality — before the server co-signs.
 
   The model mirrors the mppx (TypeScript) and mpp-rs (Rust) reference SDKs:
   absolute ceilings with per-chain defaults, overridable per server. Checks
@@ -24,6 +26,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       within `policy.max_validity_window_seconds` of now (bounds how long a
       sponsorship the server co-signs can sit broadcastable)
     * access list empty (fee-payer call scopes never need one)
+    * EIP-7702 authorization list empty (a sponsored payment never delegates
+      account code; each entry is intrinsic gas the sponsor would pay)
+    * key-authorization field absent unless the server itself pinned one via
+      `expect_key_authorization/2`, in which case it must be byte-exact (a
+      sponsored payment never provisions an access key the server did not verify)
     * every call carries zero native `value`
     * calldata for each recognized TIP-20 / DEX call is byte-exact canonical — no
       trailing padding or non-canonical high-order bytes that raise intrinsic gas
@@ -64,6 +71,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   """
 
   alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
+  alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Tempo.TIP20
   alias Onchain.Tempo.Transaction
 
@@ -102,7 +110,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
           max_total_fee: non_neg_integer(),
           max_validity_window_seconds: non_neg_integer(),
           max_in_flight_total_fee: non_neg_integer(),
-          max_in_flight_reservations: non_neg_integer()
+          max_in_flight_reservations: non_neg_integer(),
+          expected_key_authorization: nil | list()
         }
 
   defstruct [
@@ -112,7 +121,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
     :max_total_fee,
     :max_validity_window_seconds,
     :max_in_flight_total_fee,
-    :max_in_flight_reservations
+    :max_in_flight_reservations,
+    expected_key_authorization: nil
   ]
 
   @doc """
@@ -184,15 +194,17 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   end
 
   @spec apply_overrides(t(), map()) :: t()
-  defp apply_overrides(policy, overrides) do
-    %__MODULE__{
-      max_gas: override(overrides, "max_gas", policy.max_gas),
-      max_fee_per_gas: override(overrides, "max_fee_per_gas", policy.max_fee_per_gas),
-      max_priority_fee_per_gas: override(overrides, "max_priority_fee_per_gas", policy.max_priority_fee_per_gas),
-      max_total_fee: override(overrides, "max_total_fee", policy.max_total_fee),
-      max_validity_window_seconds: override(overrides, "max_validity_window_seconds", policy.max_validity_window_seconds),
-      max_in_flight_total_fee: override(overrides, "max_in_flight_total_fee", policy.max_in_flight_total_fee),
-      max_in_flight_reservations: override(overrides, "max_in_flight_reservations", policy.max_in_flight_reservations)
+  defp apply_overrides(%__MODULE__{} = policy, overrides) do
+    %{
+      policy
+      | max_gas: override(overrides, "max_gas", policy.max_gas),
+        max_fee_per_gas: override(overrides, "max_fee_per_gas", policy.max_fee_per_gas),
+        max_priority_fee_per_gas: override(overrides, "max_priority_fee_per_gas", policy.max_priority_fee_per_gas),
+        max_total_fee: override(overrides, "max_total_fee", policy.max_total_fee),
+        max_validity_window_seconds:
+          override(overrides, "max_validity_window_seconds", policy.max_validity_window_seconds),
+        max_in_flight_total_fee: override(overrides, "max_in_flight_total_fee", policy.max_in_flight_total_fee),
+        max_in_flight_reservations: override(overrides, "max_in_flight_reservations", policy.max_in_flight_reservations)
     }
   end
 
@@ -203,6 +215,21 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       _ -> default
     end
   end
+
+  @doc """
+  Pin the key-authorization field the sponsored transaction must carry.
+
+  A sponsored `0x76` envelope may not carry a key authorization at all unless
+  the server built the transaction itself around one it has already verified
+  (subscription activation). `nil` (the default) rejects any key-authorization
+  field; a `KeyAuthorization` struct requires the envelope's field to equal
+  `KeyAuthorization.transaction_field/1` of that struct exactly.
+  """
+  @spec expect_key_authorization(t(), KeyAuthorization.t() | nil) :: t()
+  def expect_key_authorization(%__MODULE__{} = policy, nil), do: %{policy | expected_key_authorization: nil}
+
+  def expect_key_authorization(%__MODULE__{} = policy, %KeyAuthorization{} = authorization),
+    do: %{policy | expected_key_authorization: KeyAuthorization.transaction_field(authorization)}
 
   @doc """
   Validate a transaction's gas economics and validity window against `policy`.
@@ -260,6 +287,8 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
          :ok <- check_nonce_key(tx),
          {:ok, valid_before} <- check_validity_window(tx, policy, now),
          :ok <- check_access_list(tx),
+         :ok <- check_authorization_list(tx),
+         :ok <- check_key_authorization(tx, policy),
          :ok <- check_call_values(tx),
          :ok <- check_canonical_calls(tx) do
       {:ok, %{total_fee: gas_limit * max_fee, valid_before: valid_before}}
@@ -340,6 +369,48 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
       _ ->
         {:error, "fee-payer transaction has a malformed access_list field"}
+    end
+  end
+
+  @spec check_authorization_list(Transaction.t()) :: :ok | {:error, String.t()}
+  defp check_authorization_list(%Transaction{fields: fields}) do
+    case Enum.at(fields, TxFields.aa_authorization_list()) do
+      [] ->
+        :ok
+
+      list when is_list(list) ->
+        {:error, "fee-payer transaction must not declare an authorization list (#{length(list)} entries)"}
+
+      _ ->
+        {:error, "fee-payer transaction has a malformed aa_authorization_list field"}
+    end
+  end
+
+  # Key-authorization presence is signalled by envelope length, not a tag: a signed
+  # 0x76 envelope has 14 fields, or 15 when the optional key_authorization list is
+  # inserted before sender_signature (Onchain.Tempo.Transaction).
+  @spec check_key_authorization(Transaction.t(), t()) :: :ok | {:error, String.t()}
+  defp check_key_authorization(%Transaction{fields: fields}, %{expected_key_authorization: expected}) do
+    count = length(fields)
+
+    cond do
+      count == TxFields.signed_field_count() and is_nil(expected) ->
+        :ok
+
+      count == TxFields.signed_field_count() ->
+        {:error, "fee-payer transaction is missing the expected key authorization"}
+
+      count != TxFields.signed_with_key_auth_field_count() ->
+        {:error, "fee-payer transaction has an unexpected 0x76 field count (#{count})"}
+
+      is_nil(expected) ->
+        {:error, "fee-payer transaction must not carry a key authorization"}
+
+      Enum.at(fields, TxFields.key_authorization()) == expected ->
+        :ok
+
+      true ->
+        {:error, "fee-payer transaction key authorization does not match the verified authorization"}
     end
   end
 
