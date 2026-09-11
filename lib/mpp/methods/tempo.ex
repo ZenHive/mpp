@@ -149,6 +149,7 @@ defmodule MPP.Methods.Tempo do
   use MPP.Method
   use Descripex, namespace: "/methods"
 
+  alias Curvy.Signature, as: CurvySignature
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Hex
@@ -994,10 +995,12 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp prepare_sponsored_transaction(tx, payment, config, memo, store) do
-    with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
-         {:ok, tx, hash} <- canonicalize_transaction(tx),
+    with {:ok, tx, hash} <- canonicalize_transaction(tx),
+         :ok <- maybe_validate_fee_payer_envelope(tx, config),
          {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
          :ok <- reserve_hash_atomic(store, hash),
+         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+         {:ok, tx, _hash} <- canonicalize_transaction(tx),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
       {:ok, tx, rpc_url}
@@ -1102,6 +1105,16 @@ defmodule MPP.Methods.Tempo do
 
   defp maybe_cosign_fee_payer(tx, _config), do: {:ok, tx}
 
+  defp maybe_validate_fee_payer_envelope(tx, config) do
+    if fee_payer_enabled?(config) do
+      with :ok <- check_fee_payer_placeholder(tx) do
+        check_fee_token_empty(tx)
+      end
+    else
+      :ok
+    end
+  end
+
   defp check_fee_payer_placeholder(tx) do
     if Transaction.has_fee_payer_placeholder?(tx) do
       :ok
@@ -1154,9 +1167,11 @@ defmodule MPP.Methods.Tempo do
   # release entirely.
   #
   # Transaction path (type="transaction"): canonicalize → atomic reserve on
-  # keccak256(canonical bytes) → simulate → broadcast the canonical envelope.
-  # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
-  # the same signed tx. Matches mppx #818 (Charge.ts deserialize-then-serialize).
+  # keccak256(canonical client bytes) → optional co-sign/hosted fill →
+  # simulate → broadcast the canonical envelope. Reserve before fill so two
+  # encodings of one signed tx cannot each hit the hosted fee payer.
+  # Matches mppx #818 (Charge.ts deserialize-then-serialize at adcf3b5;
+  # ox `Transaction.serialize` of the same envelope).
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
   defp check_hash_unused(nil, _hash), do: :ok
@@ -1249,10 +1264,10 @@ defmodule MPP.Methods.Tempo do
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
   # Re-encode a deserialized 0x76 envelope so every accepted signature encoding
-  # (Electrum v=27/28 vs raw yParity 0/1) and every non-canonical RLP integer
-  # maps to one byte string. onchain_tempo 0.10.0 has no public serialize/1 —
-  # it only re-encodes inside cosign_fee_payer — so the charge path does it here
-  # before FeePayerPolicy, reserve, or any RPC (mppx #818).
+  # and every non-canonical RLP integer maps to one byte string.
+  # onchain_tempo 0.10.0 has no public serialize/1 — it only re-encodes inside
+  # cosign_fee_payer — so the charge path does it here before FeePayerPolicy,
+  # reserve, or any RPC (mppx #818 / adcf3b5; ox Transaction.serialize).
   defp canonicalize_transaction(%Transaction{fields: fields} = tx) when is_list(fields) do
     canonical_fields = canonicalize_fields(fields)
     binary = <<0x76>> <> ExRLP.encode(canonical_fields)
@@ -1309,11 +1324,20 @@ defmodule MPP.Methods.Tempo do
     base ++ [canonicalize_sender_signature(sender_sig)]
   end
 
-  defp canonicalize_sender_signature(<<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>) when v in [0, 1] do
-    <<r::unsigned-big-size(256), s::unsigned-big-size(256), v + 27::8>>
+  defp canonicalize_sender_signature(<<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>)
+       when v in [0, 1, 27, 28] do
+    recid = if v >= 27, do: v - 27, else: v
+
+    %CurvySignature{r: r, s: s, recid: recid}
+    |> CurvySignature.normalize()
+    |> encode_canonical_sender_signature()
   end
 
   defp canonicalize_sender_signature(other), do: other
+
+  defp encode_canonical_sender_signature(%CurvySignature{r: r, s: s, recid: recid}) when recid in 0..3 do
+    <<r::unsigned-big-size(256), s::unsigned-big-size(256), recid + 27::8>>
+  end
 
   defp rlp_canonical_uint(<<>>), do: <<>>
 

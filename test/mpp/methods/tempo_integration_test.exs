@@ -908,6 +908,37 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => canonical_tx})
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
+
+      complement_tx = TempoTestHelpers.with_complement_s(canonical_tx)
+      refute String.downcase(complement_tx) == String.downcase(canonical_tx)
+      refute canonical_hash == TempoTestHelpers.keccak256_hex(complement_tx)
+
+      complement_body =
+        submit_credential!(config, challenge, %{"type" => "transaction", "signature" => complement_tx})
+
+      assert complement_body["type"] =~ "verification-failed"
+      assert complement_body["detail"] =~ "already used"
+    end
+
+    test "Moderato rejects the complement-s encoding of a signed transaction", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+      config = tempo_config(recipient_address, rpc_url, %{"store" => false})
+      challenge = request_challenge!(config)
+      {:ok, canonical_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
+      complement_tx = TempoTestHelpers.with_complement_s(canonical_tx)
+
+      refute String.downcase(complement_tx) == String.downcase(canonical_tx)
+
+      response = post_raw_transaction_sync(complement_tx, rpc_url)
+
+      assert %{
+               "error" => %{"code" => -32_602, "message" => "invalid transaction signature"},
+               "id" => 1,
+               "jsonrpc" => "2.0"
+             } = response
     end
   end
 
@@ -1724,6 +1755,25 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
   # Broadcasts a prebuilt signed Tempo transaction via the sync RPC and returns its tx hash.
   defp broadcast_raw_transaction_sync!(raw_tx, rpc_url) do
+    case post_raw_transaction_sync(raw_tx, rpc_url) do
+      %{"result" => receipt} when is_map(receipt) ->
+        tx_hash = receipt["transactionHash"]
+
+        if receipt["status"] != "0x1" do
+          flunk("Broadcasted raw transaction reverted (tx: #{tx_hash || inspect(receipt)})")
+        end
+
+        tx_hash
+
+      %{"error" => error} ->
+        flunk("Failed to broadcast raw transaction: #{inspect(error)}")
+
+      other ->
+        flunk("Unexpected response broadcasting raw transaction: #{inspect(other)}")
+    end
+  end
+
+  defp post_raw_transaction_sync(raw_tx, rpc_url) do
     body =
       Jason.encode!(%{
         "jsonrpc" => "2.0",
@@ -1733,24 +1783,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
       })
 
     case Req.post(rpc_url, headers: [{"content-type", "application/json"}], body: body) do
-      {:ok, %Req.Response{status: status, body: %{"result" => receipt}}}
-      when status in 200..299 and is_map(receipt) ->
-        tx_hash = receipt["transactionHash"]
-
-        if receipt["status"] != "0x1" do
-          flunk("Broadcasted raw transaction reverted (tx: #{tx_hash || inspect(receipt)})")
-        end
-
-        tx_hash
-
-      {:ok, %Req.Response{status: status, body: %{"error" => error}}} when status in 200..299 ->
-        flunk("Failed to broadcast raw transaction: #{inspect(error)}")
+      {:ok, %Req.Response{status: status, body: resp_body}} when status in 200..299 and is_map(resp_body) ->
+        resp_body
 
       {:ok, %Req.Response{status: status, body: resp_body}} ->
-        flunk("Unexpected response broadcasting raw transaction: status=#{status}, body=#{inspect(resp_body)}")
+        flunk("Unexpected response posting raw transaction: status=#{status}, body=#{inspect(resp_body)}")
 
       {:error, exception} ->
-        flunk("Failed to broadcast raw transaction: #{Exception.message(exception)}")
+        flunk("Failed to post raw transaction: #{Exception.message(exception)}")
     end
   end
 

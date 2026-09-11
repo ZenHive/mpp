@@ -1452,6 +1452,50 @@ defmodule MPP.Methods.TempoTest do
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> String.downcase(raw_hex))
     end
 
+    test "complement-s encodings of the same signed tx reserve one slot and yield one receipt", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      canonical_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      complement_hex = with_complement_s(canonical_hex)
+      canonical_hash = keccak256_hex(canonical_hex)
+      complement_hash = keccak256_hex(complement_hex)
+
+      refute String.downcase(complement_hex) == String.downcase(canonical_hex)
+      refute canonical_hash == complement_hash
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => complement_hex}, charge)
+
+      assert_received {:rpc_call, "eth_simulateV1", _}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
+      assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+
+      assert error.detail =~ "already used"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+
+      assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> complement_hash)
+    end
+
     test "padded zero integers of the same signed tx share the canonical reserve key", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
@@ -3566,6 +3610,54 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
+    end
+
+    test "two encodings of the same hosted tx reserve one slot with no duplicate fill or broadcast", %{
+      charge: charge
+    } do
+      {:ok, canonical_hex} = build_hosted_client_tx()
+      complement_hex = with_complement_s(canonical_hex)
+      {:ok, tx} = Transaction.deserialize(canonical_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+
+      refute String.downcase(complement_hex) == String.downcase(canonical_hex)
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"]})
+
+        response =
+          case request["method"] do
+            "eth_fillTransaction" ->
+              %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+
+            "eth_simulateV1" ->
+              simulate_success_body()
+
+            _ ->
+              %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => complement_hex}, charge)
+
+      assert_received {:rpc_call, "eth_fillTransaction"}
+      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync"}
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+
+      assert error.detail =~ "already used"
+      refute_received {:rpc_call, "eth_fillTransaction"}
+      refute_received {:rpc_call, "eth_simulateV1"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
     end
 
     test "rejects hosted fill when returned feeToken is outside configured allowlist", %{charge: charge} do

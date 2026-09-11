@@ -46,7 +46,8 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
                "jcs-descending-key-order",
                "verifier-request-pin-bypassed",
                "evm-authorization-dispatch-hash-routed",
-               "tempo-unknown-dispatch-accepted"
+               "tempo-unknown-dispatch-accepted",
+               "tempo-reserve-key-caller-bytes"
              ])
   end
 

@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "83b870850811e529746a601733ed4948d1df2ea5c49d8bf4642e48f017b93a58",
+    "fingerprint_sha256": "2ff4b2a3de2d9c805cab53329b31884b3a869a101b28c4eec93f55a85b52ba5b",
     "mutations": [
       {
         "id": "jcs-descending-key-order",
@@ -182,13 +182,21 @@
         "status": "killed",
         "evidence": "fee-payer policy and Tempo method tests reject a sponsored envelope carrying a key authorization the server did not pin",
         "classification": "non-equivalent; sponsors intrinsic gas and access-key provisioning the payment never needs"
+      },
+      {
+        "id": "tempo-reserve-key-caller-bytes",
+        "class": "tempo-canonical-reserve",
+        "status": "killed",
+        "evidence": "two encodings of one signed Tempo transaction share one reserve slot",
+        "classification": "non-equivalent; keys the pre-broadcast reserve on caller-supplied bytes"
       }
     ],
     "canaries": [
       "jcs-descending-key-order",
       "verifier-request-pin-bypassed",
       "evm-authorization-dispatch-hash-routed",
-      "tempo-unknown-dispatch-accepted"
+      "tempo-unknown-dispatch-accepted",
+      "tempo-reserve-key-caller-bytes"
     ],
     "reviewed_survivors": [
       {

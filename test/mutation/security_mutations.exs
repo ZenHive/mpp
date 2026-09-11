@@ -186,6 +186,27 @@ defmodule MPP.Test.SecurityMutations do
         """,
         ["test/mpp/methods/tempo/fee_payer_policy_test.exs", "test/mpp/methods/tempo_test.exs"],
         false
+      ),
+      mutation(
+        "tempo-reserve-key-caller-bytes",
+        "tempo-canonical-reserve",
+        "lib/mpp/methods/tempo.ex",
+        """
+            canonical_fields = canonicalize_fields(fields)
+            binary = <<0x76>> <> ExRLP.encode(canonical_fields)
+            hex = "0x" <> Base.encode16(binary, case: :lower)
+            hash = "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+            {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
+        """,
+        """
+            canonical_fields = canonicalize_fields(fields)
+            binary = <<0x76>> <> ExRLP.encode(canonical_fields)
+            _hex = "0x" <> Base.encode16(binary, case: :lower)
+            hash = transaction_hash(tx)
+            {:ok, %{tx | fields: canonical_fields, raw: tx.raw}, hash}
+        """,
+        ["test/mpp/methods/tempo_test.exs"],
+        true
       )
     ]
   end
