@@ -7,8 +7,8 @@ latest released `0.x` version on Hex and the `main` branch.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.16.x  | :white_check_mark: |
-| < 0.16  | :x:                |
+| 0.17.x  | :white_check_mark: |
+| < 0.17  | :x:                |
 
 ## Reporting a Vulnerability
 

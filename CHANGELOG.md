@@ -6,7 +6,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.17.0] — 2026-09-12
+
+**Security (one low-severity hardening, disclosed with this release).** The Tempo pre-broadcast dedup reserve key is now stable across every valid re-encoding of a signed transaction, closing the last re-encoding channel left after 0.16.2; the live Moderato node already rejected that encoding at broadcast, so no deployment was exploitable, and a mutation canary now pins the reserve-key derivation (`GHSA-65c4-v2vw-rr64`). Safe-by-default, no configuration change.
 
 ### Added
 
