@@ -12,11 +12,14 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 - `MPP.Methods.XRPL` charge method: XRP, issued-currency and MPT payments
   with transaction and hash credentials, per-challenge `InvoiceID` binding,
-  and validated `delivered_amount` matching (draft-xrpl-charge-00).
+  validated `delivered_amount` matching, and transaction-age checks against
+  the challenge's issuance time (draft-xrpl-charge-00).
 - `MPP.Methods.XRPL.Session` session method over XRPL payment channels:
   open / voucher / close with locally verified channel claims, network-keyed
-  session store entries, and a live-channel integration test
-  (draft-xrpl-session-00).
+  session store entries, retained highest claims, and validated
+  `PaymentChannelClaim` redemption on close (draft-xrpl-session-00).
+  Configure `destination_secret` for redemption, or `defer_redemption` to
+  settle the stored claim later with `redeem/2`.
 
 ### Changed
 

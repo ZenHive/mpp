@@ -144,7 +144,10 @@ It requires an explicitly configured atomic, durable shared store. See
 
 `MPP.Methods.XRPL.Session` maps the session intent onto XRP payment channels:
 open submits `PaymentChannelCreate`, voucher and close are off-ledger claims
-over a cumulative drop total. See [XRPL session](docs/xrpl-session.md).
+over a cumulative drop total. The server retains the highest verified claim;
+close redeems it with `PaymentChannelClaim` unless redemption is deferred.
+See [XRPL session](docs/xrpl-session.md) for the destination signing seed and
+deferred-redemption configuration.
 
 ### NEAR Intents (1Click)
 

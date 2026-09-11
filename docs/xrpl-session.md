@@ -28,8 +28,10 @@ seconds. `destination_secret` is the Destination account's family seed; it is
 server-only and never copied into challenge method details. The JSON-RPC
 connection must support `server_info`, `submit`, `tx`, `account_info`,
 `ledger_entry` and `ledger` API v1. Session-channel state uses
-`MPP.Session.Store`, namespaced by network so the same PayChannel ID on two
-ledgers cannot share a high-water mark.
+`MPP.Session.Store`. The built-in `MPP.Session.ETSStore` is automatically
+namespaced by network so the same PayChannel ID on two ledgers cannot share a
+high-water mark. Custom `session_store` implementations receive their configured
+options unchanged; use a separate store or network-scoped options for each network.
 
 ## Draft contract
 
