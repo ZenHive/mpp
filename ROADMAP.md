@@ -143,7 +143,7 @@
 | Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42?] 📋 |
 | Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08] 📋 |
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
-| Task 111 | ⬜ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
+| Task 111 | 🔄 | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
 | Task 112 | ⬜ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
 <!-- TASKS:END -->
 

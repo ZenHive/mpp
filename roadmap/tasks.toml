@@ -2857,7 +2857,7 @@ depends_on = ["109"]
 id = "111"
 phase = 10
 bundle = "session"
-status = "pending"
+status = "in_progress"
 title = "Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415"
 scores = { d = 3, b = 9, u = 8 }
 markers = ["security"]
@@ -2870,6 +2870,7 @@ body = """
 mpp-rs #415 (commit d859a13, 2026-09-10, src/protocol/methods/tempo/session_method.rs) changed voucher acceptance so a voucher that does not raise the channel's accepted cumulative amount is rejected with DeltaTooSmall, and re-checks the minimum delta inside the atomic store update so concurrent identical vouchers have one winner. Port the same invariant to MPP.Session.Actions: an accepted voucher must add funds; equal-amount vouchers are an error, never a silent success. Our Store.update/3 callback already runs the checks atomically, so the change is confined to the acceptance branch plus tests (port both upstream concurrency tests). Full threat detail lives in private advisory GHSA-8c63-r789-xrrf; keep public artifacts to the invariant.
 """
 created_at = "2026-09-11"
+started_at = "2026-09-11"
 scored_at = "2026-09-11"
 
 [[task]]
