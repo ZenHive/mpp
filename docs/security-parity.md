@@ -108,6 +108,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 | mppx #881 (commit baa0fd5, 2026-09-09) `allowKeyAuthorization` fee-payer policy knob (default allow) | Sponsored transaction installing a new access key at the sponsor's expense | Stricter than upstream: the charge path rejects any `0x76` key authorization outright and the subscription path pins the exact verified authorization — `fee_payer_policy.ex:229-232,392-410` (shipped 0.16.1, `GHSA-rpwj-vrf7-4x36`) |
 | mppx #864 (commit 7949db6, 2026-09-04) expiring nonces for server-side session precompile calls | Nonce collisions when several server processes share one signer | Not applicable to our sessions (no server-side session broadcasts; channels are voucher-settled through `MPP.Session.Store`); the one server-signed Tempo path, sponsored subscription settlement, already uses the expiring nonce key — `subscription_transaction.ex:26,90` |
 | mppx #814 / #832 / #845 / #842 / #823 hosted and remote fee-payer transport plumbing | — (viem-transport routing of the sponsor call; no bounding change) | Equivalent HTTP fill already in `MPP.Methods.Tempo.HostedFeePayer.fill/3` — `hosted_fee_payer.ex`, `tempo.ex:963-975` |
+| mppx #887 (commit c0ce0fe, 2026-09-10) client recipient allowlist covers the primary recipient and every split | Hostile/misconfigured server redirecting a client TIP-20 transfer to an unlisted address, including via splits or the zero-amount proof path | `MPP.Client.Providers.Tempo` `:expected_recipients` — primary and every `methodDetails.splits` recipient must be listed; refused before RPC or signing; checksum-agnostic — `client/providers/tempo.ex` |
 
 ---
 
@@ -117,7 +118,6 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
 | Session integrity parity for published upstream advisories | 📋 **Task 50** (done) built the session machinery; residual hardening is tracked as counted open items, never enumerated here |
-| mppx #887 (commit c0ce0fe, 2026-09-10) client recipient allowlist covers the primary recipient and every split | 📋 Task 108 — built-in Tempo provider `expected_recipients` |
 | Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 
 ---

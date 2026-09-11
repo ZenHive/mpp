@@ -335,6 +335,7 @@ provider =
        private_key: tempo_private_key,
        rpc_url: "https://rpc.tempo.xyz",
        expected_chain_id: 4217,
+       expected_recipients: ["0x742d35Cc6634C0532925a3b844Bc9e7595f8fE00"],
        client_id: "my-agent"
      }},
     {MPP.Client.Providers.Stripe,
@@ -354,6 +355,10 @@ Provider credentials and endpoints are passed explicitly; the providers do not r
 application configuration or environment variables. The Tempo provider verifies that
 the RPC serves the challenge's advertised chain before signing and automatically creates
 the challenge-bound attribution memo required by routes without a static memo.
+When `:expected_recipients` is set, the provider refuses a challenge whose primary
+`recipient` or any `splits` recipient is outside that allowlist — before signing a
+transaction or a zero-amount proof. Address comparison is checksum-agnostic. Omit
+the option to keep the previous unrestricted-recipient behaviour.
 A payment credential must never be created or attached after a redirect changed the
 request origin — `Req` follows redirects by default. `MPP.Client.Req.attach/2` refuses
 that path (`:cross_origin_redirect`, mpp-rs #379). Callers that drive

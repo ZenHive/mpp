@@ -13,6 +13,11 @@ defmodule MPP.Client.Providers.Tempo do
     * `:private_key` — required 32-byte private key, raw or hex encoded
     * `:rpc_url` — required Tempo JSON-RPC URL
     * `:expected_chain_id` — optional additional chain pin
+    * `:expected_recipients` — optional allowlist of payment recipients.
+      When set, both the primary `recipient` and every `methodDetails.splits`
+      recipient must be in the list (case-insensitive / checksum-agnostic).
+      A list that does not include the challenge's primary recipient is
+      rejected before any signing.
     * `:client_id` — optional attribution client identifier
     * `:fee_token` — optional fee token; defaults to the charge currency
     * `:req_options` — optional Req options for the chain-ID check
@@ -101,6 +106,7 @@ defmodule MPP.Client.Providers.Tempo do
     with {:ok, charge} <- Shared.parse_charge(challenge, "tempo"),
          {:ok, provider} <- parse_config(config),
          {:ok, details} <- method_details(charge),
+         :ok <- pin_recipients(charge, details, provider.expected_recipients),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
          {:ok, address} <- Signer.address_from_key(provider.private_key),
@@ -116,12 +122,14 @@ defmodule MPP.Client.Providers.Tempo do
          {:ok, rpc_url} <- Shared.required_config(config, :rpc_url),
          {:ok, req_options} <- req_options(config[:req_options]),
          {:ok, expected_chain_id} <- optional_chain_id(config[:expected_chain_id]),
+         {:ok, expected_recipients} <- expected_recipients(config[:expected_recipients]),
          {:ok, client_id} <- optional_string(config[:client_id], :client_id) do
       {:ok,
        %{
          private_key: private_key,
          rpc_url: rpc_url,
          expected_chain_id: expected_chain_id,
+         expected_recipients: expected_recipients,
          client_id: client_id,
          fee_token: config[:fee_token],
          req_options: req_options,
@@ -293,6 +301,41 @@ defmodule MPP.Client.Providers.Tempo do
     end
   end
 
+  defp pin_recipients(_charge, _details, nil), do: :ok
+
+  defp pin_recipients(%Charge{recipient: recipient}, details, allowed) do
+    with :ok <- require_allowed_recipient(recipient, allowed, :unexpected_primary_recipient) do
+      require_allowed_splits(split_recipients(details), allowed)
+    end
+  end
+
+  defp require_allowed_splits([], _allowed), do: :ok
+
+  defp require_allowed_splits([recipient | rest], allowed) do
+    with :ok <- require_allowed_recipient(recipient, allowed, :unexpected_split_recipient) do
+      require_allowed_splits(rest, allowed)
+    end
+  end
+
+  defp require_allowed_recipient(recipient, allowed, reason) do
+    case Address.normalize(recipient) do
+      {:ok, normalized} ->
+        if normalized in allowed, do: :ok, else: {:error, {reason, recipient}}
+
+      {:error, _reason} ->
+        {:error, {reason, recipient}}
+    end
+  end
+
+  defp split_recipients(%{"splits" => splits}) when is_list(splits) do
+    Enum.map(splits, fn
+      %{"recipient" => recipient} -> recipient
+      _split -> nil
+    end)
+  end
+
+  defp split_recipients(_details), do: []
+
   defp method_details(%Charge{method_details: nil}), do: {:ok, %{}}
   defp method_details(%Charge{method_details: details}) when is_map(details), do: {:ok, details}
 
@@ -364,6 +407,19 @@ defmodule MPP.Client.Providers.Tempo do
   defp optional_chain_id(nil), do: {:ok, nil}
   defp optional_chain_id(value) when is_integer(value) and value >= 0, do: {:ok, value}
   defp optional_chain_id(_other), do: {:error, {:invalid_config, :expected_chain_id}}
+
+  defp expected_recipients(nil), do: {:ok, nil}
+  defp expected_recipients(list) when is_list(list), do: normalize_expected_recipients(list, [])
+  defp expected_recipients(_other), do: {:error, {:invalid_config, :expected_recipients}}
+
+  defp normalize_expected_recipients([], allowed), do: {:ok, allowed}
+
+  defp normalize_expected_recipients([address | rest], allowed) do
+    case Address.normalize(address) do
+      {:ok, normalized} -> normalize_expected_recipients(rest, [normalized | allowed])
+      {:error, _reason} -> {:error, {:invalid_config, :expected_recipients}}
+    end
+  end
 
   defp optional_string(nil, _key), do: {:ok, nil}
   defp optional_string(value, _key) when is_binary(value), do: {:ok, value}

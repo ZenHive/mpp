@@ -15,6 +15,9 @@ defmodule MPP.Client.Providers.TempoTest do
   @private_key String.duplicate("11", 32)
   @token "0x20c0000000000000000000000000000000000001"
   @recipient "0x2222222222222222222222222222222222222222"
+  @split_recipient "0x3333333333333333333333333333333333333333"
+  @mixed_recipient "0xAaaABbBbCcCcDdDdEeEeFfFf0000111122223333"
+  @lower_recipient "0xaaaabbbbccccddddeeeeffff0000111122223333"
   @realm "payments.example.com"
   @challenge_id "challenge-attribution-123"
   @client_id "mpp-elixir-test-client"
@@ -438,15 +441,111 @@ defmodule MPP.Client.Providers.TempoTest do
     end
   end
 
+  describe "expected_recipients" do
+    test "refuses an unlisted primary recipient on the transaction path before signing" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      config = allowlist_config([@split_recipient])
+
+      assert {:error, {:unexpected_primary_recipient, @recipient}} = Tempo.pay(challenge(), config)
+    end
+
+    test "refuses an unlisted primary recipient on the zero-amount proof path before signing" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      config = allowlist_config([@split_recipient])
+
+      assert {:error, {:unexpected_primary_recipient, @recipient}} =
+               Tempo.pay(challenge(amount: "0"), config)
+    end
+
+    test "refuses a split recipient outside the allowlist before signing" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      outsider = "0x4444444444444444444444444444444444444444"
+
+      challenge =
+        challenge(
+          method_details: %{
+            "chainId" => @chain_id,
+            "splits" => [%{"recipient" => outsider, "amount" => "1"}]
+          }
+        )
+
+      assert {:error, {:unexpected_split_recipient, ^outsider}} =
+               Tempo.pay(challenge, allowlist_config([@recipient]))
+    end
+
+    test "rejects a config listing only split recipients as a missing primary" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      challenge =
+        challenge(
+          method_details: %{
+            "chainId" => @chain_id,
+            "splits" => [%{"recipient" => @split_recipient, "amount" => "1"}]
+          }
+        )
+
+      assert {:error, {:unexpected_primary_recipient, @recipient}} =
+               Tempo.pay(challenge, allowlist_config([@split_recipient]))
+    end
+
+    test "compares allowlist addresses case-insensitively" do
+      challenge = challenge(recipient: @lower_recipient)
+
+      assert {:ok, credential} = Tempo.pay(challenge, allowlist_config([@mixed_recipient]))
+      assert %{"type" => "transaction"} = credential.payload
+    end
+
+    test "pays when the primary and every split recipient are allowlisted" do
+      challenge =
+        challenge(
+          method_details: %{
+            "chainId" => @chain_id,
+            "splits" => [%{"recipient" => @split_recipient, "amount" => "1"}]
+          }
+        )
+
+      assert {:ok, credential} =
+               Tempo.pay(challenge, allowlist_config([@recipient, @split_recipient]))
+
+      assert %{"type" => "transaction"} = credential.payload
+    end
+
+    test "rejects malformed expected_recipients at config parse" do
+      assert {:error, {:invalid_config, :expected_recipients}} =
+               Tempo.pay(challenge(), Map.put(provider_config(), :expected_recipients, @recipient))
+
+      assert {:error, {:invalid_config, :expected_recipients}} =
+               Tempo.pay(challenge(), Map.put(provider_config(), :expected_recipients, ["not-an-address"]))
+    end
+
+    test "refuses a missing or invalid primary recipient before signing" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      assert {:error, {:unexpected_primary_recipient, "not-an-address"}} =
+               Tempo.pay(challenge(recipient: "not-an-address"), allowlist_config([@recipient]))
+    end
+
+    test "refuses a split entry that omits recipient before signing" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      challenge =
+        challenge(method_details: %{"chainId" => @chain_id, "splits" => [%{"amount" => "1"}]})
+
+      assert {:error, {:unexpected_split_recipient, nil}} =
+               Tempo.pay(challenge, allowlist_config([@recipient]))
+    end
+  end
+
   defp challenge(opts \\ []) do
     amount = Keyword.get(opts, :amount, "1250")
     details = Keyword.get(opts, :method_details, %{"chainId" => @chain_id})
+    recipient = Keyword.get(opts, :recipient, @recipient)
 
     {:ok, charge} =
       Charge.new(
         amount: amount,
         currency: @token,
-        recipient: @recipient,
+        recipient: recipient,
         method_details: details
       )
 
@@ -472,6 +571,10 @@ defmodule MPP.Client.Providers.TempoTest do
       gas_limit: @gas_limit,
       req_options: [plug: {Req.Test, __MODULE__}]
     }
+  end
+
+  defp allowlist_config(recipients) do
+    Map.put(provider_config(), :expected_recipients, recipients)
   end
 
   defp subscription_challenge(opts \\ []) do

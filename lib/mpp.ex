@@ -61,7 +61,7 @@ defmodule MPP do
     * `MPP.Transports.WebSocket` — WebSocket adapter: handshake challenge, session `needVoucher` metering, JSON-RPC `message` frames
     * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
-    * `MPP.Client.Providers.Tempo` — Built-in Tempo charge provider (chain-pinned, attribution-bound, machine-token route when advertised)
+    * `MPP.Client.Providers.Tempo` — Built-in Tempo charge provider (chain-pinned, optional recipient allowlist, attribution-bound, machine-token route when advertised)
     * `MPP.Client.Providers.Stripe` — Built-in Stripe charge provider (Shared Payment Tokens)
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
