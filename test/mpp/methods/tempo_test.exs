@@ -1452,16 +1452,16 @@ defmodule MPP.Methods.TempoTest do
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> String.downcase(raw_hex))
     end
 
-    test "complement-s encodings of the same signed tx reserve one slot and yield one receipt", %{charge: charge} do
+    test "alternate encodings of the same signed tx reserve one slot and yield one receipt", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
       canonical_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
-      complement_hex = with_complement_s(canonical_hex)
+      alternate_hex = with_alternate_signature_encoding(canonical_hex)
       canonical_hash = keccak256_hex(canonical_hex)
-      complement_hash = keccak256_hex(complement_hex)
+      alternate_hash = keccak256_hex(alternate_hex)
 
-      refute String.downcase(complement_hex) == String.downcase(canonical_hex)
-      refute canonical_hash == complement_hash
+      refute String.downcase(alternate_hex) == String.downcase(canonical_hex)
+      refute canonical_hash == alternate_hash
 
       test_pid = self()
 
@@ -1480,7 +1480,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => complement_hex}, charge)
+               Tempo.verify(%{"type" => "transaction", "signature" => alternate_hex}, charge)
 
       assert_received {:rpc_call, "eth_simulateV1", _}
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
@@ -1493,7 +1493,7 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
-      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> complement_hash)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> alternate_hash)
     end
 
     test "padded zero integers of the same signed tx share the canonical reserve key", %{charge: charge} do
@@ -3616,11 +3616,11 @@ defmodule MPP.Methods.TempoTest do
       charge: charge
     } do
       {:ok, canonical_hex} = build_hosted_client_tx()
-      complement_hex = with_complement_s(canonical_hex)
+      alternate_hex = with_alternate_signature_encoding(canonical_hex)
       {:ok, tx} = Transaction.deserialize(canonical_hex)
       fill_tx = hosted_fill_tx_map(tx)
 
-      refute String.downcase(complement_hex) == String.downcase(canonical_hex)
+      refute String.downcase(alternate_hex) == String.downcase(canonical_hex)
 
       test_pid = self()
 
@@ -3645,7 +3645,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => complement_hex}, charge)
+               Tempo.verify(%{"type" => "transaction", "signature" => alternate_hex}, charge)
 
       assert_received {:rpc_call, "eth_fillTransaction"}
       assert_received {:rpc_call, "eth_simulateV1"}

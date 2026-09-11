@@ -909,18 +909,18 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
 
-      complement_tx = TempoTestHelpers.with_complement_s(canonical_tx)
-      refute String.downcase(complement_tx) == String.downcase(canonical_tx)
-      refute canonical_hash == TempoTestHelpers.keccak256_hex(complement_tx)
+      alternate_tx = TempoTestHelpers.with_alternate_signature_encoding(canonical_tx)
+      refute String.downcase(alternate_tx) == String.downcase(canonical_tx)
+      refute canonical_hash == TempoTestHelpers.keccak256_hex(alternate_tx)
 
-      complement_body =
-        submit_credential!(config, challenge, %{"type" => "transaction", "signature" => complement_tx})
+      alternate_body =
+        submit_credential!(config, challenge, %{"type" => "transaction", "signature" => alternate_tx})
 
-      assert complement_body["type"] =~ "verification-failed"
-      assert complement_body["detail"] =~ "already used"
+      assert alternate_body["type"] =~ "verification-failed"
+      assert alternate_body["detail"] =~ "already used"
     end
 
-    test "Moderato rejects the complement-s encoding of a signed transaction", %{
+    test "Moderato rejects the alternate signature encoding of a signed transaction", %{
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
@@ -928,11 +928,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
       config = tempo_config(recipient_address, rpc_url, %{"store" => false})
       challenge = request_challenge!(config)
       {:ok, canonical_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
-      complement_tx = TempoTestHelpers.with_complement_s(canonical_tx)
+      alternate_tx = TempoTestHelpers.with_alternate_signature_encoding(canonical_tx)
 
-      refute String.downcase(complement_tx) == String.downcase(canonical_tx)
+      refute String.downcase(alternate_tx) == String.downcase(canonical_tx)
 
-      response = post_raw_transaction_sync(complement_tx, rpc_url)
+      response = post_raw_transaction_sync(alternate_tx, rpc_url)
 
       assert %{
                "error" => %{"code" => -32_602, "message" => "invalid transaction signature"},

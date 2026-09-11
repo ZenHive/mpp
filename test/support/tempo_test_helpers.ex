@@ -186,17 +186,17 @@ defmodule MPP.Test.TempoTestHelpers do
     "0x" <> Base.encode16(<<0x76>> <> ExRLP.encode(padded), case: :lower)
   end
 
-  @doc "Re-encode a 0x76 envelope with the complementary secp256k1 s scalar and flipped recovery id."
-  @spec with_complement_s(String.t()) :: String.t()
-  def with_complement_s(hex) when is_binary(hex) do
+  @doc "Re-encode a 0x76 envelope under the alternate valid encoding of the same sender signature."
+  @spec with_alternate_signature_encoding(String.t()) :: String.t()
+  def with_alternate_signature_encoding(hex) when is_binary(hex) do
     {:ok, binary} = Base.decode16(strip_0x(hex), case: :mixed)
     <<0x76, rlp::binary>> = binary
     fields = ExRLP.decode(rlp)
     {base, [<<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>]} = Enum.split(fields, -1)
     recid = if v >= 27, do: v - 27, else: v
-    complement_s = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s
+    alternate_s = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s
     new_v = if v >= 27, do: Bitwise.bxor(recid, 1) + 27, else: Bitwise.bxor(recid, 1)
-    sender_sig = <<r::unsigned-big-size(256), complement_s::unsigned-big-size(256), new_v::8>>
+    sender_sig = <<r::unsigned-big-size(256), alternate_s::unsigned-big-size(256), new_v::8>>
     "0x" <> Base.encode16(<<0x76>> <> ExRLP.encode(base ++ [sender_sig]), case: :lower)
   end
 end
