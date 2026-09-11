@@ -2901,7 +2901,7 @@ shipped_in = "7270edc1dcfb58250cc5ee812876609206564165"
 id = "112"
 phase = 10
 bundle = "session"
-status = "in_progress"
+status = "done"
 title = "Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882)"
 scores = { d = 5, b = 8, u = 8 }
 markers = ["security"]
@@ -2913,6 +2913,13 @@ model = "cursor-grok-4.6-high"
 body = """
 mppx #882 (commit 43ec92c, 2026-09-09, src/tempo/subscription/KeyAuthorization.ts + src/tempo/server/Subscription.ts) binds every subscription key authorization to its server-issued challenge by placing the 32-byte decoding of the challenge id in the ox/tempo KeyAuthorization `witness` field, and the server rejects any authorization whose witness does not match the credential's challenge. ox's tuple is `[chainId, keyType, keyId, expiry, limits, calls, witness?, isAdmin?, account?]` (wevm/ox src/tempo/KeyAuthorization.ts, fromTuple — the wire authority; mpp-rs has no subscription implementation, so ox + mppx are the only references). MPP.Methods.Tempo.KeyAuthorization currently decodes exactly six elements and verifies no witness, so current mppx subscription clients cannot activate against our server, and an authorization is not tied to the challenge that issued it. Port the mppx shape: decode the trailing optional fields per ox, require the witness on the subscription path, and thread the witness through the wallet RPC builders. Verify the signed digest and tuple layout against ox before shipping (CLAUDE.md wire-format rule). Full threat detail lives in private advisory GHSA-p9fv-9w58-95x2; keep public artifacts to the invariant.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1789116465065-d5244c71, 49c8b499b6af58ba8fe260c84e5df7652c6b739c)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1789116465065-d5244c71"
 created_at = "2026-09-11"
 started_at = "2026-09-11"
 scored_at = "2026-09-11"
+done_at = "2026-09-11"
+shipped_in = "49c8b499b6af58ba8fe260c84e5df7652c6b739c"
