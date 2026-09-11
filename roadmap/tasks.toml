@@ -2949,7 +2949,7 @@ scored_at = "2026-09-11"
 id = "114"
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "done"
 title = "Make the Tempo reserve key invariant under every valid re-encoding of a signed transaction: close the remaining channel, add a mutation canary, cover the hosted fee-payer path"
 scores = { d = 3, b = 5, u = 4 }
 markers = ["security"]
@@ -2964,6 +2964,13 @@ Class invariant, widened from Task 104 (shipped 0.16.2): the pre-broadcast reser
 Public-safe parts: (1) add a payment-security mutant to `test/mutation/security_mutations.exs` that reverts the reserve key to the caller-supplied bytes, run `mix mutation.security`, and record the new fingerprint in the ledger (the default test checks it) — this is what makes a future instance of the class fail in CI instead of in review; (2) extend the two-encodings-one-receipt property to the hosted `fee_payer_url` sponsored path (only the locally signed sponsored path is covered today); (3) extend the Moderato `:integration` test with the advisory's second encoding and record what the node does with it — either outcome is an observed fact, never a green skip. Cite `refs/mppx` (`adcf3b5`) and ox for any wire-level claim; the reference SDKs carry the same residual, so parity is not an argument against the fix.
 
 CHANGELOG line describes the shape ("Tempo dedup reserve key is stable across every valid re-encoding of a signed transaction"), not the hole. The advisory is published with the release that ships this."""
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1789121499860-c5bef4a3, 3a73c53e822d39b5de5cd841b024ec23f74ba3a9)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1789121499860-c5bef4a3"
 created_at = "2026-09-11"
 started_at = "2026-09-11"
 scored_at = "2026-09-11"
+done_at = "2026-09-11"
+shipped_in = "3a73c53e822d39b5de5cd841b024ec23f74ba3a9"
