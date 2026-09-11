@@ -17,6 +17,7 @@ defmodule MPP.PlugTest do
   alias MPP.Test.SessionSigning
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
+  alias MPP.Transports.JsonRpc
 
   defmodule MockMethod do
     @moduledoc false
@@ -1515,6 +1516,30 @@ defmodule MPP.PlugTest do
       refute close_conn.halted
       {:ok, close_receipt} = Headers.parse_receipt(get_resp_header(close_conn, "payment-receipt"))
       assert close_receipt.extensions["action"] == "close"
+    end
+
+    test "equal session vouchers return delta-too-small through HTTP, MCP, and JSON-RPC", %{config: config} do
+      refute session_call(config, session_open_payload(80)).halted
+      conn = session_call(config, session_voucher_payload(80))
+      assert conn.halted
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] == "https://paymentauth.org/problems/session/delta-too-small"
+
+      {:ok, credential} =
+        config
+        |> build_authorization_header(session_voucher_payload(80))
+        |> Headers.parse_credential()
+
+      request = %{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/call", "params" => %{}}
+      mcp_request = Map.put(request, "params", MPP.Mcp.attach_credential(%{}, credential))
+      rpc_request = JsonRpc.attach_credential(request, credential)
+
+      for {transport, request} <- [{MPP.Mcp, mcp_request}, {JsonRpc, rpc_request}] do
+        response = transport.call(request, config, fn _ -> flunk("rejected voucher reached the handler") end)
+        assert response["error"]["code"] == -32_043
+        assert response["error"]["data"]["httpStatus"] == 402
+        assert response["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/session/delta-too-small"
+      end
     end
 
     test "unknown action returns 402 invalid_payload", %{config: config} do

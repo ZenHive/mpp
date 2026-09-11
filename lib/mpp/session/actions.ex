@@ -121,7 +121,7 @@ defmodule MPP.Session.Actions do
 
     cond do
       payload.cumulative_amount == channel.cumulative_amount ->
-        {:ok, channel}
+        {:error, Errors.new(:delta_too_small, "voucher must increase the accepted cumulative amount")}
 
       payload.cumulative_amount < channel.cumulative_amount ->
         {:error, Errors.new(:invalid_payload, "voucher cumulativeAmount is not monotonic")}

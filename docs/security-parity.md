@@ -62,6 +62,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 
 | Upstream fix | What it guards | Our implementation |
 |---|---|---|
+| mpp-rs #415 (`d859a13`) session voucher acceptance | Every accepted voucher adds funds | `MPP.Session.Actions` enforces a positive delta and the configured minimum in the same atomic `Store.update/3` callback as the spend; deterministic concurrency tests cover identical and increasing vouchers (Task 111). |
 | mpp-rs #175 / #296 constant-time HMAC | Timing side-channel on challenge-ID compare | `Plug.Crypto.secure_compare/2` — `challenge.ex:85`, `body_digest.ex:71` |
 | mpp-rs #299 / mppx `ec1ad50` (#562) token cap | Memory-exhaustion DoS via oversized header token | `@max_token_len 16 KiB` enforced pre-parse at all 4 client-input sites — credential token, receipt token, challenge `request` param (Task 65, done), and `Accept-Payment` header (2026-07-08) |
 | mpp-specs #204 `hash`+`feePayer` MUST REJECT | Bypass of sponsorship validation via hash credential | `tempo.ex:139` rejects `type="hash"` when `fee_payer: true` |

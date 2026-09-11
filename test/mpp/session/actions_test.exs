@@ -165,12 +165,51 @@ defmodule MPP.Session.ActionsTest do
       assert String.contains?(over.type, "amount-exceeds-deposit")
     end
 
-    test "treats an equal cumulative voucher as idempotent", %{opts: opts, store: store} do
-      assert {:ok, first} = Actions.dispatch(open_payload(50), opts)
-      assert {:ok, again} = Actions.dispatch(voucher_payload(50), opts)
-      assert again.extensions["spent"] == first.extensions["spent"]
+    test "rejects an equal cumulative voucher even with a zero minimum delta", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      assert {:ok, before} = Store.get(store, @channel_id)
+
+      for minimum <- [0, "0", 1, 20] do
+        assert {:error, %Errors{} = error} =
+                 Actions.dispatch(voucher_payload(50), Keyword.put(opts, :min_voucher_delta, minimum))
+
+        assert error.type == "https://paymentauth.org/problems/session/delta-too-small"
+        assert error.status == 402
+        assert {:ok, ^before} = Store.get(store, @channel_id)
+      end
+    end
+
+    test "concurrent identical vouchers have exactly one winner", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(100), opts)
+      opts = Keyword.put(opts, :min_voucher_delta, 0)
+      payload = voucher_payload(200)
+
+      results = concurrent_vouchers([payload, payload], opts, store)
+      assert [{:ok, receipt}] = Enum.filter(results, &match?({:ok, _}, &1))
+      assert [{:error, %Errors{} = error}] = Enum.filter(results, &match?({:error, _}, &1))
+      assert error.type == "https://paymentauth.org/problems/session/delta-too-small"
+      assert receipt.extensions["spent"] == "20"
       assert {:ok, channel} = Store.get(store, @channel_id)
-      assert channel.units == 1
+      assert channel.cumulative_amount == 200
+      assert channel.spent == 20
+      assert channel.units == 2
+      assert channel.deposit == 1_000
+    end
+
+    test "concurrent increasing vouchers check the minimum delta atomically", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(100), opts)
+      opts = Keyword.put(opts, :min_voucher_delta, 100)
+
+      assert [{:ok, receipt}, {:error, %Errors{} = error}] =
+               concurrent_vouchers([voucher_payload(200), voucher_payload(250)], opts, store)
+
+      assert error.type == "https://paymentauth.org/problems/session/delta-too-small"
+      assert receipt.extensions["acceptedCumulative"] == "200"
+      assert {:ok, channel} = Store.get(store, @channel_id)
+      assert channel.cumulative_amount == 200
+      assert channel.spent == 20
+      assert channel.units == 2
+      assert channel.deposit == 1_000
     end
   end
 
@@ -420,6 +459,38 @@ defmodule MPP.Session.ActionsTest do
       assert receipt.extensions["acceptedCumulative"] == "50"
       assert {:ok, _} = Actions.verify(voucher_payload(80), session)
     end
+  end
+
+  defp concurrent_vouchers(payloads, opts, {ETSStore, store_opts}) do
+    server = Process.whereis(Keyword.fetch!(store_opts, :name))
+    :ok = :sys.suspend(server)
+
+    # Queue both updates before the real store processes either, in payload order.
+    tasks =
+      try do
+        Enum.map(payloads, fn payload ->
+          task =
+            Task.async(fn ->
+              receive do
+                :present -> Actions.dispatch(payload, opts)
+              end
+            end)
+
+          pid = task.pid
+          :erlang.trace(pid, true, [:send])
+          send(pid, :present)
+
+          assert_receive {:trace, ^pid, :send, {:"$gen_call", _, {:update, @channel_id, _}}, ^server},
+                         1_000
+
+          :erlang.trace(pid, false, [:send])
+          task
+        end)
+      after
+        :ok = :sys.resume(server)
+      end
+
+    Enum.map(tasks, &Task.await/1)
   end
 
   defp open_payload(amount) do
