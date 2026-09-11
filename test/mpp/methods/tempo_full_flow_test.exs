@@ -131,6 +131,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       assert receipt.reference == @tx_hash
 
       # Verify Payment-Receipt header
+      conn = Plug.Conn.send_resp(conn, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed} = Headers.parse_receipt(receipt_header)
       assert parsed.reference == receipt.reference

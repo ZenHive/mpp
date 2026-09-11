@@ -235,6 +235,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert receipt.timestamp
 
       # Verify Payment-Receipt header is set
+      conn_200 = Plug.Conn.send_resp(conn_200, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn_200, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference
@@ -646,6 +647,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert String.starts_with?(receipt.reference, "0x")
 
       # Verify Payment-Receipt header is set
+      conn = Plug.Conn.send_resp(conn, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference
@@ -793,6 +795,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert receipt.timestamp
 
       # Verify Payment-Receipt header
+      conn = Plug.Conn.send_resp(conn, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference

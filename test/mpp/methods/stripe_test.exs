@@ -2081,6 +2081,7 @@ defmodule MPP.Methods.StripeTest do
       assert receipt.external_id == "premium-001"
       assert receipt.reference == @pi_id
 
+      conn = Plug.Conn.send_resp(conn, 200, "ok")
       [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.external_id == "premium-001"

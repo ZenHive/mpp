@@ -111,9 +111,30 @@ defmodule MPP.Transports.JsonRpc.Plug do
 
   defp send_json(conn, status, body) do
     conn
+    |> register_response_headers(body)
     |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.put_resp_header("cache-control", "private, no-store")
     |> Plug.Conn.send_resp(status, Jason.encode!(body))
     |> Plug.Conn.halt()
+  end
+
+  defp register_response_headers(conn, body) do
+    receipt = get_in(body, ["_meta", JsonRpc.receipt_meta_key()])
+
+    Plug.Conn.register_before_send(conn, fn conn ->
+      if conn.status in 200..299 and is_map(receipt) do
+        conn
+        |> Plug.Conn.put_resp_header("payment-receipt", encode_receipt(receipt))
+        |> MPP.Plug.put_private_cache_control()
+      else
+        Plug.Conn.put_resp_header(conn, "cache-control", "no-store")
+      end
+    end)
+  end
+
+  defp encode_receipt(receipt) do
+    receipt
+    |> Map.delete("challengeId")
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
   end
 end

@@ -33,7 +33,7 @@ defmodule MPP.Plug do
 
   1. Request without `Authorization: Payment` → 402 with `WWW-Authenticate` challenge(s)
   2. Client pays off-band, retries with `Authorization: Payment <credential>`
-  3. Valid credential → request passes through with `Payment-Receipt` header + receipt in assigns
+  3. Valid credential → request passes through with receipt in assigns; successful responses get `Payment-Receipt`
   4. Invalid credential → 402 with fresh challenge(s) + RFC 9457 error body
 
   For JSON-RPC over HTTP (root-level `_meta`, not `Authorization` headers),
@@ -371,8 +371,8 @@ defmodule MPP.Plug do
 
   Returns `402` with fresh challenges when no valid credential is present;
   halts with an RFC 9457 problem body on verification failure; otherwise
-  passes the connection through with `:mpp_receipt` assigned and a
-  `Payment-Receipt` response header.
+  passes the connection through with `:mpp_receipt` assigned. The
+  `Payment-Receipt` response header is attached when a successful response is sent.
   """
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
@@ -446,12 +446,50 @@ defmodule MPP.Plug do
              :ok <- Replay.mark_used(store, credential) do
           conn
           |> Plug.Conn.assign(:mpp_receipt, receipt)
-          |> Plug.Conn.put_resp_header("payment-receipt", Headers.format_receipt(receipt))
-          |> Plug.Conn.put_resp_header("cache-control", "private")
+          |> register_receipt_headers(receipt)
         else
           {:error, %Errors{} = error} ->
             respond_error(conn, config, error)
         end
+    end
+  end
+
+  defp register_receipt_headers(conn, receipt) do
+    receipt_header = Headers.format_receipt(receipt)
+
+    Plug.Conn.register_before_send(conn, fn conn ->
+      if conn.status in 200..299 do
+        conn
+        |> Plug.Conn.put_resp_header("payment-receipt", receipt_header)
+        |> put_private_cache_control()
+      else
+        Plug.Conn.put_resp_header(conn, "cache-control", "no-store")
+      end
+    end)
+  end
+
+  @doc false
+  @spec put_private_cache_control(Plug.Conn.t()) :: Plug.Conn.t()
+  def put_private_cache_control(conn) do
+    value =
+      case Plug.Conn.get_resp_header(conn, "cache-control") do
+        [] -> "private"
+        ["max-age=0, private, must-revalidate"] -> "private"
+        values -> merge_private(values)
+      end
+
+    conn
+    |> Plug.Conn.delete_resp_header("cache-control")
+    |> Plug.Conn.put_resp_header("cache-control", value)
+  end
+
+  defp merge_private(values) do
+    value = Enum.join(values, ", ")
+
+    if value |> String.split(",") |> Enum.any?(&(String.downcase(String.trim(&1)) == "private")) do
+      value
+    else
+      value <> ", private"
     end
   end
 

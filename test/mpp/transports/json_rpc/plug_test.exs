@@ -53,11 +53,14 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
 
   @router_opts PaidRouter.init([])
 
-  defp post_rpc(body) do
-    :post
-    |> conn("/rpc", Jason.encode!(body))
-    |> put_req_header("content-type", "application/json")
-    |> PaidRouter.call(@router_opts)
+  defp post_rpc(body, response_headers \\ []) do
+    conn =
+      :post
+      |> conn("/rpc", Jason.encode!(body))
+      |> put_req_header("content-type", "application/json")
+
+    conn = Enum.reduce(response_headers, conn, fn {name, value}, conn -> put_resp_header(conn, name, value) end)
+    PaidRouter.call(conn, @router_opts)
   end
 
   defp decode(conn) do
@@ -97,6 +100,24 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
       assert paid["_meta"][JsonRpc.receipt_meta_key()]["status"] == "success"
       assert paid["_meta"][JsonRpc.receipt_meta_key()]["challengeId"] == challenge.id
       refute get_in(paid, ["result", "_meta"])
+      assert [_receipt] = get_resp_header(paid_conn, "payment-receipt")
+      assert get_resp_header(paid_conn, "cache-control") == ["private"]
+    end
+
+    test "successful payment preserves Cache-Control and appends private" do
+      unpaid = decode(post_rpc(%{"jsonrpc" => "2.0", "id" => 3, "method" => "eth_chainId", "params" => []}))
+      {:ok, [challenge]} = ClientTransport.get_challenges(unpaid)
+
+      request =
+        ClientTransport.set_credential(
+          %{"jsonrpc" => "2.0", "id" => 3, "method" => "eth_chainId", "params" => []},
+          %Credential{challenge: challenge, payload: %{"token" => "demo-token"}}
+        )
+
+      conn = post_rpc(request, [{"cache-control", "public, max-age=60"}])
+
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=60, private"]
+      assert [_receipt] = get_resp_header(conn, "payment-receipt")
     end
 
     test "verification-failed response keeps the JSON-RPC error on HTTP 200" do
@@ -116,6 +137,8 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
       assert body["error"]["code"] == -32_043
       assert body["error"]["data"]["httpStatus"] == 402
       assert [_challenge] = body["error"]["data"]["challenges"]
+      assert get_resp_header(conn, "payment-receipt") == []
+      assert get_resp_header(conn, "cache-control") == ["no-store"]
     end
   end
 

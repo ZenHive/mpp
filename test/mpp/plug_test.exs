@@ -174,6 +174,8 @@ defmodule MPP.PlugTest do
     PaymentPlug.call(conn, config)
   end
 
+  defp send_success(conn), do: Plug.Conn.send_resp(conn, 200, "ok")
+
   # Returns the first (or only) method entry from config.
   defp first_entry(config), do: hd(config.method_entries)
 
@@ -665,6 +667,8 @@ defmodule MPP.PlugTest do
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
+      assert get_resp_header(conn, "payment-receipt") == nil
+      conn = send_success(conn)
       receipt_header = get_resp_header(conn, "payment-receipt")
       assert receipt_header
       {:ok, receipt} = Headers.parse_receipt(receipt_header)
@@ -680,7 +684,35 @@ defmodule MPP.PlugTest do
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
+      conn = send_success(conn)
       assert get_resp_header(conn, "cache-control") == "private"
+    end
+
+    test "preserves downstream Cache-Control directives and appends private", %{
+      config: config,
+      auth_header: auth_header
+    } do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+        |> Plug.Conn.put_resp_header("cache-control", "public, max-age=60")
+        |> send_success()
+
+      assert get_resp_header(conn, "cache-control") == "public, max-age=60, private"
+    end
+
+    test "does not attach receipt to a downstream error response", %{config: config, auth_header: auth_header} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+        |> Plug.Conn.send_resp(500, "error")
+
+      assert get_resp_header(conn, "payment-receipt") == nil
+      assert get_resp_header(conn, "cache-control") == "no-store"
     end
 
     test "accepts the same credential twice when no shared replay store is configured", %{
@@ -715,6 +747,7 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       refute conn.halted
+      conn = send_success(conn)
       assert get_resp_header(conn, "payment-receipt")
     end
 
@@ -772,6 +805,7 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       refute conn.halted
+      conn = send_success(conn)
       assert get_resp_header(conn, "payment-receipt")
     end
 
@@ -1268,6 +1302,7 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       refute conn.halted
+      conn = send_success(conn)
       {:ok, receipt} = Headers.parse_receipt(get_resp_header(conn, "payment-receipt"))
       assert receipt.method == "mock"
       assert receipt.reference == "ref_1000"
@@ -1284,6 +1319,7 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       refute conn.halted
+      conn = send_success(conn)
       {:ok, receipt} = Headers.parse_receipt(get_resp_header(conn, "payment-receipt"))
       assert receipt.method == "mockb"
       assert receipt.reference == "ref_b_500"
@@ -1495,6 +1531,7 @@ defmodule MPP.PlugTest do
     test "open, voucher, topUp, and close succeed through the plug", %{config: config} do
       open_conn = session_call(config, session_open_payload(80))
       refute open_conn.halted
+      open_conn = send_success(open_conn)
       {:ok, open_receipt} = Headers.parse_receipt(get_resp_header(open_conn, "payment-receipt"))
       assert open_receipt.method == "mocksession"
       assert open_receipt.extensions["action"] == "open"
@@ -1503,17 +1540,20 @@ defmodule MPP.PlugTest do
 
       voucher_conn = session_call(config, session_voucher_payload(200))
       refute voucher_conn.halted
+      voucher_conn = send_success(voucher_conn)
       {:ok, voucher_receipt} = Headers.parse_receipt(get_resp_header(voucher_conn, "payment-receipt"))
       assert voucher_receipt.extensions["action"] == "voucher"
       assert voucher_receipt.extensions["spent"] == "20"
 
       top_up_conn = session_call(config, session_top_up_payload(100))
       refute top_up_conn.halted
+      top_up_conn = send_success(top_up_conn)
       {:ok, top_up_receipt} = Headers.parse_receipt(get_resp_header(top_up_conn, "payment-receipt"))
       assert top_up_receipt.extensions["action"] == "topUp"
 
       close_conn = session_call(config, session_close_payload(200))
       refute close_conn.halted
+      close_conn = send_success(close_conn)
       {:ok, close_receipt} = Headers.parse_receipt(get_resp_header(close_conn, "payment-receipt"))
       assert close_receipt.extensions["action"] == "close"
     end

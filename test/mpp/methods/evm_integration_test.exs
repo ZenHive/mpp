@@ -303,6 +303,7 @@ defmodule MPP.Methods.EVMIntegrationTest do
       assert receipt.reference == tx_hash
 
       # Verify Payment-Receipt header
+      conn = Plug.Conn.send_resp(conn, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference

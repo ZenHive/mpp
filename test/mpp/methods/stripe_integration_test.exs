@@ -147,6 +147,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
       assert receipt.timestamp
 
       # Verify Payment-Receipt header is set
+      conn_200 = Plug.Conn.send_resp(conn_200, 200, "ok")
       assert [receipt_header] = Plug.Conn.get_resp_header(conn_200, "payment-receipt")
       assert {:ok, parsed_receipt} = Headers.parse_receipt(receipt_header)
       assert parsed_receipt.reference == receipt.reference
