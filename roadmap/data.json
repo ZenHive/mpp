@@ -4601,7 +4601,7 @@
       "id": "114",
       "phase": 9,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Make the Tempo reserve key invariant under every valid re-encoding of a signed transaction: close the remaining channel, add a mutation canary, cover the hosted fee-payer path",
       "scores": {
         "d": 3,
@@ -4637,6 +4637,7 @@
       ],
       "body": "Class invariant, widened from Task 104 (shipped 0.16.2): the pre-broadcast reserve key of a Tempo transaction credential must be identical for every valid encoding of the same signed transaction — not only the two channels 104 normalized. The orchestrator content review of that landing found one remaining channel in `canonicalize_transaction/1`; its mechanism and the exact fix are in private advisory GHSA-65c4-v2vw-rr64 (Security → Advisories). Read it first; do not copy its mechanism into this file, the CHANGELOG, commit messages, or code comments beyond what the fix itself needs.\n\nPublic-safe parts: (1) add a payment-security mutant to `test/mutation/security_mutations.exs` that reverts the reserve key to the caller-supplied bytes, run `mix mutation.security`, and record the new fingerprint in the ledger (the default test checks it) — this is what makes a future instance of the class fail in CI instead of in review; (2) extend the two-encodings-one-receipt property to the hosted `fee_payer_url` sponsored path (only the locally signed sponsored path is covered today); (3) extend the Moderato `:integration` test with the advisory's second encoding and record what the node does with it — either outcome is an observed fact, never a green skip. Cite `refs/mppx` (`adcf3b5`) and ox for any wire-level claim; the reference SDKs carry the same residual, so parity is not an argument against the fix.\n\nCHANGELOG line describes the shape (\"Tempo dedup reserve key is stable across every valid re-encoding of a signed transaction\"), not the hole. The advisory is published with the release that ships this.",
       "created_at": "2026-09-11",
+      "started_at": "2026-09-11",
       "scored_at": "2026-09-11",
       "cross_repo": []
     }

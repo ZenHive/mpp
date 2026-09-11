@@ -2949,7 +2949,7 @@ scored_at = "2026-09-11"
 id = "114"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Make the Tempo reserve key invariant under every valid re-encoding of a signed transaction: close the remaining channel, add a mutation canary, cover the hosted fee-payer path"
 scores = { d = 3, b = 5, u = 4 }
 markers = ["security"]
@@ -2965,4 +2965,5 @@ Public-safe parts: (1) add a payment-security mutant to `test/mutation/security_
 
 CHANGELOG line describes the shape ("Tempo dedup reserve key is stable across every valid re-encoding of a signed transaction"), not the hole. The advisory is published with the release that ships this."""
 created_at = "2026-09-11"
+started_at = "2026-09-11"
 scored_at = "2026-09-11"
