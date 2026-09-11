@@ -38,6 +38,7 @@ defmodule MPP.Methods.XRPL do
   alias MPP.Intents.Charge
   alias MPP.Methods.Shared
   alias MPP.Methods.XRPL.Codec
+  alias MPP.Methods.XRPL.RPC
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -125,7 +126,7 @@ defmodule MPP.Methods.XRPL do
 
   # Draft :365-378, :264-275. Bound hex before decoding or making RPC calls.
   defp proof(%{"type" => "hash", "hash" => hash}) do
-    if hex?(hash, 64), do: {:ok, {:hash, String.upcase(hash)}}, else: malformed()
+    if RPC.hex?(hash, 64), do: {:ok, {:hash, String.upcase(hash)}}, else: malformed()
   end
 
   defp proof(%{"type" => "transaction", "blob" => blob}) do
@@ -141,9 +142,9 @@ defmodule MPP.Methods.XRPL do
 
   defp prepare({:blob, blob, tx}, charge, config) do
     with :ok <- fields(tx, tx["Amount"], charge, config),
-         true <- signed?(tx),
+         true <- Codec.signed?(tx),
          true <- is_integer(tx["LastLedgerSequence"]) and tx["LastLedgerSequence"] > 0,
-         :ok <- unused(config, "tx:" <> blob_hash(blob)) do
+         :ok <- unused(config, "tx:" <> RPC.blob_hash(blob)) do
       {:ok, {:blob, blob}}
     else
       {:error, %Errors{} = error} -> {:error, error}
@@ -151,66 +152,26 @@ defmodule MPP.Methods.XRPL do
     end
   end
 
-  defp signed?(%{"TxnSignature" => signature}), do: is_binary(signature) and byte_size(signature) > 0
-  defp signed?(%{"Signers" => signers}), do: is_list(signers) and signers != []
-  defp signed?(_), do: false
-
   defp submit({:hash, hash}, _config), do: {:ok, hash}
 
   defp submit({:blob, blob}, config) do
-    expected_hash = blob_hash(blob)
-
-    with {:ok, result} <- rpc(config, "submit", %{"tx_blob" => blob}),
-         true <- result["engine_result"] in ["tesSUCCESS", "terQUEUED"],
-         hash when is_binary(hash) <- get_in(result, ["tx_json", "hash"]),
-         true <- hex?(hash, 64) and String.upcase(hash) == expected_hash do
-      {:ok, expected_hash}
-    else
-      _ -> failed()
+    case RPC.submit_blob(blob, config) do
+      {:ok, hash} -> {:ok, hash}
+      :error -> failed()
     end
   end
 
-  # XRPLF/rippled include/xrpl/protocol/HashPrefix.h: TransactionId = "TXN\0".
-  defp blob_hash(blob) do
-    <<digest::binary-32, _::binary>> = :crypto.hash(:sha512, <<"TXN", 0>> <> Base.decode16!(blob))
-    Base.encode16(digest)
-  end
-
   defp network(config) do
-    with {:ok, %{"info" => %{"network_id" => id}}} <- rpc(config, "server_info", %{}),
-         true <- id == @networks[config["network"]] do
-      :ok
-    else
-      _ -> failed()
+    case RPC.check_network(config) do
+      :ok -> :ok
+      :error -> failed()
     end
   end
 
   defp await_transaction(hash, config) do
-    deadline = System.monotonic_time(:millisecond) + timeout(config)
-    poll(hash, config, deadline, 0)
-  end
-
-  defp poll(hash, config, deadline, misses) do
-    case rpc(config, "tx", %{"transaction" => hash, "binary" => false}) do
-      {:ok, %{"validated" => true} = result} -> {:ok, result}
-      {:ok, %{"error" => "txnNotFound"}} when misses < 2 -> retry(hash, config, deadline, misses + 1)
-      {:ok, %{"validated" => false}} -> retry(hash, config, deadline, misses)
-      _ -> failed()
-    end
-  end
-
-  defp retry(hash, config, deadline, misses) do
-    delay = Map.get(config, "poll_interval_ms", 1000)
-
-    if System.monotonic_time(:millisecond) + delay < deadline do
-      receive do
-      after
-        delay -> :ok
-      end
-
-      poll(hash, config, deadline, misses)
-    else
-      failed()
+    case RPC.await_validated(hash, config) do
+      {:ok, result} -> {:ok, result}
+      :error -> failed()
     end
   end
 
@@ -263,7 +224,7 @@ defmodule MPP.Methods.XRPL do
   # Draft :442-456. Require the binding on both paths, including older pull clients.
   defp invoice_matches?(invoice, config) do
     expected = config["invoiceId"] || derived_invoice(config["challenge_id"])
-    hex?(invoice, 64) and hex?(expected, 64) and String.upcase(invoice) == String.upcase(expected)
+    RPC.hex?(invoice, 64) and RPC.hex?(expected, 64) and String.upcase(invoice) == String.upcase(expected)
   end
 
   defp derived_invoice(id) do
@@ -344,7 +305,7 @@ defmodule MPP.Methods.XRPL do
         map_size(asset) == 2 and currency_code?(code) and Codec.address?(issuer)
 
       {:ok, %{"mpt_issuance_id" => id} = asset} ->
-        map_size(asset) == 1 and hex?(id, 48)
+        map_size(asset) == 1 and RPC.hex?(id, 48)
 
       _ ->
         false
@@ -353,7 +314,7 @@ defmodule MPP.Methods.XRPL do
 
   defp valid_currency?(_, _), do: false
 
-  defp currency_code?(code) when is_binary(code), do: code != "XRP" and (byte_size(code) == 3 or hex?(code, 40))
+  defp currency_code?(code) when is_binary(code), do: code != "XRP" and (byte_size(code) == 3 or RPC.hex?(code, 40))
   defp currency_code?(_), do: false
 
   # Draft :391-409, :584-587. No expiry or no atomic store is never unbounded.
@@ -363,7 +324,8 @@ defmodule MPP.Methods.XRPL do
          {:ok, date, _} <- DateTime.from_iso8601(expires),
          remaining when remaining > 0 <- DateTime.diff(date, DateTime.utc_now(), :millisecond),
          retention when is_integer(retention) <- config["store_retention_ms"],
-         true <- is_integer(timeout(config)) and timeout(config) > 0 and retention >= remaining + timeout(config) do
+         timeout = Map.get(config, "poll_timeout_ms", 60_000),
+         true <- is_integer(timeout) and timeout > 0 and retention >= remaining + timeout do
       :ok
     else
       _ -> invalid_challenge()
@@ -371,33 +333,30 @@ defmodule MPP.Methods.XRPL do
   end
 
   defp valid_config?(config) do
-    is_map(config) and valid_url?(config["rpc_url"]) and Map.has_key?(@networks, config["network"]) and
+    is_map(config) and RPC.valid_url?(config["rpc_url"]) and Map.has_key?(@networks, config["network"]) and
       valid_store?(config) and valid_limits?(config) and valid_details?(config)
   end
 
   defp valid_limits?(config) do
-    Enum.all?([config["store_retention_ms"], timeout(config), Map.get(config, "poll_interval_ms", 1000)], fn value ->
-      is_integer(value) and value > 0
-    end)
+    Enum.all?(
+      [
+        config["store_retention_ms"],
+        Map.get(config, "poll_timeout_ms", 60_000),
+        Map.get(config, "poll_interval_ms", 1000)
+      ],
+      fn value ->
+        is_integer(value) and value > 0
+      end
+    )
   end
 
   defp valid_details?(config) do
     Enum.all?(~w(destinationTag sourceTag), fn key ->
       not Map.has_key?(config, key) or (is_integer(config[key]) and config[key] in 0..4_294_967_295)
     end) and
-      (not Map.has_key?(config, "invoiceId") or hex?(config["invoiceId"], 64)) and
+      (not Map.has_key?(config, "invoiceId") or RPC.hex?(config["invoiceId"], 64)) and
       valid_memos?(Map.get(config, "memos", []))
   end
-
-  defp valid_url?(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: "https", host: host, userinfo: nil} when is_binary(host) and host != "" -> true
-      %URI{scheme: "http", host: host} when host in ["localhost", "127.0.0.1", "::1"] -> true
-      _ -> false
-    end
-  end
-
-  defp valid_url?(_), do: false
 
   defp valid_store?(%{"store" => {ConCacheStore, opts}} = config) when is_list(opts), do: local_store?(config)
   defp valid_store?(%{"store" => ConCacheStore} = config), do: local_store?(config)
@@ -431,26 +390,6 @@ defmodule MPP.Methods.XRPL do
   end
 
   defp store_key(config, suffix), do: "mpp:xrpl:#{config["network"]}:#{suffix}"
-  defp timeout(config), do: Map.get(config, "poll_timeout_ms", 60_000)
-
-  defp rpc(config, method, params) do
-    opts =
-      Keyword.merge(Map.get(config, "req_options", []),
-        json: %{"method" => method, "params" => [Map.put(params, "api_version", 1)]},
-        retry: false,
-        receive_timeout: timeout(config)
-      )
-
-    case Req.post(config["rpc_url"], opts) do
-      {:ok, %{status: 200, body: %{"result" => result}}} when is_map(result) -> {:ok, result}
-      _ -> failed()
-    end
-  end
-
-  defp hex?(value, size) when is_binary(value) and byte_size(value) == size,
-    do: match?({:ok, _}, Base.decode16(value, case: :mixed))
-
-  defp hex?(_, _), do: false
   # Draft :550-565 introduces no new error types; never disclose ledger results.
   defp failed, do: {:error, Errors.new(:verification_failed, "XRPL payment verification failed")}
   defp invalid_challenge, do: {:error, Errors.new(:invalid_challenge, "XRPL challenge is invalid")}

@@ -2,7 +2,7 @@
 
 `MPP.Methods.XRPL` verifies XRP (integer drops), issued currencies and MPTs through
 XRPL JSON-RPC. It accepts signed `transaction`/`blob` credentials and submitted
-`hash`/`hash` credentials. Session intents and client-side providers are not included.
+`hash`/`hash` credentials. Client-side providers are not included.
 
 ```elixir
 plug MPP.Plug,
@@ -28,6 +28,8 @@ errors fail closed. `false` and an absent store are rejected. A configured
 `MPP.Tempo.ConCacheStore` is permitted only on testnet/devnet with explicit
 `"allow_process_local_store" => true`; this is a development exception to durable
 storage, not a production topology.
+
+Session intents are `MPP.Methods.XRPL.Session` — see [XRPL session](xrpl-session.md).
 
 `MPP.Verifier` supplies the authenticated challenge ID, expiry and source DID.
 The source must be `did:pkh:xrpl:0:<address>` on mainnet, `:1:` on testnet or `:2:`

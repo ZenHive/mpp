@@ -240,6 +240,12 @@ defmodule MPP.Session.ActionsTest do
   end
 
   describe "signature verification" do
+    test "skips EIP-712 when the caller already verified the signature", %{opts: opts} do
+      payload = 50 |> open_payload() |> Map.put("signature", "0x" <> String.duplicate("ab", 65))
+      assert {:ok, receipt} = Actions.dispatch(payload, Keyword.put(opts, :verify_signature, :already_verified))
+      assert receipt.extensions["action"] == "open"
+    end
+
     test "accepts the mpp-rs TIP-1034 voucher vector and rejects a tampered one", %{opts: opts} do
       signed_opts =
         opts
@@ -480,7 +486,7 @@ defmodule MPP.Session.ActionsTest do
           :erlang.trace(pid, true, [:send])
           send(pid, :present)
 
-          assert_receive {:trace, ^pid, :send, {:"$gen_call", _, {:update, @channel_id, _}}, ^server},
+          assert_receive {:trace, ^pid, :send, {:"$gen_call", _, {:update, @channel_id, @channel_id, _}}, ^server},
                          1_000
 
           :erlang.trace(pid, false, [:send])

@@ -1,12 +1,12 @@
 defmodule MPP.Session.Channel do
   @moduledoc """
-  State and TIP-1034 precompile identity for an MPP payment channel.
+  State and identity for an MPP payment channel.
 
-  Channel IDs match the Tempo TIP-20 Channel Reserve precompile:
-
-      keccak256(abi.encode(payer, payee, operator, token, salt,
-                           authorizedSigner, expiringNonceHash,
-                           escrowContract, chainId))
+  Tempo TIP-1034 channel IDs are keccak256 of the ABI-encoded identity
+  descriptor. XRPL PayChannel IDs are SHA-512Half of the `0x0078` space key,
+  source AccountID, destination AccountID and create Sequence (or TicketSequence),
+  per the PayChannel ledger-entry ID format. `new/1` accepts EVM addresses or
+  XRPL classic addresses; `token` may be an EVM address or `"XRP"`.
 
   Channel lifecycle is deliberately small: a new channel is `:open`, may be
   activated once, and an active channel may be closed once.
@@ -15,6 +15,8 @@ defmodule MPP.Session.Channel do
   import Bitwise, only: [<<<: 2]
 
   alias Cartouche.Hash
+  alias MPP.Methods.XRPL.Codec
+  alias MPP.Methods.XRPL.RPC
   alias Onchain.Address
   alias Onchain.Hex
 
@@ -217,6 +219,28 @@ defmodule MPP.Session.Channel do
     end
   end
 
+  @doc "Compute an XRPL PayChannel ID from funder, destination and create sequence."
+  @spec compute_xrpl_id(String.t(), String.t(), non_neg_integer()) :: {:ok, String.t()} | {:error, term()}
+  def compute_xrpl_id(account, destination, sequence)
+      when is_binary(account) and is_binary(destination) and is_integer(sequence) and sequence >= 0 do
+    with {:ok, account_id} <- Codec.account_id(account),
+         {:ok, destination_id} <- Codec.account_id(destination) do
+      {:ok, Hex.encode(RPC.sha512_half(<<0x00, 0x78>> <> account_id <> destination_id <> <<sequence::unsigned-32>>))}
+    else
+      _ -> {:error, :invalid_channel_id_parameters}
+    end
+  end
+
+  def compute_xrpl_id(_account, _destination, _sequence), do: {:error, :invalid_channel_id_parameters}
+
+  @doc "Return the 64-character uppercase hex form used on the XRPL wire."
+  @spec to_xrpl_id(term()) :: {:ok, String.t()} | {:error, {:invalid_channel_id, term()}}
+  def to_xrpl_id(channel_id) do
+    with {:ok, "0x" <> hex} <- normalize_id(channel_id) do
+      {:ok, String.upcase(hex)}
+    end
+  end
+
   @doc "Normalize a 32-byte channel ID to lowercase, `0x`-prefixed hex."
   @spec normalize_id(term()) :: {:ok, String.t()} | {:error, {:invalid_channel_id, term()}}
   def normalize_id(channel_id) do
@@ -241,11 +265,17 @@ defmodule MPP.Session.Channel do
   def action_from_wire("close"), do: {:ok, :close}
   def action_from_wire(_value), do: {:error, :invalid_action}
 
+  defp normalize_address("XRP", :token), do: {:ok, "XRP"}
+
   defp normalize_address(address, field) do
     case Address.normalize(address) do
       {:ok, normalized} -> {:ok, normalized}
-      {:error, _reason} -> {:error, {:invalid_address, field}}
+      {:error, _reason} -> xrpl_address(address, field)
     end
+  end
+
+  defp xrpl_address(address, field) do
+    if Codec.address?(address), do: {:ok, address}, else: {:error, {:invalid_address, field}}
   end
 
   defp normalize_address_bytes(address, field) do

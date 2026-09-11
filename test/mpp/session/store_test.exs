@@ -113,6 +113,21 @@ defmodule MPP.Session.StoreTest do
       assert ETSStore.child_spec().id == {ETSStore, ETSStore}
       assert ETSStore.child_spec(name: :custom_session_store).id == {ETSStore, :custom_session_store}
     end
+
+    test "namespaces keys by network so the same channel ID cannot collide", %{store: {ETSStore, opts}} do
+      testnet = {ETSStore, Keyword.put(opts, :network, "testnet")}
+      mainnet = {ETSStore, Keyword.put(opts, :network, "mainnet")}
+      channel = channel()
+
+      assert :ok = Store.put(testnet, channel)
+      assert :not_found = Store.get(mainnet, channel.channel_id)
+      assert {:ok, ^channel} = Store.get(testnet, channel.channel_id)
+
+      mainnet_channel = %{channel | deposit: 9}
+      assert :ok = Store.put(mainnet, mainnet_channel)
+      assert {:ok, ^channel} = Store.get(testnet, channel.channel_id)
+      assert {:ok, ^mainnet_channel} = Store.get(mainnet, channel.channel_id)
+    end
   end
 
   defp channel do

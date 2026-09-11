@@ -1,0 +1,228 @@
+defmodule MPP.Methods.XRPL.SessionIntegrationTest do
+  @moduledoc """
+  Live testnet oracle for XRPL payment-channel sessions.
+
+  Claim signatures are produced by xrpl.js `authorizeChannel` and checked
+  both locally and via `channel_verify`:
+  https://xrpl.org/docs/references/protocol/transactions/types/paymentchannelclaim
+  https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/payment-channel-methods/channel_verify
+  """
+  use ExUnit.Case, async: false
+
+  alias MPP.Intents.Session
+  alias MPP.Methods.XRPL.Claim
+  alias MPP.Methods.XRPL.Session, as: XRPLSession
+  alias MPP.Session.Channel
+  alias MPP.Session.ETSStore
+  alias MPP.Session.Store
+
+  @moduletag :integration
+  @moduletag timeout: 180_000
+
+  setup_all do
+    url = System.get_env("XRPL_TESTNET_RPC_URL")
+
+    if is_nil(url) or System.find_executable("node") == nil or
+         not File.dir?(System.get_env("XRPL_JS_PATH") || "tmp/xrpl/node_modules/xrpl") do
+      flunk("""
+      Missing XRPL testnet setup. Run from the repository root:
+        npm install --prefix tmp/xrpl --no-audit --no-fund xrpl@4.6.0
+        export XRPL_TESTNET_RPC_URL="https://s.altnet.rippletest.net:51234/"
+        export XRPL_JS_PATH="$PWD/tmp/xrpl/node_modules/xrpl"
+        mix test test/mpp/methods/xrpl_session_integration_test.exs --include integration
+      Wallets are generated and funded through https://faucet.altnet.rippletest.net/accounts.
+      Setup: https://xrpl.org/resources/dev-tools/xrp-faucets
+      No wallet secret is sent to the RPC or written to a fixture.
+      """)
+    end
+
+    assert %{"info" => %{"network_id" => 1}} = rpc!(url, "server_info", %{})
+    payer = funded_wallet!()
+    recipient = funded_wallet!()
+    {:ok, url: url, payer: payer, recipient: recipient}
+  end
+
+  setup do
+    name = String.to_atom("xrpl_session_live_#{System.unique_integer([:positive])}")
+    start_supervised!(ETSStore.child_spec(name: name))
+    {:ok, store: {ETSStore, [name: name]}}
+  end
+
+  test "open, voucher and close against a real payment channel", context do
+    session = session(context)
+    create = payment_channel_create(context)
+    signed = sign!(context, create)
+    channel_id = predicted_id!(context, signed["Sequence"])
+    open_sig = authorize!(context, channel_id, "100000")
+
+    verified =
+      rpc!(context.url, "channel_verify", %{
+        "channel_id" => channel_id,
+        "signature" => open_sig,
+        "public_key" => context.payer["publicKey"],
+        "amount" => "100000"
+      })
+
+    assert verified["signature_verified"] == true
+    assert :ok = Claim.verify(channel_id, 100_000, open_sig, context.payer["publicKey"])
+
+    assert {:ok, open} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => signed["tx_blob"], "amount" => "100000", "signature" => open_sig},
+               session
+             )
+
+    assert open.extensions["channelId"] == channel_id
+    assert open.extensions["txHash"] == signed["hash"]
+    ledger = rpc!(context.url, "tx", %{"transaction" => signed["hash"]})
+    assert ledger["validated"] == true
+    assert ledger["meta"]["TransactionResult"] == "tesSUCCESS"
+
+    voucher_sig = authorize!(context, channel_id, "200000")
+
+    assert {:ok, voucher} =
+             XRPLSession.verify(
+               %{"action" => "voucher", "channelId" => channel_id, "amount" => "200000", "signature" => voucher_sig},
+               session
+             )
+
+    assert voucher.extensions["cumulative"] == "200000"
+    refute Map.has_key?(voucher.extensions, "txHash")
+    assert {:ok, channel} = Store.get({ETSStore, [name: store_name(context.store), network: "testnet"]}, channel_id)
+    assert channel.cumulative_amount == 200_000
+    assert channel.spent == 200_000
+
+    tampered =
+      String.replace_prefix(voucher_sig, String.slice(voucher_sig, 0, 2), flip_hex(String.slice(voucher_sig, 0, 2)))
+
+    assert {:error, %MPP.Errors{type: "https://paymentauth.org/problems/session/invalid-signature"}} =
+             XRPLSession.verify(
+               %{"action" => "voucher", "channelId" => channel_id, "amount" => "300000", "signature" => tampered},
+               session
+             )
+
+    assert {:ok, closed} =
+             XRPLSession.verify(
+               %{"action" => "close", "channelId" => channel_id, "amount" => "200000", "signature" => voucher_sig},
+               session
+             )
+
+    assert closed.extensions["action"] == "close"
+
+    assert {:ok, %Channel{status: :closed}} =
+             Store.get({ETSStore, [name: store_name(context.store), network: "testnet"]}, channel_id)
+  end
+
+  defp session(context) do
+    {:ok, session} =
+      Session.new(
+        amount: "100000",
+        currency: "XRP",
+        recipient: context.recipient["address"],
+        method_details: %{
+          "rpc_url" => context.url,
+          "network" => "testnet",
+          "credential_source" => "did:pkh:xrpl:1:" <> context.payer["address"],
+          "session_store" => context.store,
+          "min_settle_delay" => 3600
+        }
+      )
+
+    session
+  end
+
+  defp payment_channel_create(context) do
+    %{
+      "TransactionType" => "PaymentChannelCreate",
+      "Account" => context.payer["address"],
+      "Destination" => context.recipient["address"],
+      "Amount" => "1000000",
+      "SettleDelay" => 3600,
+      "PublicKey" => context.payer["publicKey"]
+    }
+  end
+
+  defp predicted_id!(context, sequence) do
+    {:ok, id} = Channel.compute_xrpl_id(context.payer["address"], context.recipient["address"], sequence)
+    {:ok, wire} = Channel.to_xrpl_id(id)
+    wire
+  end
+
+  defp authorize!(context, channel_id, amount) do
+    js!(%{
+      "seed" => context.payer["seed"],
+      "claim" => %{"channel" => channel_id, "amount" => amount}
+    })["signature"]
+  end
+
+  defp sign!(context, tx) do
+    info = account!(context.url, context.payer["address"], System.monotonic_time(:millisecond) + 30_000)
+    ledger = rpc!(context.url, "ledger_current", %{})
+
+    tx =
+      Map.merge(tx, %{
+        "Fee" => "12",
+        "Sequence" => info["account_data"]["Sequence"],
+        "LastLedgerSequence" => ledger["ledger_current_index"] + 20
+      })
+
+    signed = js!(%{"seed" => context.payer["seed"], "tx" => tx})
+    Map.put(signed, "Sequence", tx["Sequence"])
+  end
+
+  defp account!(url, address, deadline) do
+    result = rpc!(url, "account_info", %{"account" => address, "ledger_index" => "validated"})
+
+    case result do
+      %{"account_data" => %{"Sequence" => sequence}} when is_integer(sequence) ->
+        result
+
+      %{"error" => "actNotFound"} ->
+        assert System.monotonic_time(:millisecond) < deadline, "Faucet account did not reach a validated ledger"
+
+        receive do
+        after
+          1000 -> :ok
+        end
+
+        account!(url, address, deadline)
+
+      other ->
+        flunk("XRPL account_info failed: #{inspect(other)}")
+    end
+  end
+
+  defp funded_wallet! do
+    wallet = js!(%{})
+
+    assert {:ok, %{status: 200, body: body}} =
+             Req.post("https://faucet.altnet.rippletest.net/accounts",
+               json: %{"destination" => wallet["address"]},
+               retry: false,
+               receive_timeout: 60_000
+             )
+
+    assert body["account"]["address"] == wallet["address"]
+    wallet
+  end
+
+  defp js!(input) do
+    {output, status} = System.cmd("node", ["test/support/xrpl/sign.cjs", Jason.encode!(input)], stderr_to_stdout: true)
+    assert status == 0, "XRPL signing helper failed; install xrpl@4.6.0 and set XRPL_JS_PATH"
+    Jason.decode!(output)
+  end
+
+  defp rpc!(url, method, params) do
+    assert {:ok, %{status: 200, body: %{"result" => result}}} =
+             Req.post(url, json: %{"method" => method, "params" => [Map.put(params, "api_version", 1)]}, retry: false)
+
+    result
+  end
+
+  defp store_name({ETSStore, opts}), do: Keyword.fetch!(opts, :name)
+
+  defp flip_hex(<<a, b>> = pair) do
+    flipped = if a == ?0, do: "1" <> <<b>>, else: "0" <> <<b>>
+    if flipped == pair, do: "F" <> <<b>>, else: flipped
+  end
+end

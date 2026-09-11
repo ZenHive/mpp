@@ -142,6 +142,10 @@ validated-ledger settlement, exact amounts and challenge-bound InvoiceID attribu
 It requires an explicitly configured atomic, durable shared store. See
 [XRPL configuration and live test setup](docs/xrpl-charge.md).
 
+`MPP.Methods.XRPL.Session` maps the session intent onto XRP payment channels:
+open submits `PaymentChannelCreate`, voucher and close are off-ledger claims
+over a cumulative drop total. See [XRPL session](docs/xrpl-session.md).
+
 ### NEAR Intents (1Click)
 
 Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). A configured `"store"` must implement atomic `MPP.Tempo.Store.update/3`. There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
@@ -308,6 +312,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Methods.XRPL` | XRPL signed-blob and hash charge verification via JSON-RPC |
+| `MPP.Methods.XRPL.Session` | XRPL payment-channel session verification (open / voucher / close) |
 | `MPP.Methods.NearIntents` | NEAR Intents hash-credential charges via 1Click Swap + origin RPC |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |

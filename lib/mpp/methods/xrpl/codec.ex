@@ -1,6 +1,6 @@
 defmodule MPP.Methods.XRPL.Codec do
   @moduledoc """
-  Bounded XRPL Payment decoder for pre-submission field verification.
+  Bounded XRPL Payment and PaymentChannelCreate decoder.
 
   Field ordinals and encodings follow https://xrpl.org/docs/references/protocol/binary-format
   and XRPLF/xrpl.js `packages/ripple-binary-codec/src/enums/definitions.json`.
@@ -21,15 +21,20 @@ defmodule MPP.Methods.XRPL.Codec do
     {2, 2} => "Flags",
     {2, 3} => "SourceTag",
     {2, 4} => "Sequence",
+    {2, 10} => "Expiration",
     {2, 14} => "DestinationTag",
     {2, 27} => "LastLedgerSequence",
+    {2, 36} => "CancelAfter",
+    {2, 39} => "SettleDelay",
     {2, 41} => "TicketSequence",
     {5, 9} => "AccountTxnID",
     {5, 17} => "InvoiceID",
+    {5, 22} => "Channel",
     {6, 1} => "Amount",
     {6, 8} => "Fee",
     {6, 9} => "SendMax",
     {6, 10} => "DeliverMin",
+    {7, 1} => "PublicKey",
     {7, 3} => "SigningPubKey",
     {7, 4} => "TxnSignature",
     {7, 12} => "MemoType",
@@ -44,35 +49,63 @@ defmodule MPP.Methods.XRPL.Codec do
     {18, 1} => "Paths"
   }
 
+  @transaction_types %{0 => "Payment", 13 => "PaymentChannelCreate"}
+
   @doc "Decode a hex Payment blob, rejecting malformed or unsupported encodings."
   @spec decode(term()) :: {:ok, map()} | {:error, :malformed_blob}
-  def decode(hex) when is_binary(hex) and byte_size(hex) in 2..131_072 do
+  def decode(hex) do
+    case decode_typed(hex) do
+      {:ok, %{"TransactionType" => "Payment"} = tx} -> {:ok, tx}
+      _ -> {:error, :malformed_blob}
+    end
+  end
+
+  @doc "Decode a signed PaymentChannelCreate blob for session open."
+  @spec decode_create(term()) :: {:ok, map()} | {:error, :malformed_blob}
+  def decode_create(hex) do
+    case decode_typed(hex) do
+      {:ok, %{"TransactionType" => "PaymentChannelCreate"} = tx} -> {:ok, tx}
+      _ -> {:error, :malformed_blob}
+    end
+  end
+
+  @doc "Validate a classic address's version, length and checksum."
+  @spec address?(term()) :: boolean()
+  def address?(address), do: match?({:ok, _}, account_id(address))
+
+  @doc "Return true when the transaction carries a signature or a non-empty signer list."
+  @spec signed?(term()) :: boolean()
+  def signed?(%{"TxnSignature" => signature}), do: is_binary(signature) and byte_size(signature) > 0
+  def signed?(%{"Signers" => signers}), do: is_list(signers) and signers != []
+  def signed?(_), do: false
+
+  @doc "Decode a classic address to its 20-byte AccountID."
+  @spec account_id(term()) :: {:ok, binary()} | :error
+  def account_id(address) when is_binary(address) and byte_size(address) in 25..35 do
+    translated = for <<char <- address>>, into: "", do: <<Map.get(@to_bitcoin, char, ?0)>>
+
+    case Base58.decode(translated) do
+      {:ok, <<0, id::binary-20, checksum::binary-4>> = bytes} ->
+        if binary_part(double_hash(binary_part(bytes, 0, 21)), 0, 4) == checksum, do: {:ok, id}, else: :error
+
+      _ ->
+        :error
+    end
+  end
+
+  def account_id(_), do: :error
+
+  defp decode_typed(hex) when is_binary(hex) and byte_size(hex) in 2..131_072 do
     with {:ok, bytes} <- Base.decode16(hex, case: :mixed),
          {:ok, tx, <<>>} <- object(bytes, %{}, {0, 0}, 0),
-         0 <- tx["TransactionType"] do
-      {:ok, Map.put(tx, "TransactionType", "Payment")}
+         type when is_binary(type) <- Map.get(@transaction_types, tx["TransactionType"]) do
+      {:ok, Map.put(tx, "TransactionType", type)}
     else
       _ -> {:error, :malformed_blob}
     end
   end
 
-  def decode(_), do: {:error, :malformed_blob}
-
-  @doc "Validate a classic address's version, length and checksum."
-  @spec address?(term()) :: boolean()
-  def address?(address) when is_binary(address) and byte_size(address) in 25..35 do
-    translated = for <<char <- address>>, into: "", do: <<Map.get(@to_bitcoin, char, ?0)>>
-
-    case Base58.decode(translated) do
-      {:ok, <<0, _::binary-20, checksum::binary-4>> = bytes} ->
-        binary_part(double_hash(binary_part(bytes, 0, 21)), 0, 4) == checksum
-
-      _ ->
-        false
-    end
-  end
-
-  def address?(_), do: false
+  defp decode_typed(_), do: {:error, :malformed_blob}
 
   defp address(bytes) do
     body = <<0, bytes::binary>>

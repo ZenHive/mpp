@@ -38,6 +38,7 @@ defmodule MPP do
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Methods.Solana` — Solana native SOL and SPL token charge verification
     * `MPP.Methods.XRPL` — XRPL native XRP, issued currency and MPT charge verification
+    * `MPP.Methods.XRPL.Session` — XRPL payment-channel session verification (open / voucher / close)
     * `MPP.Methods.NearIntents` — NEAR Intents hash-credential charge verification via 1Click + origin RPC
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)

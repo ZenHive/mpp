@@ -43,7 +43,7 @@ defmodule MPP.Session.ETSStore do
   @spec get(String.t(), keyword()) :: {:ok, Channel.t()} | :not_found | {:error, term()}
   def get(channel_id, opts) do
     with {:ok, channel_id} <- Channel.normalize_id(channel_id) do
-      GenServer.call(server(opts), {:get, channel_id})
+      GenServer.call(server(opts), {:get, store_key(channel_id, opts)})
     end
   end
 
@@ -56,7 +56,8 @@ defmodule MPP.Session.ETSStore do
   @spec put(Channel.t(), keyword()) :: :ok | {:error, term()}
   def put(%Channel{} = channel, opts) do
     with {:ok, channel_id} <- Channel.normalize_id(channel.channel_id) do
-      GenServer.call(server(opts), {:put, %{channel | channel_id: channel_id}})
+      channel = %{channel | channel_id: channel_id}
+      GenServer.call(server(opts), {:put, store_key(channel_id, opts), channel})
     end
   end
 
@@ -71,7 +72,7 @@ defmodule MPP.Session.ETSStore do
           {:ok, Channel.t()} | {:error, term()}
   def update(channel_id, fun, opts) when is_function(fun, 1) do
     with {:ok, channel_id} <- Channel.normalize_id(channel_id) do
-      GenServer.call(server(opts), {:update, channel_id, fun})
+      GenServer.call(server(opts), {:update, store_key(channel_id, opts), channel_id, fun})
     end
   end
 
@@ -84,7 +85,7 @@ defmodule MPP.Session.ETSStore do
   @spec delete(String.t(), keyword()) :: :ok | {:error, term()}
   def delete(channel_id, opts) do
     with {:ok, channel_id} <- Channel.normalize_id(channel_id) do
-      GenServer.call(server(opts), {:delete, channel_id})
+      GenServer.call(server(opts), {:delete, store_key(channel_id, opts)})
     end
   end
 
@@ -104,15 +105,15 @@ defmodule MPP.Session.ETSStore do
     {:reply, reply, table}
   end
 
-  def handle_call({:put, %Channel{} = channel}, _from, table) do
-    :ets.insert(table, {channel.channel_id, channel})
+  def handle_call({:put, key, %Channel{} = channel}, _from, table) do
+    :ets.insert(table, {key, channel})
     {:reply, :ok, table}
   end
 
-  def handle_call({:update, channel_id, fun}, _from, table) do
+  def handle_call({:update, key, channel_id, fun}, _from, table) do
     current =
-      case :ets.lookup(table, channel_id) do
-        [{^channel_id, channel}] -> channel
+      case :ets.lookup(table, key) do
+        [{^key, channel}] -> channel
         [] -> :not_found
       end
 
@@ -121,7 +122,7 @@ defmodule MPP.Session.ETSStore do
         case Channel.normalize_id(channel.channel_id) do
           {:ok, ^channel_id} ->
             channel = %{channel | channel_id: channel_id}
-            :ets.insert(table, {channel_id, channel})
+            :ets.insert(table, {key, channel})
             {:reply, {:ok, channel}, table}
 
           _error ->
@@ -142,4 +143,11 @@ defmodule MPP.Session.ETSStore do
   end
 
   defp server(opts), do: Keyword.get(opts, :name, @default_name)
+
+  defp store_key(channel_id, opts) do
+    case Keyword.get(opts, :network) do
+      network when is_binary(network) -> {network, channel_id}
+      _ -> channel_id
+    end
+  end
 end

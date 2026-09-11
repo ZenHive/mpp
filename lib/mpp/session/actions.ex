@@ -239,9 +239,17 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp maybe_verify_signature(%Payload{signature: nil}, _opts), do: :ok
+  defp maybe_verify_signature(payload, opts) do
+    case Keyword.get(opts, :verify_signature, :default) do
+      :already_verified -> :ok
+      fun when is_function(fun, 2) -> fun.(payload, opts)
+      :default -> verify_presented_signature(payload, opts)
+    end
+  end
 
-  defp maybe_verify_signature(%Payload{} = payload, opts) do
+  defp verify_presented_signature(%Payload{signature: nil}, _opts), do: :ok
+
+  defp verify_presented_signature(%Payload{} = payload, opts) do
     escrow = Keyword.get(opts, :escrow_contract)
     chain_id = Keyword.get(opts, :chain_id)
     signer = signature_signer(payload, opts)

@@ -160,6 +160,41 @@ defmodule MPP.Session.ChannelTest do
     end
   end
 
+  describe "XRPL identity" do
+    @xrpl_payer "rnuh5j7ZarfCymLtgrGuBnPzTWdZ9SXHjQ"
+    @xrpl_payee "rsGNsDhce3dugGQt9hfawTmDtr76nqTz8D"
+    @xrpl_fixture "test/fixtures/xrpl/session.json" |> File.read!() |> Jason.decode!()
+
+    test "accepts classic addresses and XRP as the channel token" do
+      assert {:ok, channel} =
+               Channel.new(
+                 channel_id: @xrpl_fixture["channelId"],
+                 payer: @xrpl_payer,
+                 recipient: @xrpl_payee,
+                 token: "XRP",
+                 deposit: 1_000_000
+               )
+
+      assert channel.payer == @xrpl_payer
+      assert channel.token == "XRP"
+      assert {:ok, String.upcase(@xrpl_fixture["channelId"])} == Channel.to_xrpl_id(channel.channel_id)
+    end
+
+    test "compute_xrpl_id matches xrpl.js hashPaymentChannel" do
+      vector = @xrpl_fixture["hashPaymentChannel"]
+
+      assert {:ok, "0x" <> hex} =
+               Channel.compute_xrpl_id(vector["account"], vector["destination"], vector["sequence"])
+
+      assert String.upcase(hex) == vector["channelId"]
+
+      assert {:ok, "0x" <> fixture_hex} =
+               Channel.compute_xrpl_id(@xrpl_payer, @xrpl_payee, @xrpl_fixture["sequence"])
+
+      assert String.upcase(fixture_hex) == @xrpl_fixture["channelId"]
+    end
+  end
+
   describe "action wire values" do
     test "uses camelCase only at the JSON boundary" do
       mappings = [open: "open", top_up: "topUp", voucher: "voucher", close: "close"]
