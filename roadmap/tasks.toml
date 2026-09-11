@@ -2846,7 +2846,7 @@ shipped_in = "356157b65bac4495e2b2aa721b525f2d904dee34"
 id = "109"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "XRPL charge method"
 scores = { d = 7, b = 6, u = 6 }
 acceptance_criteria = ["MPP.Methods.XRPL implements the MPP.Method behaviour for the charge intent per refs/mpp-specs/specs/methods/xrpl/draft-xrpl-charge-00.md (both credential types the draft defines)", "Live XRPL testnet integration: at least one real success and one relevant real error per credential type; missing credentials flunk loudly with exact setup instructions, never skip", "Payment semantics (destination, amount/currency incl. issued currencies, destination tag / memo attribution, validated ledger) pinned by integration test against the XRPL-owned docs (xrpl.org); the MPP draft defines the wire contract only", "Wire constants and credential field names cross-checked against the draft's examples; any error codes the draft introduces are added to MPP.Errors with tests", "Attribution is per-challenge (no static tag/memo), and an observed payment is single-use via the shared MPP.Tempo.Store dedup contract", "Touched money-path modules stay at or above the 95% critical-tier coverage floor; mix ci passes"]
@@ -2857,6 +2857,7 @@ body = """
 mpp-specs #346 (commit 213b098, 2026-09-07) added an XRPL payment method with charge and session intents (`specs/methods/xrpl/draft-xrpl-charge-00.md`, 802 lines). Implement the charge intent: read the draft for the credential types and verification rules, then verify against the XRPL testnet as ground truth (rippled / Clio JSON-RPC as documented on xrpl.org). Neither mppx nor mpp-rs implements XRPL yet, so there is no SDK cross-check — the draft plus the live ledger are the only authorities; cite `refs/mpp-specs/...:line` for every wire constant. Model the module on MPP.Methods.Solana (pull transaction + push hash shapes, per-challenge attribution, store-backed single use) and reuse MPP.Methods.Shared. Pick an XRPL RPC client the same way the Solana method uses `cartouche` — if no maintained Hex client exists, a minimal Req-based JSON-RPC wrapper inside the method is acceptable; say which you chose and why in the delivery.
 """
 created_at = "2026-09-11"
+started_at = "2026-09-11"
 scored_at = "2026-09-11"
 
 [[task]]

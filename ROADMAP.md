@@ -243,7 +243,7 @@
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0?] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
-| Task 109 | ⬜ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
+| Task 109 | 🔄 | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
 | Task 110 | ⬜ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
 <!-- TASKS:END -->
 
