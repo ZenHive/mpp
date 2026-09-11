@@ -7,6 +7,7 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
   alias MPP.Client.Transport.JsonRpc, as: ClientTransport
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
+  alias MPP.Headers
   alias MPP.Transports.JsonRpc
   alias MPP.Transports.JsonRpc.Plug, as: RpcPlug
 
@@ -74,6 +75,8 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
 
       assert unpaid_conn.status == 200
       unpaid = decode(unpaid_conn)
+      assert get_resp_header(unpaid_conn, "payment-receipt") == []
+      assert get_resp_header(unpaid_conn, "cache-control") == ["no-store"]
 
       assert ClientTransport.payment_required?(unpaid)
       assert {:ok, [challenge]} = ClientTransport.get_challenges(unpaid)
@@ -100,7 +103,10 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
       assert paid["_meta"][JsonRpc.receipt_meta_key()]["status"] == "success"
       assert paid["_meta"][JsonRpc.receipt_meta_key()]["challengeId"] == challenge.id
       refute get_in(paid, ["result", "_meta"])
-      assert [_receipt] = get_resp_header(paid_conn, "payment-receipt")
+      assert [receipt_header] = get_resp_header(paid_conn, "payment-receipt")
+      assert {:ok, receipt} = Headers.parse_receipt(receipt_header)
+      assert receipt.status == "success"
+      assert receipt.method == "demo"
       assert get_resp_header(paid_conn, "cache-control") == ["private"]
     end
 
@@ -117,7 +123,8 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
       conn = post_rpc(request, [{"cache-control", "public, max-age=60"}])
 
       assert get_resp_header(conn, "cache-control") == ["public, max-age=60, private"]
-      assert [_receipt] = get_resp_header(conn, "payment-receipt")
+      assert [receipt_header] = get_resp_header(conn, "payment-receipt")
+      assert {:ok, _receipt} = Headers.parse_receipt(receipt_header)
     end
 
     test "verification-failed response keeps the JSON-RPC error on HTTP 200" do
@@ -154,6 +161,8 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
       body = decode(conn)
       assert body["error"]["code"] == -32_700
       assert body["id"] == nil
+      assert get_resp_header(conn, "payment-receipt") == []
+      assert get_resp_header(conn, "cache-control") == ["no-store"]
     end
 
     test "empty body is a parse error" do

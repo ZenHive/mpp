@@ -463,7 +463,7 @@ defmodule MPP.Plug do
         |> Plug.Conn.put_resp_header("payment-receipt", receipt_header)
         |> put_private_cache_control()
       else
-        Plug.Conn.put_resp_header(conn, "cache-control", "no-store")
+        conn
       end
     end)
   end
@@ -471,6 +471,9 @@ defmodule MPP.Plug do
   @doc false
   @spec put_private_cache_control(Plug.Conn.t()) :: Plug.Conn.t()
   def put_private_cache_control(conn) do
+    # Plug.Conn seeds every response with `max-age=0, private, must-revalidate`.
+    # Treat that default as unset so a 2xx with no app Cache-Control still ships
+    # `private` (0.16.0 / spec §11.10).
     value =
       case Plug.Conn.get_resp_header(conn, "cache-control") do
         [] -> "private"

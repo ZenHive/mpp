@@ -703,16 +703,61 @@ defmodule MPP.PlugTest do
       assert get_resp_header(conn, "cache-control") == "public, max-age=60, private"
     end
 
-    test "does not attach receipt to a downstream error response", %{config: config, auth_header: auth_header} do
+    test "sets private when the app cleared Cache-Control", %{config: config, auth_header: auth_header} do
       conn =
         :get
         |> Plug.Test.conn("/premium")
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
+        |> Plug.Conn.delete_resp_header("cache-control")
+        |> send_success()
+
+      assert get_resp_header(conn, "cache-control") == "private"
+    end
+
+    test "does not attach receipt to a downstream error response", %{config: config, auth_header: auth_header} do
+      Enum.each([302, 403, 500], fn status ->
+        conn =
+          :get
+          |> Plug.Test.conn("/premium")
+          |> Plug.Conn.put_req_header("authorization", auth_header)
+          |> call_plug(config)
+          |> Plug.Conn.send_resp(status, "error")
+
+        assert get_resp_header(conn, "payment-receipt") == nil
+        assert get_resp_header(conn, "cache-control") == "max-age=0, private, must-revalidate"
+      end)
+    end
+
+    test "does not rewrite downstream Cache-Control on an error response", %{
+      config: config,
+      auth_header: auth_header
+    } do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+        |> Plug.Conn.put_resp_header("cache-control", "public, max-age=60")
         |> Plug.Conn.send_resp(500, "error")
 
       assert get_resp_header(conn, "payment-receipt") == nil
-      assert get_resp_header(conn, "cache-control") == "no-store"
+      assert get_resp_header(conn, "cache-control") == "public, max-age=60"
+    end
+
+    test "does not duplicate private when Cache-Control already has it", %{
+      config: config,
+      auth_header: auth_header
+    } do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+        |> Plug.Conn.put_resp_header("cache-control", "private, max-age=60")
+        |> send_success()
+
+      assert get_resp_header(conn, "cache-control") == "private, max-age=60"
     end
 
     test "accepts the same credential twice when no shared replay store is configured", %{
