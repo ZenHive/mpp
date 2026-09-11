@@ -52,6 +52,10 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-j4j7-7xpr-c7cr` | `CVE-2026-73541` | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
 | `GHSA-5qrp-r24c-w6jr` | `CVE-2026-82750` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
 | `GHSA-rpwj-vrf7-4x36` | `CVE-2026-82751` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
+| `GHSA-8c63-r789-xrrf` | — (CVE request to the EEF CNA pending) | HIGH | 0.16.2 | Session voucher that adds no new funds was served without a charge — unlimited units after one paid voucher (mpp-rs #415 parity) |
+| `GHSA-p9fv-9w58-95x2` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo subscription key authorization was not bound to the issuing challenge — captured activation credential replayable under a fresh challenge (mppx #882 parity) |
+| `GHSA-8x7x-5j8g-8hcx` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo pre-broadcast dedup reserve keyed on the caller-supplied encoding — a non-canonical re-encoding reserved a second slot (mppx #818 parity) |
+| `GHSA-82qh-vrvm-gqvc` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | `Payment-Receipt` and `Cache-Control: private` written before the downstream app ran — consumer `Cache-Control` could expose paid responses to shared caches (mpp-rs #381/#399 parity) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18.
@@ -126,8 +130,8 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 
 ## Open hardening items
 
-**3 open items** as of 2026-09-11 — two draft advisories from the 2026-09-04 upstream sweep (tracked as Tasks 103 and 104) and one from the 2026-09-11 sweep (tracked as Task 111). Detail stays in the private advisories until each ships. The two inbound HIGH reports from that day shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
-patched release (latest: `GHSA-j4j7-7xpr-c7cr`, fixed in 0.12.0); the earlier "4 open items" from
+**0 open items** as of 2026-09-11 — the four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
+patched release; the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
 (published 2026-06-29). When a new gap is found, its detail goes to a **private draft security
 advisory** (Security → Advisories) per the disclosure policy above and moves to the ✓ table when

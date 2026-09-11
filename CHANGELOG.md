@@ -6,7 +6,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.16.2] — 2026-09-11
+
+**Security (four coordinated fixes, each disclosed with this release).** A session voucher that does not raise the channel's accepted cumulative amount is now rejected with `delta_too_small` instead of being served as an idempotent repeat, and the delta check runs inside the same atomic store update as the spend (`GHSA-8c63-r789-xrrf`, mpp-rs #415 parity). Tempo subscription key authorizations are bound to the issuing challenge: the ox `witness` field must be the 32-byte decoding of the challenge id, so a captured activation credential cannot be replayed under a fresh challenge, and admin- or account-bound authorizations are refused on the subscription path (`GHSA-p9fv-9w58-95x2`, mppx #882 parity). The Tempo pre-broadcast dedup reserve is keyed on the canonical re-encoding of the deserialized `0x76` transaction rather than the caller-supplied bytes, so one signed transaction maps to exactly one slot (`GHSA-8x7x-5j8g-8hcx`, mppx #818 parity). HTTP `Payment-Receipt` and `Cache-Control: private` are attached at send time, only on successful responses, merged with the application's own directives, so a paid response can no longer be marked shareable by a downstream plug (`GHSA-82qh-vrvm-gqvc`, mpp-rs #381/#399 parity). All four are safe-by-default and need no configuration change.
 
 ### Added
 
@@ -26,12 +28,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 - Tempo subscription key authorizations are bound to the issuing challenge.
   The codec supports the ox witness, admin, and account tuple fields;
   subscription verification rejects admin and account-bound keys.
+- Tempo transaction credentials are canonicalized (Electrum recovery id,
+  canonical RLP integers) before the fee-payer policy, the dedup reserve, and
+  any RPC; reserve and post-broadcast keys are the keccak256 of those bytes.
 - Project checks run through `mix ci`; GitHub Actions workflows were removed.
-
-### Fixed
-
-- Tempo charge verification canonicalizes signed transactions before deduplication
-  and broadcast, using the canonical transaction hash for replay reservations.
 
 ## [0.16.1] — 2026-09-04
 
