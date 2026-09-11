@@ -52,6 +52,30 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     assert DateTime.compare(record.billing_anchor, DateTime.utc_now()) in [:lt, :eq]
   end
 
+  test "rejects a witness-bound activation credential replayed under a new challenge" do
+    access_key_private_key = access_key_private_key!()
+    rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
+    {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
+
+    {_store, config} =
+      subscription_config(access_key_private_key, rpc_url, %{private_key: SubscriptionHelpers.fee_payer_private_key()})
+
+    subscription = subscription(config, recipient)
+
+    signature =
+      signed_authorization(subscription, %{private_key: SubscriptionHelpers.root_private_key()}, access_key_private_key)
+
+    payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+    replayed = %{
+      subscription
+      | method_details: Map.put(config, "challenge_id", SubscriptionHelpers.unique_challenge_id())
+    }
+
+    assert {:error, %Errors{detail: "keyAuthorization challenge mismatch"}} =
+             Subscription.verify(payload, replayed)
+  end
+
   test "holds the activation claim on Moderato when the confirmed transfer misses the recipient" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
@@ -198,7 +222,7 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
         "max_validity_window_seconds" => 20
       },
       "subscription_store" => store,
-      "challenge_id" => "integration-#{System.unique_integer([:positive])}"
+      "challenge_id" => SubscriptionHelpers.unique_challenge_id()
     }
 
     {store, config}

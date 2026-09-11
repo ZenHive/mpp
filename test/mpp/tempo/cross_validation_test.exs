@@ -33,8 +33,11 @@ defmodule MPP.Tempo.CrossValidationTest do
   # this suite nightly. Opt in locally with `mix test.json --include
   # cross_validation` (or `mix test --include cross_validation`) when the
   # toolchain is set up. Mirrors :integration handling.
+  alias Cartouche.Hash
   alias Cartouche.Signer.Curvy
+  alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Test.OxTempoBundle
+  alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -483,6 +486,74 @@ defmodule MPP.Tempo.CrossValidationTest do
     end
   end
 
+  describe "KeyAuthorization witness tuple cross-validation" do
+    setup :start_quickbeam_with_ox_tempo
+
+    test "Elixir verifies an ox-signed witness-bound authorization and matches the ox digest", %{rt: rt} do
+      subscription = SubscriptionHelpers.subscription()
+      challenge_id = SubscriptionHelpers.challenge_id()
+      witness = SubscriptionHelpers.challenge_witness(challenge_id)
+      expiry = expiry_unix(subscription.subscription_expires)
+      root_key = "0x" <> SubscriptionHelpers.root_private_key()
+      witness_hex = hex(witness)
+
+      {:ok, serialized} =
+        QuickBEAM.eval(rt, """
+          const authorization = OxKeyAuthorization.from({
+            address: '#{SubscriptionHelpers.access_address()}',
+            chainId: #{SubscriptionHelpers.chain_id()}n,
+            expiry: #{expiry},
+            type: 'secp256k1',
+            limits: [{
+              token: '#{String.downcase(SubscriptionHelpers.token())}',
+              limit: #{subscription.amount}n,
+              period: 86400
+            }],
+            scopes: [
+              {
+                address: '#{String.downcase(SubscriptionHelpers.token())}',
+                selector: '0xa9059cbb',
+                recipients: ['#{String.downcase(SubscriptionHelpers.recipient())}']
+              },
+              {
+                address: '#{String.downcase(SubscriptionHelpers.token())}',
+                selector: '0x95777d59',
+                recipients: ['#{String.downcase(SubscriptionHelpers.recipient())}']
+              }
+            ],
+            witness: '#{witness_hex}'
+          });
+          const payload = OxKeyAuthorization.getSignPayload(authorization);
+          const signature = OxSecp256k1.sign({ payload, privateKey: '#{root_key}' });
+          OxKeyAuthorization.serialize(OxKeyAuthorization.from(authorization, { signature }));
+        """)
+
+      assert {:ok, authorization} = KeyAuthorization.deserialize(serialized)
+      assert authorization.witness == witness
+
+      [authorization_tuple, _signature] = authorization.field
+      elixir_digest = authorization_tuple |> ExRLP.encode() |> Hash.keccak() |> hex()
+
+      {:ok, ox_digest} = QuickBEAM.eval(rt, "OxKeyAuthorization.hash(OxKeyAuthorization.deserialize('#{serialized}'))")
+      assert String.downcase(elixir_digest) == String.downcase(ox_digest)
+
+      assert :ok =
+               KeyAuthorization.verify(authorization, subscription,
+                 chain_id: SubscriptionHelpers.chain_id(),
+                 access_key: SubscriptionHelpers.access_address(),
+                 key_type: :secp256k1,
+                 challenge_id: challenge_id
+               )
+
+      elixir_serialized = KeyAuthorization.serialize(authorization)
+
+      {:ok, js_from_elixir} =
+        QuickBEAM.eval(rt, "OxKeyAuthorization.serialize(OxKeyAuthorization.deserialize('#{elixir_serialized}'))")
+
+      assert String.downcase(js_from_elixir) == String.downcase(elixir_serialized)
+    end
+  end
+
   describe "regression guards" do
     setup :start_quickbeam_with_ox_tempo
 
@@ -588,8 +659,6 @@ defmodule MPP.Tempo.CrossValidationTest do
            "Round-trip hex mismatch:\n  original:     #{hex}\n  reserialized: #{reserialized}"
   end
 
-  # --- Helpers: Elixir RLP transaction builders ---
-
   @default_max_priority_fee 1_000_000_000
   @default_max_fee 25_000_000_000
   @default_amount 1_000_000_000_000_000_000
@@ -687,6 +756,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       encode_uint(0),
       <<>>,
       <<>>,
+      # --- Helpers: Elixir RLP transaction builders ---
       []
     ]
 
@@ -791,10 +861,16 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   # Decodes a 0x-prefixed hex string to raw bytes.
   defp decode_hex!("0x" <> hex), do: Base.decode16!(hex, case: :mixed)
+  defp hex(value), do: "0x" <> Base.encode16(value, case: :lower)
+
+  defp expiry_unix(value) do
+    {:ok, datetime, _offset} = DateTime.from_iso8601(value)
+    DateTime.to_unix(datetime)
+  end
 
   # Computes the 4-byte function selector (hex) from a Solidity function signature.
   defp keccak_selector(signature) do
-    <<selector::binary-size(4), _::binary>> = Cartouche.Hash.keccak(signature)
+    <<selector::binary-size(4), _::binary>> = Hash.keccak(signature)
     Base.encode16(selector, case: :lower)
   end
 

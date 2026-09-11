@@ -129,6 +129,7 @@ defmodule MPP.Methods.Tempo.Subscription do
                access_key: access_key,
                key_type: :secp256k1,
                challenge_expires: config["challenge_expires"],
+               challenge_id: config["challenge_id"],
                source: config["credential_source"]
              ) do
         activate(subscription, authorization, signature, config)

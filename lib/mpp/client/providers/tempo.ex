@@ -80,7 +80,8 @@ defmodule MPP.Client.Providers.Tempo do
          {:ok, params} <-
            KeyAuthorization.wallet_params(subscription,
              access_key: access_key,
-             key_type: key_type
+             key_type: key_type,
+             challenge_id: challenge.id
            ),
          {:ok, authorization} <- authorize_access_key(wallet_rpc_url, params, config[:req_options]),
          :ok <-
@@ -88,7 +89,8 @@ defmodule MPP.Client.Providers.Tempo do
              chain_id: chain_id,
              access_key: access_key,
              key_type: key_type,
-             challenge_expires: challenge.expires
+             challenge_expires: challenge.expires,
+             challenge_id: challenge.id
            ) do
       {:ok,
        %Credential{

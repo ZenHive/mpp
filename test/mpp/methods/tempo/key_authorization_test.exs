@@ -16,6 +16,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
     assert authorization.key_type == :secp256k1
     assert authorization.key_id == SubscriptionHelpers.access_address()
     assert authorization.source == SubscriptionHelpers.root_address()
+    assert authorization.witness == SubscriptionHelpers.challenge_witness(SubscriptionHelpers.challenge_id())
+    assert authorization.is_admin == false
+    assert authorization.account == nil
     assert KeyAuthorization.serialize(authorization) == serialized
     assert KeyAuthorization.transaction_field(authorization) == authorization.field
 
@@ -24,6 +27,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                chain_id: SubscriptionHelpers.chain_id(),
                access_key: SubscriptionHelpers.access_address(),
                key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id(),
                challenge_expires: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
                source: "did:pkh:eip155:#{SubscriptionHelpers.chain_id()}:#{SubscriptionHelpers.root_address()}"
              )
@@ -35,11 +39,13 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
     assert {:ok, params} =
              KeyAuthorization.wallet_params(subscription,
                access_key: SubscriptionHelpers.access_address(),
-               key_type: :secp256k1
+               key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id()
              )
 
     assert params["address"] == SubscriptionHelpers.access_address()
     assert params["keyType"] == "secp256k1"
+    assert params["witness"] == hex(SubscriptionHelpers.challenge_witness(SubscriptionHelpers.challenge_id()))
     assert [%{"limit" => "0x10", "period" => 1_209_600, "token" => token}] = params["limits"]
     assert token == String.downcase(SubscriptionHelpers.token())
 
@@ -67,16 +73,91 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
   test "decodes the exact RPC object returned by wallet_authorizeAccessKey" do
     subscription = SubscriptionHelpers.subscription()
-    {serialized, _authorization, rpc} = SubscriptionHelpers.signed_authorization(subscription)
+    {serialized, authorization, rpc} = SubscriptionHelpers.signed_authorization(subscription)
 
     assert {:ok, decoded} = KeyAuthorization.from_rpc(rpc)
     assert KeyAuthorization.serialize(decoded) == serialized
+    assert decoded.witness == authorization.witness
 
     assert {:error, "wallet_authorizeAccessKey returned an invalid keyAuthorization"} =
              KeyAuthorization.from_rpc(%{})
 
     assert {:error, "wallet returned an invalid primitive signature"} =
              KeyAuthorization.from_rpc(%{rpc | "signature" => %{"type" => "keychain"}})
+  end
+
+  test "binds the authorization witness to the issuing challenge id" do
+    subscription = SubscriptionHelpers.subscription()
+    other_challenge = SubscriptionHelpers.unique_challenge_id()
+    {_serialized, matching, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+    {_serialized, mismatched, _rpc} =
+      SubscriptionHelpers.signed_authorization(subscription, challenge_id: other_challenge)
+
+    {_serialized, unbound, _rpc} = SubscriptionHelpers.signed_authorization(subscription, omit_witness: true)
+
+    assert :ok = verify(matching, subscription)
+
+    assert {:error, "keyAuthorization challenge mismatch"} = verify(mismatched, subscription)
+    assert {:error, "keyAuthorization challenge mismatch"} = verify(unbound, subscription)
+
+    assert {:error, "challenge id must encode 32 bytes"} =
+             KeyAuthorization.verify(matching, subscription,
+               chain_id: SubscriptionHelpers.chain_id(),
+               access_key: SubscriptionHelpers.access_address(),
+               key_type: :secp256k1,
+               challenge_id: "not-32-bytes"
+             )
+
+    assert {:ok, params} =
+             KeyAuthorization.wallet_params(subscription,
+               access_key: SubscriptionHelpers.access_address(),
+               key_type: :secp256k1
+             )
+
+    refute Map.has_key?(params, "witness")
+
+    assert {:error, "challenge id must encode 32 bytes"} =
+             KeyAuthorization.wallet_params(subscription,
+               access_key: SubscriptionHelpers.access_address(),
+               key_type: :secp256k1,
+               challenge_id: "not-32-bytes"
+             )
+  end
+
+  test "decodes ox trailing admin and account fields and rejects them on the subscription path" do
+    subscription = SubscriptionHelpers.subscription()
+    account = decode_address(SubscriptionHelpers.root_address())
+
+    {_serialized, admin, rpc} =
+      SubscriptionHelpers.signed_authorization(subscription, extra_trailing: [<<1>>], is_admin: true)
+
+    assert admin.is_admin
+    assert {:ok, from_admin} = KeyAuthorization.from_rpc(rpc)
+    assert from_admin.is_admin
+    assert {:error, "keyAuthorization admin keys are not supported"} = verify(admin, subscription)
+
+    {_serialized, bound, _rpc} =
+      SubscriptionHelpers.signed_authorization(subscription,
+        extra_trailing: [<<1>>, account],
+        is_admin: true,
+        account: SubscriptionHelpers.root_address()
+      )
+
+    assert bound.account == SubscriptionHelpers.root_address()
+    assert {:error, "keyAuthorization admin keys are not supported"} = verify(bound, subscription)
+
+    {_serialized, account_only, account_rpc} =
+      SubscriptionHelpers.signed_authorization(subscription,
+        extra_trailing: [<<>>, account],
+        account: SubscriptionHelpers.root_address()
+      )
+
+    assert account_only.account == SubscriptionHelpers.root_address()
+    refute account_only.is_admin
+    assert {:ok, from_account} = KeyAuthorization.from_rpc(account_rpc)
+    assert from_account.account == SubscriptionHelpers.root_address()
+    assert {:error, "keyAuthorization account-bound keys are not supported"} = verify(account_only, subscription)
   end
 
   test "verifies p256 and WebAuthn primitive signatures returned by the wallet" do
@@ -91,7 +172,8 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                KeyAuthorization.verify(authorization, subscription,
                  chain_id: SubscriptionHelpers.chain_id(),
                  access_key: SubscriptionHelpers.access_address(),
-                 key_type: key_type
+                 key_type: key_type,
+                 challenge_id: SubscriptionHelpers.challenge_id()
                )
     end
   end
@@ -159,6 +241,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                chain_id: SubscriptionHelpers.chain_id(),
                access_key: SubscriptionHelpers.access_address(),
                key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id(),
                source: "did:pkh:eip155:#{SubscriptionHelpers.chain_id()}:0x9999999999999999999999999999999999999999"
              )
 
@@ -167,6 +250,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                chain_id: SubscriptionHelpers.chain_id(),
                access_key: SubscriptionHelpers.access_address(),
                key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id(),
                source: "not-a-did"
              )
 
@@ -175,6 +259,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                chain_id: SubscriptionHelpers.chain_id(),
                access_key: SubscriptionHelpers.access_address(),
                key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id(),
                source: "did:pkh:eip155:1:#{SubscriptionHelpers.root_address()}"
              )
   end
@@ -220,6 +305,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                chain_id: SubscriptionHelpers.chain_id(),
                access_key: SubscriptionHelpers.access_address(),
                key_type: :secp256k1,
+               challenge_id: SubscriptionHelpers.challenge_id(),
                challenge_expires: subscription.subscription_expires
              )
   end
@@ -264,6 +350,10 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
       {List.replace_at(authorization, 5, [[token, [[<<1>>, [recipient]]]]]), "invalid keyAuthorization selector rule"},
       {List.replace_at(authorization, 5, [[token, [[decode_hex!(@transfer_selector), [<<1>>]]]]]),
        "invalid scope recipient address"},
+      {List.replace_at(authorization, 6, <<1>>), "keyAuthorization witness must be exactly 32 bytes"},
+      {authorization ++ [<<2>>], "invalid keyAuthorization admin marker"},
+      {authorization ++ [<<1>>, <<1>>], "invalid keyAuthorization account address"},
+      {authorization ++ [<<>>, <<>>, <<>>, <<>>], "unsupported or missing fields"},
       {List.replace_at(authorization, 4, [valid_limit]), nil}
     ]
 
@@ -330,7 +420,10 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
       put_in(rpc, ["allowedCalls", Access.at(0), "selectorRules", Access.at(0), "selector"], "0x01"),
       put_in(rpc, ["allowedCalls", Access.at(0), "selectorRules", Access.at(0), "recipients"], ["0x01"]),
       put_in(rpc, ["signature", "r"], "invalid"),
-      put_in(rpc, ["signature", "yParity"], 2)
+      put_in(rpc, ["signature", "yParity"], 2),
+      Map.put(rpc, "witness", "0x01"),
+      Map.put(rpc, "isAdmin", "yes"),
+      Map.put(rpc, "account", "0x01")
     ]
 
     for malformed <- cases do
@@ -355,7 +448,8 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
     KeyAuthorization.verify(authorization, subscription,
       chain_id: SubscriptionHelpers.chain_id(),
       access_key: SubscriptionHelpers.access_address(),
-      key_type: :secp256k1
+      key_type: :secp256k1,
+      challenge_id: SubscriptionHelpers.challenge_id()
     )
   end
 
@@ -440,8 +534,12 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
       encode_uint(hex_to_integer(rpc["expiry"])),
       limits,
       scopes
+      | rpc_trailing(rpc)
     ]
   end
+
+  defp rpc_trailing(%{"witness" => witness}) when is_binary(witness), do: [decode_hex!(witness)]
+  defp rpc_trailing(_rpc), do: []
 
   defp deserialize_fields(authorization, signature) do
     [authorization, signature]

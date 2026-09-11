@@ -322,7 +322,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
     test "rejects a replayed activation credential for the same challenge", %{store: store} do
       stub_successful_chain()
-      challenge_id = "replay-#{System.unique_integer([:positive])}"
+      challenge_id = SubscriptionHelpers.unique_challenge_id()
       config = store |> config() |> Map.put("challenge_id", challenge_id)
       subscription = subscription(config)
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
@@ -334,22 +334,38 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
                Subscription.verify(payload, subscription)
     end
 
-    test "hashes the serialized authorization when challenge_id is absent", %{store: store} do
+    test "rejects an activation credential replayed under a different challenge before RPC", %{store: store} do
+      stub_successful_chain()
+      challenge_a = SubscriptionHelpers.unique_challenge_id()
+      challenge_b = SubscriptionHelpers.unique_challenge_id()
+      config_a = store |> config() |> Map.put("challenge_id", challenge_a)
+      subscription_a = subscription(config_a)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription_a)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+      subscription_b = %{subscription_a | method_details: Map.put(config_a, "challenge_id", challenge_b)}
+
+      assert {:error, %Errors{detail: "keyAuthorization challenge mismatch"}} =
+               Subscription.verify(payload, subscription_b)
+
+      refute_received {:rpc, _method, _params}
+    end
+
+    test "rejects activation when the challenge id is not a 32-byte witness", %{store: store} do
       stub_successful_chain()
       config = store |> config() |> Map.put("challenge_id", "")
       subscription = subscription(config)
-      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription, omit_witness: true)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
-
-      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+      assert {:error, %Errors{detail: "challenge id must encode 32 bytes"}} =
                Subscription.verify(payload, subscription)
+
+      refute_received {:rpc, _method, _params}
     end
 
     test "opts out of activation replay protection when store is false", %{store: store} do
       stub_reverted_chain()
-      challenge_id = "opt-out-#{System.unique_integer([:positive])}"
+      challenge_id = SubscriptionHelpers.unique_challenge_id()
       config = store |> config() |> Map.merge(%{"store" => false, "challenge_id" => challenge_id})
       subscription = subscription(config)
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
@@ -728,7 +744,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       "subscription_gas_limit" => @gas_limit,
       "fee_token" => SubscriptionHelpers.token(),
       "subscription_store" => store,
-      "challenge_id" => "subscription_challenge_#{System.unique_integer([:positive])}",
+      "challenge_id" => SubscriptionHelpers.unique_challenge_id(),
       "req_options" => [plug: {Req.Test, __MODULE__}]
     }
   end

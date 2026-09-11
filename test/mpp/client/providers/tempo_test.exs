@@ -338,7 +338,10 @@ defmodule MPP.Client.Providers.TempoTest do
     test "calls wallet_authorizeAccessKey with the normative subscription shape" do
       challenge = subscription_challenge()
       {:ok, subscription} = challenge |> decode_challenge_request() |> Subscription.from_request()
-      {_serialized, _authorization, rpc_authorization} = SubscriptionHelpers.signed_authorization(subscription)
+
+      {_serialized, _authorization, rpc_authorization} =
+        SubscriptionHelpers.signed_authorization(subscription, challenge_id: challenge.id)
+
       test_process = self()
 
       Req.Test.stub(__MODULE__, fn conn ->
@@ -366,6 +369,9 @@ defmodule MPP.Client.Providers.TempoTest do
       assert params["address"] == SubscriptionHelpers.access_address()
       assert [%{"selector" => "0xa9059cbb"}, %{"selector" => "0x95777d59"}] = params["scopes"]
       assert [%{"limit" => "0xf4240", "period" => 86_400}] = params["limits"]
+
+      assert params["witness"] ==
+               "0x" <> Base.encode16(SubscriptionHelpers.challenge_witness(challenge.id), case: :lower)
     end
 
     test "returns wallet errors and rejects malformed subscription challenges" do
@@ -600,7 +606,7 @@ defmodule MPP.Client.Providers.TempoTest do
     request = subscription |> Subscription.to_request() |> Jason.encode!() |> Base.url_encode64(padding: false)
 
     %Challenge{
-      id: @challenge_id,
+      id: Keyword.get(opts, :id, SubscriptionHelpers.challenge_id()),
       realm: @realm,
       method: "tempo",
       intent: "subscription",

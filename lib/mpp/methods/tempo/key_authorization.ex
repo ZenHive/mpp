@@ -3,8 +3,10 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   Tempo subscription key-authorization wire codec and verifier.
 
   The RLP layout and primitive signature envelopes match `ox/tempo`'s
-  `KeyAuthorization`; subscription scope checks follow the normative Tempo
-  subscription draft.
+  `KeyAuthorization` (`[chainId, keyType, keyId, expiry, limits, calls,
+  witness?, isAdmin?, account?]`). Subscription verification requires the
+  TIP-1053 `witness` to be the 32-byte decoding of the issuing challenge
+  id and rejects TIP-1049 admin / account-bound keys.
   """
 
   alias Cartouche.Hash
@@ -29,13 +31,29 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
           expiry: pos_integer(),
           limits: [map()],
           scopes: [map()],
+          witness: binary() | nil,
+          is_admin: boolean(),
+          account: String.t() | nil,
           signature: binary(),
           source: String.t(),
           field: list()
         }
 
   @enforce_keys [:chain_id, :key_type, :key_id, :expiry, :limits, :scopes, :signature, :source, :field]
-  defstruct [:chain_id, :key_type, :key_id, :expiry, :limits, :scopes, :signature, :source, :field]
+  defstruct [
+    :chain_id,
+    :key_type,
+    :key_id,
+    :expiry,
+    :limits,
+    :scopes,
+    :witness,
+    :account,
+    :signature,
+    :source,
+    :field,
+    is_admin: false
+  ]
 
   @doc "Deserialize and cryptographically verify a signed primitive key authorization."
   @spec deserialize(String.t()) :: {:ok, t()} | {:error, String.t()}
@@ -59,6 +77,8 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
          :ok <- equal(authorization.chain_id, chain_id, "keyAuthorization chainId mismatch"),
          :ok <- address_equal(authorization.key_id, access_key, "keyAuthorization access key mismatch"),
          :ok <- equal(authorization.key_type, key_type, "keyAuthorization key type mismatch"),
+         :ok <- verify_witness(authorization.witness, opts[:challenge_id]),
+         :ok <- reject_admin_account(authorization),
          {:ok, expiry} <- subscription_expiry(subscription.subscription_expires),
          :ok <- equal(authorization.expiry, expiry, "keyAuthorization expiry mismatch"),
          :ok <- validate_challenge_expiry(expiry, opts[:challenge_expires]),
@@ -79,23 +99,24 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
          {:ok, token} <- normalize_address(subscription.currency, "currency"),
          {:ok, recipient} <- normalize_address(subscription.recipient, "recipient"),
          {:ok, amount} <- parse_amount(subscription.amount) do
-      {:ok,
-       %{
-         "address" => access_key,
-         "expiry" => expiry,
-         "keyType" => key_type_to_wire(key_type),
-         "limits" => [
-           %{
-             "token" => token,
-             "limit" => hex_quantity(amount),
-             "period" => period
-           }
-         ],
-         "scopes" => [
-           %{"address" => token, "selector" => hex(@transfer_selector), "recipients" => [recipient]},
-           %{"address" => token, "selector" => hex(@transfer_with_memo_selector), "recipients" => [recipient]}
-         ]
-       }}
+      params = %{
+        "address" => access_key,
+        "expiry" => expiry,
+        "keyType" => key_type_to_wire(key_type),
+        "limits" => [
+          %{
+            "token" => token,
+            "limit" => hex_quantity(amount),
+            "period" => period
+          }
+        ],
+        "scopes" => [
+          %{"address" => token, "selector" => hex(@transfer_selector), "recipients" => [recipient]},
+          %{"address" => token, "selector" => hex(@transfer_with_memo_selector), "recipients" => [recipient]}
+        ]
+      }
+
+      put_wallet_witness(params, opts[:challenge_id])
     end
   end
 
@@ -125,8 +146,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
          {:ok, expiry} <- decode_quantity(expiry, "expiry"),
          {:ok, limits} <- rpc_limits(limits),
          {:ok, scopes} <- rpc_scopes(rpc["allowedCalls"]),
-         {:ok, signature} <- rpc_signature(signature) do
-      authorization = [encode_uint(chain_id), key_type, key_id, encode_uint(expiry), limits, scopes]
+         {:ok, signature} <- rpc_signature(signature),
+         {:ok, trailing} <- rpc_trailing(rpc) do
+      authorization = [encode_uint(chain_id), key_type, key_id, encode_uint(expiry), limits, scopes | trailing]
       [authorization, signature] |> ExRLP.encode() |> hex() |> deserialize()
     end
   end
@@ -148,18 +170,70 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
     end
   end
 
-  defp parse_authorization([chain_id, key_type, key_id, expiry, limits, scopes]) do
+  defp parse_authorization([chain_id, key_type, key_id, expiry, limits, scopes | trailing]) when is_list(trailing) do
+    if supported_trailing?(trailing) do
+      parse_authorization_fields(chain_id, key_type, key_id, expiry, limits, scopes, trailing)
+    else
+      {:error, "keyAuthorization contains unsupported or missing fields"}
+    end
+  end
+
+  defp parse_authorization(_authorization), do: {:error, "keyAuthorization contains unsupported or missing fields"}
+
+  defp supported_trailing?([]), do: true
+  defp supported_trailing?([_]), do: true
+  defp supported_trailing?([_, _]), do: true
+  defp supported_trailing?([_, _, _]), do: true
+  defp supported_trailing?(_trailing), do: false
+
+  defp parse_authorization_fields(chain_id, key_type, key_id, expiry, limits, scopes, trailing) do
     with {:ok, chain_id} <- decode_uint(chain_id, "chainId"),
          {:ok, key_type} <- parse_key_type(key_type),
          {:ok, key_id} <- encode_address(key_id, "access key"),
          {:ok, expiry} <- decode_positive_uint(expiry, "expiry"),
          {:ok, limits} <- parse_limits(limits),
-         {:ok, scopes} <- parse_scopes(scopes) do
-      {:ok, %{chain_id: chain_id, key_type: key_type, key_id: key_id, expiry: expiry, limits: limits, scopes: scopes}}
+         {:ok, scopes} <- parse_scopes(scopes),
+         {:ok, extras} <- parse_trailing(trailing) do
+      {:ok,
+       Map.merge(extras, %{
+         chain_id: chain_id,
+         key_type: key_type,
+         key_id: key_id,
+         expiry: expiry,
+         limits: limits,
+         scopes: scopes
+       })}
     end
   end
 
-  defp parse_authorization(_authorization), do: {:error, "keyAuthorization contains unsupported or missing fields"}
+  defp parse_trailing(trailing) do
+    {raw_witness, raw_admin, raw_account} = padded_trailing(trailing)
+
+    with {:ok, witness} <- parse_witness(raw_witness),
+         {:ok, is_admin} <- parse_admin_marker(raw_admin),
+         {:ok, account} <- parse_account(raw_account) do
+      {:ok, %{witness: witness, is_admin: is_admin, account: account}}
+    end
+  end
+
+  defp padded_trailing([]), do: {<<>>, <<>>, <<>>}
+  defp padded_trailing([witness]), do: {witness, <<>>, <<>>}
+  defp padded_trailing([witness, is_admin]), do: {witness, is_admin, <<>>}
+  defp padded_trailing([witness, is_admin, account]), do: {witness, is_admin, account}
+
+  defp parse_witness(<<>>), do: {:ok, nil}
+  defp parse_witness(witness) when is_binary(witness) and byte_size(witness) == 32, do: {:ok, witness}
+  defp parse_witness(_witness), do: {:error, "keyAuthorization witness must be exactly 32 bytes"}
+
+  # ox `fromTuple`: the TIP-1049 admin marker is strictly `0x01`; any other
+  # present value is a protocol-level decode error (refs/ox KeyAuthorization.ts).
+  defp parse_admin_marker(<<>>), do: {:ok, false}
+  defp parse_admin_marker(<<1>>), do: {:ok, true}
+  defp parse_admin_marker(_marker), do: {:error, "invalid keyAuthorization admin marker"}
+
+  defp parse_account(<<>>), do: {:ok, nil}
+  defp parse_account(account) when is_binary(account) and byte_size(account) == 20, do: {:ok, hex(account)}
+  defp parse_account(_account), do: {:error, "invalid keyAuthorization account address"}
 
   defp parse_limits(limits) when is_list(limits) do
     limits
@@ -354,6 +428,40 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
         :ok
     end
   end
+
+  defp put_wallet_witness(params, nil), do: {:ok, params}
+
+  defp put_wallet_witness(params, challenge_id) do
+    with {:ok, witness} <- decode_challenge_witness(challenge_id) do
+      {:ok, Map.put(params, "witness", hex(witness))}
+    end
+  end
+
+  defp verify_witness(witness, challenge_id) do
+    with {:ok, expected} <- decode_challenge_witness(challenge_id),
+         true <- is_binary(witness) and byte_size(witness) == 32 and Plug.Crypto.secure_compare(witness, expected) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _mismatch -> {:error, "keyAuthorization challenge mismatch"}
+    end
+  end
+
+  defp decode_challenge_witness(challenge_id) when is_binary(challenge_id) do
+    case Base.url_decode64(challenge_id, padding: false) do
+      {:ok, witness} when byte_size(witness) == 32 -> {:ok, witness}
+      _ -> {:error, "challenge id must encode 32 bytes"}
+    end
+  end
+
+  defp decode_challenge_witness(_challenge_id), do: {:error, "challenge id must encode 32 bytes"}
+
+  defp reject_admin_account(%{is_admin: true}), do: {:error, "keyAuthorization admin keys are not supported"}
+
+  defp reject_admin_account(%{account: account}) when is_binary(account),
+    do: {:error, "keyAuthorization account-bound keys are not supported"}
+
+  defp reject_admin_account(_authorization), do: :ok
 
   defp verify_declared_source(_authorization, nil), do: :ok
 
@@ -573,6 +681,38 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   end
 
   defp rpc_signature(_signature), do: {:error, "wallet returned an invalid primitive signature"}
+
+  defp rpc_trailing(rpc) do
+    with {:ok, witness} <- rpc_optional_witness(rpc["witness"]),
+         {:ok, is_admin} <- rpc_optional_admin(rpc["isAdmin"]),
+         {:ok, account} <- rpc_optional_account(rpc["account"]) do
+      {:ok, encode_trailing(witness, is_admin, account)}
+    end
+  end
+
+  defp rpc_optional_witness(nil), do: {:ok, nil}
+  defp rpc_optional_witness(value), do: decode_fixed_hex(value, 32, "witness")
+
+  defp rpc_optional_admin(nil), do: {:ok, nil}
+  defp rpc_optional_admin(true), do: {:ok, true}
+  defp rpc_optional_admin(false), do: {:ok, false}
+  defp rpc_optional_admin(_value), do: {:error, "wallet returned an invalid isAdmin"}
+
+  defp rpc_optional_account(nil), do: {:ok, nil}
+  defp rpc_optional_account(value), do: decode_address(value, "account")
+
+  # ox `toTuple` optional trailing fields in wire order: witness, isAdmin, account.
+  # Absent earlier slots become RLP empty (`<<>>` / `'0x'`) when a later slot is present.
+  defp encode_trailing(witness, is_admin, account) do
+    admin_marker = if is_admin == true, do: <<1>>
+
+    cond do
+      not is_nil(account) -> [witness || <<>>, admin_marker || <<>>, account]
+      not is_nil(admin_marker) -> [witness || <<>>, admin_marker]
+      not is_nil(witness) -> [witness]
+      true -> []
+    end
+  end
 
   defp decode_quantity(value, _name) when is_integer(value) and value >= 0, do: {:ok, value}
 

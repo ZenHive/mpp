@@ -15,6 +15,7 @@ defmodule MPP.Test.SubscriptionHelpers do
   @fee_payer_private_key String.duplicate("33", 32)
   @token "0x20c0000000000000000000000000000000000001"
   @recipient "0x2222222222222222222222222222222222222222"
+  @default_challenge_id Base.url_encode64(:binary.copy(<<0xAB>>, 32), padding: false)
   @transfer_selector <<0xA9, 0x05, 0x9C, 0xBB>>
   @transfer_with_memo_selector <<0x95, 0x77, 0x7D, 0x59>>
   @transfer_with_memo_event "TransferWithMemo(address,address,uint256,bytes32)"
@@ -46,6 +47,18 @@ defmodule MPP.Test.SubscriptionHelpers do
   @spec fee_payer_address() :: String.t()
   def fee_payer_address, do: address!(@fee_payer_private_key)
 
+  @spec unique_challenge_id() :: String.t()
+  def unique_challenge_id, do: 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+
+  @spec challenge_id() :: String.t()
+  def challenge_id, do: @default_challenge_id
+
+  @spec challenge_witness(String.t()) :: binary()
+  def challenge_witness(challenge_id) do
+    {:ok, bytes} = Base.url_decode64(challenge_id, padding: false)
+    bytes
+  end
+
   @spec subscription(keyword()) :: Subscription.t()
   def subscription(opts \\ []) do
     defaults = [
@@ -65,7 +78,8 @@ defmodule MPP.Test.SubscriptionHelpers do
 
   @spec signed_authorization(Subscription.t(), keyword()) :: {String.t(), KeyAuthorization.t(), map()}
   def signed_authorization(%Subscription{} = subscription, opts \\ []) do
-    authorization = authorization_tuple(subscription, opts)
+    challenge_id = authorization_challenge_id(subscription, opts)
+    authorization = authorization_tuple(subscription, opts, challenge_id)
     digest = authorization |> ExRLP.encode() |> Hash.keccak()
     private_key = decode_key!(Keyword.get(opts, :root_private_key, @root_private_key))
     {:ok, root_address} = Curvy.get_address(private_key)
@@ -100,6 +114,11 @@ defmodule MPP.Test.SubscriptionHelpers do
       }
     }
 
+    rpc =
+      rpc
+      |> maybe_put_rpc_witness(opts, challenge_id)
+      |> maybe_put_rpc_admin(opts)
+
     {serialized, parsed, rpc}
   end
 
@@ -124,7 +143,7 @@ defmodule MPP.Test.SubscriptionHelpers do
     binary_part(input, byte_size(input) - 32, 32)
   end
 
-  defp authorization_tuple(subscription, opts) do
+  defp authorization_tuple(subscription, opts, challenge_id) do
     {:ok, token} = Address.validate(subscription.currency)
     {:ok, recipient} = Address.validate(subscription.recipient)
     {:ok, access_key} = Address.validate(Keyword.get(opts, :access_key, access_address()))
@@ -149,8 +168,56 @@ defmodule MPP.Test.SubscriptionHelpers do
       encode_uint(expiry_seconds(subscription, opts)),
       limits,
       scopes
+      | authorization_trailing(opts, challenge_id)
     ]
   end
+
+  defp authorization_challenge_id(subscription, opts) do
+    Keyword.get_lazy(opts, :challenge_id, fn ->
+      case subscription.method_details do
+        %{"challenge_id" => id} when is_binary(id) and id != "" -> id
+        _details -> challenge_id()
+      end
+    end)
+  end
+
+  defp authorization_trailing(opts, challenge_id) do
+    cond do
+      Keyword.has_key?(opts, :trailing) ->
+        Keyword.fetch!(opts, :trailing)
+
+      Keyword.get(opts, :omit_witness) ->
+        []
+
+      true ->
+        witness = Keyword.get_lazy(opts, :witness, fn -> challenge_witness(challenge_id) end)
+        extra = Keyword.get(opts, :extra_trailing, [])
+        [witness | extra]
+    end
+  end
+
+  defp maybe_put_rpc_witness(rpc, opts, challenge_id) do
+    cond do
+      Keyword.get(opts, :omit_witness) ->
+        rpc
+
+      Keyword.has_key?(opts, :trailing) ->
+        rpc
+
+      true ->
+        witness = Keyword.get_lazy(opts, :witness, fn -> challenge_witness(challenge_id) end)
+        Map.put(rpc, "witness", hex(witness))
+    end
+  end
+
+  defp maybe_put_rpc_admin(rpc, opts) do
+    rpc
+    |> maybe_put("isAdmin", Keyword.get(opts, :is_admin))
+    |> maybe_put("account", Keyword.get(opts, :account))
+  end
+
+  defp maybe_put(rpc, _key, nil), do: rpc
+  defp maybe_put(rpc, key, value), do: Map.put(rpc, key, value)
 
   defp rpc_allowed_calls(subscription, opts) do
     Keyword.get(opts, :rpc_allowed_calls, [
