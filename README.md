@@ -135,6 +135,13 @@ end
 
 Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs. Set `"confidential" => true` (Token-2022 mints only) to require the confidential transfer profile: the client submits a `type="bundle"` credential whose final transaction carries the single Token-2022 confidential `Transfer`/`TransferWithFee`, and the server confirms the amount by decrypting the recipient pending-balance delta with `"recipient_elgamal_secret_key"`.
 
+### XRPL (XRP, issued currencies and MPTs)
+
+`MPP.Methods.XRPL` supports signed-blob and transaction-hash charge credentials,
+validated-ledger settlement, exact amounts and challenge-bound InvoiceID attribution.
+It requires an explicitly configured atomic, durable shared store. See
+[XRPL configuration and live test setup](docs/xrpl-charge.md).
+
 ### NEAR Intents (1Click)
 
 Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). A configured `"store"` must implement atomic `MPP.Tempo.Store.update/3`. There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
@@ -242,6 +249,7 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 | Tempo | MPP | Stablecoins (TIP-20) | v0.2.0 |
 | EVM | MPP | Any EVM chain (ETH, USDC, ERC-20) | v0.3.0 |
 | Solana | MPP | Native SOL and SPL tokens (incl. Token-2022 confidential) | v0.14.0 |
+| XRPL | MPP | XRP, issued currencies and MPTs | Implemented |
 | NEAR Intents | MPP | Cross-chain deposits via 1Click (hash-only) | v0.14.0 |
 | Lightning | MPP | Bitcoin (BOLT11) | Future |
 
@@ -299,6 +307,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
+| `MPP.Methods.XRPL` | XRPL signed-blob and hash charge verification via JSON-RPC |
 | `MPP.Methods.NearIntents` | NEAR Intents hash-credential charges via 1Click Swap + origin RPC |
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
