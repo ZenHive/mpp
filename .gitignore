@@ -44,3 +44,4 @@ mpp-*.tar
 /node_modules/
 /npm.lock
 /package.json
+/package-lock.json

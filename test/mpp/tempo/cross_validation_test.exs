@@ -659,6 +659,8 @@ defmodule MPP.Tempo.CrossValidationTest do
            "Round-trip hex mismatch:\n  original:     #{hex}\n  reserialized: #{reserialized}"
   end
 
+  # --- Helpers: Elixir RLP transaction builders ---
+
   @default_max_priority_fee 1_000_000_000
   @default_max_fee 25_000_000_000
   @default_amount 1_000_000_000_000_000_000
@@ -756,7 +758,6 @@ defmodule MPP.Tempo.CrossValidationTest do
       encode_uint(0),
       <<>>,
       <<>>,
-      # --- Helpers: Elixir RLP transaction builders ---
       []
     ]
 
