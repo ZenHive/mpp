@@ -4766,7 +4766,7 @@
       "id": "117",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "XRPL session redemption: retain the highest verified claim and submit PaymentChannelClaim on close, and verify the claim signature before any ledger RPC",
       "scores": {
         "d": 5,
@@ -4809,10 +4809,17 @@
         "test/mpp/session/channel_test.exs",
         "docs/xrpl-session.md"
       ],
+      "shipped_in": "a159f95bbd52e6a18903738f716aef98c4103467",
       "body": "Post-landing content review of Task 110 (evidence read 2026-09-11 on `0019cb3`): `MPP.Methods.XRPL.Session` verifies each claim signature and then discards it — `apply_action/6` hands `MPP.Session.Actions` a `%Payload{signature: nil}` (`session.ex` ~123), `%MPP.Session.Channel{}` has no signature field (`channel.ex` ~52-62), the close receipt carries only `channelId`/`cumulative`, and telemetry deliberately omits proofs. `grep -rn \"PaymentChannelClaim\\|tfClose\\|redeem\" lib/mpp/` finds only doc comments. The server therefore has no way, automatic or manual, to ever redeem a channel: the funder closes after SettleDelay and reclaims the full deposit, spent units included. `refs/mpp-specs` draft-xrpl-session-00 (commit 213b098; `git -C refs/mpp-specs fetch` first, the local clone may be behind) §Redemption permits deferring the on-ledger claim but §\"The Server Bears the Settlement Risk\" says a redemption in a validated ledger is the only thing that settles the matter and none is optional. Read the draft at pickup and cite section lines.\n\nBuild:\n1. Retain the highest accepted claim per channel — cumulative amount, signature, and the ledger PublicKey it verified against — in the session channel state via the existing `MPP.Session.Store` update closure (atomic, same pattern as Tempo vouchers). Extend `MPP.Session.Channel` with an optional, method-neutral field (Tempo leaves it nil) rather than forking the struct.\n2. On `close`, submit `PaymentChannelClaim` with `Balance` = accepted cumulative, `Amount`, `Signature`, `PublicKey`, and `tfClose` set when the server is the Destination (immediate close per xrpl.org); confirm `tesSUCCESS` in a validated ledger and that the PayChannel is gone or its `Balance` advanced; put the claim `txHash` on the close receipt. Keep a documented deferred mode (config flag) where close only records the claim and exposes it via a public function the operator can call later (`redeem/2` or similar) — the draft allows deferral, but the claim must be retrievable.\n3. Reorder `channel_state/6`: run `Claim.verify` before `closing_window/2` and before the ledger read where the public key allows it — the draft (§Signature) says a forged claim against a random channel id must be rejected without the server making a request on the client's behalf. The PublicKey comes from the ledger, so the minimum is: read the entry once, verify the signature, then do every further RPC. Say which order you settled on and why.\n\nProvider-owned authority: xrpl.org PaymentChannelClaim / channel_verify docs and the live testnet (`XRPL_TESTNET_RPC_URL`, `xrpl@4.6.0` toolchain the integration test installs). The signing/settlement fee for the claim is the server's; document who pays.",
       "created_at": "2026-09-11",
       "started_at": "2026-09-11",
+      "done_at": "2026-09-11",
       "scored_at": "2026-09-11",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1789137581059-3d66cbd2, a159f95bbd52e6a18903738f716aef98c4103467).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1789137581059-3d66cbd2",
       "cross_repo": []
     }
   ]

@@ -3047,7 +3047,7 @@ shipped_in = "0983afe464dac7cd0bcc6ba487609f2a9c7423af"
 id = "117"
 phase = 9
 bundle = "utilities"
-status = "in_progress"
+status = "done"
 title = "XRPL session redemption: retain the highest verified claim and submit PaymentChannelClaim on close, and verify the claim signature before any ledger RPC"
 scores = { d = 5, b = 8, u = 7 }
 markers = ["security"]
@@ -3066,6 +3066,13 @@ Build:
 3. Reorder `channel_state/6`: run `Claim.verify` before `closing_window/2` and before the ledger read where the public key allows it — the draft (§Signature) says a forged claim against a random channel id must be rejected without the server making a request on the client's behalf. The PublicKey comes from the ledger, so the minimum is: read the entry once, verify the signature, then do every further RPC. Say which order you settled on and why.
 
 Provider-owned authority: xrpl.org PaymentChannelClaim / channel_verify docs and the live testnet (`XRPL_TESTNET_RPC_URL`, `xrpl@4.6.0` toolchain the integration test installs). The signing/settlement fee for the claim is the server's; document who pays.'''
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1789137581059-3d66cbd2, a159f95bbd52e6a18903738f716aef98c4103467)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1789137581059-3d66cbd2"
 created_at = "2026-09-11"
 started_at = "2026-09-11"
 scored_at = "2026-09-11"
+done_at = "2026-09-11"
+shipped_in = "a159f95bbd52e6a18903738f716aef98c4103467"
