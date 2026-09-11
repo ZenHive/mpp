@@ -120,7 +120,10 @@ PayChannel is gone or its `Balance` has advanced. The close receipt carries the
 claim `txHash`.
 
 The store is updated first so a failed submit still leaves the claim
-retrievable via `MPP.Methods.XRPL.Session.redeem/2`.
+retrievable via `MPP.Methods.XRPL.Session.redeem/2`. A close whose submit was
+rejected answers `settlement-failed` without the ledger result code,
+which §Error Responses (lines 677–702) forbids surfacing raw; `redeem/2`
+reports the code to the operator.
 
 ### Deferred mode
 

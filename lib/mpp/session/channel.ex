@@ -135,6 +135,10 @@ defmodule MPP.Session.Channel do
     deposit - cumulative_amount
   end
 
+  @doc "Build the method-specific settlement proof retained for a claim."
+  @spec new_proof(non_neg_integer(), String.t(), String.t()) :: proof()
+  def new_proof(amount, signature, public_key), do: %{amount: amount, signature: signature, public_key: public_key}
+
   @doc "Raise the accepted cumulative voucher amount. Equal amounts are idempotent."
   @spec apply_voucher(t(), non_neg_integer(), proof() | nil) :: {:ok, t()} | {:error, term()}
   def apply_voucher(channel, amount, proof \\ nil)
@@ -341,7 +345,7 @@ defmodule MPP.Session.Channel do
 
   defp normalize_proof(%{amount: amount, signature: signature, public_key: key}, amount)
        when is_binary(signature) and signature != "" and is_binary(key) and key != "" do
-    {:ok, %{amount: amount, signature: signature, public_key: key}}
+    {:ok, new_proof(amount, signature, key)}
   end
 
   defp normalize_proof(_proof, _amount), do: {:error, :invalid_proof}

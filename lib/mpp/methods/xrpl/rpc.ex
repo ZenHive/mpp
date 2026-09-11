@@ -2,6 +2,7 @@ defmodule MPP.Methods.XRPL.RPC do
   @moduledoc false
 
   @networks %{"mainnet" => 0, "testnet" => 1, "devnet" => 2}
+  @miss_budget 2
 
   @doc false
   @spec networks() :: %{String.t() => 0 | 1 | 2}
@@ -88,22 +89,32 @@ defmodule MPP.Methods.XRPL.RPC do
     end
   end
 
+  # A caller-supplied hash gets a bounded `txnNotFound` budget so a random hash
+  # cannot make the server poll for the whole timeout on the caller's behalf.
+  # A hash this server just submitted is known to exist, so `submitted: true`
+  # lets propagation take the full deadline.
   @doc false
-  @spec await_validated(String.t(), map()) :: {:ok, map()} | :error
-  def await_validated(hash, config) when is_binary(hash) and is_map(config) do
-    poll(hash, config, System.monotonic_time(:millisecond) + timeout(config))
+  @spec await_validated(String.t(), map(), keyword()) :: {:ok, map()} | :error
+  def await_validated(hash, config, opts \\ []) when is_binary(hash) and is_map(config) and is_list(opts) do
+    budget = if Keyword.get(opts, :submitted, false), do: :infinity, else: @miss_budget
+
+    poll(hash, config, System.monotonic_time(:millisecond) + timeout(config), budget)
   end
 
-  defp poll(hash, config, deadline) do
+  defp poll(hash, config, deadline, misses) do
     case call(config, "tx", %{"transaction" => hash, "binary" => false}) do
       {:ok, %{"validated" => true} = result} -> {:ok, result}
-      {:ok, %{"error" => "txnNotFound"}} -> retry(hash, config, deadline)
-      {:ok, %{"validated" => false}} -> retry(hash, config, deadline)
+      {:ok, %{"error" => "txnNotFound"}} -> miss(hash, config, deadline, misses)
+      {:ok, %{"validated" => false}} -> retry(hash, config, deadline, misses)
       _ -> :error
     end
   end
 
-  defp retry(hash, config, deadline) do
+  defp miss(_hash, _config, _deadline, 0), do: :error
+  defp miss(hash, config, deadline, :infinity), do: retry(hash, config, deadline, :infinity)
+  defp miss(hash, config, deadline, misses), do: retry(hash, config, deadline, misses - 1)
+
+  defp retry(hash, config, deadline, misses) do
     delay = Map.get(config, "poll_interval_ms", 1000)
 
     if System.monotonic_time(:millisecond) + delay < deadline do
@@ -112,7 +123,7 @@ defmodule MPP.Methods.XRPL.RPC do
         delay -> :ok
       end
 
-      poll(hash, config, deadline)
+      poll(hash, config, deadline, misses)
     else
       :error
     end

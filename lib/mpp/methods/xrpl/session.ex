@@ -107,7 +107,7 @@ defmodule MPP.Methods.XRPL.Session do
          :ok <- unused_channel(channel_id, config),
          :ok <- RPC.check_network(config),
          {:ok, hash} <- RPC.submit_blob(blob, config),
-         {:ok, result} <- RPC.await_validated(hash, config),
+         {:ok, result} <- RPC.await_validated(hash, config, submitted: true),
          :ok <- created?(result, hash, channel_id),
          {:ok, channel} <- ledger_channel(channel_id, config),
          :ok <- channel_state(channel, channel_id, amount, session, config, signature) do
@@ -486,7 +486,7 @@ defmodule MPP.Methods.XRPL.Session do
     else
       case redeem(channel_id, config) do
         {:ok, hash} -> {:ok, Map.put(extra, "txHash", hash)}
-        {:error, %Errors{} = error} -> {:error, error}
+        {:error, %Errors{}} -> {:error, settlement_failed()}
       end
     end
   end
@@ -509,7 +509,7 @@ defmodule MPP.Methods.XRPL.Session do
          {:ok, tx} <- claim_transaction(channel, proof, wallet, sequence, last_ledger, config),
          {:ok, blob, hash} <- Wallet.sign_claim(wallet, tx),
          {:ok, ^hash} <- submit_claim(blob, hash, config),
-         {:ok, result} <- RPC.await_validated(hash, config),
+         {:ok, result} <- RPC.await_validated(hash, config, submitted: true),
          :ok <- claimed?(result, hash, channel, proof),
          :ok <- confirm_ledger(channel.channel_id, proof.amount, config) do
       {:ok, hash}
@@ -542,9 +542,9 @@ defmodule MPP.Methods.XRPL.Session do
     end
   end
 
-  defp stored_proof(%Channel{proof: %{amount: amount, signature: signature, public_key: key}})
+  defp stored_proof(%Channel{proof: %{amount: amount, signature: signature, public_key: key} = proof})
        when is_integer(amount) and amount > 0 and is_binary(signature) and is_binary(key) do
-    {:ok, %{amount: amount, signature: signature, public_key: key}}
+    {:ok, proof}
   end
 
   defp stored_proof(_channel), do: {:error, Errors.new(:settlement_failed, "no retained claim to redeem")}
@@ -648,6 +648,11 @@ defmodule MPP.Methods.XRPL.Session do
         end
     end
   end
+
+  # draft-xrpl-session-00 §Error Responses: ledger result codes MUST NOT be
+  # surfaced raw, so the client-facing close error drops the engine result that
+  # `redeem/2` reports to the operator.
+  defp settlement_failed, do: Errors.new(:settlement_failed, "XRPL PaymentChannelClaim was not settled")
 
   defp failed, do: {:error, Errors.new(:verification_failed, "XRPL session verification failed")}
   defp malformed, do: {:error, Errors.new(:malformed_credential, "Malformed XRPL session credential")}

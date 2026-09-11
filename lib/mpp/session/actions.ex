@@ -131,7 +131,9 @@ defmodule MPP.Session.Actions do
         {:error, Errors.new(:delta_too_small, "voucher delta #{delta} below minimum #{min_delta}")}
 
       true ->
-        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount, settlement_proof(payload, opts)) do
+        proof = settlement_proof(payload, opts)
+
+        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount, proof) do
           maybe_spend(channel, request_amount(opts))
         end
     end
@@ -165,7 +167,7 @@ defmodule MPP.Session.Actions do
        when is_binary(signature) and signature != "" do
     case Keyword.get(opts, :proof) do
       %{public_key: key} when is_binary(key) and key != "" ->
-        %{amount: amount, signature: signature, public_key: key}
+        Channel.new_proof(amount, signature, key)
 
       _ ->
         nil

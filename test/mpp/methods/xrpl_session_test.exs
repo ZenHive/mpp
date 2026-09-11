@@ -639,6 +639,46 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert :error = Codec.encode_claim(%{})
   end
 
+  test "the claim encoder fails closed on every malformed field" do
+    base = %{
+      "TransactionType" => "PaymentChannelClaim",
+      "Account" => @fixture["destination"]["ed25519"]["address"],
+      "Channel" => @channel_id,
+      "Amount" => "200000",
+      "Balance" => "200000",
+      "Signature" => @voucher_sig,
+      "PublicKey" => @fixture["payer"]["publicKey"],
+      "Flags" => 131_072,
+      "Sequence" => 1,
+      "LastLedgerSequence" => 100,
+      "Fee" => "12"
+    }
+
+    assert {:ok, _blob} = Codec.encode_claim(base)
+
+    for {field, value} <- [
+          {"Channel", "00"},
+          {"Channel", "zz"},
+          {"Amount", "-1"},
+          {"Balance", 1.5},
+          {"Account", "not-an-address"},
+          {"Flags", "131072"},
+          {"Signature", "ABC"},
+          {"Fee", nil}
+        ] do
+      assert :error = Codec.encode_claim(Map.put(base, field, value)), "#{field}=#{inspect(value)} encoded"
+    end
+
+    # 0x-prefixed blob fields are accepted and normalise to the same bytes.
+    assert Codec.encode_claim(Map.put(base, "Signature", "0x" <> @voucher_sig)) == Codec.encode_claim(base)
+
+    # A family seed with a valid prefix but a broken checksum is rejected.
+    seed = @fixture["destination"]["ed25519"]["seed"]
+    assert :error = Wallet.from_seed(String.replace_suffix(seed, String.last(seed), "2"))
+    assert :error = Wallet.from_seed(:not_a_binary)
+    assert :error = Codec.claim_signing_data(%{})
+  end
+
   test "redeem/2 fails when the store has no proof", context do
     {:ok, channel} =
       Channel.new(
@@ -735,6 +775,147 @@ defmodule MPP.Methods.XRPL.SessionTest do
              XRPLSession.redeem(@channel_id, session.method_details)
   end
 
+  test "redeem/2 reports a rejected or unreadable submit", context do
+    session = redeemable!(context)
+
+    stub(%{context | session: session}, @hash,
+      submit: %{"engine_result" => "tecNO_PERMISSION", "tx_json" => %{"hash" => @hash}}
+    )
+
+    assert {:error, %Errors{type: type, detail: detail}} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert type == Errors.new(:settlement_failed, "").type
+    assert detail =~ "tecNO_PERMISSION"
+
+    stub(%{context | session: session}, @hash, submit: %{"tx_json" => %{"hash" => @hash}})
+
+    assert {:error, %Errors{type: ^type}} = XRPLSession.redeem(@channel_id, session.method_details)
+  end
+
+  test "redeem/2 fails closed on a missing channel, a broken store and a foreign seed", context do
+    session = redeemable!(context)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/session/channel-not-found"}} =
+             XRPLSession.redeem(@fixture["hashPaymentChannel"]["channelId"], session.method_details)
+
+    down = Map.put(session.method_details, "session_store", DownStore)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.redeem(@channel_id, down)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.redeem(@channel_id, Map.put(session.method_details, "destination_secret", "not-a-seed"))
+  end
+
+  test "redeem/2 fails closed when the ledger cannot supply a sequence or a ledger index", context do
+    session = redeemable!(context)
+    settlement_failed = Errors.new(:settlement_failed, "").type
+
+    for results <- [
+          %{"account_info" => %{}},
+          %{"ledger" => %{}},
+          %{"ledger" => %{"ledger_index" => "not-a-number"}},
+          %{"ledger" => %{"ledger_index" => -1}}
+        ] do
+      stub(%{context | session: session}, @hash, results: results)
+      assert {:error, %Errors{type: ^settlement_failed}} = XRPLSession.redeem(@channel_id, session.method_details)
+    end
+
+    stub(%{context | session: session}, @hash, results: %{"ledger" => %{"ledger" => %{"ledger_index" => "120"}}})
+    assert {:ok, _hash} = XRPLSession.redeem(@channel_id, session.method_details)
+  end
+
+  test "redeem/2 refuses a PayChannel whose Balance did not advance", context do
+    session = redeemable!(context)
+
+    stub(%{context | session: session}, @hash,
+      claim_advanced: true,
+      results: %{
+        "ledger_entry" => %{
+          "node" => %{"LedgerEntryType" => "PayChannel", "Balance" => "1", "Amount" => "1000000"}
+        }
+      }
+    )
+
+    assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert type == Errors.new(:settlement_failed, "").type
+  end
+
+  test "close surfaces a settlement failure after the store already recorded the claim", context do
+    destination = @fixture["destination"]["ed25519"]
+
+    {:ok, session} =
+      session(%{
+        "session_store" => context.session.method_details["session_store"],
+        "destination_secret" => destination["seed"],
+        "defer_redemption" => false
+      })
+
+    session = %{session | recipient: destination["address"]}
+
+    {:ok, channel} =
+      Channel.new(
+        channel_id: @channel_id,
+        payer: @payer,
+        recipient: destination["address"],
+        token: "XRP",
+        deposit: 1_000_000,
+        cumulative_amount: 100_000,
+        spent: 100_000,
+        proof: %{amount: 100_000, signature: @open_sig, public_key: @fixture["payer"]["publicKey"]}
+      )
+
+    {:ok, channel} = Channel.activate(channel)
+    assert :ok = Store.put(context.store, channel)
+
+    stub(%{context | session: session}, @hash,
+      destination: destination["address"],
+      submit: %{"engine_result" => "tefPAST_SEQ", "tx_json" => %{"hash" => @hash}}
+    )
+
+    assert {:error, %Errors{type: type, detail: detail}} =
+             XRPLSession.verify(
+               %{"action" => "close", "channelId" => @channel_id, "amount" => "100000", "signature" => @open_sig},
+               session
+             )
+
+    assert type == Errors.new(:settlement_failed, "").type
+
+    # draft §Error Responses: the raw ledger result code stays out of the client's problem detail.
+    refute detail =~ "tefPAST_SEQ"
+
+    # The claim survives the failed submit, so an operator can still redeem it.
+    assert {:ok, %Channel{status: :closed, proof: %{amount: 100_000}}} = Store.get(context.store, @channel_id)
+  end
+
+  defp redeemable!(context) do
+    destination = @fixture["destination"]["ed25519"]
+    {:ok, wallet} = Wallet.from_seed(destination["seed"])
+
+    {:ok, channel} =
+      Channel.new(
+        channel_id: @channel_id,
+        payer: @payer,
+        recipient: wallet.address,
+        token: "XRP",
+        deposit: 1_000_000,
+        cumulative_amount: 200_000,
+        spent: 200_000,
+        proof: %{amount: 200_000, signature: @voucher_sig, public_key: @fixture["payer"]["publicKey"]}
+      )
+
+    {:ok, channel} = Channel.activate(channel)
+    {:ok, channel} = Channel.close(channel)
+    assert :ok = Store.put(context.store, channel)
+
+    {:ok, session} =
+      session(%{
+        "session_store" => context.session.method_details["session_store"],
+        "destination_secret" => destination["seed"]
+      })
+
+    session
+  end
+
   defp session(config) do
     Session.new(
       amount: "100000",
@@ -783,7 +964,14 @@ defmodule MPP.Methods.XRPL.SessionTest do
     method = decoded["method"]
     params = decoded |> Map.get("params", []) |> List.first() || %{}
     send(owner, {:rpc, method})
-    Req.Test.json(conn, %{"result" => rpc_result(method, hash, opts, params, claimed, owner)})
+    Req.Test.json(conn, %{"result" => rpc_override(method, hash, opts, params, claimed, owner)})
+  end
+
+  defp rpc_override(method, hash, opts, params, claimed, owner) do
+    case opts |> Keyword.get(:results, %{}) |> Map.fetch(method) do
+      {:ok, override} -> override
+      :error -> rpc_result(method, hash, opts, params, claimed, owner)
+    end
   end
 
   defp rpc_result("server_info", _hash, opts, _params, _claimed, _owner),
