@@ -145,6 +145,7 @@
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
 | Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
 | Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
+| Task 113 | ⬜ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---

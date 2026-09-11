@@ -1,7 +1,5 @@
 # MPP
 
-[![CI](https://github.com/ZenHive/mpp/actions/workflows/ci.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/ci.yml)
-[![Code Scanning](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml/badge.svg)](https://github.com/ZenHive/mpp/actions/workflows/code-scanning.yml)
 [![GitHub](https://img.shields.io/github/license/ZenHive/mpp)](https://github.com/ZenHive/mpp/blob/main/LICENSE)
 
 Elixir implementation of the [Machine Payments Protocol](https://mpp.dev) (MPP) — HTTP 402 payment middleware for AI agents and machine-to-machine commerce.
@@ -196,7 +194,7 @@ pipeline :paid_multi do
 end
 ```
 
-Requests without payment get a `402 Payment Required` with a challenge. Requests with a valid `Authorization: Payment` credential pass through with a `Payment-Receipt` header and the receipt in `conn.assigns[:mpp_receipt]`.
+Requests without payment get a `402 Payment Required` with a challenge. Requests with a valid `Authorization: Payment` credential pass through with the receipt in `conn.assigns[:mpp_receipt]`. When a successful (2xx) response is sent, MPP attaches `Payment-Receipt` and merges `private` into the response’s `Cache-Control` directives.
 
 Each route can have its own pricing — just mount `MPP.Plug` with different `amount`/`currency` per pipeline or scope.
 
@@ -440,34 +438,22 @@ payload. The startup banner prints copy-paste curl commands for the full
 challenge → pay → receipt flow. Requires Bandit (`{:bandit, "~> 1.10", only: :dev}`
 when using mpp as a dependency).
 
-## Continuous Integration
+## Project checks
 
-GitHub Actions workflows (Elixir/OTP pinned via `.tool-versions`, so CI never
-drifts from local `mix format`):
+Run `mix deps.get`, then `mix ci` (also available as `mix check.dispatch`).
+Elixir/OTP versions are pinned in `.tool-versions`. The gate runs formatting,
+compilation with warnings as errors, Credo, Doctor, tests with 95% coverage,
+Sobelow, clone and architecture checks, Dialyzer, and dependency auditing.
+Host tooling also checks `AGENTS.md` freshness and advisory-mirror freshness.
 
-- **CI** (`.github/workflows/ci.yml`) — runs on every push/PR to `development` and
-  `main`: format check, `--warnings-as-errors` compile, Credo strict, Doctor,
-  Sobelow, tests with a 95% coverage gate, and Dialyzer. Mirrors `mix precommit.full`.
-- **Integration** (`.github/workflows/integration.yml`) — runs the credential-gated
-  `:integration` suite nightly (and on PR / manual dispatch). These live round-trips
-  catch the bug class unit tests are blind to (wrong gas limit, wrong request shape,
-  on-chain accounting drift). It requires the following repo secrets — when any are
-  absent the suite **flunks loudly** rather than reporting a green 0-test run:
+Live provider tests run separately with `mix test --include integration`.
+Each integration test module documents its credentials and RPC configuration;
+missing required credentials fail loudly. Cross-validation tests run with
+`mix test --include cross_validation`.
 
-  | Secret | Purpose |
-  |--------|---------|
-  | `TEMPO_RPC_URL` | Moderato testnet RPC (`https://rpc.moderato.tempo.xyz`) |
-  | `STRIPE_SECRET_KEY` | Stripe **test-mode** secret key (`sk_test_…`) |
-  | `ETH_SEPOLIA_RPC_URL` / `ETH_SEPOLIA_PRIVATE_KEY` | Sepolia RPC + funded key |
-  | `EVM_RPC_URL` / `EVM_PRIVATE_KEY` | Generic EVM RPC + funded key (falls back to Sepolia) |
-
-- **Mutation security** (`.github/workflows/mutation-security.yml`) — nightly
-  and `workflow_dispatch` only (not on PRs). Runs `mix mutation.security`, which
-  applies each payment-security mutant, compiles it, and runs its tests. A
-  surviving canary fails the job. Kept out of `mix ci` / `mix precommit.full`.
-
-A further workflow, **Code Scanning** (`.github/workflows/code-scanning.yml`), uploads
-Sobelow findings to the Security → Code scanning tab (CodeQL has no Elixir support).
+`mix mutation.security` applies payment-security mutants and runs their tests;
+a surviving canary fails the command. It runs separately from `mix ci`.
+GitHub Actions workflows have been removed; `mix ci` is the project gate.
 Security vulnerabilities should be reported privately — see [SECURITY.md](SECURITY.md).
 
 ## References
