@@ -2943,3 +2943,25 @@ touches = ["test/mpp/tempo/con_cache_store_test.exs"]
 body = "The cold audit of 24b4181 observed test/mpp/tempo/con_cache_store_test.exs:173 fail at line 183: the original value had expired before the invalid-update preservation assertion. The shared setup uses a 25 ms TTL. test.json automatically retried this test and it passed (seed 531377; 1 flaky, 0 confirmed failures). Give non-expiry assertions an expiry-independent setup while preserving explicit expiry tests. This is a test reliability issue, not evidence of a runtime store defect."
 created_at = "2026-09-11"
 scored_at = "2026-09-11"
+
+[[task]]
+id = "114"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Make the Tempo reserve key invariant under every valid re-encoding of a signed transaction: close the remaining channel, add a mutation canary, cover the hosted fee-payer path"
+scores = { d = 3, b = 5, u = 4 }
+markers = ["security"]
+acceptance_criteria = ["The fix described in GHSA-65c4-v2vw-rr64 is implemented in canonicalize_transaction/1 and a unit test presents the same signed transaction under the advisory's two encodings and asserts one reservation and one receipt", "A new mutant reverting the reserve key to the caller-supplied bytes is in security_mutations.exs, mix mutation.security reports it killed, and the ledger fingerprint is updated", "The hosted fee_payer_url sponsored path has a two-encodings-one-receipt test with no duplicate hosted fill or broadcast", "The Moderato integration test submits the advisory's second encoding and asserts the observed node behaviour (accepted-and-deduped or rejected) explicitly", "mix ci passes; no mechanism detail from the advisory appears in tasks.toml, CHANGELOG.md, or commit messages"]
+out_of_scope = ["Changing MPP.Tempo.Store's behaviour contract", "Upstreaming a serialize/1 into onchain_tempo (separate task if wanted)"]
+touches = ["lib/mpp/methods/tempo.ex", "test/mpp/methods/tempo_test.exs", "test/mpp/methods/tempo_integration_test.exs", "test/mutation/security_mutations.exs", "test/mutation/payment_security_ledger.json"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+Class invariant, widened from Task 104 (shipped 0.16.2): the pre-broadcast reserve key of a Tempo transaction credential must be identical for every valid encoding of the same signed transaction — not only the two channels 104 normalized. The orchestrator content review of that landing found one remaining channel in `canonicalize_transaction/1`; its mechanism and the exact fix are in private advisory GHSA-65c4-v2vw-rr64 (Security → Advisories). Read it first; do not copy its mechanism into this file, the CHANGELOG, commit messages, or code comments beyond what the fix itself needs.
+
+Public-safe parts: (1) add a payment-security mutant to `test/mutation/security_mutations.exs` that reverts the reserve key to the caller-supplied bytes, run `mix mutation.security`, and record the new fingerprint in the ledger (the default test checks it) — this is what makes a future instance of the class fail in CI instead of in review; (2) extend the two-encodings-one-receipt property to the hosted `fee_payer_url` sponsored path (only the locally signed sponsored path is covered today); (3) extend the Moderato `:integration` test with the advisory's second encoding and record what the node does with it — either outcome is an observed fact, never a green skip. Cite `refs/mppx` (`adcf3b5`) and ox for any wire-level claim; the reference SDKs carry the same residual, so parity is not an argument against the fix.
+
+CHANGELOG line describes the shape ("Tempo dedup reserve key is stable across every valid re-encoding of a signed transaction"), not the hole. The advisory is published with the release that ships this."""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
