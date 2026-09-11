@@ -28,6 +28,11 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   subscription verification rejects admin and account-bound keys.
 - Project checks run through `mix ci`; GitHub Actions workflows were removed.
 
+### Fixed
+
+- Tempo charge verification canonicalizes signed transactions before deduplication
+  and broadcast, using the canonical transaction hash for replay reservations.
+
 ## [0.16.1] — 2026-09-04
 
 **Security (fee-payer envelope hardening — the sponsor policy now bounds every signed `0x76` field).** `MPP.Methods.Tempo.FeePayerPolicy` now rejects, before the server co-signs, a client-built sponsored transaction that carries a non-empty EIP-7702 authorization list (`aa_authorization_list`) or a key-authorization field. Both are persistent account-state changes a sponsored payment never needs, and both were outside the gas-economics, access-list, call-value, and calldata-canonicality bounds the policy already enforced. The policy also fails closed on an envelope whose field count is neither the plain nor the key-authorization shape. Subscription activation, where the server itself builds the transaction around a root-signed key authorization it has already verified, pins that exact authorization on the policy via the new `FeePayerPolicy.expect_key_authorization/2`; renewals and every charge-route sponsorship expect none. Safe-by-default: honest clients emit neither field, so existing `fee_payer: true` and `fee_payer_url` deployments are protected without config changes, and the rejection happens before any RPC, simulation, hosted fill, or broadcast. The payment-security mutant campaign gains two `sponsor-intrinsic-gas` mutants covering the new checks.
