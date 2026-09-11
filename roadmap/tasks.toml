@@ -2871,7 +2871,7 @@ shipped_in = "956957879fff9ff073558f1c8341efaf3695520a"
 id = "110"
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "done"
 title = "XRPL session method"
 scores = { d = 8, b = 5, u = 5 }
 depends_on = ["109"]
@@ -2882,9 +2882,16 @@ model = "grok-4.6"
 body = """
 mpp-specs #346 (commit 213b098) also added `specs/methods/xrpl/draft-xrpl-session-00.md` (868 lines), mapping the session intent onto XRPL payment channels. Implement it on top of the XRPL charge method and the shared session machinery (MPP.Session.Actions / Store / Channel). The draft is the wire contract; XRPL payment-channel semantics (channel creation, off-ledger claims, claim verification, settle delay, close) come from xrpl.org and the live testnet, which is the only ground truth — no reference SDK implements this yet. Where the draft's channel model differs from the Tempo escrow model that MPP.Session.Channel encodes, extend the shared module rather than forking it, and say what changed.
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1789132477316-892cb342, cd7a476c709a3b6f593332222571a8c3e7ecb92d)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1789132477316-892cb342"
 created_at = "2026-09-11"
 started_at = "2026-09-11"
 scored_at = "2026-09-11"
+done_at = "2026-09-11"
+shipped_in = "cd7a476c709a3b6f593332222571a8c3e7ecb92d"
 
 [[task]]
 id = "111"
