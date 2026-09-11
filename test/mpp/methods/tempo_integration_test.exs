@@ -880,6 +880,35 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
     end
+
+    test "same signed transaction under two encodings yields one receipt", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+      start_supervised!(TempoMemoryStore)
+
+      config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+      challenge = request_challenge!(config)
+      {:ok, canonical_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
+      raw_tx = TempoTestHelpers.to_raw_recovery_id(canonical_tx)
+      canonical_hash = TempoTestHelpers.keccak256_hex(canonical_tx)
+
+      refute String.downcase(raw_tx) == String.downcase(canonical_tx)
+      refute canonical_hash == TempoTestHelpers.keccak256_hex(raw_tx)
+
+      conn = submit_credential_conn(config, challenge, %{"type" => "transaction", "signature" => raw_tx})
+
+      assert conn.status == nil,
+             "First encoding should pass through, got #{conn.status}: #{conn.resp_body}"
+
+      assert %Receipt{reference: reference} = conn.assigns[:mpp_receipt]
+      assert String.downcase(reference) == canonical_hash
+
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => canonical_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "already used"
+    end
   end
 
   describe "fee payer co-signing" do

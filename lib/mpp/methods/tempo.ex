@@ -327,6 +327,7 @@ defmodule MPP.Methods.Tempo do
     result =
       with {:ok, signature} <- extract_signature(payload),
            {:ok, tx} <- Transaction.deserialize(signature),
+           {:ok, tx, _hash} <- canonicalize_transaction(tx),
            :ok <- verify_chain_id(tx, expected_chain_id),
            :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
            {:ok, payment} <- find_transaction_payment(tx, charge, config, memo),
@@ -994,8 +995,9 @@ defmodule MPP.Methods.Tempo do
 
   defp prepare_sponsored_transaction(tx, payment, config, memo, store) do
     with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+         {:ok, tx, hash} <- canonicalize_transaction(tx),
          {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
-         :ok <- reserve_hash_atomic(store, tx.raw),
+         :ok <- reserve_hash_atomic(store, hash),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
       {:ok, tx, rpc_url}
@@ -1005,7 +1007,7 @@ defmodule MPP.Methods.Tempo do
   defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, store, budget) do
     with :ok <- begin_budget_broadcast(budget),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
-      safe_dedup_post_broadcast(store, tx_hash, tx.raw)
+      safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
       {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
     else
       {:error, :budget_transition_failed} ->
@@ -1151,9 +1153,10 @@ defmodule MPP.Methods.Tempo do
   # failure (Charge.ts:215-273); our mark-after-verify avoids the compensating
   # release entirely.
   #
-  # Transaction path (type="transaction"): atomic reserve → verify → broadcast.
+  # Transaction path (type="transaction"): canonicalize → atomic reserve on
+  # keccak256(canonical bytes) → simulate → broadcast the canonical envelope.
   # Must reserve BEFORE broadcast to prevent concurrent duplicate broadcasts of
-  # the same signed tx. Matches mppx (Charge.ts:144-146).
+  # the same signed tx. Matches mppx #818 (Charge.ts deserialize-then-serialize).
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
   defp check_hash_unused(nil, _hash), do: :ok
@@ -1202,8 +1205,8 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Post-broadcast dedup: if the on-chain tx hash differs from the input hash
-  # (malleable variants), record the on-chain hash too.
+  # Post-broadcast dedup: if the on-chain tx hash differs from the canonical
+  # keccak256 we reserved, record the on-chain hash too.
   # Payment already succeeded on-chain at this point — a store crash (e.g. dead
   # Agent process, network partition to Redis) must not fail the HTTP response.
   # The pre-broadcast reserve_hash_atomic is the critical gate; this is
@@ -1244,6 +1247,82 @@ defmodule MPP.Methods.Tempo do
   defp store_check_and_mark(store, key, value), do: Store.check_and_mark(store, key, value)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
+
+  # Re-encode a deserialized 0x76 envelope so every accepted signature encoding
+  # (Electrum v=27/28 vs raw yParity 0/1) and every non-canonical RLP integer
+  # maps to one byte string. onchain_tempo 0.10.0 has no public serialize/1 —
+  # it only re-encodes inside cosign_fee_payer — so the charge path does it here
+  # before FeePayerPolicy, reserve, or any RPC (mppx #818).
+  defp canonicalize_transaction(%Transaction{fields: fields} = tx) when is_list(fields) do
+    canonical_fields = canonicalize_fields(fields)
+    binary = <<0x76>> <> ExRLP.encode(canonical_fields)
+    hex = "0x" <> Base.encode16(binary, case: :lower)
+    hash = "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+    {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
+  end
+
+  defp transaction_hash(%Transaction{raw: raw}) when is_binary(raw) do
+    {:ok, binary} = Base.decode16(Hex.strip_0x(raw), case: :mixed)
+    "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+  end
+
+  defp canonicalize_fields(fields) do
+    fields
+    |> canonicalize_uint_fields()
+    |> canonicalize_call_values()
+    |> canonicalize_trailing_sender_signature()
+  end
+
+  defp canonicalize_uint_fields(fields) do
+    uint? = canonical_uint_index_set()
+
+    fields
+    |> Enum.with_index()
+    |> Enum.map(fn {value, idx} ->
+      if is_binary(value) and MapSet.member?(uint?, idx), do: rlp_canonical_uint(value), else: value
+    end)
+  end
+
+  defp canonical_uint_index_set do
+    MapSet.new([
+      TxFields.chain_id(),
+      TxFields.max_priority_fee_per_gas(),
+      TxFields.max_fee_per_gas(),
+      TxFields.gas_limit(),
+      TxFields.nonce_key(),
+      TxFields.nonce(),
+      TxFields.valid_before(),
+      TxFields.valid_after()
+    ])
+  end
+
+  defp canonicalize_call_values(fields) do
+    calls = Enum.at(fields, TxFields.calls())
+    List.replace_at(fields, TxFields.calls(), Enum.map(calls, &canonicalize_call/1))
+  end
+
+  defp canonicalize_call([to, value, input]) when is_binary(value), do: [to, rlp_canonical_uint(value), input]
+  defp canonicalize_call(call), do: call
+
+  defp canonicalize_trailing_sender_signature(fields) do
+    {base, [sender_sig]} = Enum.split(fields, -1)
+    base ++ [canonicalize_sender_signature(sender_sig)]
+  end
+
+  defp canonicalize_sender_signature(<<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>) when v in [0, 1] do
+    <<r::unsigned-big-size(256), s::unsigned-big-size(256), v + 27::8>>
+  end
+
+  defp canonicalize_sender_signature(other), do: other
+
+  defp rlp_canonical_uint(<<>>), do: <<>>
+
+  defp rlp_canonical_uint(bin) when is_binary(bin) do
+    case :binary.decode_unsigned(bin) do
+      0 -> <<>>
+      n -> :binary.encode_unsigned(n)
+    end
+  end
 
   # Validates memo format: exactly 32 bytes of hex (64 chars), optional 0x prefix.
   defp validate_memo!(nil), do: :ok

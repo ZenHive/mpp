@@ -156,4 +156,33 @@ defmodule MPP.Test.TempoTestHelpers do
   @doc "Strips the optional 0x prefix from a hex string."
   def strip_0x("0x" <> rest), do: rest
   def strip_0x(hex), do: hex
+
+  @doc """
+  Rewrites the trailing Electrum recovery ID (`0x1b`/`0x1c`) of a 0x76 envelope
+  to the raw `0`/`1` encoding Tempo nodes also accept.
+  """
+  def to_raw_recovery_id(hex) when is_binary(hex) do
+    body = strip_0x(hex)
+
+    case String.slice(body, -2, 2) do
+      "1b" -> "0x" <> String.slice(body, 0, String.length(body) - 2) <> "00"
+      "1c" -> "0x" <> String.slice(body, 0, String.length(body) - 2) <> "01"
+      other -> raise ArgumentError, "expected Electrum recovery ID 0x1b/0x1c, got 0x#{other}"
+    end
+  end
+
+  @doc "keccak256 of a hex payload as a 0x-prefixed hex string."
+  def keccak256_hex(hex) when is_binary(hex) do
+    {:ok, binary} = Base.decode16(strip_0x(hex), case: :mixed)
+    "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+  end
+
+  @doc "Re-encode a 0x76 envelope with nonce as `<<0>>` instead of RLP empty (same integer zero)."
+  def with_padded_zero_nonce(hex) when is_binary(hex) do
+    {:ok, binary} = Base.decode16(strip_0x(hex), case: :mixed)
+    <<0x76, rlp::binary>> = binary
+    fields = ExRLP.decode(rlp)
+    padded = List.replace_at(fields, 7, <<0>>)
+    "0x" <> Base.encode16(<<0x76>> <> ExRLP.encode(padded), case: :lower)
+  end
 end

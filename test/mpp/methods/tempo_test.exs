@@ -1407,6 +1407,75 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "already used"
     end
 
+    test "two encodings of the same signed tx reserve one slot and yield one receipt", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      canonical_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      raw_hex = to_raw_recovery_id(canonical_hex)
+      canonical_hash = keccak256_hex(canonical_hex)
+      raw_hash = keccak256_hex(raw_hex)
+
+      refute String.downcase(raw_hex) == String.downcase(canonical_hex)
+      refute canonical_hash == raw_hash
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => raw_hex}, charge)
+
+      assert_received {:rpc_call, "eth_simulateV1", _}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
+      assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+
+      assert error.detail =~ "already used"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+
+      assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> raw_hash)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> String.downcase(raw_hex))
+    end
+
+    test "padded zero integers of the same signed tx share the canonical reserve key", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      # A 2-element call is valid RLP; canonicalize leaves it unchanged.
+      short_call = [decode_address(@token_address), <<>>]
+      canonical_hex = build_tempo_tx(calls: [call, short_call], chain_id: 42_431)
+      padded_hex = with_padded_zero_nonce(canonical_hex)
+      canonical_hash = keccak256_hex(canonical_hex)
+
+      refute String.downcase(padded_hex) == String.downcase(canonical_hex)
+      refute canonical_hash == keccak256_hex(padded_hex)
+
+      stub_broadcast_and_receipt(success_receipt())
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => padded_hex}, charge)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+
+      assert error.detail =~ "already used"
+      assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
+    end
+
     test "static-memo hash path rejects replay of already-used hash (store backstops missing attribution binding)",
          %{charge: charge} do
       # Static memo disables per-challenge attribution binding, so the dedup store is the
@@ -1477,11 +1546,12 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
 
-      # Both the input hex and the on-chain hash should be recorded
-      input_key = "mpp:charge:" <> String.downcase(tx_hex)
+      # Reserve is keyed on keccak256(canonical bytes); the distinct on-chain hash is recorded too
+      canonical_key = "mpp:charge:" <> keccak256_hex(tx_hex)
       onchain_key = "mpp:charge:" <> String.downcase(different_on_chain_hash)
-      assert {:ok, _} = TempoMemoryStore.get(input_key)
+      assert {:ok, _} = TempoMemoryStore.get(canonical_key)
       assert {:ok, _} = TempoMemoryStore.get(onchain_key)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> String.downcase(tx_hex))
     end
 
     test "store get error surfaces as verification_failed", %{charge: charge} do
@@ -2371,6 +2441,56 @@ defmodule MPP.Methods.TempoTest do
       assert broadcast_hex != tx_hex
       assert String.starts_with?(broadcast_hex, "0x76")
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "two encodings of the same sponsored tx reserve one slot before any RPC", %{charge: charge} do
+      {:ok, canonical_hex} =
+        TempoTxBuilder.build_fee_payer_transfer(
+          private_key: @client_private_key,
+          token: @token_address,
+          recipient: @recipient,
+          amount: 1_000_000,
+          chain_id: 42_431,
+          rpc_url: @rpc_url,
+          gas_limit: 1_000_000,
+          nonce: 0,
+          nonce_key: expiring_nonce_key_int(),
+          valid_before: future_valid_before()
+        )
+
+      raw_hex = to_raw_recovery_id(canonical_hex)
+      refute String.downcase(raw_hex) == String.downcase(canonical_hex)
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      assert {:ok, %Receipt{}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => raw_hex}, charge)
+
+      assert_received {:rpc_call, "eth_simulateV1", _}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
+      refute String.downcase(broadcast_hex) == String.downcase(raw_hex)
+      assert String.starts_with?(broadcast_hex, "0x76")
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+
+      assert error.detail =~ "already used"
+      refute_received {:rpc_call, "eth_simulateV1", _}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
 
     test "rejects a reverting CO-SIGNED sponsored tx before the fee payer broadcasts", %{charge: charge} do
