@@ -47,6 +47,9 @@ defmodule MPP.Methods.XRPLTest do
     start_supervised!({ConCacheStore, name: name, ttl: 600_000})
     {:ok, charge} = Charge.from_request(@fixture["request"])
 
+    expires = DateTime.shift(DateTime.utc_now(), minute: 1)
+    close_time = DateTime.shift(~U[2000-01-01 00:00:00Z], second: @ledger["date"])
+
     config =
       Map.merge(charge.method_details, %{
         "rpc_url" => "https://xrpl.test",
@@ -55,7 +58,9 @@ defmodule MPP.Methods.XRPLTest do
         "allow_process_local_store" => true,
         "poll_interval_ms" => 1,
         "poll_timeout_ms" => 100,
-        "challenge_expires" => DateTime.to_iso8601(DateTime.shift(DateTime.utc_now(), minute: 1)),
+        "challenge_expires" => DateTime.to_iso8601(expires),
+        # Keep the captured ledger timestamp inside this regression test's challenge window.
+        "expires_in" => DateTime.diff(expires, close_time, :second) + 1,
         "req_options" => [plug: {Req.Test, __MODULE__}]
       })
 
@@ -170,6 +175,9 @@ defmodule MPP.Methods.XRPLTest do
           %{"store_retention_ms" => -1},
           %{"poll_timeout_ms" => 0},
           %{"poll_interval_ms" => 0},
+          %{"expires_in" => 0},
+          %{"expires_in" => nil},
+          %{"expires_in" => "300"},
           %{"sourceTag" => -1},
           %{"destinationTag" => 4_294_967_296},
           %{"invoiceId" => "123"},
@@ -237,6 +245,67 @@ defmodule MPP.Methods.XRPLTest do
       stub(context, tx)
       assert_error(XRPL.verify(payload("hash"), context.charge), :verification_failed)
     end
+  end
+
+  test "captured settlement before issuance fails even with a matching explicit invoice", context do
+    stub(context, @ledger)
+    charge = config_charge(context, %{"expires_in" => 60, "invoiceId" => @ledger["InvoiceID"]})
+    assert_error(XRPL.verify(payload("hash"), charge), :verification_failed)
+    assert {:ok, _} = XRPL.verify(payload("hash"), context.charge)
+  end
+
+  for representation <- [:date, :iso] do
+    @representation representation
+    test "#{representation} close time accepts equality and rejects one second before issuance", context do
+      close_time = DateTime.truncate(DateTime.utc_now(), :second)
+
+      charge =
+        config_charge(context, %{
+          "challenge_expires" => DateTime.to_iso8601(DateTime.shift(close_time, minute: 1)),
+          "expires_in" => 60
+        })
+
+      tx =
+        case @representation do
+          :date -> Map.put(@ledger, "date", DateTime.diff(close_time, ~U[2000-01-01 00:00:00Z], :second))
+          :iso -> Map.put(@ledger, "close_time_iso", DateTime.to_iso8601(close_time))
+        end
+
+      stub(context, tx)
+      later = config_charge(%{context | charge: charge}, %{"expires_in" => 59})
+      assert_error(XRPL.verify(payload("hash"), later), :verification_failed)
+      assert {:ok, _} = XRPL.verify(payload("hash"), charge)
+    end
+  end
+
+  test "missing or malformed ledger times fail closed", context do
+    for tx <- [
+          Map.delete(@ledger, "date"),
+          Map.put(@ledger, "date", -1),
+          Map.put(@ledger, "date", "842437420"),
+          Map.put(@ledger, "close_time_iso", "bad"),
+          Map.put(@ledger, "close_time_iso", nil),
+          Map.put(@ledger, "close_time_iso", 1)
+        ] do
+      stub(context, tx)
+      assert_error(XRPL.verify(payload("hash"), context.charge), :verification_failed)
+    end
+  end
+
+  test "default challenge lifetime is 300 seconds", context do
+    stub(context, Map.put(@ledger, "date", DateTime.diff(DateTime.utc_now(), ~U[2000-01-01 00:00:00Z], :second)))
+    charge = %{context.charge | method_details: Map.delete(context.charge.method_details, "expires_in")}
+    assert {:ok, _} = XRPL.verify(payload("hash"), charge)
+  end
+
+  test "strict pull binding rejects a blob with no invoice before submission", context do
+    bytes = Base.decode16!(@blob)
+    invoice = Base.decode16!(@ledger["InvoiceID"])
+    blob = bytes |> :binary.replace(<<0x50, 17, invoice::binary>>, "") |> Base.encode16()
+    assert {:ok, tx} = MPP.Methods.XRPL.Codec.decode(blob)
+    refute Map.has_key?(tx, "InvoiceID")
+    assert_error(XRPL.verify(%{"type" => "transaction", "blob" => blob}, context.charge), :verification_failed)
+    refute_received {:rpc, _}
   end
 
   test "explicit per-challenge invoice accepts either casing", context do

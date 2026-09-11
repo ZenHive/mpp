@@ -132,6 +132,26 @@ defmodule MPP.Methods.XRPLIntegrationTest do
     end
   end
 
+  test "settlement before challenge issuance is rejected even with an explicit invoice", context do
+    charge = charge(context)
+    signed = sign!(context, payment(context, charge))
+    ledger = submit!(context, signed)
+    close_time = DateTime.shift(~U[2000-01-01 00:00:00Z], second: ledger["date"])
+
+    config =
+      Map.merge(charge.method_details, %{
+        "invoiceId" => ledger["InvoiceID"],
+        "challenge_expires" => DateTime.to_iso8601(DateTime.shift(close_time, second: 181))
+      })
+
+    payload = %{"type" => "hash", "hash" => signed["hash"]}
+
+    assert {:error, %MPP.Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPL.verify(payload, %{charge | method_details: config})
+
+    assert {:ok, _} = XRPL.verify(payload, charge)
+  end
+
   test "real MPT charge settles only the challenged issuance", context do
     # https://xrpl.org/docs/references/protocol/transactions/types/mptokenissuancecreate
     create =
@@ -210,6 +230,7 @@ defmodule MPP.Methods.XRPLIntegrationTest do
         "rpc_url" => context.url,
         "network" => "testnet",
         "challenge_id" => id,
+        "expires_in" => 180,
         "challenge_expires" => DateTime.to_iso8601(DateTime.shift(DateTime.utc_now(), minute: 3)),
         "credential_source" => "did:pkh:xrpl:1:" <> context.payer["address"],
         "destinationTag" => :binary.decode_unsigned(:crypto.strong_rand_bytes(4)),

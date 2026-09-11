@@ -22,6 +22,8 @@ defmodule MPP.Methods.XRPL do
   The source is `did:pkh:xrpl:<network ID>:<classic address>`.
   Binding defaults to SHA-512Half of the challenge ID, never a static tag.
   An explicit `invoiceId` must be unique to that challenge.
+  `expires_in` (seconds, default 300) must match the challenge issuer's TTL;
+  settlement must not precede `challenge_expires` minus that TTL.
 
   Public details are `network`, `reference`, `invoiceId`, `destinationTag`,
   `sourceTag`, and `memos`. The draft leaves memo entry structure unspecified;
@@ -107,6 +109,7 @@ defmodule MPP.Methods.XRPL do
          :ok <- unused(config, "tx:" <> hash),
          {:ok, result} <- await_transaction(hash, config),
          :ok <- settled(result, hash, charge, config),
+         :ok <- transaction_age(result, config),
          :ok <- freshness(config),
          :ok <- mark(config, "tx:" <> hash),
          :ok <- mark(config, "challenge:" <> config["challenge_id"]) do
@@ -186,6 +189,33 @@ defmodule MPP.Methods.XRPL do
   end
 
   defp settled(_, _, _, _), do: failed()
+
+  # Draft §Transaction Age :470-475. Challenge has expiry but no issued-at field.
+  defp transaction_age(tx, config) do
+    with {:ok, expires, _} <- DateTime.from_iso8601(config["challenge_expires"]),
+         {:ok, closed} <- close_time(tx),
+         issued = DateTime.shift(expires, second: -Map.get(config, "expires_in", 300)),
+         true <- DateTime.compare(closed, issued) != :lt do
+      :ok
+    else
+      _ -> failed()
+    end
+  end
+
+  defp close_time(%{"close_time_iso" => iso}) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, date, _} -> {:ok, date}
+      _ -> :error
+    end
+  end
+
+  defp close_time(%{"close_time_iso" => _}), do: :error
+
+  # API v1 tx.date uses Ripple epoch seconds (xrpl.org basic-data-types#specifying-time).
+  defp close_time(%{"date" => seconds}) when is_integer(seconds) and seconds >= 0,
+    do: DateTime.from_unix(seconds + 946_684_800)
+
+  defp close_time(_), do: :error
 
   defp fields(tx, delivered, charge, config) do
     flags = Map.get(tx, "Flags", 0)
@@ -341,6 +371,7 @@ defmodule MPP.Methods.XRPL do
     Enum.all?(
       [
         config["store_retention_ms"],
+        Map.get(config, "expires_in", 300),
         Map.get(config, "poll_timeout_ms", 60_000),
         Map.get(config, "poll_interval_ms", 1000)
       ],
