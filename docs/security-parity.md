@@ -35,9 +35,9 @@ mpp-specs: no advisories.
 
 Every advisory published on `ZenHive/mpp`, with its CVE assignment. Hex packages fall under the
 **Erlang Ecosystem Foundation CNA** — GitHub declines to assign for them and routes requests to
-the EEF (`cna@erlef.org`), which assigned the first three on 2026-07-17 and the next four on 2026-08-19. A CNA-assigned CVE is not
+the EEF (`cna@erlef.org`), which assigned the first three on 2026-07-17, the next four on 2026-08-19, and the two 0.16.1 fee-payer CVEs on 2026-09-06. A CNA-assigned CVE is not
 backlinked automatically — the ID was attached to each GitHub advisory via
-`gh api -X PATCH repos/ZenHive/mpp/security-advisories/<ghsa> -f cve_id=<cve>` (2026-08-18 and 2026-09-04).
+`gh api -X PATCH repos/ZenHive/mpp/security-advisories/<ghsa> -f cve_id=<cve>` (2026-08-18, 2026-09-04 and 2026-09-11).
 OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 
 | Advisory | CVE | Sev | Fixed in | Subject |
@@ -50,8 +50,8 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-vp5h-xh25-44wf` | `CVE-2026-67581` | HIGH | 0.7.0 | EVM on-chain transfer proof not single-use — cross-challenge replay |
 | `GHSA-34g7-vx6g-82mq` | `CVE-2026-73136` | HIGH | 0.8.0 | Static Tempo memo disables per-challenge attribution binding — third-party replay |
 | `GHSA-j4j7-7xpr-c7cr` | `CVE-2026-73541` | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
-| `GHSA-5qrp-r24c-w6jr` | — (requested 2026-09-04) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
-| `GHSA-rpwj-vrf7-4x36` | — (requested 2026-09-04) | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
+| `GHSA-5qrp-r24c-w6jr` | `CVE-2026-82750` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
+| `GHSA-rpwj-vrf7-4x36` | `CVE-2026-82751` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18.
