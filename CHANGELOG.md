@@ -6,6 +6,19 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- `MPP.Methods.XRPL` charge method: XRP, issued-currency and MPT payments
+  with transaction and hash credentials, per-challenge `InvoiceID` binding,
+  and validated `delivered_amount` matching (draft-xrpl-charge-00).
+
+### Changed
+
+- Tempo dedup reserve key is stable across every valid re-encoding of a
+  signed transaction; the reserve is taken before any hosted fee-payer fill.
+
 ## [0.16.2] — 2026-09-11
 
 **Security (four coordinated fixes, each disclosed with this release).** A session voucher that does not raise the channel's accepted cumulative amount is now rejected with `delta_too_small` instead of being served as an idempotent repeat, and the delta check runs inside the same atomic store update as the spend (`GHSA-8c63-r789-xrrf`, mpp-rs #415 parity). Tempo subscription key authorizations are bound to the issuing challenge: the ox `witness` field must be the 32-byte decoding of the challenge id, so a captured activation credential cannot be replayed under a fresh challenge, and admin- or account-bound authorizations are refused on the subscription path (`GHSA-p9fv-9w58-95x2`, mppx #882 parity). The Tempo pre-broadcast dedup reserve is keyed on the canonical re-encoding of the deserialized `0x76` transaction rather than the caller-supplied bytes, so one signed transaction maps to exactly one slot (`GHSA-8x7x-5j8g-8hcx`, mppx #818 parity). HTTP `Payment-Receipt` and `Cache-Control: private` are attached at send time, only on successful responses, merged with the application's own directives, so a paid response can no longer be marked shareable by a downstream plug (`GHSA-82qh-vrvm-gqvc`, mpp-rs #381/#399 parity). All four are safe-by-default and need no configuration change.
