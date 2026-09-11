@@ -865,7 +865,7 @@ MPP.Methods.Solana         — Solana native SOL / SPL token charge verification
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle verification (type="bundle", recipient pending-balance decryption)
 MPP.Methods.XRPL           — XRPL native XRP / issued currency / MPT charge verification (pull blob + push hash)
-MPP.Methods.XRPL.Codec     — Bounded XRPL Payment and PaymentChannelCreate decoder for pre-submit field checks
+MPP.Methods.XRPL.Codec     — Bounded XRPL Payment / PaymentChannelCreate decoder and PaymentChannelClaim codec
 MPP.Methods.XRPL.Claim     — Payment-channel claim message (CLM\\0) and signature verification
 MPP.Methods.XRPL.Session   — XRPL payment-channel session intent (open / voucher / close)
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
@@ -909,7 +909,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.RPC`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 

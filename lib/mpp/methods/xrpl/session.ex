@@ -8,8 +8,13 @@ defmodule MPP.Methods.XRPL.Session do
   Implements `draft-xrpl-session-00` at mpp-specs commit `213b098`. Open
   submits a signed `PaymentChannelCreate`, then treats `amount` + `signature`
   as the first claim. Voucher and close are off-ledger claims over the
-  cumulative drop total. Channel high-water state is stored through
-  `MPP.Session.Actions` / `MPP.Session.Store`.
+  cumulative drop total. The highest accepted claim (cumulative, signature,
+  ledger PublicKey) is retained on `MPP.Session.Channel.proof`.
+
+  Close submits `PaymentChannelClaim` with `tfClose` unless
+  `defer_redemption` is true, in which case `redeem/2` submits later.
+  The Destination (server) pays the claim transaction Fee from its own
+  XRP; set `destination_secret` to that account's family seed.
 
   Configure `rpc_url` (HTTPS) and `network` (`mainnet` / `testnet` / `devnet`).
   `min_settle_delay` defaults to 3600 seconds; `closing_margin` defaults to
@@ -25,6 +30,7 @@ defmodule MPP.Methods.XRPL.Session do
   alias MPP.Methods.XRPL.Claim
   alias MPP.Methods.XRPL.Codec
   alias MPP.Methods.XRPL.RPC
+  alias MPP.Methods.XRPL.Wallet
   alias MPP.Receipt
   alias MPP.Session.Actions
   alias MPP.Session.Channel
@@ -35,6 +41,10 @@ defmodule MPP.Methods.XRPL.Session do
   @public_fields ~w(network)
   @default_settle_delay 3_600
   @default_closing_margin 3_600
+  @default_fee "12"
+  @last_ledger_offset 20
+  # xrpl.org PaymentChannelClaim Flags: tfClose = 0x00020000
+  @tf_close 131_072
   @max_drops 100_000_000_000_000_000
 
   api(:method_name, "Return the XRPL payment method identifier.")
@@ -56,7 +66,7 @@ defmodule MPP.Methods.XRPL.Session do
   def validate_config!(config) do
     if not valid_config?(config) do
       raise ArgumentError,
-            "XRPL session requires HTTPS rpc_url, network, and positive min_settle_delay / closing_margin"
+            "XRPL session requires HTTPS rpc_url, network, positive min_settle_delay / closing_margin, and destination_secret or defer_redemption"
     end
 
     :ok
@@ -101,7 +111,17 @@ defmodule MPP.Methods.XRPL.Session do
          :ok <- created?(result, hash, channel_id),
          {:ok, channel} <- ledger_channel(channel_id, config),
          :ok <- channel_state(channel, channel_id, amount, session, config, signature) do
-      apply_action(:open, channel_id, amount, deposit(channel), config, session, %{"txHash" => hash})
+      apply_action(%{
+        action: :open,
+        channel_id: channel_id,
+        amount: amount,
+        deposit: deposit(channel),
+        config: config,
+        session: session,
+        signature: signature,
+        public_key: channel_public_key(channel),
+        extra: %{"txHash" => hash}
+      })
     else
       {:error, %Errors{} = error} -> {:error, error}
       _ -> failed()
@@ -109,21 +129,59 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp dispatch({action, channel_id, amount, signature}, session, config) when action in [:voucher, :close] do
-    with :ok <- RPC.check_network(config),
-         {:ok, channel} <- ledger_channel(channel_id, config),
-         :ok <- channel_state(channel, channel_id, amount, session, config, signature) do
-      apply_action(action, channel_id, amount, deposit(channel), config, session, %{})
+    with {:ok, channel} <- ledger_channel(channel_id, config),
+         :ok <- channel_state(channel, channel_id, amount, session, config, signature),
+         :ok <- RPC.check_network(config),
+         :ok <- settlement_ready?(action, config) do
+      apply_action(%{
+        action: action,
+        channel_id: channel_id,
+        amount: amount,
+        deposit: deposit(channel),
+        config: config,
+        session: session,
+        signature: signature,
+        public_key: channel_public_key(channel),
+        extra: %{}
+      })
     else
       {:error, %Errors{} = error} -> {:error, error}
       _ -> failed()
     end
   end
 
-  defp apply_action(action, channel_id, amount, deposit, config, session, extra) do
-    payload = %Payload{action: action, channel_id: channel_id, cumulative_amount: amount, signature: nil}
+  api(:redeem, "Submit the stored highest PaymentChannelClaim for a channel.")
 
-    with {:ok, receipt} <- Actions.handle(payload, action_opts(action, channel_id, deposit, config, session)) do
-      finish_receipt(receipt, channel_id, extra)
+  @doc """
+  Submit the highest retained claim as `PaymentChannelClaim`.
+
+  Used automatically on `close` unless `defer_redemption` is true. The
+  Destination pays the transaction Fee from its XRP balance.
+  """
+  @spec redeem(String.t(), map()) :: {:ok, String.t()} | {:error, Errors.t()}
+  def redeem(channel_id, config) when is_binary(channel_id) and is_map(config) do
+    with {:ok, id} <- Channel.normalize_id(channel_id),
+         {:ok, channel} <- stored_channel(id, config) do
+      redeem_channel(channel, config)
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      {:error, {:invalid_channel_id, _}} -> malformed()
+    end
+  end
+
+  def redeem(_channel_id, _config), do: failed()
+
+  defp apply_action(params) do
+    payload = %Payload{
+      action: params.action,
+      channel_id: params.channel_id,
+      cumulative_amount: params.amount,
+      signature: params.signature
+    }
+
+    with {:ok, receipt} <- Actions.handle(payload, action_opts(params)),
+         {:ok, extra} <- maybe_redeem(params.action, params.channel_id, params.extra, params.config) do
+      finish_receipt(receipt, params.channel_id, extra)
     end
   end
 
@@ -201,14 +259,14 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp channel_state(node, channel_id, amount, session, config, signature) do
-    with {:ok, deposit} <- drops(node["Amount"]),
+    with :ok <- Claim.verify(channel_id, amount, signature, node["PublicKey"]),
+         {:ok, deposit} <- drops(node["Amount"]),
          {:ok, balance} <- drops(node["Balance"]),
          true <- node["Destination"] == session.recipient,
          true <- source_matches?(node["Account"], config),
          true <- is_integer(node["SettleDelay"]) and node["SettleDelay"] >= min_settle_delay(config),
-         :ok <- closing_window(node, config),
          :ok <- claim_bounds(amount, balance, deposit),
-         :ok <- Claim.verify(channel_id, amount, signature, node["PublicKey"]) do
+         :ok <- closing_window(node, config) do
       :ok
     else
       {:error, %Errors{} = error} -> {:error, error}
@@ -226,17 +284,23 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp closing_window(node, config) do
     case RPC.call(config, "ledger", %{"ledger_index" => "validated"}) do
-      {:ok, %{"ledger" => %{"close_time" => close_time}}} when is_integer(close_time) ->
-        margin = closing_margin(config)
+      {:ok, %{"ledger_index" => index, "ledger" => %{"close_time" => close_time}}}
+      when is_integer(close_time) and is_integer(index) ->
+        check_closing_window(node, close_time, closing_margin(config))
 
-        if expired?(node["Expiration"], close_time, margin) or expired?(node["CancelAfter"], close_time, margin) do
-          {:error, Errors.new(:channel_closed, "channel is inside the settlement margin or expired")}
-        else
-          :ok
-        end
+      {:ok, %{"ledger" => %{"close_time" => close_time}}} when is_integer(close_time) ->
+        check_closing_window(node, close_time, closing_margin(config))
 
       _ ->
         failed()
+    end
+  end
+
+  defp check_closing_window(node, close_time, margin) do
+    if expired?(node["Expiration"], close_time, margin) or expired?(node["CancelAfter"], close_time, margin) do
+      {:error, Errors.new(:channel_closed, "channel is inside the settlement margin or expired")}
+    else
+      :ok
     end
   end
 
@@ -244,19 +308,20 @@ defmodule MPP.Methods.XRPL.Session do
   defp expired?(deadline, close_time, margin) when is_integer(deadline), do: deadline <= close_time + margin
   defp expired?(_deadline, _close_time, _margin), do: true
 
-  defp action_opts(action, _channel_id, deposit, config, session) do
-    request = request_amount(session)
+  defp action_opts(params) do
+    request = request_amount(params.session)
 
     [
-      store: store(config),
-      deposit: deposit,
-      payer: payer(config),
-      recipient: session.recipient,
+      store: store(params.config),
+      deposit: params.deposit,
+      payer: payer(params.config),
+      recipient: params.session.recipient,
       token: "XRP",
-      request_amount: if(action == :close, do: 0, else: request),
+      request_amount: if(params.action == :close, do: 0, else: request),
       min_voucher_delta: request,
       verify_signature: :already_verified,
-      method_name: "xrpl"
+      method_name: "xrpl",
+      proof: %{public_key: params.public_key}
     ]
   end
 
@@ -344,7 +409,12 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp valid_config?(config) do
     is_map(config) and RPC.valid_url?(config["rpc_url"]) and Map.has_key?(RPC.networks(), config["network"]) and
-      positive_int?(min_settle_delay(config)) and positive_int?(closing_margin(config))
+      positive_int?(min_settle_delay(config)) and positive_int?(closing_margin(config)) and
+      settlement_config?(config)
+  end
+
+  defp settlement_config?(config) do
+    config["defer_redemption"] == true or match?({:ok, _}, Wallet.from_seed(config["destination_secret"]))
   end
 
   defp source(config) do
@@ -394,6 +464,191 @@ defmodule MPP.Methods.XRPL.Session do
   defp strip_hex("0x" <> rest), do: rest
   defp strip_hex("0X" <> rest), do: rest
   defp strip_hex(value), do: value
+
+  defp channel_public_key(%{"PublicKey" => key}) when is_binary(key), do: String.upcase(strip_hex(key))
+  defp channel_public_key(_node), do: ""
+
+  defp deferred?(config), do: config["defer_redemption"] == true
+
+  defp settlement_ready?(:close, config) do
+    if deferred?(config) or match?({:ok, _}, Wallet.from_seed(config["destination_secret"])) do
+      :ok
+    else
+      failed()
+    end
+  end
+
+  defp settlement_ready?(_action, _config), do: :ok
+
+  defp maybe_redeem(:close, channel_id, extra, config) do
+    if deferred?(config) do
+      {:ok, extra}
+    else
+      case redeem(channel_id, config) do
+        {:ok, hash} -> {:ok, Map.put(extra, "txHash", hash)}
+        {:error, %Errors{} = error} -> {:error, error}
+      end
+    end
+  end
+
+  defp maybe_redeem(_action, _channel_id, extra, _config), do: {:ok, extra}
+
+  defp stored_channel(channel_id, config) do
+    case Store.get(store(config), channel_id) do
+      {:ok, %Channel{} = channel} -> {:ok, channel}
+      :not_found -> {:error, Errors.new(:channel_not_found, "channel not found")}
+      _ -> failed()
+    end
+  end
+
+  defp redeem_channel(channel, config) do
+    with {:ok, proof} <- stored_proof(channel),
+         {:ok, wallet} <- destination_wallet(config, channel),
+         {:ok, sequence} <- account_sequence(wallet.address, config),
+         {:ok, last_ledger} <- last_ledger_sequence(config),
+         {:ok, tx} <- claim_transaction(channel, proof, wallet, sequence, last_ledger, config),
+         {:ok, blob, hash} <- Wallet.sign_claim(wallet, tx),
+         {:ok, ^hash} <- submit_claim(blob, hash, config),
+         {:ok, result} <- RPC.await_validated(hash, config),
+         :ok <- claimed?(result, hash, channel, proof),
+         :ok <- confirm_ledger(channel.channel_id, proof.amount, config) do
+      {:ok, hash}
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
+    end
+  end
+
+  defp submit_claim(blob, hash, config) do
+    case RPC.call(config, "submit", %{"tx_blob" => blob}) do
+      {:ok, result} ->
+        reported = get_in(result, ["tx_json", "hash"])
+        engine = result["engine_result"]
+
+        cond do
+          engine in ["tesSUCCESS", "terQUEUED"] and is_binary(reported) and RPC.hex?(reported, 64) and
+              String.upcase(reported) == hash ->
+            {:ok, hash}
+
+          is_binary(engine) ->
+            {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim #{engine}")}
+
+          true ->
+            {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+        end
+
+      _ ->
+        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+    end
+  end
+
+  defp stored_proof(%Channel{proof: %{amount: amount, signature: signature, public_key: key}})
+       when is_integer(amount) and amount > 0 and is_binary(signature) and is_binary(key) do
+    {:ok, %{amount: amount, signature: signature, public_key: key}}
+  end
+
+  defp stored_proof(_channel), do: {:error, Errors.new(:settlement_failed, "no retained claim to redeem")}
+
+  defp destination_wallet(config, channel) do
+    case Wallet.from_seed(config["destination_secret"]) do
+      {:ok, wallet} ->
+        if wallet.address == channel.recipient, do: {:ok, wallet}, else: failed()
+
+      :error ->
+        failed()
+    end
+  end
+
+  defp account_sequence(address, config) do
+    case RPC.call(config, "account_info", %{"account" => address, "ledger_index" => "validated"}) do
+      {:ok, %{"account_data" => %{"Sequence" => sequence}}} when is_integer(sequence) and sequence >= 0 ->
+        {:ok, sequence}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp last_ledger_sequence(config) do
+    case RPC.call(config, "ledger", %{"ledger_index" => "validated"}) do
+      {:ok, result} ->
+        case ledger_index(result) do
+          {:ok, index} -> {:ok, index + @last_ledger_offset}
+          :error -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp ledger_index(%{"ledger_index" => index}), do: positive_index(index)
+  defp ledger_index(%{"ledger" => %{"ledger_index" => index}}), do: positive_index(index)
+  defp ledger_index(_result), do: :error
+
+  defp positive_index(index) when is_integer(index) and index > 0, do: {:ok, index}
+
+  defp positive_index(index) when is_binary(index) do
+    case Integer.parse(index) do
+      {parsed, ""} when parsed > 0 -> {:ok, parsed}
+      _ -> :error
+    end
+  end
+
+  defp positive_index(_index), do: :error
+
+  defp claim_transaction(channel, proof, wallet, sequence, last_ledger, config) do
+    with {:ok, wire_id} <- Channel.to_xrpl_id(channel.channel_id) do
+      tx = %{
+        "TransactionType" => "PaymentChannelClaim",
+        "Account" => wallet.address,
+        "Channel" => wire_id,
+        "Amount" => Integer.to_string(proof.amount),
+        "Balance" => Integer.to_string(proof.amount),
+        "Signature" => proof.signature,
+        "PublicKey" => proof.public_key,
+        "Flags" => @tf_close,
+        "Sequence" => sequence,
+        "LastLedgerSequence" => last_ledger,
+        "Fee" => Map.get(config, "fee", @default_fee)
+      }
+
+      {:ok, maybe_network_id(tx, config)}
+    end
+  end
+
+  defp maybe_network_id(tx, config) do
+    case RPC.networks()[config["network"]] do
+      id when is_integer(id) and id > 0 -> Map.put(tx, "NetworkID", id)
+      _ -> tx
+    end
+  end
+
+  defp claimed?(result, hash, _channel, _proof) do
+    meta = Map.get(result, "meta", %{})
+    reported = result["hash"] || get_in(result, ["tx_json", "hash"])
+
+    if result["validated"] == true and meta["TransactionResult"] == "tesSUCCESS" and is_binary(reported) and
+         String.upcase(reported) == hash do
+      :ok
+    else
+      :error
+    end
+  end
+
+  defp confirm_ledger(channel_id, amount, config) do
+    case ledger_channel(channel_id, config) do
+      {:error, %Errors{type: type}} ->
+        if type == Errors.new(:channel_not_found, "").type, do: :ok, else: :error
+
+      {:ok, node} ->
+        case drops(node["Balance"]) do
+          {:ok, balance} when balance >= amount -> :ok
+          _ -> :error
+        end
+    end
+  end
+
   defp failed, do: {:error, Errors.new(:verification_failed, "XRPL session verification failed")}
   defp malformed, do: {:error, Errors.new(:malformed_credential, "Malformed XRPL session credential")}
 end

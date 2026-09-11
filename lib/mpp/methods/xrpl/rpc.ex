@@ -91,19 +91,19 @@ defmodule MPP.Methods.XRPL.RPC do
   @doc false
   @spec await_validated(String.t(), map()) :: {:ok, map()} | :error
   def await_validated(hash, config) when is_binary(hash) and is_map(config) do
-    poll(hash, config, System.monotonic_time(:millisecond) + timeout(config), 0)
+    poll(hash, config, System.monotonic_time(:millisecond) + timeout(config))
   end
 
-  defp poll(hash, config, deadline, misses) do
+  defp poll(hash, config, deadline) do
     case call(config, "tx", %{"transaction" => hash, "binary" => false}) do
       {:ok, %{"validated" => true} = result} -> {:ok, result}
-      {:ok, %{"error" => "txnNotFound"}} when misses < 2 -> retry(hash, config, deadline, misses + 1)
-      {:ok, %{"validated" => false}} -> retry(hash, config, deadline, misses)
+      {:ok, %{"error" => "txnNotFound"}} -> retry(hash, config, deadline)
+      {:ok, %{"validated" => false}} -> retry(hash, config, deadline)
       _ -> :error
     end
   end
 
-  defp retry(hash, config, deadline, misses) do
+  defp retry(hash, config, deadline) do
     delay = Map.get(config, "poll_interval_ms", 1000)
 
     if System.monotonic_time(:millisecond) + delay < deadline do
@@ -112,7 +112,7 @@ defmodule MPP.Methods.XRPL.RPC do
         delay -> :ok
       end
 
-      poll(hash, config, deadline, misses)
+      poll(hash, config, deadline)
     else
       :error
     end

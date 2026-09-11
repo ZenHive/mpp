@@ -129,6 +129,24 @@ defmodule MPP.Session.ChannelTest do
       assert {:error, :amount_exceeds_deposit} = Channel.apply_voucher(active, 2_000_000)
     end
 
+    test "proof is nil by default and only a strictly higher claim replaces it" do
+      open = Channel.new!(channel_opts())
+      assert is_nil(open.proof)
+
+      first = %{amount: 250, signature: "sig-a", public_key: "key-a"}
+      assert {:ok, active} = Channel.apply_voucher(open, 250, first)
+      assert active.proof == first
+
+      assert {:ok, same} = Channel.apply_voucher(active, 250, %{amount: 250, signature: "sig-b", public_key: "key-b"})
+      assert same.proof == first
+
+      higher = %{amount: 400, signature: "sig-c", public_key: "key-c"}
+      assert {:ok, raised} = Channel.apply_voucher(active, 400, higher)
+      assert raised.proof == higher
+      assert {:error, :voucher_not_monotonic} = Channel.apply_voucher(raised, 300, first)
+      assert raised.proof == higher
+    end
+
     test "apply_top_up increases deposit and apply_spend consumes authorized balance" do
       {:ok, channel} = channel_opts() |> Channel.new!() |> Channel.apply_voucher(200)
 

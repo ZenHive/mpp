@@ -95,7 +95,7 @@ defmodule MPP.Session.Actions do
           {:error, Errors.new(:channel_closed, "channel is closed")}
 
         %Channel{} = channel ->
-          close_channel(channel, payload)
+          close_channel(channel, payload, opts)
       end)
     end
   end
@@ -108,7 +108,8 @@ defmodule MPP.Session.Actions do
              recipient: identity.recipient,
              token: identity.token,
              deposit: deposit,
-             cumulative_amount: payload.cumulative_amount
+             cumulative_amount: payload.cumulative_amount,
+             proof: settlement_proof(payload, opts)
            ),
          {:ok, channel} <- Channel.activate(channel) do
       maybe_spend(channel, request_amount(opts))
@@ -130,13 +131,15 @@ defmodule MPP.Session.Actions do
         {:error, Errors.new(:delta_too_small, "voucher delta #{delta} below minimum #{min_delta}")}
 
       true ->
-        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount) do
+        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount, settlement_proof(payload, opts)) do
           maybe_spend(channel, request_amount(opts))
         end
     end
   end
 
-  defp close_channel(channel, payload) do
+  defp close_channel(channel, payload, opts) do
+    proof = settlement_proof(payload, opts)
+
     cond do
       payload.cumulative_amount < channel.spent ->
         {:error,
@@ -149,7 +152,7 @@ defmodule MPP.Session.Actions do
         {:error, Errors.new(:amount_exceeds_deposit, "close voucher amount exceeds deposit")}
 
       payload.cumulative_amount > channel.cumulative_amount ->
-        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount) do
+        with {:ok, channel} <- Channel.apply_voucher(channel, payload.cumulative_amount, proof) do
           Channel.close(channel)
         end
 
@@ -157,6 +160,19 @@ defmodule MPP.Session.Actions do
         Channel.close(channel)
     end
   end
+
+  defp settlement_proof(%Payload{signature: signature, cumulative_amount: amount}, opts)
+       when is_binary(signature) and signature != "" do
+    case Keyword.get(opts, :proof) do
+      %{public_key: key} when is_binary(key) and key != "" ->
+        %{amount: amount, signature: signature, public_key: key}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp settlement_proof(_payload, _opts), do: nil
 
   defp maybe_spend(channel, 0), do: {:ok, channel}
   defp maybe_spend(channel, amount), do: Channel.apply_spend(channel, amount)

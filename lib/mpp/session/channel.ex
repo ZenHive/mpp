@@ -10,6 +10,10 @@ defmodule MPP.Session.Channel do
 
   Channel lifecycle is deliberately small: a new channel is `:open`, may be
   activated once, and an active channel may be closed once.
+
+  `proof` holds the highest accepted method-specific settlement material
+  (for XRPL: cumulative drops, claim signature, and ledger PublicKey). Tempo
+  leaves it `nil`.
   """
 
   import Bitwise, only: [<<<: 2]
@@ -25,6 +29,7 @@ defmodule MPP.Session.Channel do
 
   @type status :: :open | :active | :closed
   @type action :: :open | :top_up | :voucher | :close
+  @type proof :: %{amount: non_neg_integer(), signature: String.t(), public_key: String.t()}
   @type id_params :: %{
           payer: String.t(),
           payee: String.t(),
@@ -45,7 +50,8 @@ defmodule MPP.Session.Channel do
           cumulative_amount: non_neg_integer(),
           spent: non_neg_integer(),
           units: non_neg_integer(),
-          status: status()
+          status: status(),
+          proof: proof() | nil
         }
 
   @enforce_keys [:channel_id, :payer, :recipient, :token, :deposit]
@@ -58,7 +64,8 @@ defmodule MPP.Session.Channel do
     cumulative_amount: 0,
     spent: 0,
     units: 0,
-    status: :open
+    status: :open,
+    proof: nil
   ]
 
   @doc "Create validated channel state in the `:open` status."
@@ -68,6 +75,7 @@ defmodule MPP.Session.Channel do
     cumulative_amount = Keyword.get(opts, :cumulative_amount, 0)
     spent = Keyword.get(opts, :spent, 0)
     units = Keyword.get(opts, :units, 0)
+    proof = Keyword.get(opts, :proof)
 
     with {:ok, channel_id} <- normalize_id(Keyword.get(opts, :channel_id)),
          {:ok, payer} <- normalize_address(Keyword.get(opts, :payer), :payer),
@@ -77,7 +85,8 @@ defmodule MPP.Session.Channel do
          :ok <- validate_amount(cumulative_amount, :cumulative_amount),
          :ok <- validate_amount(spent, :spent),
          :ok <- validate_amount(units, :units),
-         :ok <- validate_balance(deposit, cumulative_amount, spent) do
+         :ok <- validate_balance(deposit, cumulative_amount, spent),
+         {:ok, proof} <- normalize_proof(proof, cumulative_amount) do
       {:ok,
        %__MODULE__{
          channel_id: channel_id,
@@ -87,7 +96,8 @@ defmodule MPP.Session.Channel do
          deposit: deposit,
          cumulative_amount: cumulative_amount,
          spent: spent,
-         units: units
+         units: units,
+         proof: proof
        }}
     end
   end
@@ -126,10 +136,12 @@ defmodule MPP.Session.Channel do
   end
 
   @doc "Raise the accepted cumulative voucher amount. Equal amounts are idempotent."
-  @spec apply_voucher(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
-  def apply_voucher(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+  @spec apply_voucher(t(), non_neg_integer(), proof() | nil) :: {:ok, t()} | {:error, term()}
+  def apply_voucher(channel, amount, proof \\ nil)
 
-  def apply_voucher(%__MODULE__{} = channel, amount) when is_integer(amount) and amount >= 0 do
+  def apply_voucher(%__MODULE__{status: :closed}, _amount, _proof), do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_voucher(%__MODULE__{} = channel, amount, proof) when is_integer(amount) and amount >= 0 do
     cond do
       amount > channel.deposit ->
         {:error, :amount_exceeds_deposit}
@@ -140,11 +152,12 @@ defmodule MPP.Session.Channel do
       true ->
         channel
         |> Map.put(:cumulative_amount, amount)
+        |> put_highest_proof(amount, proof)
         |> maybe_activate()
     end
   end
 
-  def apply_voucher(_channel, _amount), do: {:error, {:invalid_amount, :cumulative_amount}}
+  def apply_voucher(_channel, _amount, _proof), do: {:error, {:invalid_amount, :cumulative_amount}}
 
   @doc "Increase the channel deposit by a positive additional amount."
   @spec apply_top_up(t(), pos_integer()) :: {:ok, t()} | {:error, term()}
@@ -323,4 +336,31 @@ defmodule MPP.Session.Channel do
   defp validate_chain_id(chain_id) when is_integer(chain_id) and chain_id >= 0 and chain_id <= @max_chain_id, do: :ok
 
   defp validate_chain_id(_chain_id), do: {:error, :invalid_chain_id}
+
+  defp normalize_proof(nil, _amount), do: {:ok, nil}
+
+  defp normalize_proof(%{amount: amount, signature: signature, public_key: key}, amount)
+       when is_binary(signature) and signature != "" and is_binary(key) and key != "" do
+    {:ok, %{amount: amount, signature: signature, public_key: key}}
+  end
+
+  defp normalize_proof(_proof, _amount), do: {:error, :invalid_proof}
+
+  defp put_highest_proof(channel, _amount, nil), do: channel
+
+  defp put_highest_proof(channel, amount, proof) do
+    case normalize_proof(proof, amount) do
+      {:ok, proof} ->
+        existing = channel.proof
+
+        if is_nil(existing) or amount > existing.amount do
+          %{channel | proof: proof}
+        else
+          channel
+        end
+
+      {:error, :invalid_proof} ->
+        channel
+    end
+  end
 end

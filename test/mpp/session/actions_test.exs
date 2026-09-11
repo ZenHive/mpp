@@ -42,6 +42,7 @@ defmodule MPP.Session.ActionsTest do
       assert channel.deposit == 1_000
       assert channel.cumulative_amount == 100
       assert channel.spent == 10
+      assert is_nil(channel.proof)
       assert Channel.available_balance(channel) == 90
       assert Channel.remaining_deposit(channel) == 900
 

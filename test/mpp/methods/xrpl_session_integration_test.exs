@@ -91,6 +91,9 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
     assert {:ok, channel} = Store.get({ETSStore, [name: store_name(context.store), network: "testnet"]}, channel_id)
     assert channel.cumulative_amount == 200_000
     assert channel.spent == 200_000
+    assert channel.proof.amount == 200_000
+    assert channel.proof.signature == voucher_sig
+    assert String.upcase(channel.proof.public_key) == String.upcase(context.payer["publicKey"])
 
     tampered =
       String.replace_prefix(voucher_sig, String.slice(voucher_sig, 0, 2), flip_hex(String.slice(voucher_sig, 0, 2)))
@@ -108,9 +111,31 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
              )
 
     assert closed.extensions["action"] == "close"
+    assert is_binary(closed.extensions["txHash"])
+    refute closed.extensions["txHash"] == signed["hash"]
 
-    assert {:ok, %Channel{status: :closed}} =
+    claimed = rpc!(context.url, "tx", %{"transaction" => closed.extensions["txHash"]})
+    assert claimed["validated"] == true
+    assert claimed["meta"]["TransactionResult"] == "tesSUCCESS"
+
+    entry = rpc!(context.url, "ledger_entry", %{"index" => channel_id, "ledger_index" => "validated"})
+
+    cond do
+      entry["error"] == "entryNotFound" ->
+        :ok
+
+      match?(%{"node" => %{"Balance" => _}}, entry) ->
+        assert String.to_integer(entry["node"]["Balance"]) >= 200_000
+
+      true ->
+        flunk("PayChannel neither deleted nor advanced after PaymentChannelClaim: #{inspect(entry)}")
+    end
+
+    assert {:ok, %Channel{status: :closed, proof: proof}} =
              Store.get({ETSStore, [name: store_name(context.store), network: "testnet"]}, channel_id)
+
+    assert proof.amount == 200_000
+    assert proof.signature == voucher_sig
   end
 
   defp session(context) do
@@ -124,7 +149,8 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
           "network" => "testnet",
           "credential_source" => "did:pkh:xrpl:1:" <> context.payer["address"],
           "session_store" => context.store,
-          "min_settle_delay" => 3600
+          "min_settle_delay" => 3600,
+          "destination_secret" => context.recipient["seed"]
         }
       )
 
