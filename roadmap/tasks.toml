@@ -3076,3 +3076,24 @@ started_at = "2026-09-11"
 scored_at = "2026-09-11"
 done_at = "2026-09-11"
 shipped_in = "a159f95bbd52e6a18903738f716aef98c4103467"
+
+[[task]]
+id = "118"
+phase = 9
+bundle = "utilities"
+status = "pending"
+title = "Serialize XRPL redemption submits per Destination account so concurrent closes do not collide on Sequence"
+scores = { d = 4, b = 5, u = 3 }
+markers = ["parallel"]
+depends_on = [117]
+acceptance_criteria = ["Two simultaneous redeem/2 calls for two channels sharing one Destination account both reach a validated tesSUCCESS with distinct Sequence values (stubbed-RPC test with a barrier)", "redeem/2 on an already-redeemed channel returns the recorded txHash without a second submit (test counts submit calls)", "A tefPAST_SEQ on submit is retried once with a fresh Sequence, pinned by a test", "Live testnet: two channels to one Destination are closed concurrently and both claims validate; missing setup flunks with exact export instructions", "mix ci passes; MPP.Methods.XRPL.Session stays at the 95% critical-tier coverage floor"]
+out_of_scope = ["Multi-node coordination (document single-node scope)", "PayChannel state caching (draft SHOULD, separate decision)"]
+touches = ["lib/mpp/methods/xrpl/session.ex", "lib/mpp/methods/xrpl/rpc.ex", "test/mpp/methods/xrpl_session_test.exs", "test/mpp/methods/xrpl_session_integration_test.exs", "docs/xrpl-session.md"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+`MPP.Methods.XRPL.Session.redeem/2` (via `redeem_channel/2` → `account_sequence/2`) reads the Destination account's `Sequence` from `account_info` immediately before signing, with no coordination and no idempotency mark. Two closes redeeming different channels that share a Destination account, or an operator calling `redeem/2` while a close is settling, can pick the same Sequence; the loser fails with a tef/tec code and the client sees `settlement-failed`. No value is lost — the retained claim survives and can be redeemed again (verified by the Task 117 review reading `account_sequence/2` and `maybe_redeem/4`) — but a busy server sees spurious settlement failures. Provider-owned authority: xrpl.org on Sequence / LastLedgerSequence / tefPAST_SEQ semantics and the live testnet.
+
+Build: serialize submits per Destination account (a per-account lock or a Registry/GenServer-free approach such as `:global`-free ETS lease keyed by address in the existing session store) or allocate distinct sequences under that lock; retry once on tefPAST_SEQ with a fresh Sequence; keep redeem/2 idempotent for an already-redeemed channel (return the recorded txHash instead of resubmitting). Document the guarantee and its single-node scope in docs/xrpl-session.md."""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
