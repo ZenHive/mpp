@@ -35,7 +35,7 @@
   },
   "tools": {
     "erlang_otp": "29",
-    "elixir": "1.20.2",
+    "elixir": "1.20.3",
     "mix": "1.20.2",
     "stream_data": "1.4.0",
     "ex_unit_json": "0.6.1",

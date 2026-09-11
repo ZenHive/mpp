@@ -130,7 +130,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 
 ## Open hardening items
 
-**0 open items** as of 2026-09-11 — the four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
+**1 open item** as of 2026-09-11 — one draft advisory from the post-landing content review of the 0.16.2 wave (tracked as Task 114). The four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
 patched release; the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
 (published 2026-06-29). When a new gap is found, its detail goes to a **private draft security
