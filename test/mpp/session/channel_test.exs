@@ -192,6 +192,9 @@ defmodule MPP.Session.ChannelTest do
                Channel.compute_xrpl_id(@xrpl_payer, @xrpl_payee, @xrpl_fixture["sequence"])
 
       assert String.upcase(fixture_hex) == @xrpl_fixture["channelId"]
+
+      assert {:error, :invalid_channel_id_parameters} =
+               Channel.compute_xrpl_id(@xrpl_payer, @xrpl_payee, 0x1_0000_0000)
     end
   end
 

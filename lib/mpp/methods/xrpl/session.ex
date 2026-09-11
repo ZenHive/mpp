@@ -102,6 +102,9 @@ defmodule MPP.Methods.XRPL.Session do
          {:ok, channel} <- ledger_channel(channel_id, config),
          :ok <- channel_state(channel, channel_id, amount, session, config, signature) do
       apply_action(:open, channel_id, amount, deposit(channel), config, session, %{"txHash" => hash})
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _ -> failed()
     end
   end
 
@@ -110,6 +113,9 @@ defmodule MPP.Methods.XRPL.Session do
          {:ok, channel} <- ledger_channel(channel_id, config),
          :ok <- channel_state(channel, channel_id, amount, session, config, signature) do
       apply_action(action, channel_id, amount, deposit(channel), config, session, %{})
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _ -> failed()
     end
   end
 
@@ -320,7 +326,7 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp signature(_), do: :error
 
-  defp drops(value) when is_binary(value) do
+  defp drops(value) when is_binary(value) and byte_size(value) <= 18 do
     if Regex.match?(~r/\A(?:0|[1-9]\d*)\z/, value) do
       amount = String.to_integer(value)
       if amount <= @max_drops, do: {:ok, amount}, else: :error
@@ -361,6 +367,7 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp store(config) do
     case Map.get(config, "session_store", Store.default_store()) do
+      ETSStore -> {ETSStore, [network: config["network"]]}
       {ETSStore, opts} when is_list(opts) -> {ETSStore, Keyword.put(opts, :network, config["network"])}
       other -> other
     end

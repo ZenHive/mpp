@@ -222,7 +222,8 @@ defmodule MPP.Session.Channel do
   @doc "Compute an XRPL PayChannel ID from funder, destination and create sequence."
   @spec compute_xrpl_id(String.t(), String.t(), non_neg_integer()) :: {:ok, String.t()} | {:error, term()}
   def compute_xrpl_id(account, destination, sequence)
-      when is_binary(account) and is_binary(destination) and is_integer(sequence) and sequence >= 0 do
+      when is_binary(account) and is_binary(destination) and is_integer(sequence) and sequence >= 0 and
+             sequence <= 0xFFFFFFFF do
     with {:ok, account_id} <- Codec.account_id(account),
          {:ok, destination_id} <- Codec.account_id(destination) do
       {:ok, Hex.encode(RPC.sha512_half(<<0x00, 0x78>> <> account_id <> destination_id <> <<sequence::unsigned-32>>))}

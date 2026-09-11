@@ -53,7 +53,13 @@ defmodule MPP.Methods.XRPL.SessionTest do
           %{"action" => "topUp", "transaction" => @blob, "additionalDeposit" => "1"},
           %{"action" => "open", "transaction" => "00", "amount" => "100000", "signature" => @open_sig},
           %{"action" => "voucher", "channelId" => "zz", "amount" => "100000", "signature" => @open_sig},
-          %{"action" => "open", "blob" => @blob, "amount" => "100000", "signature" => @open_sig}
+          %{"action" => "open", "blob" => @blob, "amount" => "100000", "signature" => @open_sig},
+          %{
+            "action" => "open",
+            "transaction" => @blob,
+            "amount" => String.duplicate("9", 19),
+            "signature" => @open_sig
+          }
         ] do
       assert {:error, %Errors{type: type}} = XRPLSession.verify(payload, session)
       assert type in [Errors.new(:malformed_credential, "").type, Errors.new(:verification_failed, "").type]
@@ -319,6 +325,67 @@ defmodule MPP.Methods.XRPL.SessionTest do
              )
   end
 
+  test "maps RPC failures onto verification_failed rather than a bare :error", context do
+    plug = unique_plug()
+    {:ok, session} = isolated_session(context, plug)
+
+    stub(%{context | session: session}, @hash, network_id: 0)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               session
+             )
+
+    stub(%{context | session: session}, @hash,
+      submit: %{"engine_result" => "tecUNFUNDED", "tx_json" => %{"hash" => @hash}}
+    )
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               session
+             )
+
+    {:ok, impatient} =
+      isolated_session(context, plug, %{"poll_timeout_ms" => 1, "poll_interval_ms" => 1000})
+
+    stub(%{context | session: impatient}, @hash, validated: false)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               impatient
+             )
+
+    stub(%{context | session: session}, @hash, network_id: 0)
+
+    assert {:error, %Errors{type: "https://paymentauth.org/problems/verification-failed"}} =
+             XRPLSession.verify(
+               %{"action" => "voucher", "channelId" => @channel_id, "amount" => "200000", "signature" => @voucher_sig},
+               session
+             )
+  end
+
+  test "namespaces the default ETS store by network", context do
+    {:ok, session} = session(%{"session_store" => ETSStore})
+    stub(%{context | session: session}, @hash)
+
+    on_exit(fn ->
+      Store.delete({ETSStore, [network: "testnet"]}, @channel_id)
+      Store.delete(ETSStore, @channel_id)
+    end)
+
+    assert {:ok, _} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               session
+             )
+
+    assert {:ok, %Channel{token: "XRP"}} = Store.get({ETSStore, [network: "testnet"]}, @channel_id)
+    assert :not_found = Store.get(ETSStore, @channel_id)
+  end
+
   test "rejects a 0x-prefixed blob, integer ledger amounts and a bad DID", context do
     stub(context, @hash, amount: 1_000_000)
 
@@ -413,23 +480,49 @@ defmodule MPP.Methods.XRPL.SessionTest do
     )
   end
 
+  defp isolated_session(context, plug, extra \\ %{}) do
+    session(
+      Map.merge(
+        %{
+          "session_store" => context.session.method_details["session_store"],
+          "req_options" => [plug: {Req.Test, plug}]
+        },
+        extra
+      )
+    )
+  end
+
+  defp unique_plug, do: String.to_atom("xrpl_session_rpc_#{System.unique_integer([:positive])}")
+
   defp stub(context, hash, opts \\ []) do
-    Req.Test.stub(__MODULE__, fn conn ->
-      {:ok, body, conn} = Plug.Conn.read_body(conn)
-      %{"method" => method} = Jason.decode!(body)
-      send(context.owner, {:rpc, method})
+    {_req, name} = context.session.method_details["req_options"][:plug]
+    owner = context.owner
+    Req.Test.stub(name, fn conn -> rpc_response(conn, owner, hash, opts) end)
+  end
 
-      result =
-        case method do
-          "server_info" -> %{"info" => %{"network_id" => 1}}
-          "submit" -> %{"engine_result" => "tesSUCCESS", "tx_json" => %{"hash" => hash}}
-          "tx" -> tx_result(hash, opts)
-          "ledger_entry" -> ledger_entry(opts)
-          "ledger" -> %{"ledger" => %{"close_time" => Keyword.get(opts, :close_time, 1)}}
-        end
+  defp rpc_response(conn, owner, hash, opts) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    %{"method" => method} = Jason.decode!(body)
+    send(owner, {:rpc, method})
+    Req.Test.json(conn, %{"result" => rpc_result(method, hash, opts)})
+  end
 
-      Req.Test.json(conn, %{"result" => result})
-    end)
+  defp rpc_result("server_info", _hash, opts), do: %{"info" => %{"network_id" => Keyword.get(opts, :network_id, 1)}}
+  defp rpc_result("submit", hash, opts), do: submit_result(hash, opts)
+  defp rpc_result("tx", hash, opts), do: tx_rpc(hash, opts)
+  defp rpc_result("ledger_entry", _hash, opts), do: ledger_entry(opts)
+  defp rpc_result("ledger", _hash, opts), do: %{"ledger" => %{"close_time" => Keyword.get(opts, :close_time, 1)}}
+
+  defp submit_result(hash, opts) do
+    Keyword.get(opts, :submit, %{"engine_result" => "tesSUCCESS", "tx_json" => %{"hash" => hash}})
+  end
+
+  defp tx_rpc(hash, opts) do
+    if Keyword.get(opts, :validated, true) do
+      tx_result(hash, opts)
+    else
+      %{"validated" => false, "hash" => hash}
+    end
   end
 
   defp tx_result(hash, opts) do
