@@ -12,11 +12,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      code-style, development-philosophy, development-commands, ex-unit-json, dialyzer-json,
      workflow-philosophy, elixir-volt, quickbeam, oxc, upstream-pr-workflow). -->
 <!-- @-import: ~/.claude/includes/critical-rules.md -->
-## 🚨 ANSWER IN SHORT TEXT — ALWAYS
+## Answer in short text
 
 Short, pointed text — explanation, proposal, pushback, summary alike. Too short beats too long: unclear → the user asks; too long → the user doesn't read it.
 
-## 🚨 BE A REAL PARTNER, NOT A YES-SAYER
+## Be a real partner, not a yes-sayer
 
 - Challenge what seems wrong, risky, or suboptimal. Not every request is a good idea.
 - Flawed approach → "I'd push back because…". Better alternative → present it with reasoning.
@@ -24,7 +24,7 @@ Short, pointed text — explanation, proposal, pushback, summary alike. Too shor
 - Understand before challenging: restate the user's mechanism + goal in two sentences they'd endorse. Can't → ask, don't challenge.
 - Partial understanding → questions only. "Seems wrong" without naming what you understood is noise.
 - "Not how software is normally built" is not an objection.
-- ≤3 sentences. Direct, not combative.
+- Direct, not combative. Make the case once.
 - Made your case and the user still wants it → commit fully. Pushback ≠ blocking.
 
 ### Think As an AI, Not Only As a Developer
@@ -42,14 +42,13 @@ Drop these instincts:
 
 Precedent (cite, don't relitigate): harness Tasks 153–163 — run-lifecycle bugs were judgment-as-procedural-code; fix was deletion (−1,219 lines).
 
-## 🚨 NO ENGAGEMENT FARMING — THE TURN ENDS WHEN THE WORK DOES
+## No engagement farming — the turn ends when the work does
 
 No harness prompt says "farm engagement", but several surfaces push toward manufactured continuation — and training pushes harder. Named here because the failure mode is not noticing.
 
 Never, unasked:
 - **Closing offers.** "Want me to also…?", "Should I go ahead and…?", "Let me know if…". Finished work ends with the result. A real blocker is a statement, not an offer.
-- **Flattery, anywhere in the turn.** "Great question", "Good catch", "Sharp observation", "Genau — wie du sagst". Assessment of the user's idea belongs in the pushback rule, as a judgment with a reason, never as a greeting or a transition.
-- **Agreement reflex.** "Du hast recht" before checking whether they are. A correction gets verified, then confirmed or contested — folding to social pressure is a lie about the code.
+- **Assessment, not affect.** An opinion of the user's idea belongs in the pushback rule — a judgment with a reason, never a greeting or a transition. A correction gets verified before it gets agreed with; folding to social pressure is a lie about the code.
 - **Padding for substance.** Inflated severity, option menus you won't pursue, findings split to raise the count, restating the request before doing it.
 - **A question in place of a derivable decision.** See `response-conventions.md` § Derive Before You Ask.
 - **Volunteering the next phase** — follow-up plans, adjacent refactors, roadmap pitches. Discoveries go to `rmap new`, not into chat as a proposal.
@@ -58,15 +57,15 @@ Never, unasked:
 - **Artificial checkpointing.** Three things asked, one delivered, "weiter?". Authorized work runs to the end of the scope in one turn. Batching for a `/compact` boundary is a workflow decision, announced as such — not a check-in.
 - **Announcing instead of doing.** "Lass mich das mal prüfen…" as the last line of a turn. The tools are in this turn. Use them, then report.
 - **Teasers.** "Ich habe da etwas Beunruhigendes gefunden…" before naming it. Finding first, context after.
-- **Celebration and affect markers.** "Perfekt!", "🎉 Done", "Läuft sauber". A completion is a fact, stated flat. Emoji outside a diff, never.
-- **Hedged non-answers.** "Kommt drauf an" without a recommendation forces a second turn to get the first answer. Name the dependency *and* the pick.
+- **A completion is a fact, stated flat.** Emoji outside a diff, never.
+- **Hedged non-answers** force a second turn to get the first answer. Name the dependency *and* the pick.
 - **Deferring what fits in this turn** to a "nächster Schritt". Later only means blocked, out of scope, or genuinely too large.
 
 **The tell:** a sentence that exists to create a next turn rather than to finish this one. Delete it. A turn ending in a question mark is farming unless that question survived the derive-gate.
 
 Exempt: a genuine blocker, a required safety/permission confirm, an ambiguity that survived the derive-gate.
 
-## 🚨 SURFACE THE OVERRIDE — DON'T DECIDE SILENTLY
+## Surface the override — don't decide silently
 
 Overriding the user's discernible intent — deferring, building differently, skipping, "I know better" — gets one visible line **before** you act. Never act silently and rationalize after.
 
@@ -74,15 +73,15 @@ Overriding the user's discernible intent — deferring, building differently, sk
 - Surface ≠ block: "doing X instead of Y because Z — say if wrong", then proceed. Don't gate on a question.
 - A stronger model makes silent overrides *harder* to spot — the rationalization is more fluent.
 
-## 🚨 NEVER START THE PHOENIX SERVER
+## Never start the Phoenix server
 
 Always already running. Never `mix phx.server`. Assume localhost:4000. To verify behavior, ask the user to check the browser.
 
-## 🚨 ALWAYS WRITE TESTS
+## Always write tests
 
 Every feature, even when the spec omits them: unit tests for context functions, integration tests for LiveViews, all CRUD/validations/error cases/edge cases (nil, empty, boundary). No tests → not complete.
 
-## 🚨 AGAINST AN API, THE PROVIDER-OWNED CONTRACT IS THE AUTHORITY
+## Against an API, the provider-owned contract is the authority
 
 Authority order: **live API / observed traffic + provider-owned docs/specs/SDKs > existing code > assumptions.** Third-party clients, aggregators, wrappers, reference impls (incl. CCXT) are reference material only — they prove compatibility, never semantics.
 
@@ -107,7 +106,7 @@ The deciding asymmetry is the *kind* of failure, not the amount: live gives **lo
 - **Expiry does not create truth** — a freshness window bounds staleness; an unexpired recording is still only a claim about the past.
 - Never downgrade a loud gate with real authority to a quiet one that can be falsely green. Its noise — rate budget, telling *unreachable* apart from *wrong* — is an engineering problem to solve at that gate.
 
-## 🚨 RAISE COVERAGE BEFORE MUTATING
+## Raise coverage before mutating
 
 Before any code-changing task on an existing module, its `mix test.json --cover` must be at tier — **≥80%** standard, **≥95%** critical (money, signing, crypto, low-level encoders, security-sensitive parsers; when in doubt, critical). Below tier → write the missing tests first, in this task.
 
@@ -132,7 +131,7 @@ end
 - Don't know what error to expect → don't write the test yet. Explore via Tidewave, then assert.
 - Integration tests: never `:skip` on missing credentials. Let it run and `flunk()` with the missing env vars, exact `export` commands, and the URL to get them. "0 failures" from 0 tests is a lie.
 
-## 🚨 FIX HOOK-FLAGGED ISSUES ON FILES YOU TOUCH
+## Fix hook-flagged issues on files you touch
 
 Hook fires → fix → re-run → stage. No planning around it, no asking, no discussing whether to. Pre-existing flags on a touched file count too (alias order, unused vars, `TODO:` formatting).
 
@@ -141,7 +140,7 @@ Hook fires → fix → re-run → stage. No planning around it, no asking, no di
 - Never move the fix to ROADMAP or a follow-up. This commit.
 - Don't re-run a check the hook just ran on the same files. Full-suite re-runs earn their cost only before a PR/merge, after `mix deps.get`, after a branch switch, or on request.
 
-## 🚨 READ TO THE ANSWER — DON'T USE THE RUNNER AS AN ORACLE
+## Read to the answer — don't use the runner as an oracle
 
 Reason to the fix by reading code; run once to CONFIRM, not to DISCOVER.
 
@@ -150,14 +149,14 @@ Reason to the fix by reading code; run once to CONFIRM, not to DISCOVER.
 - Verify handoffs/summaries against ground truth — a compaction summary or another session's "X is already wired" is a hypothesis; `grep` it.
 - Flaky terminal → sequential and simple: one command → file → Read. No parallel batches of dependent calls.
 
-## 🚨 FLAKY TESTS & TEST-RUN TOKEN ECONOMY
+## Flaky tests & test-run token economy
 
 - 1–2 failures out of hundreds, in a file your diff didn't touch → flaky **hypothesis**. Re-run that test alone (`mix test.json <file>:<line>` or `--failed`). Passes alone → proceed. One isolated re-run is the whole investigation.
 - NEVER `Process.sleep` to fix a flake. Use `assert_receive`/`refute_receive`, `Process.monitor` + `{:DOWN, …}`, `start_supervised!`, or poll-until-condition.
 - Don't re-run a full suite to grade already-graded code (per-edit hooks, a green harness run, a clean disjoint merge).
 - Bound output: `--cover` dumps hundreds of KB. Always `--output /tmp/cov.json` + `jq`. Triage with `--max-failures 1` / `--failed` / one `file:line`.
 
-## 🚨 NO PSEUDO-RIGOROUS HEDGING
+## No pseudo-rigorous hedging
 
 You have no consumer telemetry, no usage counts, no demand signal. Don't gate user-requested work behind evidence you cannot obtain. The developer in front of you IS the demand signal — they asked; that's the data point.
 
@@ -180,7 +179,7 @@ Commit, push, open PRs without asking when the task calls for it. Announce in on
 
 Only residual gate: **rewriting already-pushed history** (force-push, amend/rebase of shared commits) — confirm first, because it's irreversible.
 
-### 🚨 STAGE PATH-SCOPED — THE WORKING TREE IS SHARED
+### Stage path-scoped — the working tree is shared
 
 - NEVER `git add -A` / `git add .` / `git commit -a`. Stage explicitly (`git add <path>`) or commit path-scoped (`git commit <path>`).
 - Verify before every commit: `git diff --cached --name-only`. A path you didn't touch is someone else's.
@@ -210,11 +209,11 @@ Never without explicit consent: `mix deps.clean` (incl. `--all`), `mix deps.unlo
 
 Instead: compile error → retry `mix compile` / `mix test`. Specific dep → `mix deps.compile <dep> --force`. Most "corrupt cache" issues are transient.
 
-## 🚨 NO SCOPE-SEQUENCING QUALIFIERS IN DURABLE ARTIFACTS
+## No scope-sequencing qualifiers in durable artifacts
 
 Never write "X first", "starting with X", "initially", "for now", "MVP: X" into repo descriptions, READMEs, moduledocs, code/config comments, commit messages, or vision one-liners. They metastasize and become unremovable. Sequencing lives in the roadmap only (milestones, task bodies, `out_of_scope`). Elsewhere describe what the system IS: "Coverage: Robinhood Chain tokenized equities", not "starting with Robinhood Chain".
 
-## 🚨 Integrity and Accuracy
+## Integrity and accuracy
 
 - Never fabricate information, experience, metrics, timelines, or stats.
 - Distinguish codebase observation / general knowledge / best practice / speculation.
@@ -222,7 +221,7 @@ Never write "X first", "starting with X", "initially", "for now", "MVP: X" into 
 - Uncertain → say so, give ranges over false precision, suggest a validation path.
 - Trace sources: "Based on the code in file.ex…", "According to docs/FILE.md…", "Common practice in Elixir…".
 
-## 🚨 RESEARCH BEFORE ASSERTING ON NICHE TECHNICAL CLAIMS
+## Research before asserting on niche technical claims
 
 Outside reliable training coverage, research proactively — unasked. WebFetch when the canonical URL is known, WebSearch to find one. **Cite what you fetched.**
 
@@ -236,7 +235,7 @@ Don't research: pure Elixir/OTP, stdlib, mainstream Phoenix/LiveView/Ecto/Ash, g
 
 Fetch fails or is ambiguous → say so and lower confidence. Never fall back to "well, I think…" silently.
 
-## 🚨 NO EVASION — SIT WITH THE HARD THING
+## No evasion — sit with the hard thing
 
 Hitting a wall → silently moving to easier work is the failure. Stay with it; say "this is hard because X".
 
@@ -249,6 +248,119 @@ Don't use without explicit user approval:
 - Blocked → name it: "blocked on X because Y. Options: A, B, C."
 - Never a silent workaround. Tempted to add a fallback/nil-guard for missing data → should it come from upstream? Then stop and report.
 - Must move on → leave a tracked TODO, not a silent gap.
+
+<!-- @-import: ~/.claude/includes/elixir-security-adjudications.md -->
+# Elixir Security Adjudications (host-specific)
+
+Two settled, host-specific security verdicts that every fresh agent otherwise
+re-derives from scratch. `@`-import this in any repo that declares `mix_audit`
+or runs Sobelow, so it also flows into `AGENTS.md` for the cross-family
+reviewers via `sync-agents-md.sh`.
+
+## 🚨 ADJUDICATED: the cowlib / gun advisories are ALREADY DECIDED — do NOT re-investigate
+
+**Read this before spending a single token on a `VULNERABLE!` line mentioning `gun`,
+`cowlib`, `GHSA-w4f7-4cxr-rv3c`, or `EEF-CVE-2026-4396x`/`-43971`.** This has been
+adjudicated repeatedly by many sessions — local Claude instances, and every harness
+implementer / reviewer / auditor that ran `mix deps.get` in a fresh worktree. Each one
+found the same unbudgeted alarm and redid the same analysis. **The verdict is below.
+Cite it; don't re-derive it.**
+
+**Where the noise comes from — two independent pipelines, don't confuse them:**
+
+| Source | Reports | Silenced by |
+|---|---|---|
+| **Hex core**, during `mix deps.get` / `deps.update` / `hex.audit` | OSV incl. the EEF-CVE program | `mix hex.config ignore_advisories "<ids>"` (global, `~/.hex`) or `HEX_IGNORE_ADVISORIES` (comma-separated env var, settable per dispatch) |
+| **`mix_audit`**, during `mix deps.audit` | mirego's GHSA mirror | per-repo `.mix_audit_ignore` (the marketplace hook reads it via `--ignore-file`) |
+
+Removing `mix_audit` does **not** silence the `mix deps.get` output — that is Hex, and
+every fresh harness worktree runs `deps.get`. That is precisely why every dispatched
+agent sees it.
+
+**The verdict — cowlib 2.19.0 reached only via `gun` as a WebSocket client (the
+`zen_websocket` stack): not reachable.** Evidence is a call-graph fact, not a judgment
+call:
+
+| Advisory | Vulnerable function | Reachability |
+|---|---|---|
+| `EEF-CVE-2026-43971` | `cow_link:link/1` | **0 references** in `deps/gun/src/` |
+| `EEF-CVE-2026-43966` (alias `GHSA-w4f7-4cxr-rv3c`, `CVE-2026-43966`) | `cow_http_struct_hd:escape_string/2` | **0 references** in `deps/gun/src/` |
+| `EEF-CVE-2026-43969` | `cow_cookie:cookie/1` | only from `gun_cookies.erl` — gun's **opt-in** cookie store; `zen_websocket` never sets `cookie_store` (the string `cookie` does not appear in its `lib/`) |
+
+cowlib **2.19.0 is the latest release** — there is no fixed version to upgrade to, so
+reachability is the only available adjudication.
+
+**The separate `gun 2.5.0` line is a mirror bug, already reported upstream.** gun's real
+vulnerable range is `< 2.4.0`; gun 2.5.0 is patched. The mirego importer groups by
+`ghsaId` alone, collapsing a two-package advisory into `packages/gun/…yml` carrying
+**cowboy's** `< 2.16.0` range, so gun 2.5.0 matches a range that was never gun's. There
+is no gun 2.16.x. Filed as **`mirego/elixir-security-advisories#8`** (issue + PR open);
+`zen_websocket/.mix_audit_ignore` carries the full write-up and the removal condition.
+That gun never calls `cow_http_struct_hd` at all corroborates it independently.
+
+**🚨 `bandit` is NOT in this adjudication — it has a real fix.** `EEF-CVE-2026-74836`
+(HIGH) and `EEF-CVE-2026-75484` on bandit 1.12.4 are genuine; **1.12.5 (2026-08-20) is
+the fix**. Bump the dependency; never add a bandit id to an ignore list. Blanket-ignoring
+"all the CVE noise" buries a HIGH — suppress **per id**, only after the reachability
+argument above has been made for that specific id.
+
+**What invalidates this verdict — re-adjudicate if any becomes true:** a repo takes
+`cowboy` as a **runtime** (not `only: :test`) dependency; gun's `cookie_store` option is
+enabled anywhere; gun is used as a general HTTP client with caller-supplied header
+values; or a new cowlib advisory appears that is not one of the three ids above.
+
+**Affected repos (13 declare `mix_audit`; 9 carry `gun` in the lock — `bourse_workbench` retired to the code-archive 2026-08-23):** `bourse`,
+`mpp`, `onchain`, `onchain_aave`, `onchain_aerodrome`, `onchain_evm`, `onchain_js`,
+`onchain_tempo`, `zen_websocket`. Suppression is inconsistent across them — most carry
+`.mix_audit_ignore`, bourse uses an `--ignore-advisory-ids` alias in
+`mix.exs`. Standardize on `.mix_audit_ignore` when you touch one.
+
+**The meta-lesson this section encodes:** the analysis had in fact been done correctly —
+it lived in `zen_websocket/mix.exs` and `.mix_audit_ignore`, where no other repo's agent
+ever looks. A verdict that isn't written where the *next* agent reads it gets re-derived
+forever. Adjudicate once, then put it in `CLAUDE.md` (which flows into `AGENTS.md` for
+the cross-family reviewers) — not only in the repo that happened to notice.
+
+## Suppressing Sobelow False Positives — Use `.sobelow-skips`, NOT Inline Comments
+
+When the PostToolUse hook flags a Sobelow false positive (e.g. `Traversal.FileModule`
+on an operator-supplied CLI path, not web input), the **inline `# sobelow_skip
+["FindingType"]` comment does NOT suppress it** under this host's hook invocation —
+verified on tapakly 2026-06: comments placed correctly above both the `def` (with
+`@spec` between) and a bare `defp` still re-flagged at the same lines. The hook
+honors only the **hash-based `.sobelow-skips` file**, read via `mix sobelow --skip`.
+
+The failure mode many instances hit: add inline comment → hook re-flags → add
+another → loop. Stop. The working mechanism:
+
+1. **Confirm the finding is genuinely a false positive** (path is operator/CLI-derived
+   or a fixed dir + content hash, never untrusted/web input). Real traversal risk → fix the code.
+2. **Check the total outstanding count** — `mix sobelow --format compact`. `--mark-skip-all`
+   marks *every* current finding as skipped, so it's only safe when the outstanding set
+   IS exactly the false positives you intend to skip. Otherwise you'd silently bury a real one.
+3. **Generate the skip file:** `mix sobelow --mark-skip-all` → writes `.sobelow-skips`
+   (lines of `FindingType,file:line,HASH`).
+4. **Verify suppression with the flag the hook uses:** `mix sobelow --skip --format compact`
+   — a plain `mix sobelow` (no `--skip`) still prints them; that's expected, not a failure.
+5. **Commit `.sobelow-skips`** alongside the code (it's not gitignored — it's the
+   persisted project suppression record so CI / other devs don't re-flag).
+
+**Line shifts INVALIDATE skips, and `--mark-skip-all` never prunes — regenerate, don't accumulate.**
+Each entry pins `FindingType,file:line,HASH`, and the line number feeds the hash:
+deleting or inserting lines *above* a suppressed finding re-reds the gate even though the
+flagged code never changed. Re-running `--mark-skip-all` leaves the dead entry behind
+forever — sobelow ≤0.14 appends a new generation; 0.15+ rewrites merged+deduped+sorted
+(`--legacy-skips` restores append) but still keeps entries with no live finding
+(observed ccxt_client 2026-07-22 under 0.14: 57 entries on file, 9 live findings —
+48 stale). The cadence: whenever a skip-related
+re-red appears (or an audit notices bloat), **regenerate wholesale** — confirm every
+currently-outstanding finding (`mix sobelow --no-skip --format compact`) is a genuine
+false positive per step 1, then `rm .sobelow-skips && mix sobelow --mark-skip-all`,
+verify zero with `--skip`, commit. Never regenerate while an unconfirmed finding is
+outstanding — that buries it.
+
+Pairs with `critical-rules.md` § FIX HOOK-FLAGGED ISSUES: suppression IS the fix for a
+documented false positive — but via the file, not a comment the hook ignores.
 
 <!-- @-import: ~/.claude/includes/harness-workflow.md -->
 ## Harness Workflow
@@ -559,7 +671,7 @@ The two blind classes, both real-correctness, both passing every per-task check:
   - **`cursor` is back on the roster (operator unblocked 2026-08-15).** SuperGrok Heavy entitles Cursor Ultra; the 2026-07-13 `cursor/all` block is lifted. Pin `model = "cursor-grok-4.6-high"` — **operator decision 2026-08-17: no more Composer pins.** The older `composer-2.5` guidance (cheapest cost-to-green, and where every cursor capability KPI was measured) is retired; that ledger data describes a model the operator no longer wants routed to. Confirm the live id with `cursor-agent --list-models` / `model_availability-list_available_models cursor` (the catalog also carries `cursor-grok-4.6-xhigh` / `-fast` variants and `claude-opus-5-*` — Opus/frontier pins through cursor still exhaust and get operator-blocked, so don't reach for them as the "design-heavy" reflex). **`cursor` and `grok` are the same SpaceXAI family** (SpaceX closed the Cursor acquisition 2026-08-14): three adapters, two families. A cursor implementer must not get a grok reviewer (and vice versa) — pair either with `codex`.
   - **`model` is REQUIRED at creation for any non-`human` assignee** (`rmap new` rejects a model-less dispatchable task — "a dispatchable task must pin the LLM it runs on"; see `rmap.md` § "Pinning an LLM model"); "leave `model` unset for the agent default" does NOT work. Set `assignee` **and** `model` at task creation per `rmap.md`.
   - **`grok` runs on `grok-4.6` — the frontier default since 2026-08-13; `grok-4.5` is gone from the live catalog** (lineage: `grok-build` → `grok-4.5` 2026-07 → `grok-4.6`; a catalog refresh on 2026-08-13 listed only `grok-4.6`). Re-pin any task still carrying `grok-4.5` when you touch it — a retired pin fails at dispatch. `grok-4.6` carries **no** capability/cost-to-green data yet — route to it to *gather* that data (A/B via `dispatch-compare` grok-4.6 vs codex/gpt-5.6-sol), not on a performance claim the ledger doesn't yet show. A newly-probed grok model lands in the catalog as `selected?: false`; select it (`model_availability` toggle) before it's dispatchable. Confirm live ids with `grok models` / `model_availability-list_available_models grok`.
-  - **`codex` runs on `gpt-5.6-sol` — the standing default since 2026-07-31; `gpt-5.5` is RETIRED from the live catalog.** The GPT-5.6 family (2026-07-10) splits generation from durable capability tier: **Sol** = flagship (complex reasoning/coding/agentic, $5/$30 per 1M tok), **Terra** = balanced (~5.5-competitive at 2× cheaper, $2.50/$15), **Luna** = fast/cheap ($1/$6). Model ids: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` — the live catalog lists ONLY these three; `agent_model.codex` is pinned to `gpt-5.6-sol` (verified 2026-07-31 via `config-get agent_model.codex` + `model_availability-list_available_models codex`). **Pin `model = "gpt-5.6-sol"` for new codex tasks**, and re-pin any task still carrying `gpt-5.5` when you touch it — a retired pin fails at dispatch. `terra` remains the cost-to-green candidate (2× cheaper, ~5.5-competitive) — A/B it via `dispatch-compare` before routing bulk work to it. Confirm live ids with `codex debug models` / `model_availability-list_available_models codex`; a probe failure falls back to the builtin seed.
+  - **`codex` runs on `gpt-6-astra` — the standing default since 2026-09-06 (operator decision); `gpt-5.5` is RETIRED from the live catalog.** **`gpt-6-astra`** is OpenAI's flagship since 2026-09-03 (~$10/$50 per 1M tok ≈ 2.5× Sol, 1M context; in the catalog and selected, codex CLI ≥ 0.153) — both `agent_model.codex` and `reviewer_model.codex` are pinned to it. The GPT-5.6 family stays available as the cheaper tier: **Sol** = prior flagship ($5/$30 per 1M tok), **Terra** = balanced (~5.5-competitive at 2× cheaper, $2.50/$15), **Luna** = fast/cheap ($1/$6) — ids `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`. **Pin `model = "gpt-6-astra"` for new codex tasks**, and re-pin any task still carrying `gpt-5.5` when you touch it — a retired pin fails at dispatch. `gpt-6-astra` carries **no** capability/cost-to-green data yet — watch the ledger as runs accrue; `terra` remains the cost-to-green candidate — A/B via `dispatch-compare` before routing bulk work to it. Confirm live ids with `codex debug models` / `model_availability-list_available_models codex`; a probe failure falls back to the builtin seed.
 ### Known Sharp Edges
 
 - **Fresh worktrees lack `deps/` / `_build/`.** Implementer and reviewer each run project bootstrap (e.g. `mix deps.get`) when needed — budget timeouts for cold worktrees.
@@ -698,8 +810,8 @@ For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's
 - **`agents.check`** fails when `AGENTS.md` has drifted from this file (`sync-agents-md.sh --check`) — cross-family reviewers (codex/cursor/grok) read `AGENTS.md`, not this file directly.
 - **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
 - When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
-- Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules. **Excluded from the gate now does mean unexecuted unless you run them.** Both tiers used to run nightly in their own workflows, which supplied the credentials and JS toolchain the gate deliberately does without; those workflows were deleted with every other one on 2026-08-22. Nothing exercises `:integration` or `:cross_validation` on a schedule any more — run them explicitly before a release, with the credentials in the environment.
-- **`mix mutation.security`** is the executable payment-security mutant campaign (sandbox, apply, compile `--force`, run tests). It is not part of `mix ci` / `mix precommit.full`. The default suite only checks that each mutant still applies once and that the checked-in ledger says they were killed. The campaign itself used to run nightly in its own workflow, deleted on 2026-08-22 along with the rest — **so nothing runs it now.** Run `mix mutation.security` by hand before a release that touches payment authorization; a surviving canary (`canonical-ordering`, `pinned-fields`, `authorization-dispatch`) is the failure signal.
+- Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules. **Excluded from the gate means unexecuted unless you run them: nothing exercises `:integration` or `:cross_validation` on a schedule.** Run them explicitly before a release, with the credentials and JS toolchain in the environment.
+- **`mix mutation.security`** is the executable payment-security mutant campaign (sandbox, apply, compile `--force`, run tests). It is not part of `mix ci` / `mix precommit.full`. The default suite only checks that each mutant still applies once and that the checked-in ledger says they were killed. **Nothing runs the campaign on a schedule.** Run `mix mutation.security` by hand before a release that touches payment authorization; a surviving canary (`canonical-ordering`, `pinned-fields`, `authorization-dispatch`) is the failure signal.
 
 ## Architecture
 
@@ -755,6 +867,10 @@ MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle veri
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor policy: bounds every client-controlled 0x76 envelope field (gas economics, access/authorization lists, key authorization, call value/calldata) before fee-payer co-sign (anti-drain)
+MPP.Methods.Tempo.SponsorBudget — Atomic aggregate in-flight accounting for Tempo fee sponsorship
+MPP.Methods.Tempo.HostedFeePayer — Hosted Tempo fee-payer JSON-RPC fill support
+MPP.Methods.Tempo.Proof    — EIP-712 proof credentials for zero-amount Tempo charge flows
+MPP.Intent                 — Shared contract implemented by payment-intent schemas (Charge / Session / Subscription)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache; app-started as the default store
 MPP.Subscription.Store     — Behaviour for recurring-subscription persistence
@@ -788,6 +904,8 @@ MPP.DID                    — DID helpers for EVM credential sources
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
+
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 
@@ -929,7 +1047,7 @@ Run scripts with: `MIX_ENV=dev mix run /tmp/script.exs`
 
 Three reference repos are cloned into `refs/` (gitignored, auto-updated on session start via hook). **Read these directly — do NOT WebFetch from GitHub.**
 
-A daily cloud routine (`sdk-delta-watch`, manage at https://claude.ai/code/routines) watches these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths, judges parity against our Elixir impl, and auto-files `security`-marked rmap tasks for genuine gaps (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). If it filed tasks but couldn't run `rmap render` in the cloud env, run `rmap render` locally to re-sync ROADMAP.md.
+The `/sdk-delta-watch` skill (`.claude/skills/sdk-delta-watch/SKILL.md`) triages these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths and judges parity against our Elixir impl (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). It runs locally in an authenticated session precisely so the private-advisory path works: a genuine unfixed security gap goes to a **private draft GitHub advisory**, never a public `security` rmap task — see § "Security-parity ledger + disclosure convention". Only non-security parity gaps are filed as tasks; run `rmap render` afterwards to re-sync ROADMAP.md. A SessionStart hook suggests the skill once `.sdk-watch.json`'s `checked_at` is 7+ days old.
 
 ```
 refs/mpp-specs/   — IETF spec source (specs/, examples/)
@@ -984,11 +1102,12 @@ gh api repos/ZenHive/mpp/security-advisories \
   --jq '.[] | {ghsa: .ghsa_id, severity, state, summary}'        # 🚨 private vuln reports (PVR) — Security→Advisories tab
 gh api repos/ZenHive/mpp/dependabot/alerts \
   --jq '.[] | select(.state=="open")'                            # vulnerable dependencies
-gh api repos/ZenHive/mpp/code-scanning/alerts                    # stale: nothing uploads here since 2026-08-22
 gh api repos/ZenHive/mpp/secret-scanning/alerts                  # leaked secrets
 ```
 
-**🚨 `security-advisories` is the one most easily missed and the highest-stakes.** Privately-reported vulnerabilities submitted through Private Vulnerability Reporting land **only** in the Security → Advisories tab — they do **NOT** appear as Dependabot alerts, code/secret-scanning alerts, or in the notifications inbox (advisory submissions email repo admins, they don't generate a `reason: security_alert` inbox item). The four scanning endpoints cover *automated* findings; `security-advisories` covers *human-reported* ones. **Always query it.** As of 2026-06, three reporter `kai-kka` gas-draining advisories (critical/high/medium) sat in `triage` for up to 12 days before being noticed precisely because earlier sweeps skipped this endpoint.
+**🚨 `security-advisories` is the one most easily missed and the highest-stakes.** Privately-reported vulnerabilities submitted through Private Vulnerability Reporting land **only** in the Security → Advisories tab — they do **NOT** appear as Dependabot alerts, code/secret-scanning alerts, or in the notifications inbox (advisory submissions email repo admins, they don't generate a `reason: security_alert` inbox item). The remaining scanning endpoints cover *automated* findings; `security-advisories` covers *human-reported* ones. **Always query it.** As of 2026-06, three reporter `kai-kka` gas-draining advisories (critical/high/medium) sat in `triage` for up to 12 days before being noticed precisely because earlier sweeps skipped this endpoint.
+
+Code scanning is dormant — nothing has uploaded SARIF since the workflows were removed; re-add its query above if a scanner is wired up again.
 
 Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Reporter, PoC, and affected-version detail are at `gh api repos/ZenHive/mpp/security-advisories/<GHSA-id>`.
 
@@ -998,14 +1117,6 @@ Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Rep
 
 ## Git Commit Configuration
 
-**Configured**: 2026-03-25
+**Format:** `<scope>: <lowercase imperative description>` — the convention in this repo's log (169 of the last 200 commits). Scopes in use: `fix`, `test`, `docs`, `deps`, `roadmap`, `release`, `security`, `ci`, `chore(sdk-watch)`. Drop the scope prefix only when none applies.
 
-### Commit Message Format
-
-**Format**: imperative-mood
-
-#### Imperative Mood Template
-```
-<description>
-```
-Start with imperative verb: Add, Update, Fix, Remove, etc.
+Title only; add a body when the change needs one. No `Co-Authored-By` footers.

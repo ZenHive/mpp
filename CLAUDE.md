@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      code-style, development-philosophy, development-commands, ex-unit-json, dialyzer-json,
      workflow-philosophy, elixir-volt, quickbeam, oxc, upstream-pr-workflow). -->
 @~/.claude/includes/critical-rules.md
+@~/.claude/includes/elixir-security-adjudications.md
 @~/.claude/includes/harness-workflow.md
 @~/.claude/includes/ethereum-rpc.md
 
@@ -55,8 +56,8 @@ For cross-family reviewers (codex / cursor / grok) who don't inherit this repo's
 - **`agents.check`** fails when `AGENTS.md` has drifted from this file (`sync-agents-md.sh --check`) — cross-family reviewers (codex/cursor/grok) read `AGENTS.md`, not this file directly.
 - **`mix test.json` (`ex_unit_json`) and `mix dialyzer.json` (`dialyzer_json`) emit JSON by design** — parse it for real failures (`summary.result`, `coverage.threshold_met`, `warnings[]`); **never flag the JSON envelope itself as a build failure.** A non-empty JSON document on stdout is a *successful* run, not an error.
 - When `dialyzer.json`'s encoder can't serialize a warning shape, **plain `mix dialyzer` is the authoritative dialyzer check.**
-- Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules. **Excluded from the gate now does mean unexecuted unless you run them.** Both tiers used to run nightly in their own workflows, which supplied the credentials and JS toolchain the gate deliberately does without; those workflows were deleted with every other one on 2026-08-22. Nothing exercises `:integration` or `:cross_validation` on a schedule any more — run them explicitly before a release, with the credentials in the environment.
-- **`mix mutation.security`** is the executable payment-security mutant campaign (sandbox, apply, compile `--force`, run tests). It is not part of `mix ci` / `mix precommit.full`. The default suite only checks that each mutant still applies once and that the checked-in ledger says they were killed. The campaign itself used to run nightly in its own workflow, deleted on 2026-08-22 along with the rest — **so nothing runs it now.** Run `mix mutation.security` by hand before a release that touches payment authorization; a surviving canary (`canonical-ordering`, `pinned-fields`, `authorization-dispatch`) is the failure signal.
+- Integration tests (`:integration` tag) and Tempo JS cross-validation tests (`:cross_validation` tag) are excluded from the gate. `:integration` requires live Moderato/Stripe/Sepolia credentials. `:cross_validation` requires a local JS toolchain (node + `ox` + `viem` npm packages + npx/esbuild for QuickBEAM bundles; see `test/mpp/tempo/cross_validation_test.exs`). Run explicitly with `mix test.json --include integration` or `mix test.json --include cross_validation`. The documented cold/offline check (`mix test.json --cover --exclude integration --exclude cross_validation`) succeeds on a fresh checkout with no gitignored node_modules. **Excluded from the gate means unexecuted unless you run them: nothing exercises `:integration` or `:cross_validation` on a schedule.** Run them explicitly before a release, with the credentials and JS toolchain in the environment.
+- **`mix mutation.security`** is the executable payment-security mutant campaign (sandbox, apply, compile `--force`, run tests). It is not part of `mix ci` / `mix precommit.full`. The default suite only checks that each mutant still applies once and that the checked-in ledger says they were killed. **Nothing runs the campaign on a schedule.** Run `mix mutation.security` by hand before a release that touches payment authorization; a surviving canary (`canonical-ordering`, `pinned-fields`, `authorization-dispatch`) is the failure signal.
 
 ## Architecture
 
@@ -112,6 +113,10 @@ MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle veri
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor policy: bounds every client-controlled 0x76 envelope field (gas economics, access/authorization lists, key authorization, call value/calldata) before fee-payer co-sign (anti-drain)
+MPP.Methods.Tempo.SponsorBudget — Atomic aggregate in-flight accounting for Tempo fee sponsorship
+MPP.Methods.Tempo.HostedFeePayer — Hosted Tempo fee-payer JSON-RPC fill support
+MPP.Methods.Tempo.Proof    — EIP-712 proof credentials for zero-amount Tempo charge flows
+MPP.Intent                 — Shared contract implemented by payment-intent schemas (Charge / Session / Subscription)
 MPP.Tempo.Store            — Behaviour for tx dedup stores (get/put + required atomic check_and_mark); default-on via Store.resolve/1, opt out with store: false
 MPP.Tempo.ConCacheStore    — Built-in ETS dedup store with TTL via ConCache; app-started as the default store
 MPP.Subscription.Store     — Behaviour for recurring-subscription persistence
@@ -145,6 +150,8 @@ MPP.DID                    — DID helpers for EVM credential sources
 MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mix mpp.demo)
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
+
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 
@@ -286,7 +293,7 @@ Run scripts with: `MIX_ENV=dev mix run /tmp/script.exs`
 
 Three reference repos are cloned into `refs/` (gitignored, auto-updated on session start via hook). **Read these directly — do NOT WebFetch from GitHub.**
 
-A daily cloud routine (`sdk-delta-watch`, manage at https://claude.ai/code/routines) watches these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths, judges parity against our Elixir impl, and auto-files `security`-marked rmap tasks for genuine gaps (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). If it filed tasks but couldn't run `rmap render` in the cloud env, run `rmap render` locally to re-sync ROADMAP.md.
+The `/sdk-delta-watch` skill (`.claude/skills/sdk-delta-watch/SKILL.md`) triages these SDKs for upstream changes we may need to port: it diffs new commits since the watermark in `.sdk-watch.json` (committed at repo root) over the protocol-critical paths and judges parity against our Elixir impl (the pattern that caught mpp-rs #299 → Task 65 and mppx #577 → Task 46). It runs locally in an authenticated session precisely so the private-advisory path works: a genuine unfixed security gap goes to a **private draft GitHub advisory**, never a public `security` rmap task — see § "Security-parity ledger + disclosure convention". Only non-security parity gaps are filed as tasks; run `rmap render` afterwards to re-sync ROADMAP.md. A SessionStart hook suggests the skill once `.sdk-watch.json`'s `checked_at` is 7+ days old.
 
 ```
 refs/mpp-specs/   — IETF spec source (specs/, examples/)
@@ -341,11 +348,12 @@ gh api repos/ZenHive/mpp/security-advisories \
   --jq '.[] | {ghsa: .ghsa_id, severity, state, summary}'        # 🚨 private vuln reports (PVR) — Security→Advisories tab
 gh api repos/ZenHive/mpp/dependabot/alerts \
   --jq '.[] | select(.state=="open")'                            # vulnerable dependencies
-gh api repos/ZenHive/mpp/code-scanning/alerts                    # stale: nothing uploads here since 2026-08-22
 gh api repos/ZenHive/mpp/secret-scanning/alerts                  # leaked secrets
 ```
 
-**🚨 `security-advisories` is the one most easily missed and the highest-stakes.** Privately-reported vulnerabilities submitted through Private Vulnerability Reporting land **only** in the Security → Advisories tab — they do **NOT** appear as Dependabot alerts, code/secret-scanning alerts, or in the notifications inbox (advisory submissions email repo admins, they don't generate a `reason: security_alert` inbox item). The four scanning endpoints cover *automated* findings; `security-advisories` covers *human-reported* ones. **Always query it.** As of 2026-06, three reporter `kai-kka` gas-draining advisories (critical/high/medium) sat in `triage` for up to 12 days before being noticed precisely because earlier sweeps skipped this endpoint.
+**🚨 `security-advisories` is the one most easily missed and the highest-stakes.** Privately-reported vulnerabilities submitted through Private Vulnerability Reporting land **only** in the Security → Advisories tab — they do **NOT** appear as Dependabot alerts, code/secret-scanning alerts, or in the notifications inbox (advisory submissions email repo admins, they don't generate a `reason: security_alert` inbox item). The remaining scanning endpoints cover *automated* findings; `security-advisories` covers *human-reported* ones. **Always query it.** As of 2026-06, three reporter `kai-kka` gas-draining advisories (critical/high/medium) sat in `triage` for up to 12 days before being noticed precisely because earlier sweeps skipped this endpoint.
+
+Code scanning is dormant — nothing has uploaded SARIF since the workflows were removed; re-add its query above if a scanner is wired up again.
 
 Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Reporter, PoC, and affected-version detail are at `gh api repos/ZenHive/mpp/security-advisories/<GHSA-id>`.
 
@@ -355,14 +363,6 @@ Triage states to act on: `triage` (new, unreviewed), `draft` (being worked). Rep
 
 ## Git Commit Configuration
 
-**Configured**: 2026-03-25
+**Format:** `<scope>: <lowercase imperative description>` — the convention in this repo's log (169 of the last 200 commits). Scopes in use: `fix`, `test`, `docs`, `deps`, `roadmap`, `release`, `security`, `ci`, `chore(sdk-watch)`. Drop the scope prefix only when none applies.
 
-### Commit Message Format
-
-**Format**: imperative-mood
-
-#### Imperative Mood Template
-```
-<description>
-```
-Start with imperative verb: Add, Update, Fix, Remove, etc.
+Title only; add a body when the change needs one. No `Co-Authored-By` footers.

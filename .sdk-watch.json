@@ -1,5 +1,5 @@
 {
-  "_doc": "Watermark for the daily SDK-delta watch routine (see CLAUDE.md \u00a7 Reference implementations). The routine clones each ref, runs `git log <last_seen>..HEAD` over the critical paths, triages new commits for parity gaps vs our Elixir lib, files/updates rmap tasks, then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
+  "_doc": "Watermark for the /sdk-delta-watch skill (.claude/skills/sdk-delta-watch/SKILL.md; see CLAUDE.md \u00a7 Reference implementations). The skill runs `git log <last_seen>..HEAD` over each ref's critical paths, triages new commits for parity gaps vs our Elixir lib, routes each finding per the repo disclosure policy (private draft advisory for an unfixed security gap; rmap task only for non-security parity gaps), then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
   "checked_at": "2026-09-04",
   "refs": {
     "mppx": {
