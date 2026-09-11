@@ -617,9 +617,13 @@ defmodule MPP.Methods.XRPL.Session do
     end
   end
 
+  # xrpl.org transaction common fields: `NetworkID` must be omitted on any
+  # network with an id of 1024 or less and included on 1025 or greater; a
+  # testnet node rejects a claim carrying it with
+  # telNETWORK_ID_MAKES_TX_NON_CANONICAL (observed live 2026-09-12).
   defp maybe_network_id(tx, config) do
     case RPC.networks()[config["network"]] do
-      id when is_integer(id) and id > 0 -> Map.put(tx, "NetworkID", id)
+      id when is_integer(id) and id > 1024 -> Map.put(tx, "NetworkID", id)
       _ -> tx
     end
   end

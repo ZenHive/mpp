@@ -19,7 +19,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   session store entries, retained highest claims, and validated
   `PaymentChannelClaim` redemption on close (draft-xrpl-session-00).
   Configure `destination_secret` for redemption, or `defer_redemption` to
-  settle the stored claim later with `redeem/2`.
+  settle the stored claim later with `redeem/2`. The claim signature is
+  verified before any ledger RPC beyond the required PublicKey read.
 
 ### Changed
 

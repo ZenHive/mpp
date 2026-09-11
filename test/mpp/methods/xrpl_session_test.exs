@@ -623,10 +623,11 @@ defmodule MPP.Methods.XRPL.SessionTest do
         "Flags" => 131_072,
         "Sequence" => 1,
         "LastLedgerSequence" => 100,
-        "Fee" => "12",
-        "NetworkID" => 1
+        "Fee" => "12"
       }
 
+      # Goldens regenerated with test/support/xrpl/sign.cjs (xrpl.js 4.6.0) on
+      # this exact map; NetworkID is omitted on networks with id <= 1024.
       assert {:ok, blob, hash} = Wallet.sign_claim(wallet, tx)
       assert hash == expected["hash"]
       assert blob == expected["tx_blob"]
