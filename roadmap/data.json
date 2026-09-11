@@ -4123,7 +4123,7 @@
       "id": "103",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives",
       "scores": {
         "d": 3,
@@ -4158,6 +4158,7 @@
       ],
       "body": "The core spec (§11.10) requires every response carrying a Payment-Receipt to be marked `Cache-Control: private`, and a receipt only belongs on a response that actually delivered the paid resource. MPP.Plug and the JSON-RPC plug adapter currently write both headers on the conn before handing it to the downstream application; the invariant must instead hold at send time, regardless of what the application does with the response afterwards. mpp-rs #399 (commit 3c75742, `src/server/middleware.rs`) is the reference shape: attach the receipt only when the final status is 2xx, and merge `private` into any Cache-Control value the application already set rather than replacing it. Port the same two upstream tests (no receipt on an error response; existing Cache-Control preserved with `private` appended). Update the mpp-rs #381 row in docs/security-parity.md once shipped. Full threat detail lives in a private advisory; keep public artifacts to the invariant.\n",
       "created_at": "2026-09-04",
+      "started_at": "2026-09-11",
       "scored_at": "2026-09-04",
       "cross_repo": []
     },
