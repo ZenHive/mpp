@@ -1,21 +1,21 @@
 {
   "_doc": "Watermark for the /sdk-delta-watch skill (.claude/skills/sdk-delta-watch/SKILL.md; see CLAUDE.md \u00a7 Reference implementations). The skill runs `git log <last_seen>..HEAD` over each ref's critical paths, triages new commits for parity gaps vs our Elixir lib, routes each finding per the repo disclosure policy (private draft advisory for an unfixed security gap; rmap task only for non-security parity gaps), then advances last_seen to the new HEAD. Seeded 2026-06-24 at the HEADs whose deltas were already triaged by hand (mpp-rs #299 -> Task 65; mppx #577 -> Task 46), so the first run reports only genuinely newer commits.",
-  "checked_at": "2026-09-04",
+  "checked_at": "2026-09-11",
   "refs": {
     "mppx": {
       "url": "https://github.com/wevm/mppx.git",
       "branch": "main",
-      "last_seen": "459b517910472ea417d9617f2a61841b4ae2149b"
+      "last_seen": "c0ce0fecccf29f0dab8457c4356c0a3838af3390"
     },
     "mpp-rs": {
       "url": "https://github.com/tempoxyz/mpp-rs.git",
       "branch": "main",
-      "last_seen": "f24e72825e496d5be8387e2c71dc18e4e034dd4b"
+      "last_seen": "d859a13d74ef2b86d564faa3045f05b62e004aea"
     },
     "mpp-specs": {
       "url": "https://github.com/tempoxyz/mpp-specs.git",
       "branch": "main",
-      "last_seen": "604e0ad677828b3d73aa1fa2e683087fe22fc408"
+      "last_seen": "a938bfdd443a9683aa0fcbeae487ed4ffadfe4be"
     }
   },
   "critical_paths": {

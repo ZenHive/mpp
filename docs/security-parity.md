@@ -15,7 +15,7 @@ our unpatched weaknesses in a deployed, money-handling library would be an attac
 **Source basis.** The reference clones in `refs/` are shallow (mpp-rs 72 commits, mppx 174,
 mpp-specs 24, truncated ~2026-03). The **four published advisories below (2026-03-26) are the
 authoritative historical security record**; every named fix falls inside the visible window, so
-the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watch sweep: 2026-08-18.
+the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watch sweep: 2026-09-11.
 
 ---
 
@@ -24,7 +24,7 @@ the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watc
 | Advisory | Sev | What it covered | Our status |
 |---|---|---|---|
 | mppx `GHSA-8x4m-qw58-3pcx` / mpp-rs `GHSA-fxc9-7j2w-vx54` | CRITICAL 9.3 | "Multiple payment bypass & griefing" — published upstream advisory | **Partial — see component rows.** Charge-path replay, Stripe replay, fee-payer drain, proof binding, fee-token allowlist, and hosted fee-payer fills: ✓. Remaining session work: 📋 Task 50. |
-| mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Published upstream session advisory | 📋 **Task 50** — sessions not yet implemented; detailed acceptance criteria remain out of this public ledger until fixed. |
+| mppx `GHSA-mv9j-8jvg-j8mr` / CVE-2026-34209 | HIGH 7.5 | Published upstream session advisory | 📋 **Task 50** shipped the session machinery; component parity against this advisory is re-audited per sweep and any residual is counted (not enumerated) under "Open hardening items". |
 | mppx `GHSA-8mhj-rffc-rcvw` / CVE-2026-34210 | MEDIUM 5.4 | Stripe charge replay via missing `Idempotent-Replayed` check | ✓ Stripe replay is covered by the `Idempotent-Replayed` rejection plus Plug-level credential dedup (Tasks 35 + 64). |
 
 mpp-specs: no advisories.
@@ -103,6 +103,9 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 | mpp-specs #334 (commit 6de3b4d, 2026-08-24) `payment-expired` for expired challenges | Expired challenge reported as a generic invalid challenge | Expired → `payment-expired`; unknown/tampered → `invalid-challenge`, distinct paths — `verifier.ex:117-121,268-278`, `errors.ex:47,51` |
 | mpp-rs #396 (commit fadc88c, 2026-08-24) credential retry uses the final same-origin response URL | Credential replayed against the pre-redirect URL, or across origins | Req's `redirect` step rebuilds the request at the final URL before our response step runs; cross-origin is refused — `client/req.ex:174-203` |
 | mppx #857 (commit b12e65b, 2026-09-02) preserve multi-rail challenges in framework adapters | Adapter collapsing a multi-method 402 to one challenge | Our Plug is the adapter and emits every configured `:methods` entry — `plug.ex:96-126,228-258` |
+| mpp-rs #413 (commit 72a9214, 2026-09-09) reject malformed human-readable amounts | `.`, `1e3`, `+1`, `1.2.3` normalizing to zero or a wrong base-unit value | Already rejected: `parse_units/2` requires digits-only integer/fraction parts, at least one non-empty, a single dot, no sign — `amount.ex:152-172` (confirmed 2026-09-11 sweep) |
+| mppx #881 (commit baa0fd5, 2026-09-09) `allowKeyAuthorization` fee-payer policy knob (default allow) | Sponsored transaction installing a new access key at the sponsor's expense | Stricter than upstream: the charge path rejects any `0x76` key authorization outright and the subscription path pins the exact verified authorization — `fee_payer_policy.ex:229-232,392-410` (shipped 0.16.1, `GHSA-rpwj-vrf7-4x36`) |
+| mppx #864 (commit 7949db6, 2026-09-04) expiring nonces for server-side session precompile calls | Nonce collisions when several server processes share one signer | Not applicable to our sessions (no server-side session broadcasts; channels are voucher-settled through `MPP.Session.Store`); the one server-signed Tempo path, sponsored subscription settlement, already uses the expiring nonce key — `subscription_transaction.ex:26,90` |
 | mppx #814 / #832 / #845 / #842 / #823 hosted and remote fee-payer transport plumbing | — (viem-transport routing of the sponsor call; no bounding change) | Equivalent HTTP fill already in `MPP.Methods.Tempo.HostedFeePayer.fill/3` — `hosted_fee_payer.ex`, `tempo.ex:963-975` |
 
 ---
@@ -112,14 +115,15 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 | Upstream fix | Where tracked |
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
-| Session integrity parity for published upstream advisories | 📋 **Task 50** (sessions unbuilt; details stay out of this public ledger until fixed) |
+| Session integrity parity for published upstream advisories | 📋 **Task 50** (done) built the session machinery; residual hardening is tracked as counted open items, never enumerated here |
+| mppx #887 (commit c0ce0fe, 2026-09-10) client recipient allowlist covers the primary recipient and every split | 📋 Task 108 — built-in Tempo provider `expected_recipients` |
 | Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 
 ---
 
 ## Open hardening items
 
-**2 open items** as of 2026-09-04 — two draft advisories from the 2026-09-04 upstream sweep (tracked as Tasks 103 and 104). Detail stays in the private advisories until each ships. The two inbound HIGH reports from that day shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
+**4 open items** as of 2026-09-11 — two draft advisories from the 2026-09-04 upstream sweep (tracked as Tasks 103 and 104) and two from the 2026-09-11 sweep (tracked as Tasks 111 and 112). Detail stays in the private advisories until each ships. The two inbound HIGH reports from that day shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
 patched release (latest: `GHSA-j4j7-7xpr-c7cr`, fixed in 0.12.0); the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
 (published 2026-06-29). When a new gap is found, its detail goes to a **private draft security

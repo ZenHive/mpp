@@ -11,11 +11,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (6 of 8 done · 0 in progress)
+**Focus phase:** 12 — Client SDK (6 of 9 done · 0 in progress)
 
 **Last shipped:** no recent shipments
 
-**Up next:** Task 81 — Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋
+**Up next:** Task 108 — Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -143,6 +143,8 @@
 | Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42?] 📋 |
 | Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08] 📋 |
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
+| Task 111 | ⬜ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
+| Task 112 | ⬜ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -172,6 +174,7 @@
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 | Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06?] 📋 |
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
+| Task 108 | ⬜ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -239,6 +242,8 @@
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0?] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
+| Task 109 | ⬜ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
+| Task 110 | ⬜ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
 <!-- TASKS:END -->
 
 ---

@@ -91,7 +91,7 @@ order = 1
 phase = 15
 
 [bundles.additional-methods]
-description = "Stellar, Hedera, Near Intents, USDC, EVM Permit2, and EVM EIP-3009"
+description = "Stellar, Hedera, Near Intents, USDC, XRPL, EVM Permit2, and EVM EIP-3009"
 order = 1
 phase = 16
 
@@ -2767,13 +2767,15 @@ bundle = "mcp"
 status = "pending"
 title = "Align MCP payment error codes with the spec: -32602 for invalid payload, -32603 internal payment error, retry on -32043 re-challenge"
 scores = { d = 3, b = 6, u = 6 }
-acceptance_criteria = ["Server mapping: each MPP problem type maps to the spec's JSON-RPC code, including -32602 for invalid-payload and -32603 for internal-payment-error, with a table-driven test", "Client: a -32043 response carrying challenges triggers exactly one re-payment attempt and then surfaces the error; a -32043 without challenges is surfaced immediately", "Cross-validation test compares our code table with mppx's exported constants", "mix ci passes"]
+acceptance_criteria = ["Server mapping: each MPP problem type maps to the spec's JSON-RPC code, including -32602 for invalid-payload and -32603 for internal-payment-error, with a table-driven test", "Client: a -32043 response carrying challenges triggers exactly one re-payment attempt and then surfaces the error; a -32043 without challenges is surfaced immediately", "Cross-validation test compares our code table with mppx's exported constants", "MPP.Errors gains the `internal-payment-error` (500) problem type that core spec draft-01 (mpp-specs #353, commit 2e3de24) adds to the registry, and the -32603 mapping uses it", "mix ci passes"]
 out_of_scope = ["Bare JSON-RPC and WebSocket transport code changes beyond the shared mapping", "New payment methods"]
 touches = ["lib/mpp/mcp.ex", "lib/mpp/transports/json_rpc/", "lib/mpp/client/transport/mcp.ex", "lib/mpp/client/mcp.ex", "test/mpp/mcp_test.exs", "test/mpp/transports/", "test/mpp/client/"]
 assignee = "grok"
 model = "grok-4.6"
 body = """
 mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes with the spec: `invalid-payload` problems map to -32602, an `internal-payment-error` problem type maps to -32603, and a client receiving -32043 with challenges attached treats it as a re-challenge and retries payment a bounded number of times. Our MPP.Mcp constants and the JSON-RPC adapter map only -32042/-32602/-32043 today, and MPP.Client.Transport.MCP / MPP.Client.MCP do not retry on -32043. Bring the server mapping and the client retry behaviour to the same table, with the spec's MCP section as the authority and mppx as the compatibility reference. Bound retries so a malicious server cannot drain a client wallet through repeated re-challenges (one retry, mirroring the existing single-retry rule).
+
+2026-09-11 (sdk-delta-watch): mpp-specs #353 promoted the core spec to draft-01 and registered `bad-request`, `invalid-payload`, `internal-payment-error` (500) and `payment-action-required` as problem types; MPP.Errors already has all but `internal-payment-error`, so add that type here as part of the -32603 mapping rather than in a separate task.
 """
 created_at = "2026-09-04"
 scored_at = "2026-09-04"
@@ -2797,3 +2799,94 @@ Add verification for the key types Tempo's keychain precompile actually recogniz
 """
 created_at = "2026-09-04"
 scored_at = "2026-09-04"
+
+[[task]]
+id = "108"
+phase = 12
+bundle = "client-sdk"
+status = "pending"
+title = "Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients)"
+scores = { d = 3, b = 6, u = 6 }
+acceptance_criteria = ["With `expected_recipients` configured, a challenge whose primary `recipient` is not in the list is refused before any signing, for both the transaction and the zero-amount proof paths", "With `expected_recipients` configured, a challenge whose `splits` contain a recipient outside the list is refused before any signing", "A configuration listing only split recipients (primary missing) is rejected at provider init with a descriptive error", "Without `expected_recipients` the provider behaves byte-for-byte as before (existing tests untouched)", "Address comparison is case-insensitive / checksum-agnostic", "mix ci passes"]
+out_of_scope = ["Server-side recipient policy (already pinned by the challenge HMAC)", "Stripe provider"]
+touches = ["lib/mpp/client/providers/tempo.ex", "lib/mpp/client/providers/shared.ex", "test/mpp/client/providers/tempo_test.exs"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+mppx #887 (commit c0ce0fe, src/tempo/client/Charge.ts, shipped as a minor) makes the client-side `expectedRecipients` allowlist cover the primary recipient as well as every split recipient, and applies it before both the transaction path and the zero-amount EIP-712 proof path. Our built-in client provider (`MPP.Client.Providers.Tempo`) pins the chain (`expected_chain_id`) but pays whatever recipient the challenge names, so a hostile or misconfigured server can redirect a client's TIP-20 transfer to any address. Add an `expected_recipients` provider option mirroring the mppx semantics: the primary recipient and all splits must be in the list, and a list without the primary recipient is a configuration error. mppx is the compatibility reference; the client is the authority on its own policy, so a deterministic unit test per rule is sufficient evidence (no live call needed — nothing is signed when the check fires).
+"""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
+
+[[task]]
+id = "109"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "XRPL charge method"
+scores = { d = 7, b = 6, u = 6 }
+acceptance_criteria = ["MPP.Methods.XRPL implements the MPP.Method behaviour for the charge intent per refs/mpp-specs/specs/methods/xrpl/draft-xrpl-charge-00.md (both credential types the draft defines)", "Live XRPL testnet integration: at least one real success and one relevant real error per credential type; missing credentials flunk loudly with exact setup instructions, never skip", "Payment semantics (destination, amount/currency incl. issued currencies, destination tag / memo attribution, validated ledger) pinned by integration test against the XRPL-owned docs (xrpl.org); the MPP draft defines the wire contract only", "Wire constants and credential field names cross-checked against the draft's examples; any error codes the draft introduces are added to MPP.Errors with tests", "Attribution is per-challenge (no static tag/memo), and an observed payment is single-use via the shared MPP.Tempo.Store dedup contract", "Touched money-path modules stay at or above the 95% critical-tier coverage floor; mix ci passes"]
+out_of_scope = ["XRPL session intent (separate task)", "Client-side XRPL payment provider"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+mpp-specs #346 (commit 213b098, 2026-09-07) added an XRPL payment method with charge and session intents (`specs/methods/xrpl/draft-xrpl-charge-00.md`, 802 lines). Implement the charge intent: read the draft for the credential types and verification rules, then verify against the XRPL testnet as ground truth (rippled / Clio JSON-RPC as documented on xrpl.org). Neither mppx nor mpp-rs implements XRPL yet, so there is no SDK cross-check — the draft plus the live ledger are the only authorities; cite `refs/mpp-specs/...:line` for every wire constant. Model the module on MPP.Methods.Solana (pull transaction + push hash shapes, per-challenge attribution, store-backed single use) and reuse MPP.Methods.Shared. Pick an XRPL RPC client the same way the Solana method uses `cartouche` — if no maintained Hex client exists, a minimal Req-based JSON-RPC wrapper inside the method is acceptable; say which you chose and why in the delivery.
+"""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
+
+[[task]]
+id = "110"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "XRPL session method"
+scores = { d = 8, b = 5, u = 5 }
+acceptance_criteria = ["MPP.Methods.XRPL (or a sibling module) implements the session intent per refs/mpp-specs/specs/methods/xrpl/draft-xrpl-session-00.md, dispatching open / voucher / topUp / close through MPP.Session.Actions where the draft's channel model allows it", "Live XRPL testnet integration for open, at least one voucher, and close against a real payment channel; missing credentials flunk loudly, never skip", "Payment-channel claim signature verification pinned against XRPL-owned docs (PaymentChannelClaim / channel_verify), with one tampered-claim negative test", "Voucher acceptance follows the shared invariant: an accepted voucher must add funds, and the balance update is atomic in the session store", "mix ci passes; touched money-path modules stay at or above the 95% coverage floor"]
+out_of_scope = ["Charge intent (Task: XRPL charge method)", "Client-side channel management"]
+assignee = "grok"
+model = "grok-4.6"
+body = """
+mpp-specs #346 (commit 213b098) also added `specs/methods/xrpl/draft-xrpl-session-00.md` (868 lines), mapping the session intent onto XRPL payment channels. Implement it on top of the XRPL charge method and the shared session machinery (MPP.Session.Actions / Store / Channel). The draft is the wire contract; XRPL payment-channel semantics (channel creation, off-ledger claims, claim verification, settle delay, close) come from xrpl.org and the live testnet, which is the only ground truth — no reference SDK implements this yet. Where the draft's channel model differs from the Tempo escrow model that MPP.Session.Channel encodes, extend the shared module rather than forking it, and say what changed.
+"""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
+depends_on = ["109"]
+
+[[task]]
+id = "111"
+phase = 10
+bundle = "session"
+status = "pending"
+title = "Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415"
+scores = { d = 3, b = 9, u = 8 }
+markers = ["security"]
+acceptance_criteria = ["A voucher whose cumulativeAmount is equal to the channel's accepted cumulative amount is rejected with the delta-too-small problem type, on every transport that dispatches through MPP.Session.Actions", "Two concurrent presentations of the same voucher against one channel yield exactly one acceptance and one delta-too-small rejection, with the stored channel reflecting a single spend (deterministic concurrency test)", "The minimum-delta check and the spend run inside the same atomic MPP.Session.Store.update callback (no check outside the closure)", "open / topUp / close behaviour is unchanged (existing tests untouched except the one asserting the old idempotent accept)", "docs/security-parity.md row added on ship; mix ci passes"]
+out_of_scope = ["Changing MPP.Session.Store's contract", "XRPL / non-Tempo session methods"]
+touches = ["lib/mpp/session/actions.ex", "test/mpp/session/actions_test.exs", "test/mpp/session/method_test.exs"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+mpp-rs #415 (commit d859a13, 2026-09-10, src/protocol/methods/tempo/session_method.rs) changed voucher acceptance so a voucher that does not raise the channel's accepted cumulative amount is rejected with DeltaTooSmall, and re-checks the minimum delta inside the atomic store update so concurrent identical vouchers have one winner. Port the same invariant to MPP.Session.Actions: an accepted voucher must add funds; equal-amount vouchers are an error, never a silent success. Our Store.update/3 callback already runs the checks atomically, so the change is confined to the acceptance branch plus tests (port both upstream concurrency tests). Full threat detail lives in private advisory GHSA-8c63-r789-xrrf; keep public artifacts to the invariant.
+"""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
+
+[[task]]
+id = "112"
+phase = 10
+bundle = "session"
+status = "pending"
+title = "Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882)"
+scores = { d = 5, b = 8, u = 8 }
+markers = ["security"]
+acceptance_criteria = ["A key authorization whose witness is not the 32-byte decoding of the credential's challenge id is rejected with a descriptive verification error; one with the matching witness verifies (unit + a QuickBEAM :cross_validation test against an authorization signed by current mppx / ox)", "An activation credential replayed under a different challenge for the same subscription terms is rejected before any RPC or broadcast", "The RLP codec accepts the ox tuple layout with trailing optional witness / isAdmin / account elements, rejects any isAdmin value other than the strict admin marker, and keeps the signed digest as the keccak of the full authorization tuple; six-element authorizations without a witness are rejected on the subscription path", "wallet_params/2 and from_rpc/1 carry the witness so server-driven wallet_authorizeAccessKey flows produce bound authorizations", "Moderato integration: one real witness-bound activation succeeds and one replayed-under-new-challenge credential is rejected; missing credentials flunk loudly", "docs/security-parity.md row added on ship; mix ci passes"]
+out_of_scope = ["Admin / account-bound (TIP-1049) key authorizations as a feature — they are only decoded and rejected on this path", "Non-secp256k1 key types (Task 107)"]
+touches = ["lib/mpp/methods/tempo/key_authorization.ex", "lib/mpp/methods/tempo/subscription.ex", "test/mpp/methods/tempo/key_authorization_test.exs", "test/mpp/methods/tempo/subscription_test.exs", "test/mpp/methods/tempo/subscription_integration_test.exs"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+mppx #882 (commit 43ec92c, 2026-09-09, src/tempo/subscription/KeyAuthorization.ts + src/tempo/server/Subscription.ts) binds every subscription key authorization to its server-issued challenge by placing the 32-byte decoding of the challenge id in the ox/tempo KeyAuthorization `witness` field, and the server rejects any authorization whose witness does not match the credential's challenge. ox's tuple is `[chainId, keyType, keyId, expiry, limits, calls, witness?, isAdmin?, account?]` (wevm/ox src/tempo/KeyAuthorization.ts, fromTuple — the wire authority; mpp-rs has no subscription implementation, so ox + mppx are the only references). MPP.Methods.Tempo.KeyAuthorization currently decodes exactly six elements and verifies no witness, so current mppx subscription clients cannot activate against our server, and an authorization is not tied to the challenge that issued it. Port the mppx shape: decode the trailing optional fields per ox, require the witness on the subscription path, and thread the witness through the wallet RPC builders. Verify the signed digest and tuple layout against ox before shipping (CLAUDE.md wire-format rule). Full threat detail lives in private advisory GHSA-p9fv-9w58-95x2; keep public artifacts to the invariant.
+"""
+created_at = "2026-09-11"
+scored_at = "2026-09-11"
