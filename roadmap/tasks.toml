@@ -2724,7 +2724,7 @@ scored_at = "2026-09-04"
 id = "104"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Key the Tempo pre-broadcast dedup reserve on the canonical transaction, not the caller-supplied encoding"
 scores = { d = 4, b = 7, u = 7 }
 markers = ["security"]
@@ -2737,6 +2737,7 @@ body = """
 One signed Tempo transaction must map to exactly one dedup reserve slot, whatever byte encoding the client chose to present it in. MPP.Methods.Tempo currently keys the pre-broadcast reserve on the raw hex the client sent, while the post-broadcast record is keyed on the canonical hash; the two never meet. mppx #818 (commit adcf3b5, `src/tempo/server/Charge.ts`) is the reference shape: canonicalize the transaction (deserialize then re-serialize) before the reserve and the broadcast, and key the reserve on the keccak256 of the canonical bytes. `onchain_tempo` only re-encodes inside `cosign_fee_payer` today, so a public `serialize/1` there is a likely prerequisite (premise unverified — confirm against the current onchain_tempo release before building; if missing, ship it there first and bump the dep). Include a Moderato integration test that presents the same signed transaction under two encodings and shows exactly one receipt is issued. Full threat detail lives in a private advisory; keep public artifacts to the invariant.
 """
 created_at = "2026-09-04"
+started_at = "2026-09-11"
 scored_at = "2026-09-04"
 
 [[task]]
