@@ -2871,9 +2871,10 @@ shipped_in = "956957879fff9ff073558f1c8341efaf3695520a"
 id = "110"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "XRPL session method"
 scores = { d = 8, b = 5, u = 5 }
+depends_on = ["109"]
 acceptance_criteria = ["MPP.Methods.XRPL (or a sibling module) implements the session intent per refs/mpp-specs/specs/methods/xrpl/draft-xrpl-session-00.md, dispatching open / voucher / topUp / close through MPP.Session.Actions where the draft's channel model allows it", "Live XRPL testnet integration for open, at least one voucher, and close against a real payment channel; missing credentials flunk loudly, never skip", "Payment-channel claim signature verification pinned against XRPL-owned docs (PaymentChannelClaim / channel_verify), with one tampered-claim negative test", "Voucher acceptance follows the shared invariant: an accepted voucher must add funds, and the balance update is atomic in the session store", "mix ci passes; touched money-path modules stay at or above the 95% coverage floor"]
 out_of_scope = ["Charge intent (Task: XRPL charge method)", "Client-side channel management"]
 assignee = "grok"
@@ -2882,8 +2883,8 @@ body = """
 mpp-specs #346 (commit 213b098) also added `specs/methods/xrpl/draft-xrpl-session-00.md` (868 lines), mapping the session intent onto XRPL payment channels. Implement it on top of the XRPL charge method and the shared session machinery (MPP.Session.Actions / Store / Channel). The draft is the wire contract; XRPL payment-channel semantics (channel creation, off-ledger claims, claim verification, settle delay, close) come from xrpl.org and the live testnet, which is the only ground truth — no reference SDK implements this yet. Where the draft's channel model differs from the Tempo escrow model that MPP.Session.Channel encodes, extend the shared module rather than forking it, and say what changed.
 """
 created_at = "2026-09-11"
+started_at = "2026-09-11"
 scored_at = "2026-09-11"
-depends_on = ["109"]
 
 [[task]]
 id = "111"
