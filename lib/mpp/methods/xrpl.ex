@@ -22,8 +22,9 @@ defmodule MPP.Methods.XRPL do
   The source is `did:pkh:xrpl:<network ID>:<classic address>`.
   Binding defaults to SHA-512Half of the challenge ID, never a static tag.
   An explicit `invoiceId` must be unique to that challenge.
-  `expires_in` (seconds, default 300) must match the challenge issuer's TTL;
-  settlement must not precede `challenge_expires` minus that TTL.
+  `expires_in` (seconds, default 300) must match the challenge issuer's TTL —
+  `MPP.Plug` merges its own `:expires_in` in unless set explicitly; settlement
+  must not precede `challenge_expires` minus that TTL.
 
   Public details are `network`, `reference`, `invoiceId`, `destinationTag`,
   `sourceTag`, and `memos`. The draft leaves memo entry structure unspecified;

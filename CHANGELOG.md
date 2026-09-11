@@ -20,6 +20,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- `MPP.Plug` merges the endpoint's `:expires_in` into every `method_config`
+  as `"expires_in"` unless the map sets one, so methods that reason about
+  challenge age see the issuer's TTL.
 - Tempo dedup reserve key is stable across every valid re-encoding of a
   signed transaction; the reserve is taken before any hosted fee-payer fill.
 

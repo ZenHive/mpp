@@ -64,7 +64,10 @@ defmodule MPP.Plug do
     * `:period_unit` — (required, subscription intent) `"day"`, `"week"`, or `"month"`
     * `:period_count` — (required, subscription intent) positive canonical decimal string
     * `:subscription_expires` — (optional shared subscription expiry, required by Tempo)
-    * `:method_config` — (optional) server-only config map for `verify/2`
+    * `:method_config` — (optional) server-only config map for `verify/2`.
+      The endpoint's `:expires_in` is merged in as `"expires_in"` unless the
+      map already carries one, so methods that reason about challenge age
+      (XRPL) see the issuer's TTL without a second setting.
 
   ## Multi-Method Options
 
@@ -159,7 +162,8 @@ defmodule MPP.Plug do
     intent = validate_intent!(Keyword.get(opts, :intent, "charge"))
     session_store = resolve_session_store(intent, Keyword.get(opts, :session_store))
     method_lists = normalize_methods(opts)
-    entries = Enum.map(method_lists, &build_method_entry(&1, intent, session_store))
+    expires_in = validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds))
+    entries = Enum.map(method_lists, &build_method_entry(&1, intent, session_store, expires_in))
     validate_method_name_format!(entries)
     validate_unique_method_names!(entries)
 
@@ -167,7 +171,7 @@ defmodule MPP.Plug do
       secret_key: require_opt!(opts, :secret_key),
       realm: require_opt!(opts, :realm),
       method_entries: entries,
-      expires_in: validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds)),
+      expires_in: expires_in,
       digest: Keyword.get(opts, :digest),
       opaque: Keyword.get(opts, :opaque),
       store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve(),
@@ -260,11 +264,15 @@ defmodule MPP.Plug do
   end
 
   # Builds a MethodEntry from per-method keyword opts.
-  defp build_method_entry(method_opts, intent, session_store) do
+  defp build_method_entry(method_opts, intent, session_store, expires_in) do
     method = require_opt!(method_opts, :method)
     method_config = Keyword.get(method_opts, :method_config, %{})
     method_config = put_session_store(method_config, session_store)
     method_config = put_subscription_intent(method_config, intent)
+    # The challenge TTL is a fact about the endpoint every method may need
+    # (e.g. the XRPL transaction-age check derives issuance from it); an
+    # explicit method_config value still wins.
+    method_config = Map.put_new(method_config, "expires_in", expires_in)
     method.validate_config!(method_config)
 
     {:ok, charge} = build_pricing_intent(intent, method_opts)

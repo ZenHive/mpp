@@ -40,9 +40,10 @@ Direct `verify/2` callers must supply authenticated `challenge_id`,
 Transaction age follows draft §Transaction Age, lines 470–475. `Challenge` exposes
 `expires` but no issued-at field. Issuance is derived as authenticated
 `challenge_expires` minus the server-only `method_config["expires_in"]` in seconds
-(default 300). Set this to the same value as `MPP.Plug`'s `:expires_in` whenever
-customizing the TTL; direct callers must also supply the issuer's TTL. Keep that
-configuration stable while challenges are outstanding. The validated transaction's
+(default 300). `MPP.Plug` merges its own `:expires_in` into every
+`method_config` unless one is set explicitly, so a customized Plug TTL reaches the
+age check automatically; direct `MPP.Verifier` callers must supply the issuer's TTL
+themselves. Keep that configuration stable while challenges are outstanding. The validated transaction's
 `close_time_iso`, or API-v1 `date` when ISO is absent, must be at or after issuance.
 Missing or malformed close times fail verification. `date` uses the
 [Ripple epoch](https://xrpl.org/docs/references/protocol/data-types/basic-data-types#specifying-time).

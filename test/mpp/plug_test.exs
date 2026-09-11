@@ -468,8 +468,25 @@ defmodule MPP.PlugTest do
         )
 
       [entry_a, entry_b] = config.method_entries
-      assert entry_a.method_config == %{"key" => "a"}
-      assert entry_b.method_config == %{"key" => "b"}
+      assert entry_a.method_config == %{"key" => "a", "expires_in" => 300}
+      assert entry_b.method_config == %{"key" => "b", "expires_in" => 300}
+    end
+
+    test "the endpoint challenge TTL reaches every method_config unless set explicitly" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          expires_in: 60,
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethodB, amount: "500", currency: "usd", method_config: %{"expires_in" => 45}]
+          ]
+        )
+
+      [entry_a, entry_b] = config.method_entries
+      assert entry_a.method_config["expires_in"] == 60
+      assert entry_b.method_config["expires_in"] == 45
     end
   end
 
