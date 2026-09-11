@@ -110,6 +110,10 @@ defmodule MPP.MethodTest do
     test "NearIntents declares hash only" do
       assert MPP.Methods.NearIntents.credential_types() == ["hash"]
     end
+
+    test "XRPL declares transaction and hash" do
+      assert MPP.Methods.XRPL.credential_types() == ["transaction", "hash"]
+    end
   end
 
   describe "challenge_method_details/1" do

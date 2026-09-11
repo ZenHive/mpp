@@ -1,3 +1,6 @@
+# The shared callback set IS a behaviour (`use MPP.Method`); reach's source frontend
+# can't see the macro-injected `@behaviour`, so the candidate smell false-positives.
+# reach:disable-next-line behaviour_candidate
 defmodule MPP.Methods.XRPL do
   @moduledoc """
   XRPL charge verification for native XRP, issued currencies and MPTs.
@@ -28,7 +31,8 @@ defmodule MPP.Methods.XRPL do
   The JSON-RPC connection must support `server_info`, `submit` and `tx` API v1.
   """
 
-  @behaviour MPP.Method
+  use MPP.Method
+  use Descripex, namespace: "/methods"
 
   alias MPP.Errors
   alias MPP.Intents.Charge
@@ -45,18 +49,21 @@ defmodule MPP.Methods.XRPL do
   # XRPL-owned Payment flags; draft requires its absence at :427.
   @partial_payment 0x00020000
 
+  api(:method_name, "Return the XRPL payment method identifier.")
+
   @impl MPP.Method
-  @doc "Return the XRPL payment method identifier."
   @spec method_name() :: String.t()
   def method_name, do: "xrpl"
 
+  api(:credential_types, "Return the draft's two charge credential types.")
+
   @impl MPP.Method
-  @doc "Return the draft's two charge credential types."
   @spec credential_types() :: [String.t()]
   def credential_types, do: ~w(transaction hash)
 
+  api(:validate_config!, "Validate the RPC, network and mandatory replay-store configuration.")
+
   @impl MPP.Method
-  @doc "Validate the RPC, network and mandatory replay-store configuration."
   @spec validate_config!(map()) :: :ok
   def validate_config!(config) do
     if not valid_config?(config),
@@ -69,13 +76,19 @@ defmodule MPP.Methods.XRPL do
     :ok
   end
 
-  @impl MPP.Method
-  @doc "Expose only the draft's public method details."
-  @spec challenge_method_details(Charge.t()) :: map()
-  def challenge_method_details(%Charge{} = charge), do: Map.take(charge.method_details || %{}, @public_fields)
+  api(:challenge_method_details, "Expose only the draft's public method details plus credential types.")
 
   @impl MPP.Method
-  @doc "Verify a charge against a validated XRPL Payment and atomically consume it."
+  @spec challenge_method_details(Charge.t()) :: map()
+  def challenge_method_details(%Charge{} = charge) do
+    (charge.method_details || %{})
+    |> Map.take(@public_fields)
+    |> Map.put("credentialTypes", credential_types())
+  end
+
+  api(:verify, "Verify a charge against a validated XRPL Payment and atomically consume it.")
+
+  @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}

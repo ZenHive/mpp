@@ -864,6 +864,8 @@ MPP.Methods.EVM.Authorization — EIP-3009 transferWithAuthorization credential 
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle verification (type="bundle", recipient pending-balance decryption)
+MPP.Methods.XRPL           — XRPL native XRP / issued currency / MPT charge verification (pull blob + push hash)
+MPP.Methods.XRPL.Codec     — Bounded XRPL Payment binary decoder for pre-submit field checks
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor policy: bounds every client-controlled 0x76 envelope field (gas economics, access/authorization lists, key authorization, call value/calldata) before fee-payer co-sign (anti-drain)

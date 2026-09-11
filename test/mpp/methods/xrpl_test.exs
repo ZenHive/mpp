@@ -67,10 +67,20 @@ defmodule MPP.Methods.XRPLTest do
     assert XRPL.credential_types() == ~w(transaction hash)
     assert :ok = XRPL.validate_config!(context.charge.method_details)
 
-    assert XRPL.challenge_method_details(context.charge) ==
-             Map.take(context.charge.method_details, ~w(network reference invoiceId destinationTag sourceTag memos))
+    details = XRPL.challenge_method_details(context.charge)
 
-    assert XRPL.challenge_method_details(%{context.charge | method_details: nil}) == %{}
+    assert details ==
+             context.charge.method_details
+             |> Map.take(~w(network reference invoiceId destinationTag sourceTag memos))
+             |> Map.put("credentialTypes", ~w(transaction hash))
+
+    refute Map.has_key?(details, "rpc_url")
+    refute Map.has_key?(details, "store")
+
+    assert XRPL.challenge_method_details(%{context.charge | method_details: nil}) == %{
+             "credentialTypes" => ~w(transaction hash)
+           }
+
     assert Enum.all?(~w(malformed_credential invalid_challenge verification_failed)a, &(&1 in Errors.types()))
   end
 

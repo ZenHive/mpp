@@ -11,6 +11,7 @@ defmodule MPP.DescripexTest do
   alias MPP.Methods.Solana
   alias MPP.Methods.Stripe
   alias MPP.Methods.Tempo
+  alias MPP.Methods.XRPL
 
   @annotated_modules [
     MPP.Challenge,
@@ -26,6 +27,7 @@ defmodule MPP.DescripexTest do
     Tempo,
     EVM,
     Solana,
+    XRPL,
     NearIntents,
     MPP.BodyDigest,
     MPP.Amount,
@@ -162,7 +164,7 @@ defmodule MPP.DescripexTest do
     end
 
     test "method modules have /methods namespace" do
-      for mod <- [Stripe, Tempo, EVM, Solana, NearIntents] do
+      for mod <- [Stripe, Tempo, EVM, Solana, XRPL, NearIntents] do
         {:docs_v1, _, _, _, _, meta, _} = Code.fetch_docs(mod)
 
         assert meta[:namespace] == "/methods",

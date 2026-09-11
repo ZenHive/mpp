@@ -37,6 +37,7 @@ defmodule MPP do
     * `MPP.Methods.Tempo.Subscription` — Tempo access-key subscription activation and renewal
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Methods.Solana` — Solana native SOL and SPL token charge verification
+    * `MPP.Methods.XRPL` — XRPL native XRP, issued currency and MPT charge verification
     * `MPP.Methods.NearIntents` — NEAR Intents hash-credential charge verification via 1Click + origin RPC
     * `MPP.Intents.Charge` — Charge intent request schema
     * `MPP.Intents.Session` — Session intent request schema (pay-as-you-go / metered)
@@ -95,6 +96,7 @@ defmodule MPP do
       MPP.Methods.Tempo,
       MPP.Methods.EVM,
       MPP.Methods.Solana,
+      MPP.Methods.XRPL,
       MPP.Methods.NearIntents,
       MPP.BodyDigest,
       MPP.Amount,
