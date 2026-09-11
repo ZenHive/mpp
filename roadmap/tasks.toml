@@ -2806,7 +2806,7 @@ scored_at = "2026-09-04"
 id = "108"
 phase = 12
 bundle = "client-sdk"
-status = "in_progress"
+status = "done"
 title = "Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients)"
 scores = { d = 3, b = 6, u = 6 }
 acceptance_criteria = ["With `expected_recipients` configured, a challenge whose primary `recipient` is not in the list is refused before any signing, for both the transaction and the zero-amount proof paths", "With `expected_recipients` configured, a challenge whose `splits` contain a recipient outside the list is refused before any signing", "A configuration listing only split recipients (primary missing) is rejected at provider init with a descriptive error", "Without `expected_recipients` the provider behaves byte-for-byte as before (existing tests untouched)", "Address comparison is case-insensitive / checksum-agnostic", "mix ci passes"]
@@ -2817,9 +2817,16 @@ model = "grok-4.6"
 body = """
 mppx #887 (commit c0ce0fe, src/tempo/client/Charge.ts, shipped as a minor) makes the client-side `expectedRecipients` allowlist cover the primary recipient as well as every split recipient, and applies it before both the transaction path and the zero-amount EIP-712 proof path. Our built-in client provider (`MPP.Client.Providers.Tempo`) pins the chain (`expected_chain_id`) but pays whatever recipient the challenge names, so a hostile or misconfigured server can redirect a client's TIP-20 transfer to any address. Add an `expected_recipients` provider option mirroring the mppx semantics: the primary recipient and all splits must be in the list, and a list without the primary recipient is a configuration error. mppx is the compatibility reference; the client is the authority on its own policy, so a deterministic unit test per rule is sufficient evidence (no live call needed — nothing is signed when the check fires).
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1789116467419-6b3aa09b, 356157b65bac4495e2b2aa721b525f2d904dee34)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1789116467419-6b3aa09b"
 created_at = "2026-09-11"
 started_at = "2026-09-11"
 scored_at = "2026-09-11"
+done_at = "2026-09-11"
+shipped_in = "356157b65bac4495e2b2aa721b525f2d904dee34"
 
 [[task]]
 id = "109"
