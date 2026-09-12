@@ -12,8 +12,9 @@ defmodule MPP.Session.Channel do
   activated once, and an active channel may be closed once.
 
   `proof` holds the highest accepted method-specific settlement material
-  (for XRPL: cumulative drops, claim signature, and ledger PublicKey). Tempo
-  leaves it `nil`.
+  (for XRPL: cumulative drops, claim signature, ledger PublicKey, and after
+  a validated `PaymentChannelClaim` the claim `tx_hash`). Tempo leaves it
+  `nil`.
   """
 
   import Bitwise, only: [<<<: 2]
@@ -29,7 +30,12 @@ defmodule MPP.Session.Channel do
 
   @type status :: :open | :active | :closed
   @type action :: :open | :top_up | :voucher | :close
-  @type proof :: %{amount: non_neg_integer(), signature: String.t(), public_key: String.t()}
+  @type proof :: %{
+          required(:amount) => non_neg_integer(),
+          required(:signature) => String.t(),
+          required(:public_key) => String.t(),
+          optional(:tx_hash) => String.t()
+        }
   @type id_params :: %{
           payer: String.t(),
           payee: String.t(),

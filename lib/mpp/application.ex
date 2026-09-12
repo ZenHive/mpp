@@ -10,6 +10,7 @@ defmodule MPP.Application do
 
   use Application
 
+  alias MPP.Methods.XRPL.RedeemLock
   alias MPP.Session.ETSStore, as: SessionStore
   alias MPP.Subscription.ETSStore, as: SubscriptionStore
   alias MPP.Tempo.ConCacheStore
@@ -19,7 +20,8 @@ defmodule MPP.Application do
     children = [
       ConCacheStore.child_spec([]),
       SessionStore.child_spec([]),
-      SubscriptionStore.child_spec([])
+      SubscriptionStore.child_spec([]),
+      RedeemLock.child_spec([])
     ]
 
     opts = [strategy: :one_for_one, name: MPP.Supervisor]

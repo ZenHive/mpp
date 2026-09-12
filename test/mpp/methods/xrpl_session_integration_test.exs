@@ -138,6 +138,77 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
     assert proof.signature == voucher_sig
   end
 
+  @tag timeout: 300_000
+  test "two concurrent closes to one Destination both settle with distinct Sequences", context do
+    session = session(context)
+    {id_a, sig_a} = open_channel!(context, session)
+    {id_b, sig_b} = open_channel!(context, session)
+    parent = self()
+
+    close = fn channel_id, signature ->
+      Task.async(fn ->
+        send(parent, {:ready, self()})
+
+        receive do
+          :go ->
+            XRPLSession.verify(
+              %{"action" => "close", "channelId" => channel_id, "amount" => "100000", "signature" => signature},
+              session
+            )
+        end
+      end)
+    end
+
+    task_a = close.(id_a, sig_a)
+    task_b = close.(id_b, sig_b)
+    assert_receive {:ready, pid_a}, 30_000
+    assert_receive {:ready, pid_b}, 30_000
+    send(pid_a, :go)
+    send(pid_b, :go)
+
+    hashes =
+      Enum.map([task_a, task_b], fn task ->
+        case Task.await(task, 180_000) do
+          {:ok, receipt} ->
+            assert is_binary(receipt.extensions["txHash"])
+            receipt.extensions["txHash"]
+
+          other ->
+            flunk("concurrent close failed: #{inspect(other)}")
+        end
+      end)
+
+    assert [_, _] = Enum.uniq(hashes)
+
+    sequences =
+      Enum.map(hashes, fn hash ->
+        tx = rpc!(context.url, "tx", %{"transaction" => hash})
+        assert tx["validated"] == true
+        assert tx["meta"]["TransactionResult"] == "tesSUCCESS"
+        sequence = tx["Sequence"] || get_in(tx, ["tx_json", "Sequence"])
+        assert is_integer(sequence)
+        sequence
+      end)
+
+    assert [_, _] = Enum.uniq(sequences)
+  end
+
+  defp open_channel!(context, session) do
+    create = payment_channel_create(context)
+    signed = sign!(context, create)
+    channel_id = predicted_id!(context, signed["Sequence"])
+    open_sig = authorize!(context, channel_id, "100000")
+
+    assert {:ok, open} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => signed["tx_blob"], "amount" => "100000", "signature" => open_sig},
+               session
+             )
+
+    assert open.extensions["channelId"] == channel_id
+    {channel_id, open_sig}
+  end
+
   defp session(context) do
     {:ok, session} =
       Session.new(

@@ -140,6 +140,29 @@ transaction `Fee` from its own XRP, not from the channel deposit. Configure
 `destination_secret` (family seed). Required unless `defer_redemption` is true.
 The seed must derive to the session `recipient`.
 
+### Sequence serialization (single-node)
+
+`Sequence` is an account-wide nonce: a transaction is valid only when it
+equals the sending account's current Sequence
+([Transaction Common Fields](https://xrpl.org/docs/references/protocol/transactions/common-fields)).
+`LastLedgerSequence` caps how long the claim may sit in the open ledger
+([Reliable Transaction Submission](https://xrpl.org/docs/concepts/transactions/reliable-transaction-submission)).
+Two `PaymentChannelClaim` submits from the same Destination that pick the
+same Sequence collide; the loser fails `tefPAST_SEQ`
+([tef codes](https://xrpl.org/docs/references/protocol/transactions/transaction-results/tef-codes)).
+The claim itself is not applied, so no value is lost — the retained proof
+can be submitted again.
+
+`redeem/2` (and close, which calls it) takes an exclusive ETS lease keyed by
+Destination address (`MPP.Methods.XRPL.RedeemLock`) before reading Sequence,
+so concurrent closes of different channels that share a Destination cannot
+share a Sequence. The lease is single-node: it coordinates callers on this
+BEAM node and does not span a cluster. A `tefPAST_SEQ` result is retried
+once with a fresh Sequence (covers an operator `redeem/2` racing a close, or
+another transaction from the same account). After a validated `tesSUCCESS`,
+the claim txHash is stored on the channel proof; a later `redeem/2` returns
+that hash and does not submit again.
+
 ## Verification
 
 ```sh

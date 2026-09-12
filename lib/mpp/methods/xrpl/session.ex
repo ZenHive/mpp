@@ -15,6 +15,7 @@ defmodule MPP.Methods.XRPL.Session do
   `defer_redemption` is true, in which case `redeem/2` submits later.
   The Destination (server) pays the claim transaction Fee from its own
   XRP; set `destination_secret` to that account's family seed.
+  Submits for one Destination are serialized on this BEAM node.
 
   Configure `rpc_url` (HTTPS) and `network` (`mainnet` / `testnet` / `devnet`).
   `min_settle_delay` defaults to 3600 seconds; `closing_margin` defaults to
@@ -29,6 +30,7 @@ defmodule MPP.Methods.XRPL.Session do
   alias MPP.Intents.Session
   alias MPP.Methods.XRPL.Claim
   alias MPP.Methods.XRPL.Codec
+  alias MPP.Methods.XRPL.RedeemLock
   alias MPP.Methods.XRPL.RPC
   alias MPP.Methods.XRPL.Wallet
   alias MPP.Receipt
@@ -157,6 +159,11 @@ defmodule MPP.Methods.XRPL.Session do
 
   Used automatically on `close` unless `defer_redemption` is true. The
   Destination pays the transaction Fee from its XRP balance.
+
+  Submits for one Destination account are serialized on this BEAM node
+  so concurrent closes cannot share a `Sequence`. An already-settled
+  channel returns the recorded txHash without submitting again. A
+  `tefPAST_SEQ` submit is retried once with a fresh Sequence.
   """
   @spec redeem(String.t(), map()) :: {:ok, String.t()} | {:error, Errors.t()}
   def redeem(channel_id, config) when is_binary(channel_id) and is_map(config) do
@@ -502,16 +509,32 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp redeem_channel(channel, config) do
+    case settled_hash(channel) do
+      {:ok, hash} ->
+        {:ok, hash}
+
+      :not_settled ->
+        RedeemLock.with_account(channel.recipient, fn -> redeem_locked(channel.channel_id, config) end)
+    end
+  end
+
+  defp redeem_locked(channel_id, config) do
+    with {:ok, channel} <- stored_channel(channel_id, config) do
+      case settled_hash(channel) do
+        {:ok, hash} -> {:ok, hash}
+        :not_settled -> submit_redemption(channel, config)
+      end
+    end
+  end
+
+  defp submit_redemption(channel, config) do
     with {:ok, proof} <- stored_proof(channel),
          {:ok, wallet} <- destination_wallet(config, channel),
-         {:ok, sequence} <- account_sequence(wallet.address, config),
-         {:ok, last_ledger} <- last_ledger_sequence(config),
-         {:ok, tx} <- claim_transaction(channel, proof, wallet, sequence, last_ledger, config),
-         {:ok, blob, hash} <- Wallet.sign_claim(wallet, tx),
-         {:ok, ^hash} <- submit_claim(blob, hash, config),
+         {:ok, hash} <- submit_with_retry(channel, proof, wallet, config),
          {:ok, result} <- RPC.await_validated(hash, config, submitted: true),
          :ok <- claimed?(result, hash, channel, proof),
-         :ok <- confirm_ledger(channel.channel_id, proof.amount, config) do
+         :ok <- confirm_ledger(channel.channel_id, proof.amount, config),
+         :ok <- record_hash(channel, hash, config) do
       {:ok, hash}
     else
       {:error, %Errors{} = error} -> {:error, error}
@@ -519,28 +542,74 @@ defmodule MPP.Methods.XRPL.Session do
     end
   end
 
-  defp submit_claim(blob, hash, config) do
-    case RPC.call(config, "submit", %{"tx_blob" => blob}) do
-      {:ok, result} ->
-        reported = get_in(result, ["tx_json", "hash"])
-        engine = result["engine_result"]
-
-        cond do
-          engine in ["tesSUCCESS", "terQUEUED"] and is_binary(reported) and RPC.hex?(reported, 64) and
-              String.upcase(reported) == hash ->
-            {:ok, hash}
-
-          is_binary(engine) ->
-            {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim #{engine}")}
-
-          true ->
-            {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
-        end
-
-      _ ->
-        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+  defp submit_with_retry(channel, proof, wallet, config) do
+    case sign_and_submit(channel, proof, wallet, config) do
+      {:ok, hash} -> {:ok, hash}
+      {:error, :past_seq} -> retry_past_seq(channel, proof, wallet, config)
+      other -> other
     end
   end
+
+  defp retry_past_seq(channel, proof, wallet, config) do
+    case sign_and_submit(channel, proof, wallet, config) do
+      {:ok, hash} -> {:ok, hash}
+      {:error, :past_seq} -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim tefPAST_SEQ")}
+      other -> other
+    end
+  end
+
+  defp sign_and_submit(channel, proof, wallet, config) do
+    with {:ok, sequence} <- account_sequence(wallet.address, config),
+         {:ok, last_ledger} <- last_ledger_sequence(config),
+         {:ok, tx} <- claim_transaction(channel, proof, wallet, sequence, last_ledger, config),
+         {:ok, blob, hash} <- Wallet.sign_claim(wallet, tx) do
+      submit_claim(blob, hash, config)
+    end
+  end
+
+  defp submit_claim(blob, hash, config) do
+    case RPC.call(config, "submit", %{"tx_blob" => blob}) do
+      {:ok, result} -> accept_submit(result, hash)
+      _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+    end
+  end
+
+  defp accept_submit(result, hash) do
+    reported = get_in(result, ["tx_json", "hash"])
+    engine = result["engine_result"]
+
+    cond do
+      accepted_submit?(engine, reported, hash) -> {:ok, hash}
+      engine == "tefPAST_SEQ" -> {:error, :past_seq}
+      is_binary(engine) -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim #{engine}")}
+      true -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+    end
+  end
+
+  defp accepted_submit?(engine, reported, hash) do
+    engine in ["tesSUCCESS", "terQUEUED"] and is_binary(reported) and RPC.hex?(reported, 64) and
+      String.upcase(reported) == hash
+  end
+
+  @spec settled_hash(Channel.t()) :: {:ok, String.t()} | :not_settled
+  defp settled_hash(%Channel{proof: %{tx_hash: hash}}) when is_binary(hash) do
+    if RPC.hex?(hash, 64), do: {:ok, String.upcase(hash)}, else: :not_settled
+  end
+
+  defp settled_hash(_channel), do: :not_settled
+
+  defp record_hash(channel, hash, config) do
+    case Store.update(store(config), channel.channel_id, &put_tx_hash(&1, hash)) do
+      {:ok, _} -> :ok
+      _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
+    end
+  end
+
+  defp put_tx_hash(%Channel{proof: proof} = channel, hash) when is_map(proof) do
+    {:ok, %{channel | proof: Map.put(proof, :tx_hash, hash)}}
+  end
+
+  defp put_tx_hash(_channel, _hash), do: {:error, :invalid_proof}
 
   defp stored_proof(%Channel{proof: %{amount: amount, signature: signature, public_key: key} = proof})
        when is_integer(amount) and amount > 0 and is_binary(signature) and is_binary(key) do

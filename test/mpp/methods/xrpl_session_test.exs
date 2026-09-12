@@ -5,6 +5,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
   alias MPP.Methods.XRPL.Codec
+  alias MPP.Methods.XRPL.RPC
   alias MPP.Methods.XRPL.Session, as: XRPLSession
   alias MPP.Methods.XRPL.Wallet
   alias MPP.Session.Channel
@@ -14,6 +15,12 @@ defmodule MPP.Methods.XRPL.SessionTest do
   defmodule DownStore do
     @moduledoc false
     def get(_id), do: {:error, :unavailable}
+  end
+
+  defmodule UpdateFailStore do
+    @moduledoc false
+    def get(id), do: Store.get(Process.get({__MODULE__, :backing}), id)
+    def update(_id, _fun), do: {:error, :unavailable}
   end
 
   @fixture "test/fixtures/xrpl/session.json" |> File.read!() |> Jason.decode!()
@@ -888,6 +895,157 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert {:ok, %Channel{status: :closed, proof: %{amount: 100_000}}} = Store.get(context.store, @channel_id)
   end
 
+  test "concurrent redeem/2 of two channels sharing a Destination uses distinct Sequences", context do
+    destination = @fixture["destination"]["ed25519"]
+    {:ok, wallet} = Wallet.from_seed(destination["seed"])
+    {:ok, other_id} = Channel.compute_xrpl_id(@payer, wallet.address, 2)
+    {:ok, other_wire} = Channel.to_xrpl_id(other_id)
+    plug = unique_plug()
+
+    {:ok, session} =
+      isolated_session(context, plug, %{
+        "destination_secret" => destination["seed"],
+        "defer_redemption" => true
+      })
+
+    put_redeemable!(context, @channel_id, wallet.address)
+    put_redeemable!(context, other_id, wallet.address)
+    counters = stub_redeem(%{context | session: session}, destination: wallet.address)
+    parent = self()
+
+    start = fn channel_id ->
+      Task.async(fn ->
+        send(parent, {:ready, self()})
+
+        receive do
+          :go -> XRPLSession.redeem(channel_id, session.method_details)
+        end
+      end)
+    end
+
+    task_a = start.(@channel_id)
+    task_b = start.(other_id)
+    assert_receive {:ready, pid_a}
+    assert_receive {:ready, pid_b}
+    send(pid_a, :go)
+    send(pid_b, :go)
+
+    results = Enum.map([task_a, task_b], &Task.await(&1, 5_000))
+
+    hashes =
+      Enum.map(results, fn
+        {:ok, hash} -> hash
+        other -> flunk("concurrent redeem failed: #{inspect(other)}")
+      end)
+
+    assert [_, _] = Enum.uniq(hashes)
+    assert :atomics.get(counters.submits, 1) == 2
+
+    blobs = submitted_blobs()
+    assert [_, _] = blobs
+
+    sequences =
+      Enum.map(blobs, fn blob ->
+        assert {:ok, tx} = Codec.decode_claim(blob)
+        assert tx["Account"] == wallet.address
+        assert tx["Channel"] in [@channel_id, other_wire]
+        tx["Sequence"]
+      end)
+
+    assert Enum.sort(sequences) == [1, 2]
+  end
+
+  test "redeem/2 on an already-redeemed channel returns the recorded txHash without submitting", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session})
+
+    assert {:ok, hash} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert RPC.hex?(hash, 64)
+    assert :atomics.get(counters.submits, 1) == 1
+    assert {:ok, %Channel{proof: %{tx_hash: ^hash}}} = Store.get(context.store, @channel_id)
+
+    flush_rpc()
+    assert {:ok, ^hash} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert :atomics.get(counters.submits, 1) == 1
+    refute_received {:submitted, _}
+    assert rpc_calls() == []
+  end
+
+  test "tefPAST_SEQ on submit is retried once with a fresh Sequence", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session}, past_seq_once: true)
+
+    assert {:ok, hash} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert RPC.hex?(hash, 64)
+    assert :atomics.get(counters.submits, 1) == 2
+
+    blobs = submitted_blobs()
+    assert [_, _] = blobs
+
+    sequences =
+      Enum.map(blobs, fn blob ->
+        assert {:ok, tx} = Codec.decode_claim(blob)
+        tx["Sequence"]
+      end)
+
+    assert sequences == [1, 2]
+  end
+
+  test "concurrent redeem/2 of one channel returns the recorded hash without a second submit", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session})
+    parent = self()
+
+    start = fn ->
+      Task.async(fn ->
+        send(parent, {:ready, self()})
+
+        receive do
+          :go -> XRPLSession.redeem(@channel_id, session.method_details)
+        end
+      end)
+    end
+
+    task_a = start.()
+    task_b = start.()
+    assert_receive {:ready, pid_a}
+    assert_receive {:ready, pid_b}
+    send(pid_a, :go)
+    send(pid_b, :go)
+
+    hashes =
+      Enum.map([task_a, task_b], fn task ->
+        case Task.await(task, 5_000) do
+          {:ok, hash} -> hash
+          other -> flunk("same-channel redeem failed: #{inspect(other)}")
+        end
+      end)
+
+    assert [_] = Enum.uniq(hashes)
+    assert :atomics.get(counters.submits, 1) == 1
+  end
+
+  test "a tefPAST_SEQ retry that hits another engine result fails closed", context do
+    session = redeemable!(context)
+    stub_redeem(%{context | session: session}, submit_engines: ["tefPAST_SEQ", "tecNO_PERMISSION"])
+
+    assert {:error, %Errors{type: type, detail: detail}} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert type == Errors.new(:settlement_failed, "").type
+    assert detail =~ "tecNO_PERMISSION"
+    blobs = submitted_blobs()
+    assert [_, _] = blobs
+  end
+
+  test "redeem/2 fails closed when the store cannot record the settled txHash", context do
+    session = redeemable!(context)
+    Process.put({UpdateFailStore, :backing}, context.store)
+    details = Map.put(session.method_details, "session_store", UpdateFailStore)
+    stub_redeem(%{context | session: %{session | method_details: details}})
+
+    assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, details)
+    assert type == Errors.new(:settlement_failed, "").type
+  end
+
   defp redeemable!(context) do
     destination = @fixture["destination"]["ed25519"]
     {:ok, wallet} = Wallet.from_seed(destination["seed"])
@@ -915,6 +1073,25 @@ defmodule MPP.Methods.XRPL.SessionTest do
       })
 
     session
+  end
+
+  defp put_redeemable!(context, channel_id, recipient) do
+    {:ok, channel} =
+      Channel.new(
+        channel_id: channel_id,
+        payer: @payer,
+        recipient: recipient,
+        token: "XRP",
+        deposit: 1_000_000,
+        cumulative_amount: 200_000,
+        spent: 200_000,
+        proof: %{amount: 200_000, signature: @voucher_sig, public_key: @fixture["payer"]["publicKey"]}
+      )
+
+    {:ok, channel} = Channel.activate(channel)
+    {:ok, channel} = Channel.close(channel)
+    assert :ok = Store.put(context.store, channel)
+    channel
   end
 
   defp session(config) do
@@ -951,6 +1128,137 @@ defmodule MPP.Methods.XRPL.SessionTest do
   end
 
   defp unique_plug, do: String.to_atom("xrpl_session_rpc_#{System.unique_integer([:positive])}")
+
+  defp stub_redeem(context, opts \\ []) do
+    {_req, name} = context.session.method_details["req_options"][:plug]
+    owner = context.owner
+    sequence = :atomics.new(1, [])
+    submits = :atomics.new(1, [])
+    past = :atomics.new(1, [])
+    claimed = :ets.new(:xrpl_redeem_claimed, [:public, :set])
+    :atomics.put(sequence, 1, Keyword.get(opts, :sequence, 1))
+    if Keyword.get(opts, :past_seq_once, false), do: :atomics.put(past, 1, 1)
+    counters = %{sequence: sequence, submits: submits, claimed: claimed}
+
+    Req.Test.stub(name, fn conn ->
+      redeem_rpc_response(conn, owner, opts, counters, past)
+    end)
+
+    counters
+  end
+
+  defp redeem_rpc_response(conn, owner, opts, counters, past) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    decoded = Jason.decode!(body)
+    method = decoded["method"]
+    params = decoded |> Map.get("params", []) |> List.first() || %{}
+    send(owner, {:rpc, method})
+    Req.Test.json(conn, %{"result" => redeem_rpc_result(method, params, owner, opts, counters, past)})
+  end
+
+  defp redeem_rpc_result("server_info", _params, _owner, _opts, _counters, _past), do: %{"info" => %{"network_id" => 1}}
+
+  defp redeem_rpc_result("account_info", _params, _owner, _opts, counters, _past) do
+    %{"account_data" => %{"Sequence" => :atomics.get(counters.sequence, 1)}}
+  end
+
+  defp redeem_rpc_result("ledger", _params, _owner, _opts, _counters, _past) do
+    %{"ledger_index" => 80, "ledger" => %{"close_time" => 1, "ledger_index" => 80}}
+  end
+
+  defp redeem_rpc_result("submit", params, owner, opts, counters, past) do
+    blob = params["tx_blob"]
+    n = :atomics.add_get(counters.submits, 1, 1)
+    send(owner, {:submitted, blob})
+    hash = RPC.blob_hash(blob)
+
+    cond do
+      engines = Keyword.get(opts, :submit_engines) ->
+        engine = Enum.at(engines, n - 1) || List.last(engines)
+        submit_engine_result(engine, hash, blob, counters)
+
+      :atomics.compare_exchange(past, 1, 1, 0) == :ok ->
+        :atomics.add(counters.sequence, 1, 1)
+        %{"engine_result" => "tefPAST_SEQ", "tx_json" => %{"hash" => hash}}
+
+      true ->
+        mark_claimed(counters.claimed, blob)
+        :atomics.add(counters.sequence, 1, 1)
+        %{"engine_result" => "tesSUCCESS", "tx_json" => %{"hash" => hash}}
+    end
+  end
+
+  defp redeem_rpc_result("tx", params, _owner, _opts, _counters, _past) do
+    hash = params["transaction"]
+
+    %{
+      "validated" => true,
+      "hash" => hash,
+      "ledger_index" => 9,
+      "meta" => %{
+        "TransactionResult" => "tesSUCCESS",
+        "AffectedNodes" => [%{"DeletedNode" => %{"LedgerEntryType" => "PayChannel", "LedgerIndex" => @channel_id}}]
+      }
+    }
+  end
+
+  defp redeem_rpc_result("ledger_entry", params, _owner, opts, counters, _past) do
+    index = params["index"] |> to_string() |> String.upcase()
+
+    case :ets.lookup(counters.claimed, index) do
+      [{^index, true}] ->
+        %{"error" => "entryNotFound"}
+
+      [] ->
+        %{
+          "node" => %{
+            "LedgerEntryType" => "PayChannel",
+            "Account" => @payer,
+            "Destination" => Keyword.get(opts, :destination, @fixture["destination"]["ed25519"]["address"]),
+            "Amount" => "1000000",
+            "Balance" => "0",
+            "PublicKey" => @fixture["payer"]["publicKey"],
+            "SettleDelay" => 3600
+          }
+        }
+    end
+  end
+
+  defp redeem_rpc_result(_method, _params, _owner, _opts, _counters, _past), do: %{}
+
+  defp submit_engine_result("tesSUCCESS", hash, blob, counters) do
+    mark_claimed(counters.claimed, blob)
+    :atomics.add(counters.sequence, 1, 1)
+    %{"engine_result" => "tesSUCCESS", "tx_json" => %{"hash" => hash}}
+  end
+
+  defp submit_engine_result("tefPAST_SEQ", hash, _blob, counters) do
+    :atomics.add(counters.sequence, 1, 1)
+    %{"engine_result" => "tefPAST_SEQ", "tx_json" => %{"hash" => hash}}
+  end
+
+  defp submit_engine_result(engine, hash, _blob, _counters) do
+    %{"engine_result" => engine, "tx_json" => %{"hash" => hash}}
+  end
+
+  defp mark_claimed(table, blob) do
+    case Codec.decode_claim(blob) do
+      {:ok, %{"Channel" => channel}} when is_binary(channel) ->
+        :ets.insert(table, {String.upcase(channel), true})
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp submitted_blobs(acc \\ []) do
+    receive do
+      {:submitted, blob} -> submitted_blobs(acc ++ [blob])
+      {:rpc, _} -> submitted_blobs(acc)
+    after
+      0 -> acc
+    end
+  end
 
   defp stub(context, hash, opts \\ []) do
     {_req, name} = context.session.method_details["req_options"][:plug]
@@ -1004,7 +1312,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
         Keyword.fetch!(opts, :submit)
 
       is_binary(blob) ->
-        expected = MPP.Methods.XRPL.RPC.blob_hash(blob)
+        expected = RPC.blob_hash(blob)
         if expected != hash, do: :atomics.put(claimed, 1, 1)
         send(owner, {:submitted, blob})
         %{"engine_result" => "tesSUCCESS", "tx_json" => %{"hash" => expected}}
