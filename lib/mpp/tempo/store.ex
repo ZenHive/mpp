@@ -90,15 +90,11 @@ defmodule MPP.Tempo.Store do
           end
         end
 
+        # Compare and delete in one ETS operation; a lookup followed by a
+        # delete would let a concurrent reserve slip in between.
         def delete(key, expected) do
-          case :ets.lookup(:payment_dedup, key) do
-            [{^key, ^expected}] ->
-              :ets.delete(:payment_dedup, key)
-              :ok
-
-            _other ->
-              :ok
-          end
+          :ets.select_delete(:payment_dedup, [{{key, expected}, [], [true]}])
+          :ok
         end
       end
 
@@ -270,6 +266,14 @@ defmodule MPP.Tempo.Store do
   only when it still matches `expected`. A mismatch — the slot was replaced
   after TTL expiry by a later attempt's reservation or mark — is a
   successful no-op: return `:ok` and leave the current value.
+
+  The compare and the delete MUST be one atomic operation (ETS
+  `select_delete`, a Redis Lua script or `WATCH`/`MULTI`, a SQL `DELETE ...
+  WHERE value = ?`). A read followed by a separate delete lets a concurrent
+  attempt reserve the slot between the two steps, and the stale release then
+  removes that attempt's reservation — the ownership bug this callback exists
+  to prevent. The built-in `MPP.Tempo.ConCacheStore` runs both steps inside
+  `ConCache.isolated/3`.
 
   Optional. The `delete/3` dispatcher prefers this callback, falls back to
   `update/3` that compares the stored value to `expected` when this callback

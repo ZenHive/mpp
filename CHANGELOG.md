@@ -12,11 +12,23 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 - XRPL session redemption serializes claims per Destination on one BEAM node,
   retries `tefPAST_SEQ` once with a fresh Sequence, and returns the recorded
-  transaction hash when redeeming an already-settled channel.
+  transaction hash when redeeming an already-settled channel. Waiting for the
+  Destination lease is bounded (`redeem_lock_timeout_ms`, default 30 000 ms) and
+  fails as `settlement_failed` instead of blocking; the lease covers only the
+  Sequence read and submit, validation waits outside it. `redeem/2` accepts only
+  closed channels, and a validated claim whose ledger confirmation or hash
+  persistence fails afterwards is logged at error level with the transaction
+  hash and channel id for manual recovery. A malformed `redeem_lock_timeout_ms`
+  is rejected before any submit.
 - Tempo releases reserved dedup slots after definite pre-broadcast failures so
   the same signed transaction can be retried; ambiguous broadcast outcomes retain
-  the reservation. Custom stores can implement optional `delete/1` or atomic
-  `update/3` deletion; stores supporting neither retain the slot until TTL expiry.
+  the reservation. Release is compare-and-delete on the attempt token written at
+  reserve time, so a delayed release after TTL eviction cannot drop a later
+  attempt's reservation or mark. Custom stores implement token-checked
+  `delete/2` or the atomic `update/3` fallback; stores supporting neither retain
+  the slot until TTL expiry. A store `delete/2` that returns an error, raises, or
+  exits is logged at warning and the slot is retained; the caller's original
+  problem response is preserved.
 
 ## [0.17.0] — 2026-09-12
 
