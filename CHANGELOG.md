@@ -6,6 +6,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Tempo releases reserved dedup slots after definite pre-broadcast failures so
+  the same signed transaction can be retried; ambiguous broadcast outcomes retain
+  the reservation. Custom stores can implement optional `delete/1` or atomic
+  `update/3` deletion; stores supporting neither retain the slot until TTL expiry.
+
 ## [0.17.0] — 2026-09-12
 
 **Security (one low-severity hardening, disclosed with this release).** The Tempo pre-broadcast dedup reserve key is now stable across every valid re-encoding of a signed transaction, closing the last re-encoding channel left after 0.16.2; the live Moderato node already rejected that encoding at broadcast, so no deployment was exploitable, and a mutation canary now pins the reserve-key derivation (`GHSA-65c4-v2vw-rr64`). Safe-by-default, no configuration change.
