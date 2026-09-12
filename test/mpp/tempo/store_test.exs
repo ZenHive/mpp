@@ -10,21 +10,49 @@ defmodule MPP.Tempo.StoreTest do
     @moduledoc false
     @behaviour Store
 
-    @impl Store
-    def get(_key), do: :not_found
+    use Agent
+
+    def start_link(_opts \\ []) do
+      Agent.start_link(fn -> %{} end, name: __MODULE__)
+    end
 
     @impl Store
-    def put(_key, _value), do: :ok
-
-    @impl Store
-    def check_and_mark(_key, _value), do: :ok
-
-    @impl Store
-    def update(_key, fun, _opts) do
-      case fun.(:reserved) do
-        {:delete, result} -> {:ok, result}
-        other -> {:error, {:invalid_update_result, other}}
+    def get(key) do
+      case Agent.get(__MODULE__, &Map.get(&1, key)) do
+        nil -> :not_found
+        value -> {:ok, value}
       end
+    end
+
+    @impl Store
+    def put(key, value) do
+      Agent.update(__MODULE__, &Map.put(&1, key, value))
+      :ok
+    end
+
+    @impl Store
+    def check_and_mark(key, value) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        if Map.has_key?(state, key) do
+          {{:error, :already_exists}, state}
+        else
+          {:ok, Map.put(state, key, value)}
+        end
+      end)
+    end
+
+    @impl Store
+    def update(key, fun, _opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        current = Map.get(state, key, :not_found)
+
+        case fun.(current) do
+          {:put, value, result} -> {{:ok, result}, Map.put(state, key, value)}
+          {:delete, result} -> {{:ok, result}, Map.delete(state, key)}
+          {:noop, result} -> {{:ok, result}, state}
+          other -> {{:error, {:invalid_update_result, other}}, state}
+        end
+      end)
     end
   end
 
@@ -151,33 +179,48 @@ defmodule MPP.Tempo.StoreTest do
     end
   end
 
-  describe "delete/2" do
-    test "dispatches to a store module that exports delete/1" do
+  describe "delete/3" do
+    test "dispatches to a store module that exports delete/2" do
       assert :ok = Store.check_and_mark(TempoMemoryStore, "module-release", :reserved)
       assert {:ok, :reserved} = Store.get(TempoMemoryStore, "module-release")
-      assert :ok = Store.delete(TempoMemoryStore, "module-release")
+      assert :ok = Store.delete(TempoMemoryStore, "module-release", :reserved)
       assert :not_found = Store.get(TempoMemoryStore, "module-release")
+    end
+
+    test "leaves a later attempt's token when the expected token no longer matches" do
+      assert :ok = Store.check_and_mark(TempoMemoryStore, "stale-release", :first)
+      assert :ok = Store.put(TempoMemoryStore, "stale-release", :second)
+      assert :ok = Store.delete(TempoMemoryStore, "stale-release", :first)
+      assert {:ok, :second} = Store.get(TempoMemoryStore, "stale-release")
     end
 
     test "dispatches to configured ConCacheStore tuple", %{con_cache_store: store} do
       assert :ok = Store.check_and_mark(store, "tuple-release", :reserved)
-      assert :ok = Store.delete(store, "tuple-release")
+      assert :ok = Store.delete(store, "tuple-release", :reserved)
       assert :not_found = Store.get(store, "tuple-release")
     end
 
-    test "falls back to update/3 when delete/1 is not exported" do
+    test "falls back to update/3 compare-and-delete when delete/2 is not exported" do
+      start_supervised!(UpdateOnlyStore)
       refute Store.delete_capable?(UpdateOnlyStore)
       assert Store.update_capable?(UpdateOnlyStore)
-      assert :ok = Store.delete(UpdateOnlyStore, "update-fallback")
+
+      assert :ok = Store.check_and_mark(UpdateOnlyStore, "update-fallback", :first)
+      assert :ok = Store.put(UpdateOnlyStore, "update-fallback", :second)
+      assert :ok = Store.delete(UpdateOnlyStore, "update-fallback", :first)
+      assert {:ok, :second} = Store.get(UpdateOnlyStore, "update-fallback")
+
+      assert :ok = Store.delete(UpdateOnlyStore, "update-fallback", :second)
+      assert :not_found = Store.get(UpdateOnlyStore, "update-fallback")
     end
 
     test "propagates update/3 errors from the delete fallback" do
-      assert {:error, :boom} = Store.delete(FailingUpdateOnlyStore, "update-fallback")
+      assert {:error, :boom} = Store.delete(FailingUpdateOnlyStore, "update-fallback", :token)
     end
 
     test "returns :unsupported when the store can neither delete nor update" do
-      assert {:error, :unsupported} = Store.delete(FailingPutStore, "no-release")
-      assert {:error, :unsupported} = Store.delete("not-a-store", "no-release")
+      assert {:error, :unsupported} = Store.delete(FailingPutStore, "no-release", :token)
+      assert {:error, :unsupported} = Store.delete("not-a-store", "no-release", :token)
     end
   end
 

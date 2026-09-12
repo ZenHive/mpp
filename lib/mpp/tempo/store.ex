@@ -30,12 +30,14 @@ defmodule MPP.Tempo.Store do
   backend. Separate store instances provide separate bounds even when their module
   and configuration are otherwise identical.
 
-  The transaction path may `delete/1` a reserved slot after a definite
+  The transaction path may `delete/2` a reserved slot after a definite
   pre-broadcast failure (hosted fill, co-sign, missing config, simulate revert)
-  so the same signed bytes remain retriable. `delete/1` is optional: stores that
-  omit it fall back to `update/3` with `{:delete, result}` when they export that
-  callback, otherwise the key is retained until TTL expiry (the conservative
-  retain path).
+  so the same signed bytes remain retriable. The reservation value is an
+  **attempt token**; `delete/2` is compare-and-delete on that token so a
+  delayed release cannot remove a later attempt's reservation or mark after
+  TTL eviction. `delete/2` is optional: stores that omit it fall back to
+  `update/3` that compares the stored value to the expected token, otherwise
+  the key is retained until TTL expiry (the conservative retain path).
 
   ## Deployment Strategies
 
@@ -88,9 +90,15 @@ defmodule MPP.Tempo.Store do
           end
         end
 
-        def delete(key) do
-          :ets.delete(:payment_dedup, key)
-          :ok
+        def delete(key, expected) do
+          case :ets.lookup(:payment_dedup, key) do
+            [{^key, ^expected}] ->
+              :ets.delete(:payment_dedup, key)
+              :ok
+
+            _other ->
+              :ok
+          end
         end
       end
 
@@ -163,16 +171,16 @@ defmodule MPP.Tempo.Store do
   def update_capable?(_store), do: false
 
   @doc """
-  Whether `store` exports the optional `delete/1` callback used to release a
-  reserved dedup slot.
+  Whether `store` exports the optional `delete/2` callback used to release a
+  reserved dedup slot with compare-and-delete on the attempt token.
 
   Loads the module first, for the same reason as `dedup_capable?/1`. Stores
-  that return `false` still participate in `delete/2` via the `update/3`
+  that return `false` still participate in `delete/3` via the `update/3`
   fallback when they export it.
   """
   @spec delete_capable?(term()) :: boolean()
   def delete_capable?({ConCacheStore, _opts}), do: delete_capable?(ConCacheStore)
-  def delete_capable?(store) when is_atom(store), do: Code.ensure_loaded?(store) and function_exported?(store, :delete, 1)
+  def delete_capable?(store) when is_atom(store), do: Code.ensure_loaded?(store) and function_exported?(store, :delete, 2)
   def delete_capable?(_store), do: false
 
   @doc """
@@ -250,7 +258,7 @@ defmodule MPP.Tempo.Store do
             when result: term()
 
   @doc """
-  Delete a previously reserved key.
+  Delete a previously reserved key only when it still holds `expected`.
 
   Used to **release** a transaction-path dedup slot after a failure that
   definitely did not broadcast (hosted fill, co-sign, missing `rpc_url`,
@@ -258,13 +266,19 @@ defmodule MPP.Tempo.Store do
   and cannot broadcast). Ambiguous broadcast outcomes must **retain**
   the slot instead of calling this.
 
-  Optional. `delete/2` falls back to `update/3` with `{:delete, :ok}` when
-  this callback is missing, and returns `{:error, :unsupported}` when the
-  store exports neither — the caller then retains the key until TTL expiry.
-  """
-  @callback delete(key :: String.t()) :: :ok | {:error, term()}
+  The stored value is the attempt token written at reserve time. Delete
+  only when it still matches `expected`. A mismatch — the slot was replaced
+  after TTL expiry by a later attempt's reservation or mark — is a
+  successful no-op: return `:ok` and leave the current value.
 
-  @optional_callbacks [update: 3, delete: 1]
+  Optional. The `delete/3` dispatcher prefers this callback, falls back to
+  `update/3` that compares the stored value to `expected` when this callback
+  is missing, and returns `{:error, :unsupported}` when the store exports
+  neither — the caller then retains the key until TTL expiry.
+  """
+  @callback delete(key :: String.t(), expected :: term()) :: :ok | {:error, term()}
+
+  @optional_callbacks [update: 3, delete: 2]
 
   @doc """
   Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
@@ -303,30 +317,35 @@ defmodule MPP.Tempo.Store do
   def update(store, key, fun, opts), do: store.update(key, fun, opts)
 
   @doc """
-  Delete a key using either a store module or configured `ConCacheStore`.
+  Compare-and-delete a key using either a store module or configured `ConCacheStore`.
 
-  Prefers native `delete/1`. Stores that omit it fall back to `update/3`
-  with `{:delete, :ok}` when they export that callback. Otherwise returns
-  `{:error, :unsupported}` so the caller can retain the slot until TTL expiry.
+  Prefers native `delete/2` with the expected attempt token. Stores that omit
+  it fall back to `update/3` that deletes only when the stored value matches
+  `expected`. Otherwise returns `{:error, :unsupported}` so the caller can
+  retain the slot until TTL expiry.
   """
-  @spec delete(store_ref(), String.t()) :: :ok | {:error, term()}
-  def delete({ConCacheStore, opts}, key), do: ConCacheStore.delete(key, opts)
+  @spec delete(store_ref(), String.t(), term()) :: :ok | {:error, term()}
+  def delete({ConCacheStore, opts}, key, expected), do: ConCacheStore.delete(key, expected, opts)
 
-  def delete(store, key) when is_atom(store) do
+  def delete(store, key, expected) when is_atom(store) do
     cond do
-      delete_capable?(store) -> store.delete(key)
-      update_capable?(store) -> delete_via_update(store, key)
+      delete_capable?(store) -> store.delete(key, expected)
+      update_capable?(store) -> delete_via_update(store, key, expected)
       true -> {:error, :unsupported}
     end
   end
 
-  def delete(_store, _key), do: {:error, :unsupported}
+  def delete(_store, _key, _expected), do: {:error, :unsupported}
 
-  @spec delete_via_update(store_ref(), String.t()) :: :ok | {:error, term()}
-  defp delete_via_update(store, key) do
-    case update(store, key, fn _current -> {:delete, :ok} end) do
+  @spec delete_via_update(store_ref(), String.t(), term()) :: :ok | {:error, term()}
+  defp delete_via_update(store, key, expected) do
+    case update(store, key, &compare_delete(&1, expected)) do
       {:ok, _result} -> :ok
       {:error, _reason} = error -> error
     end
   end
+
+  @spec compare_delete(term() | :not_found, term()) :: {:delete, :ok} | {:noop, :ok}
+  defp compare_delete(current, expected) when current === expected, do: {:delete, :ok}
+  defp compare_delete(_current, _expected), do: {:noop, :ok}
 end

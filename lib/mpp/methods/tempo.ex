@@ -985,11 +985,12 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget) do
     case prepare_sponsored_transaction(tx, payment, config, memo, store) do
-      {:ok, tx, rpc_url, reserved_hash} ->
+      {:ok, tx, rpc_url, reserved_hash, token} ->
         broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
           store: store,
           budget: budget,
-          hash: reserved_hash
+          hash: reserved_hash,
+          token: token
         })
 
       {:error, _reason} = error ->
@@ -1002,18 +1003,18 @@ defmodule MPP.Methods.Tempo do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),
          :ok <- maybe_validate_fee_payer_envelope(tx, config),
          {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
-         :ok <- reserve_hash_atomic(store, hash) do
-      finish_reserved_transaction(tx, config, store, hash)
+         {:ok, token} <- reserve_hash_atomic(store, hash) do
+      finish_reserved_transaction(tx, config, store, hash, token)
     end
   end
 
-  defp finish_reserved_transaction(tx, config, store, hash) do
+  defp finish_reserved_transaction(tx, config, store, hash, token) do
     case complete_reserved_transaction(tx, config) do
       {:ok, tx, rpc_url} ->
-        {:ok, tx, rpc_url, hash}
+        {:ok, tx, rpc_url, hash, token}
 
       {:error, _reason} = error ->
-        safe_dedup_release(store, hash)
+        safe_dedup_release(store, hash, token)
         error
     end
   end
@@ -1030,7 +1031,8 @@ defmodule MPP.Methods.Tempo do
   defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
          store: store,
          budget: budget,
-         hash: reserved_hash
+         hash: reserved_hash,
+         token: token
        }) do
     with :ok <- begin_budget_broadcast(budget),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
@@ -1039,7 +1041,7 @@ defmodule MPP.Methods.Tempo do
     else
       {:error, :budget_transition_failed} ->
         safe_budget_release(budget)
-        safe_dedup_release(store, reserved_hash)
+        safe_dedup_release(store, reserved_hash, token)
         {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
 
       {:error, _reason} = error ->
@@ -1200,10 +1202,14 @@ defmodule MPP.Methods.Tempo do
   #
   # After reserve, a definite pre-broadcast failure (fill, co-sign, missing
   # `rpc_url`, simulate revert or operational simulate error) **releases** the
-  # slot so the same signed bytes remain retriable. Once
-  # `eth_sendRawTransaction*` is issued, the slot is **retained** — a timeout
-  # or transport error may still mean the node included the tx (mppx
-  # Charge.ts `broadcastAttempted` / `releaseHashUse`).
+  # slot so the same signed bytes remain retriable. Release is compare-and-
+  # delete on the attempt token written at reserve, so a delayed release after
+  # TTL eviction cannot drop a later attempt's reservation or mark. A store
+  # `delete/2` that returns `{:error, _}`, raises, or exits is logged at
+  # warning and the slot is retained. Once `eth_sendRawTransaction*` is
+  # issued, the slot is **retained** — a timeout or transport error may still
+  # mean the node included the tx (mppx Charge.ts `broadcastAttempted` /
+  # `releaseHashUse`).
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
   defp check_hash_unused(nil, _hash), do: :ok
@@ -1234,20 +1240,30 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Atomically reserves a hash before broadcast. Used by the transaction path to
-  # prevent concurrent duplicate broadcasts of the same signed tx.
-  defp reserve_hash_atomic(nil, _hash), do: :ok
+  # prevent concurrent duplicate broadcasts of the same signed tx. The stored
+  # value is an attempt token used later for compare-and-delete release.
+  defp reserve_hash_atomic(nil, _hash), do: {:ok, nil}
 
   defp reserve_hash_atomic(store, hash) do
-    claim_atomic(store, store_key(hash), System.system_time(:millisecond))
+    token = attempt_token()
+
+    case claim_atomic(store, store_key(hash), token) do
+      :ok -> {:ok, token}
+      {:error, _reason} = error -> error
+    end
   end
 
-  defp safe_dedup_release(nil, _hash), do: :ok
+  defp attempt_token, do: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
 
-  defp safe_dedup_release(store, hash) do
-    case Store.delete(store, store_key(hash)) do
-      :ok -> :ok
-      {:error, reason} -> Logger.warning("MPP.Methods.Tempo: dedup reserve release failed: #{inspect(reason)}")
-    end
+  defp safe_dedup_release(nil, _hash, _token), do: :ok
+
+  defp safe_dedup_release(store, hash, token) do
+    swallow_store_fault("dedup reserve release", fn ->
+      case Store.delete(store, store_key(hash), token) do
+        :ok -> :ok
+        {:error, reason} -> Logger.warning("MPP.Methods.Tempo: dedup reserve release failed: #{inspect(reason)}")
+      end
+    end)
   end
 
   # Atomic single-use claim via the store's check_and_mark/2. Shared by the
@@ -1267,32 +1283,39 @@ defmodule MPP.Methods.Tempo do
   # Agent process, network partition to Redis) must not fail the HTTP response.
   # The pre-broadcast reserve_hash_atomic is the critical gate; this is
   # supplementary protection against hash malleability.
-  # Uses both rescue (exceptions) and catch (process exits from dead Agents/GenServers).
   # Logger.warning is intentional: payment already settled on-chain, so this
   # supplementary dedup write must never fail the HTTP response.
   defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
 
   defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
-    if String.downcase(tx_hash) != String.downcase(input_hash) do
-      key = store_key(tx_hash)
-      store_put(store, key, System.system_time(:millisecond))
-    end
+    swallow_store_fault("post-broadcast dedup store", fn ->
+      if String.downcase(tx_hash) != String.downcase(input_hash) do
+        key = store_key(tx_hash)
+        store_put(store, key, System.system_time(:millisecond))
+      end
 
-    :ok
+      :ok
+    end)
+  end
+
+  # Shared exception/exit barrier for store side effects that must not replace
+  # the caller's original verification outcome. Pre-broadcast release uses this
+  # so a raising/exiting custom store keeps the 402 problem response; post-
+  # broadcast put uses it so a settled payment still returns 200.
+  # Deliberately broad: a custom MPP.Tempo.Store may raise ANY exception struct
+  # (e.g. %Redix.ConnectionError{} on a network partition). Narrowing to a fixed
+  # exception list would drop exactly the infra failures this guard exists to
+  # absorb. Suppress reach's bare_rescue smell at this one deliberate site.
+  defp swallow_store_fault(event, fun) do
+    fun.()
   rescue
-    # Deliberately broad: a custom MPP.Tempo.Store may raise ANY exception struct
-    # (e.g. %Redix.ConnectionError{} on a network partition — see the doc above).
-    # Payment already settled on-chain, so this supplementary write must never
-    # crash the response; narrowing to a fixed exception list would drop exactly
-    # the infra failures this guard exists to absorb. Suppress reach's bare_rescue
-    # smell at this one deliberate site rather than weaken the safety invariant.
     # reach:disable-next-line bare_rescue
     exception ->
-      Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store failed: #{Exception.message(exception)}")
+      Logger.warning("MPP.Methods.Tempo: #{event} failed: #{Exception.message(exception)}")
       :ok
   catch
     :exit, reason ->
-      Logger.warning("MPP.Methods.Tempo: post-broadcast dedup store exited: #{inspect(reason)}")
+      Logger.warning("MPP.Methods.Tempo: #{event} exited: #{inspect(reason)}")
       :ok
   end
 

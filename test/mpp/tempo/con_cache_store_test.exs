@@ -101,20 +101,29 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       assert {:ok, :first} = ConCacheStore.get(key, store_opts)
     end
 
-    test "delete/2 removes a reserved key so it can be marked again", %{store_opts: store_opts} do
+    test "delete/3 removes a reserved key so it can be marked again", %{store_opts: store_opts} do
       key = "mpp:charge:release"
 
       assert :ok = ConCacheStore.check_and_mark(key, :reserved, store_opts)
-      assert :ok = ConCacheStore.delete(key, store_opts)
+      assert :ok = ConCacheStore.delete(key, :reserved, store_opts)
       assert :not_found = ConCacheStore.get(key, store_opts)
       assert :ok = ConCacheStore.check_and_mark(key, :retried, store_opts)
     end
 
-    test "delete/1 releases a key in the default cache" do
+    test "delete/3 leaves a later attempt's value when the token does not match", %{store_opts: store_opts} do
+      key = "mpp:charge:stale-release"
+
+      assert :ok = ConCacheStore.check_and_mark(key, :first, store_opts)
+      assert :ok = ConCacheStore.put(key, :second, store_opts)
+      assert :ok = ConCacheStore.delete(key, :first, store_opts)
+      assert {:ok, :second} = ConCacheStore.get(key, store_opts)
+    end
+
+    test "delete/2 releases a matching key in the default cache" do
       key = "mpp:charge:default-delete-#{System.unique_integer([:positive])}"
 
       assert :ok = ConCacheStore.check_and_mark(key, :reserved)
-      assert :ok = ConCacheStore.delete(key)
+      assert :ok = ConCacheStore.delete(key, :reserved)
       assert :not_found = ConCacheStore.get(key)
     end
 

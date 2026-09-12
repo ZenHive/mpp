@@ -15,6 +15,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.FailingPutStore
+  alias MPP.Test.FaultyDeleteStore
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
   alias Onchain.Tempo.Transaction
@@ -1686,6 +1687,110 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
     end
 
+    test "stale release does not remove a later attempt's reservation", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      later_token = "later-attempt-token"
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            TempoMemoryStore.put(expected_key, later_token)
+
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+              "id" => 1
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+      assert {:ok, ^later_token} = TempoMemoryStore.get(expected_key)
+    end
+
+    test "raising delete/2 keeps the original error and the reserved slot", %{charge: charge} do
+      start_supervised!({FaultyDeleteStore, [mode: :raise]})
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FaultyDeleteStore)
+      }
+
+      {payload, expected_key} = simulate_reject_payload()
+      stub_simulate_reject()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert error.detail =~ "Pre-broadcast simulation rejected"
+        end)
+
+      assert log =~ "dedup reserve release failed"
+      assert {:ok, _} = FaultyDeleteStore.get(expected_key)
+
+      stub_broadcast_and_receipt(success_receipt())
+      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
+      assert retry_error.detail =~ "already used"
+    end
+
+    test "exiting delete/2 keeps the original error and the reserved slot", %{charge: charge} do
+      start_supervised!({FaultyDeleteStore, [mode: :exit]})
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FaultyDeleteStore)
+      }
+
+      {payload, expected_key} = simulate_reject_payload()
+      stub_simulate_reject()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert error.detail =~ "Pre-broadcast simulation rejected"
+        end)
+
+      assert log =~ "dedup reserve release exited"
+      assert {:ok, _} = FaultyDeleteStore.get(expected_key)
+
+      stub_broadcast_and_receipt(success_receipt())
+      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
+      assert retry_error.detail =~ "already used"
+    end
+
+    test "delete/2 error return keeps the original error and the reserved slot", %{charge: charge} do
+      start_supervised!({FaultyDeleteStore, [mode: :error]})
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "store", FaultyDeleteStore)
+      }
+
+      {payload, expected_key} = simulate_reject_payload()
+      stub_simulate_reject()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert error.detail =~ "Pre-broadcast simulation rejected"
+        end)
+
+      assert log =~ "dedup reserve release failed"
+      assert log =~ "store_failure"
+      assert {:ok, _} = FaultyDeleteStore.get(expected_key)
+    end
+
     test "timeout after eth_sendRawTransactionSync retains the slot", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
@@ -3182,6 +3287,33 @@ defmodule MPP.Methods.TempoTest do
 
         other ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1, "_method" => other})
+      end
+    end)
+  end
+
+  defp simulate_reject_payload do
+    calldata = transfer_calldata(@recipient, 1_000_000)
+    call = build_call(@token_address, calldata)
+    tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+    payload = %{"type" => "transaction", "signature" => tx_hex}
+    {payload, "mpp:charge:" <> keccak256_hex(tx_hex)}
+  end
+
+  defp stub_simulate_reject do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      case request["method"] do
+        "eth_simulateV1" ->
+          Req.Test.json(conn, %{
+            "jsonrpc" => "2.0",
+            "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+            "id" => 1
+          })
+
+        _ ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
       end
     end)
   end
