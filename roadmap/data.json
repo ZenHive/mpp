@@ -4667,7 +4667,7 @@
       "id": "115",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Release the Tempo dedup reserve slot when a post-reserve step fails before broadcast, retaining it on ambiguous outcomes",
       "scores": {
         "d": 5,
@@ -4702,10 +4702,17 @@
         "test/mpp/methods/tempo_test.exs",
         "test/mpp/methods/tempo_integration_test.exs"
       ],
+      "shipped_in": "1a265883ab5669d8b779e8941dadd73fa39a61cd",
       "body": "`MPP.Methods.Tempo` reserves the transaction's dedup slot (`reserve_hash_atomic/2`, keyed on keccak256 of the canonical bytes since Tasks 104/114) and never releases it. Any failure after the reserve and before a successful broadcast — hosted `eth_fillTransaction` error, local co-sign error, missing `rpc_url`, a reverting or unreachable `eth_simulateV1` — permanently burns the slot for that signed transaction. Because the client already signed at that nonce, the identical transaction can never be retried; the payer must re-sign, and on a chain where the nonce is consumed that is not always possible. Task 114 widened this window by moving the hosted fill inside the reserved region (necessary so two encodings cannot each reach the fee payer). Premise verified by the Task 114 reviewer reading `tempo.ex` (`reserve_hash_atomic` has no release path) — re-read at pickup and cite lines.\n\nmppx takes the other route: reserve before verify, release on failure (`refs/mppx/src/tempo/server/Charge.ts` ~215-273); `MPP.Methods.Tempo.SponsorBudget` (Task 78) already encodes the release/retain distinction for the sponsor accounting — reuse its vocabulary. Design: distinguish 'definitely not broadcast' failures (fill, co-sign, config, simulate reverted with a definitive error) which release the slot, from 'may have been broadcast' outcomes (simulate or broadcast timeout, ambiguous RPC transport error) which must stay reserved. Prefer a compensating release on the transaction path over a TTL-only provisional reserve; if the `MPP.Tempo.Store` behaviour needs a new optional callback, add it as optional with a documented fallback so third-party stores keep working, and bump the CHANGELOG accordingly.",
       "created_at": "2026-09-11",
       "started_at": "2026-09-12",
+      "done_at": "2026-09-12",
       "scored_at": "2026-09-11",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1789178979194-af517e39, 1a265883ab5669d8b779e8941dadd73fa39a61cd).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1789178979194-af517e39",
       "cross_repo": []
     },
     {
