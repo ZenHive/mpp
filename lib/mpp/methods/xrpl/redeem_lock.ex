@@ -9,9 +9,11 @@ defmodule MPP.Methods.XRPL.RedeemLock do
   the loser fails `tefPAST_SEQ`
   ([tef codes](https://xrpl.org/docs/references/protocol/transactions/transaction-results/tef-codes)).
 
-  `with_account/2` takes an ETS lease keyed by Destination address so
-  concurrent `redeem/2` calls on one BEAM node cannot share a Sequence. The
-  lease is not visible to other nodes.
+  `with_account/3` takes an ETS lease keyed by Destination address so
+  concurrent `redeem/2` calls on one BEAM node cannot share a Sequence.
+  `MPP.Methods.XRPL.Session` also leases `"channel:" <> channel_id` in the same
+  table so one channel is redeemed once at a time. Acquisition is bounded by a
+  timeout; the lease is not visible to other nodes.
   """
 
   use GenServer

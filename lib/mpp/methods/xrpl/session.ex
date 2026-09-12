@@ -524,11 +524,17 @@ defmodule MPP.Methods.XRPL.Session do
         {:ok, hash}
 
       :not_settled ->
-        RedeemLock.with_account(
-          "channel:" <> channel.channel_id,
-          fn -> redeem_locked(channel.channel_id, config) end,
-          lock_timeout(config)
-        )
+        redeem_unsettled(channel, config)
+    end
+  end
+
+  defp redeem_unsettled(channel, config) do
+    with {:ok, timeout_ms} <- lock_timeout(config) do
+      RedeemLock.with_account(
+        "channel:" <> channel.channel_id,
+        fn -> redeem_locked(channel.channel_id, config) end,
+        timeout_ms
+      )
     end
   end
 
@@ -546,7 +552,7 @@ defmodule MPP.Methods.XRPL.Session do
          {:ok, wallet} <- destination_wallet(config, channel),
          {:ok, hash, result} <- submit_and_validate(channel, proof, wallet, config),
          :ok <- claimed?(result, hash, channel, proof),
-         :ok <- confirm_ledger(channel.channel_id, proof.amount, config),
+         :ok <- confirm_validated_ledger(channel, hash, proof.amount, config),
          :ok <- record_hash(channel, hash, config) do
       {:ok, hash}
     else
@@ -556,25 +562,34 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp submit_and_validate(channel, proof, wallet, config) do
-    result =
-      RedeemLock.with_account(
-        channel.recipient,
-        fn -> submit_with_retry(channel, proof, wallet, config) end,
-        lock_timeout(config)
-      )
-
-    case result do
-      {:ok, hash} ->
-        with {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
-          {:ok, hash, validated}
-        end
-
-      other ->
-        other
+    with {:ok, timeout_ms} <- lock_timeout(config),
+         {:ok, hash} <-
+           RedeemLock.with_account(
+             channel.recipient,
+             fn -> submit_with_retry(channel, proof, wallet, config) end,
+             timeout_ms
+           ),
+         {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
+      {:ok, hash, validated}
     end
   end
 
-  defp lock_timeout(config), do: Map.get(config, "redeem_lock_timeout_ms", 30_000)
+  # Validated once per redeem/2 before the channel lease; the second call
+  # inside the lease cannot fail.
+
+  defp lock_timeout(config) do
+    case Map.get(config, "redeem_lock_timeout_ms", 30_000) do
+      timeout_ms when is_integer(timeout_ms) and timeout_ms >= 0 ->
+        {:ok, timeout_ms}
+
+      other ->
+        {:error,
+         Errors.new(
+           :verification_failed,
+           "XRPL session method config redeem_lock_timeout_ms must be a non-negative integer, got: #{inspect(other)}"
+         )}
+    end
+  end
 
   defp submit_with_retry(channel, proof, wallet, config) do
     submit_claim_attempt(channel, proof, wallet, config, false)
@@ -651,12 +666,26 @@ defmodule MPP.Methods.XRPL.Session do
         :ok
 
       _ ->
-        Logger.error(
-          "XRPL validated redemption hash persistence failed: txHash=#{hash} channel_id=#{channel.channel_id} Destination=#{channel.recipient}"
-        )
-
-        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
+        validated_but_lost("hash persistence", channel, hash)
     end
+  end
+
+  # Runs after the claim validated tesSUCCESS: the ledger check can fail only
+  # on RPC trouble or an unexpected channel state, and the funds already moved,
+  # so the hash must reach the operator log before the request fails closed.
+  defp confirm_validated_ledger(channel, hash, amount, config) do
+    case confirm_ledger(channel.channel_id, amount, config) do
+      :ok -> :ok
+      :error -> validated_but_lost("ledger confirmation", channel, hash)
+    end
+  end
+
+  defp validated_but_lost(stage, channel, hash) do
+    Logger.error(
+      "XRPL validated redemption #{stage} failed: txHash=#{hash} channel_id=#{channel.channel_id} Destination=#{channel.recipient}"
+    )
+
+    {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
   end
 
   defp put_tx_hash(%Channel{proof: proof} = channel, hash) when is_map(proof) do

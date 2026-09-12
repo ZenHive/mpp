@@ -1086,6 +1086,41 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert log =~ @fixture["destination"]["ed25519"]["address"]
   end
 
+  test "redeem/2 logs the validated txHash when the ledger confirmation fails afterwards", context do
+    session = redeemable!(context)
+    stub_redeem(%{context | session: session}, ledger_entry_after_claim: %{"error" => "lgrNotFound"})
+
+    log =
+      ExUnit.CaptureLog.capture_log([level: :error], fn ->
+        assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, session.method_details)
+        assert type == Errors.new(:settlement_failed, "").type
+      end)
+
+    [blob] = submitted_blobs()
+    assert log =~ "[error]"
+    assert log =~ "ledger confirmation"
+    assert log =~ RPC.blob_hash(blob)
+    assert {:ok, id} = Channel.normalize_id(@channel_id)
+    assert log =~ id
+    assert log =~ @fixture["destination"]["ed25519"]["address"]
+    assert {:ok, %Channel{proof: proof}} = Store.get(context.store, @channel_id)
+    refute Map.has_key?(proof, :tx_hash)
+  end
+
+  test "redeem/2 rejects a malformed redeem_lock_timeout_ms without submitting", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session})
+
+    for bad <- ["fast", -1, 1.5, nil] do
+      details = Map.put(session.method_details, "redeem_lock_timeout_ms", bad)
+      assert {:error, %Errors{type: type, detail: detail}} = XRPLSession.redeem(@channel_id, details)
+      assert type == Errors.new(:verification_failed, "").type
+      assert detail =~ "redeem_lock_timeout_ms"
+    end
+
+    assert :atomics.get(counters.submits, 1) == 0
+  end
+
   test "queued claims wait for validation and fail closed when validation is unavailable", context do
     session = redeemable!(context)
 
@@ -1342,7 +1377,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
 
     case :ets.lookup(counters.claimed, index) do
       [{^index, true}] ->
-        %{"error" => "entryNotFound"}
+        Keyword.get(opts, :ledger_entry_after_claim, %{"error" => "entryNotFound"})
 
       [] ->
         %{
