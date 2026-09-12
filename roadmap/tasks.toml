@@ -3113,3 +3113,55 @@ started_at = "2026-09-12"
 scored_at = "2026-09-11"
 done_at = "2026-09-12"
 shipped_in = "4cbd43feb64b18aba83efdc258dddf9bd41a0ab0"
+
+[[task]]
+id = "119"
+phase = 8
+bundle = "additional-methods"
+status = "pending"
+title = "Harden XRPL session redemption: bounded lease acquisition, closed-only redeem, and validated-hash recovery logging"
+scores = { d = 4, b = 7, u = 7 }
+markers = ["security"]
+depends_on = [118]
+acceptance_criteria = ["Lease acquisition fails closed after the configured deadline with settlement_failed and the claim remains redeemable afterwards (test with a holder that never releases)", "Waiters do not poll: the implementation blocks on a monitor with a single receive bounded by the deadline, pinned by a test that a waiter receives no scheduling between acquire attempts (e.g. reductions stay flat while waiting)", "Concurrent closes to one Destination still yield distinct Sequences and both validate, with a stub-side gate between account_info and submit that makes the test fail when the lease is removed", "redeem/2 on an :active channel is refused without any submit (submit count 0) and the channel keeps accepting vouchers", "A failing record_hash after validated tesSUCCESS logs the txHash, channel id and Destination at error level (captured with ExUnit.CaptureLog) and returns settlement_failed", "Live testnet: two concurrent closes to one Destination validate with the lease scoped as delivered; missing setup flunks with exact export instructions", "mix ci passes; MPP.Methods.XRPL.Session and RedeemLock stay at the 95% critical-tier floor; docs/xrpl-session.md states the lease scope and timeout"]
+out_of_scope = ["Cluster-wide lease coordination (documented single-node scope stays)", "Changing the tfClose semantics for close-initiated redemption"]
+touches = ["lib/mpp/methods/xrpl/redeem_lock.ex", "lib/mpp/methods/xrpl/session.ex", "test/mpp/methods/xrpl/redeem_lock_test.exs", "test/mpp/methods/xrpl_session_test.exs", "docs/xrpl-session.md"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Converges on Task 118 (architect-seat review of the landed surface, 2026-09-12). Three coupled hardening items in `MPP.Methods.XRPL.RedeemLock` and `MPP.Methods.XRPL.Session.redeem/2`; lease-scope detail lives in private advisory GHSA-rp92-r4rc-42gw — keep public artifacts to the fix shape.
+
+1. **Lease acquisition and scope.** `RedeemLock.with_account/2` must acquire with a bounded deadline (config `redeem_lock_timeout_ms`, default 30_000) and fail closed with `settlement_failed` when it expires — the retained claim stays redeemable later. Waiters block on the owner's monitor (`Process.monitor` + `receive` with the deadline), never on a short-interval poll. Hold the lease only through Sequence read and `submit`; `RPC.await_validated` runs outside the lease. Decision made here, vetoable: allocate Sequence under the lease and validate outside it, because XRPL consumes the Sequence in the open ledger at submit time (xrpl.org Transaction Common Fields / Reliable Transaction Submission), so a second submit under the same Destination after the first `submit` returned `tesSUCCESS`/`terQUEUED` gets a fresh Sequence from `account_info` with `ledger_index: "current"`. If a live probe shows `current` Sequence does not advance until validation, fall back to holding the lease through validation but keep the acquisition bound and monitor-based wait; say in the delivery which you found.
+
+2. **Closed-only redeem.** `redeem/2` on a channel whose stored status is not `:closed` currently submits a `tfClose` claim, deleting the PayChannel on-ledger while the store keeps accepting vouchers (`channel.ex` proof replacement drops the idempotency hash, so the eventual close submits into a deleted channel). Refuse with `channel_not_closed` (or the closest existing error type — no new `MPP.Errors` problem types) unless status is `:closed`.
+
+3. **Validated-hash recovery.** After a validated `tesSUCCESS`, a failing `record_hash/3` store write currently returns `settlement_failed` and the on-ledger channel is gone. Log the validated txHash, channel id, and Destination at error level so an operator can reconcile by hand, and document that path in docs/xrpl-session.md.
+
+Also make the concurrent-close test in `xrpl_session_test.exs` deterministic: the stubbed RPC must hold the first caller between `account_info` and `submit` so the assertion fails with the lease removed, and replace the `receive after 20` sync in `redeem_lock_test.exs` with a monitor/`assert_receive` barrier."""
+created_at = "2026-09-12"
+scored_at = "2026-09-12"
+
+[[task]]
+id = "120"
+phase = 8
+bundle = "tempo"
+status = "pending"
+title = "Make the Tempo dedup reserve release exception-safe and ownership-checked"
+scores = { d = 3, b = 6, u = 5 }
+markers = ["security", "parallel"]
+depends_on = [115]
+acceptance_criteria = ["A store whose delete/1 raises, and one whose delete/1 exits, both leave the caller's original verification error intact, log a warning, and keep the slot reserved (unit tests for both paths)", "A release issued by an attempt whose reservation was replaced by a later attempt does not remove the later attempt's reservation or mark (unit test with two attempts sharing the key and a store whose stored value carries the token)", "ConCacheStore and the test memory store implement the token-checked delete; update/3 fallback performs the compare; {:error, :unsupported} path unchanged", "mix ci passes with no new blanket reach/credo suppression beyond one documented rescue site; MPP.Methods.Tempo stays at the 95% floor", "mix mutation.security exits 0 with every mutant killed and the ledger fingerprint regenerated"]
+out_of_scope = ["Retaining the slot after a hosted fill (mppx parity releases on every pre-broadcast error; a client can present fresh signed bytes at no cost, so the slot never bounded fill calls per client)", "New MPP.Errors problem types"]
+touches = ["lib/mpp/methods/tempo.ex", "lib/mpp/tempo/store.ex", "lib/mpp/tempo/con_cache_store.ex", "test/mpp/methods/tempo_test.exs", "test/mpp/tempo/store_test.exs", "test/mpp/tempo/con_cache_store_test.exs", "test/mutation/payment_security_ledger.json"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+Converges on Task 115 (reviewer proposal plus architect-seat review, 2026-09-12). Two coupled gaps in the new pre-broadcast release path of `MPP.Methods.Tempo`.
+
+1. **Exception safety.** `safe_dedup_release/2` handles only an `{:error, reason}` return from `MPP.Tempo.Store.delete/2`. A custom store that raises or exits inside `delete/1` (Redis partition, dead Agent — the repo's own `FailingPutStore` shows stores raise) propagates out of `verify/2`, turning the request's original 402 problem response into a 500 and losing the original failure reason. `safe_dedup_post_broadcast/3` already solves the same class with a documented `rescue` + `catch :exit` pair and a `reach:disable-next-line` justification; apply the same shape. The release failure is logged at warning level and the slot stays reserved (conservative retain).
+
+2. **Ownership-checked release.** `claim_atomic` stores only a timestamp and `delete/2` deletes unconditionally, so an attempt that outlives the store TTL (default 10 min in ConCacheStore) can delete a later attempt's successful reservation or post-broadcast mark for the same signed bytes. Store an attempt token with the reservation and release with compare-and-delete on that token (`update/3` fallback compares the stored value; stores supporting neither keep TTL-only retention as today). Document the callback contract change in `MPP.Tempo.Store` and keep the optional-callback fallback chain.
+
+Editing tempo.ex invalidates `test/mutation/payment_security_ledger.json`'s fingerprint: regenerate it and run `mix mutation.security` — every mutant must still be killed."""
+created_at = "2026-09-12"
+scored_at = "2026-09-12"

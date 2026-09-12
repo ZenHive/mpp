@@ -254,7 +254,8 @@ defmodule MPP.Tempo.Store do
 
   Used to **release** a transaction-path dedup slot after a failure that
   definitely did not broadcast (hosted fill, co-sign, missing `rpc_url`,
-  a reverting `eth_simulateV1`). Ambiguous broadcast outcomes must **retain**
+  a reverting or operationally failing `eth_simulateV1`, which is read-only
+  and cannot broadcast). Ambiguous broadcast outcomes must **retain**
   the slot instead of calling this.
 
   Optional. `delete/2` falls back to `update/3` with `{:delete, :ok}` when

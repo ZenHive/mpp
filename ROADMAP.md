@@ -113,7 +113,7 @@
 ## Phase 8: Developer Experience
 
 <!-- TASKS:BEGIN phase=8 -->
-> 2 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-8-developer-experience).
+> 4 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-8-developer-experience).
 <!-- TASKS:END -->
 
 ---
