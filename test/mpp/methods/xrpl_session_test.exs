@@ -1036,6 +1036,18 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert [_, _] = blobs
   end
 
+  test "a second tefPAST_SEQ is not retried", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session}, submit_engines: ["tefPAST_SEQ", "tefPAST_SEQ"])
+
+    assert {:error, %Errors{type: type, detail: detail}} = XRPLSession.redeem(@channel_id, session.method_details)
+    assert type == Errors.new(:settlement_failed, "").type
+    assert detail =~ "tefPAST_SEQ"
+    assert :atomics.get(counters.submits, 1) == 2
+    blobs = submitted_blobs()
+    assert [_, _] = blobs
+  end
+
   test "redeem/2 fails closed when the store cannot record the settled txHash", context do
     session = redeemable!(context)
     Process.put({UpdateFailStore, :backing}, context.store)

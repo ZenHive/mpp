@@ -543,18 +543,22 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp submit_with_retry(channel, proof, wallet, config) do
-    case sign_and_submit(channel, proof, wallet, config) do
-      {:ok, hash} -> {:ok, hash}
-      {:error, :past_seq} -> retry_past_seq(channel, proof, wallet, config)
-      other -> other
-    end
+    submit_claim_attempt(channel, proof, wallet, config, false)
   end
 
-  defp retry_past_seq(channel, proof, wallet, config) do
+  defp submit_claim_attempt(channel, proof, wallet, config, retried?) do
     case sign_and_submit(channel, proof, wallet, config) do
-      {:ok, hash} -> {:ok, hash}
-      {:error, :past_seq} -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim tefPAST_SEQ")}
-      other -> other
+      {:ok, hash} ->
+        {:ok, hash}
+
+      {:error, :past_seq} when retried? ->
+        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim tefPAST_SEQ")}
+
+      {:error, :past_seq} ->
+        submit_claim_attempt(channel, proof, wallet, config, true)
+
+      other ->
+        other
     end
   end
 

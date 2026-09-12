@@ -51,27 +51,22 @@ defmodule MPP.Methods.XRPL.RedeemLock do
     if :ets.insert_new(@table, {address, self()}) do
       :ok
     else
-      wait_and_retry(address)
+      wait_for_owner(address)
+      acquire(address)
     end
   end
 
-  defp wait_and_retry(address) do
-    case :ets.lookup(@table, address) do
-      [{^address, owner}] ->
-        ref = Process.monitor(owner)
+  defp wait_for_owner(address) do
+    with [{^address, owner}] <- :ets.lookup(@table, address) do
+      ref = Process.monitor(owner)
 
-        receive do
-          {:DOWN, ^ref, :process, ^owner, _} ->
-            :ets.delete_object(@table, {address, owner})
-            acquire(address)
-        after
-          @wait_ms ->
-            Process.demonitor(ref, [:flush])
-            acquire(address)
-        end
-
-      [] ->
-        acquire(address)
+      receive do
+        {:DOWN, ^ref, :process, ^owner, _} ->
+          :ets.delete_object(@table, {address, owner})
+      after
+        @wait_ms ->
+          Process.demonitor(ref, [:flush])
+      end
     end
   end
 
