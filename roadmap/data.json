@@ -4887,7 +4887,7 @@
       "id": "119",
       "phase": 8,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Harden XRPL session redemption: bounded lease acquisition, closed-only redeem, and validated-hash recovery logging",
       "scores": {
         "d": 4,
@@ -4927,6 +4927,7 @@
       ],
       "body": "Converges on Task 118 (architect-seat review of the landed surface, 2026-09-12). Three coupled hardening items in `MPP.Methods.XRPL.RedeemLock` and `MPP.Methods.XRPL.Session.redeem/2`; lease-scope detail lives in private advisory GHSA-rp92-r4rc-42gw — keep public artifacts to the fix shape.\n\n1. **Lease acquisition and scope.** `RedeemLock.with_account/2` must acquire with a bounded deadline (config `redeem_lock_timeout_ms`, default 30_000) and fail closed with `settlement_failed` when it expires — the retained claim stays redeemable later. Waiters block on the owner's monitor (`Process.monitor` + `receive` with the deadline), never on a short-interval poll. Hold the lease only through Sequence read and `submit`; `RPC.await_validated` runs outside the lease. Decision made here, vetoable: allocate Sequence under the lease and validate outside it, because XRPL consumes the Sequence in the open ledger at submit time (xrpl.org Transaction Common Fields / Reliable Transaction Submission), so a second submit under the same Destination after the first `submit` returned `tesSUCCESS`/`terQUEUED` gets a fresh Sequence from `account_info` with `ledger_index: \"current\"`. If a live probe shows `current` Sequence does not advance until validation, fall back to holding the lease through validation but keep the acquisition bound and monitor-based wait; say in the delivery which you found.\n\n2. **Closed-only redeem.** `redeem/2` on a channel whose stored status is not `:closed` currently submits a `tfClose` claim, deleting the PayChannel on-ledger while the store keeps accepting vouchers (`channel.ex` proof replacement drops the idempotency hash, so the eventual close submits into a deleted channel). Refuse with `channel_not_closed` (or the closest existing error type — no new `MPP.Errors` problem types) unless status is `:closed`.\n\n3. **Validated-hash recovery.** After a validated `tesSUCCESS`, a failing `record_hash/3` store write currently returns `settlement_failed` and the on-ledger channel is gone. Log the validated txHash, channel id, and Destination at error level so an operator can reconcile by hand, and document that path in docs/xrpl-session.md.\n\nAlso make the concurrent-close test in `xrpl_session_test.exs` deterministic: the stubbed RPC must hold the first caller between `account_info` and `submit` so the assertion fails with the lease removed, and replace the `receive after 20` sync in `redeem_lock_test.exs` with a monitor/`assert_receive` barrier.",
       "created_at": "2026-09-12",
+      "started_at": "2026-09-12",
       "scored_at": "2026-09-12",
       "cross_repo": []
     },
