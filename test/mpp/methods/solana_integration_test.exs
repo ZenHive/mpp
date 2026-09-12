@@ -25,7 +25,11 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
   @moduletag :integration
 
-  @lamports 1_000
+  # A System transfer that leaves a fresh account below the rent-exempt minimum
+  # (getMinimumBalanceForRentExemption(0), 650_240 lamports on devnet 2026-09)
+  # fails with InsufficientFundsForRent, so every recipient gets at least that.
+  @lamports 1_000_000
+  @fee_payer_lamports 2_000_000
   @airdrop_lamports 1_000_000_000
   @confirmation_timeout_ms 30_000
   @token_2022_program "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
@@ -50,7 +54,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
     seed = decode_seed!(private_key)
     {payer, ^seed} = Keys.from_seed(seed)
-    rpc_opts = [solana_node: rpc_url, commitment: :confirmed]
+    rpc_opts = [solana_node: rpc_url, commitment: :confirmed, preflight_commitment: :confirmed]
 
     ensure_funded!(payer, rpc_opts)
 
@@ -307,7 +311,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
   defp fund_fee_payer!(context) do
     {:ok, %{blockhash: blockhash}} = RPC.get_latest_blockhash(context.rpc_opts)
-    ix = SystemProgram.transfer(context.payer, context.fee_payer, 100_000)
+    ix = SystemProgram.transfer(context.payer, context.fee_payer, @fee_payer_lamports)
     message = Transaction.build_message(context.payer, [ix], blockhash)
     tx = Transaction.sign(message, [context.payer_seed])
 

@@ -762,7 +762,14 @@ defmodule MPP.Methods.Solana do
 
   defp rpc_opts(rpc_url, config, extra \\ []) do
     timeout = config["confirmation_timeout"] || 30_000
-    opts = Keyword.merge([solana_node: rpc_url, commitment: :confirmed, timeout: timeout], extra)
+    # preflight_commitment must match the commitment the blockhash and the
+    # simulation used: the RPC default is finalized, and a transaction built
+    # on a confirmed blockhash then fails preflight with "Blockhash not found".
+    opts =
+      Keyword.merge(
+        [solana_node: rpc_url, commitment: :confirmed, preflight_commitment: :confirmed, timeout: timeout],
+        extra
+      )
 
     case config["req_options"] do
       req_options when is_list(req_options) -> Keyword.put(opts, :req_options, req_options)

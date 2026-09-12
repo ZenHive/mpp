@@ -20,6 +20,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   persistence fails afterwards is logged at error level with the transaction
   hash and channel id for manual recovery. A malformed `redeem_lock_timeout_ms`
   is rejected before any submit.
+- Solana pull-mode broadcasts send `preflightCommitment: confirmed`, matching
+  the commitment used for the blockhash and the pre-broadcast simulation. The
+  RPC default is `finalized`, so a transaction built on a confirmed blockhash
+  failed preflight with "Blockhash not found" against live devnet.
 - Tempo releases reserved dedup slots after definite pre-broadcast failures so
   the same signed transaction can be retried; ambiguous broadcast outcomes retain
   the reservation. Release is compare-and-delete on the attempt token written at
