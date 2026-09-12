@@ -3082,7 +3082,7 @@ shipped_in = "a159f95bbd52e6a18903738f716aef98c4103467"
 id = "118"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Serialize XRPL redemption submits per Destination account so concurrent closes do not collide on Sequence"
 scores = { d = 4, b = 5, u = 3 }
 markers = ["parallel"]
@@ -3097,4 +3097,5 @@ body = """
 
 Build: serialize submits per Destination account (a per-account lock or a Registry/GenServer-free approach such as `:global`-free ETS lease keyed by address in the existing session store) or allocate distinct sequences under that lock; retry once on tefPAST_SEQ with a fresh Sequence; keep redeem/2 idempotent for an already-redeemed channel (return the recorded txHash instead of resubmitting). Document the guarantee and its single-node scope in docs/xrpl-session.md."""
 created_at = "2026-09-11"
+started_at = "2026-09-12"
 scored_at = "2026-09-11"
