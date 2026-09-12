@@ -158,8 +158,8 @@ Destination address (`MPP.Methods.XRPL.RedeemLock`) before reading Sequence,
 so concurrent closes of different channels that share a Destination cannot
 share a Sequence. The lease is single-node: it coordinates callers on this
 BEAM node and does not span a cluster. A `tefPAST_SEQ` result is retried
-once with a fresh Sequence (covers an operator `redeem/2` racing a close, or
-another transaction from the same account). After a validated `tesSUCCESS`,
+once with a fresh Sequence (covers submissions from another node or other
+transactions from the same account outside this lease). After a validated `tesSUCCESS`,
 the claim txHash is stored on the channel proof; a later `redeem/2` returns
 that hash and does not submit again.
 

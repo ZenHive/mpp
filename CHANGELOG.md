@@ -10,6 +10,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- XRPL session redemption serializes claims per Destination on one BEAM node,
+  retries `tefPAST_SEQ` once with a fresh Sequence, and returns the recorded
+  transaction hash when redeeming an already-settled channel.
 - Tempo releases reserved dedup slots after definite pre-broadcast failures so
   the same signed transaction can be retried; ambiguous broadcast outcomes retain
   the reservation. Custom stores can implement optional `delete/1` or atomic
