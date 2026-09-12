@@ -881,6 +881,38 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert body["detail"] =~ "already used"
     end
 
+    test "definitive pre-broadcast RPC failure then successful retry of the same signed tx", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = fresh_wallet!(rpc_url)
+      start_supervised!(TempoMemoryStore)
+
+      dead_config =
+        tempo_config(recipient_address, "http://127.0.0.1:9", %{
+          "store" => TempoMemoryStore,
+          "req_options" => [retry: false, connect_options: [timeout: 250], receive_timeout: 250]
+        })
+
+      live_config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+      challenge = request_challenge!(live_config)
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
+      payload = %{"type" => "transaction", "signature" => signed_tx}
+      expected_key = "mpp:charge:" <> TempoTestHelpers.keccak256_hex(signed_tx)
+
+      body = submit_credential!(dead_config, challenge, payload)
+      assert body["type"] =~ "verification-failed"
+      assert :not_found = TempoMemoryStore.get(expected_key)
+
+      conn = submit_credential_conn(live_config, challenge, payload)
+
+      assert conn.status == nil,
+             "Retry after released pre-broadcast failure should pass through, got #{inspect(conn.resp_body)}"
+
+      assert %Receipt{} = conn.assigns[:mpp_receipt]
+      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+    end
+
     test "same signed transaction under two encodings yields one receipt", %{
       recipient: recipient_address,
       rpc_url: rpc_url

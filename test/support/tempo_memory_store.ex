@@ -50,6 +50,12 @@ defmodule MPP.Test.TempoMemoryStore do
   end
 
   @impl Store
+  def delete(key) do
+    Agent.update(__MODULE__, &Map.delete(&1, key))
+    :ok
+  end
+
+  @impl Store
   def update(key, fun, _opts) do
     Agent.get_and_update(__MODULE__, fn state ->
       current = Map.get(state, key, :not_found)

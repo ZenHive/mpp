@@ -184,6 +184,29 @@ defmodule MPP.Tempo.ConCacheStore do
     end)
   end
 
+  @impl Store
+  @doc """
+  Deletes a dedup key in the default ConCache.
+  """
+  @spec delete(String.t()) :: :ok
+  def delete(key), do: delete(key, [])
+
+  @doc """
+  Deletes a dedup key, optionally using a non-default ConCache name from opts.
+
+  Same as `delete/1` when `opts` is `[]`. Idempotent: missing keys still return `:ok`.
+  """
+  @spec delete(String.t(), keyword()) :: :ok
+  def delete(key, opts) do
+    cache_name = cache_name(opts)
+    storage_key = Store.storage_key(key, opts)
+
+    ConCache.isolated(cache_name, storage_key, fn ->
+      ConCache.delete(cache_name, storage_key)
+      :ok
+    end)
+  end
+
   @spec apply_update(ConCache.t(), term(), term(), keyword()) :: {:ok, term()} | {:error, term()}
   defp apply_update(cache_name, storage_key, {:put, value, result}, opts) do
     case stored_value(value, opts) do

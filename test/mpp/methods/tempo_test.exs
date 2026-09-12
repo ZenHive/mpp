@@ -1653,6 +1653,131 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "already used"
     end
 
+    test "definitive simulate rejection releases the slot so the same bytes retry", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+              "id" => 1
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+      assert :not_found = TempoMemoryStore.get(expected_key)
+
+      stub_broadcast_and_receipt(success_receipt())
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+    end
+
+    test "timeout after eth_sendRawTransactionSync retains the slot", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            send(test_pid, :broadcast_issued)
+            Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail == "Tempo RPC request failed"
+      assert_received :broadcast_issued
+      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+
+      stub_broadcast_and_receipt(success_receipt())
+      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
+      assert retry_error.detail =~ "already used"
+    end
+
+    test "missing rpc_url after reserve leaves the signed tx retriable", %{charge: charge} do
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+
+      charge_without_rpc = %{charge | method_details: Map.delete(charge.method_details, "rpc_url")}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge_without_rpc)
+      assert error.detail =~ "rpc_url"
+      assert :not_found = TempoMemoryStore.get(expected_key)
+
+      stub_broadcast_and_receipt(success_receipt())
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "concurrent duplicate during the reserved window is rejected exactly once against ConCacheStore",
+         %{charge: charge} do
+      store = start_sponsor_store()
+      charge = %{charge | method_details: Map.put(charge.method_details, "store", store)}
+      {ConCacheStore, store_opts} = store
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      parent = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            send(parent, {:simulate_entered, self()})
+
+            receive do
+              :release_simulate -> Req.Test.json(conn, simulate_success_body())
+            after
+              to_timeout(second: 5) -> Req.Test.transport_error(conn, :timeout)
+            end
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      first = Task.async(fn -> Tempo.verify(payload, charge) end)
+      assert_receive {:simulate_entered, sim_pid}, to_timeout(second: 5)
+      assert {:ok, _} = ConCacheStore.get(expected_key, store_opts)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "already used"
+
+      send(sim_pid, :release_simulate)
+      assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
+    end
+
     test "post-broadcast store.put crash does not fail the request", %{charge: charge} do
       # Store that succeeds on check_and_mark but raises on put (post-broadcast path)
       defmodule CrashingPutStore do
@@ -3658,6 +3783,61 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_fillTransaction"}
       refute_received {:rpc_call, "eth_simulateV1"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+    end
+
+    test "transient hosted fill failure releases the slot so the same bytes retry", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        response =
+          case request["method"] do
+            "eth_fillTransaction" ->
+              %{
+                "jsonrpc" => "2.0",
+                "error" => %{"code" => -32_000, "message" => "temporarily unavailable"},
+                "id" => request["id"]
+              }
+
+            _ ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "temporarily unavailable"
+      assert :not_found = ConCacheStore.get(expected_key, store_opts)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        response =
+          case request["method"] do
+            "eth_fillTransaction" ->
+              %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+
+            "eth_simulateV1" ->
+              simulate_success_body()
+
+            _ ->
+              %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, _} = ConCacheStore.get(expected_key, store_opts)
     end
 
     test "rejects hosted fill when returned feeToken is outside configured allowlist", %{charge: charge} do

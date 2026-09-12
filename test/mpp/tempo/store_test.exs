@@ -6,6 +6,45 @@ defmodule MPP.Tempo.StoreTest do
   alias MPP.Test.FailingPutStore
   alias MPP.Test.TempoMemoryStore
 
+  defmodule UpdateOnlyStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl Store
+    def get(_key), do: :not_found
+
+    @impl Store
+    def put(_key, _value), do: :ok
+
+    @impl Store
+    def check_and_mark(_key, _value), do: :ok
+
+    @impl Store
+    def update(_key, fun, _opts) do
+      case fun.(:reserved) do
+        {:delete, result} -> {:ok, result}
+        other -> {:error, {:invalid_update_result, other}}
+      end
+    end
+  end
+
+  defmodule FailingUpdateOnlyStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl Store
+    def get(_key), do: :not_found
+
+    @impl Store
+    def put(_key, _value), do: :ok
+
+    @impl Store
+    def check_and_mark(_key, _value), do: :ok
+
+    @impl Store
+    def update(_key, _fun, _opts), do: {:error, :boom}
+  end
+
   @ttl_ms 1_000
 
   setup do
@@ -63,6 +102,10 @@ defmodule MPP.Tempo.StoreTest do
       unload(TempoMemoryStore)
       refute :erlang.module_loaded(TempoMemoryStore)
       assert Store.update_capable?(TempoMemoryStore)
+
+      unload(TempoMemoryStore)
+      refute :erlang.module_loaded(TempoMemoryStore)
+      assert Store.delete_capable?(TempoMemoryStore)
     end
 
     test "reject non-modules and stores missing the callbacks" do
@@ -71,11 +114,14 @@ defmodule MPP.Tempo.StoreTest do
       refute Store.dedup_capable?("MPP.Test.TempoMemoryStore")
       refute Store.dedup_capable?(MPP.Tempo.NoSuchStore)
       refute Store.update_capable?(FailingPutStore)
+      refute Store.delete_capable?(FailingPutStore)
     end
 
     test "unwraps the ConCacheStore tuple form for update_capable?/1" do
       assert Store.update_capable?({ConCacheStore, name: :whatever})
       refute Store.update_capable?({FailingPutStore, []})
+      assert Store.delete_capable?({ConCacheStore, name: :whatever})
+      refute Store.delete_capable?({FailingPutStore, []})
     end
   end
 
@@ -102,6 +148,36 @@ defmodule MPP.Tempo.StoreTest do
 
       assert :not_found =
                ConCacheStore.get("mpp:sponsor-budget:1:wallet", Keyword.put(store_opts, :key_prefix, "tenant:"))
+    end
+  end
+
+  describe "delete/2" do
+    test "dispatches to a store module that exports delete/1" do
+      assert :ok = Store.check_and_mark(TempoMemoryStore, "module-release", :reserved)
+      assert {:ok, :reserved} = Store.get(TempoMemoryStore, "module-release")
+      assert :ok = Store.delete(TempoMemoryStore, "module-release")
+      assert :not_found = Store.get(TempoMemoryStore, "module-release")
+    end
+
+    test "dispatches to configured ConCacheStore tuple", %{con_cache_store: store} do
+      assert :ok = Store.check_and_mark(store, "tuple-release", :reserved)
+      assert :ok = Store.delete(store, "tuple-release")
+      assert :not_found = Store.get(store, "tuple-release")
+    end
+
+    test "falls back to update/3 when delete/1 is not exported" do
+      refute Store.delete_capable?(UpdateOnlyStore)
+      assert Store.update_capable?(UpdateOnlyStore)
+      assert :ok = Store.delete(UpdateOnlyStore, "update-fallback")
+    end
+
+    test "propagates update/3 errors from the delete fallback" do
+      assert {:error, :boom} = Store.delete(FailingUpdateOnlyStore, "update-fallback")
+    end
+
+    test "returns :unsupported when the store can neither delete nor update" do
+      assert {:error, :unsupported} = Store.delete(FailingPutStore, "no-release")
+      assert {:error, :unsupported} = Store.delete("not-a-store", "no-release")
     end
   end
 

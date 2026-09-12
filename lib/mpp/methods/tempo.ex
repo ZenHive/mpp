@@ -985,8 +985,12 @@ defmodule MPP.Methods.Tempo do
 
   defp verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget) do
     case prepare_sponsored_transaction(tx, payment, config, memo, store) do
-      {:ok, tx, rpc_url} ->
-        broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, store, budget)
+      {:ok, tx, rpc_url, reserved_hash} ->
+        broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
+          store: store,
+          budget: budget,
+          hash: reserved_hash
+        })
 
       {:error, _reason} = error ->
         safe_budget_release(budget)
@@ -998,8 +1002,24 @@ defmodule MPP.Methods.Tempo do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),
          :ok <- maybe_validate_fee_payer_envelope(tx, config),
          {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
-         :ok <- reserve_hash_atomic(store, hash),
-         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+         :ok <- reserve_hash_atomic(store, hash) do
+      finish_reserved_transaction(tx, config, store, hash)
+    end
+  end
+
+  defp finish_reserved_transaction(tx, config, store, hash) do
+    case complete_reserved_transaction(tx, config) do
+      {:ok, tx, rpc_url} ->
+        {:ok, tx, rpc_url, hash}
+
+      {:error, _reason} = error ->
+        safe_dedup_release(store, hash)
+        error
+    end
+  end
+
+  defp complete_reserved_transaction(tx, config) do
+    with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, tx, _hash} <- canonicalize_transaction(tx),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
@@ -1007,7 +1027,11 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, store, budget) do
+  defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
+         store: store,
+         budget: budget,
+         hash: reserved_hash
+       }) do
     with :ok <- begin_budget_broadcast(budget),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
       safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
@@ -1015,6 +1039,7 @@ defmodule MPP.Methods.Tempo do
     else
       {:error, :budget_transition_failed} ->
         safe_budget_release(budget)
+        safe_dedup_release(store, reserved_hash)
         {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
 
       {:error, _reason} = error ->
@@ -1172,6 +1197,13 @@ defmodule MPP.Methods.Tempo do
   # encodings of one signed tx cannot each hit the hosted fee payer.
   # Matches mppx #818 (Charge.ts deserialize-then-serialize at adcf3b5;
   # ox `Transaction.serialize` of the same envelope).
+  #
+  # After reserve, a definite pre-broadcast failure (fill, co-sign, missing
+  # `rpc_url`, simulate revert or operational simulate error) **releases** the
+  # slot so the same signed bytes remain retriable. Once
+  # `eth_sendRawTransaction*` is issued, the slot is **retained** — a timeout
+  # or transport error may still mean the node included the tx (mppx
+  # Charge.ts `broadcastAttempted` / `releaseHashUse`).
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
   defp check_hash_unused(nil, _hash), do: :ok
@@ -1207,6 +1239,15 @@ defmodule MPP.Methods.Tempo do
 
   defp reserve_hash_atomic(store, hash) do
     claim_atomic(store, store_key(hash), System.system_time(:millisecond))
+  end
+
+  defp safe_dedup_release(nil, _hash), do: :ok
+
+  defp safe_dedup_release(store, hash) do
+    case Store.delete(store, store_key(hash)) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("MPP.Methods.Tempo: dedup reserve release failed: #{inspect(reason)}")
+    end
   end
 
   # Atomic single-use claim via the store's check_and_mark/2. Shared by the

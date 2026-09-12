@@ -30,6 +30,13 @@ defmodule MPP.Tempo.Store do
   backend. Separate store instances provide separate bounds even when their module
   and configuration are otherwise identical.
 
+  The transaction path may `delete/1` a reserved slot after a definite
+  pre-broadcast failure (hosted fill, co-sign, missing config, simulate revert)
+  so the same signed bytes remain retriable. `delete/1` is optional: stores that
+  omit it fall back to `update/3` with `{:delete, result}` when they export that
+  callback, otherwise the key is retained until TTL expiry (the conservative
+  retain path).
+
   ## Deployment Strategies
 
   The store choice depends on your deployment topology:
@@ -79,6 +86,11 @@ defmodule MPP.Tempo.Store do
           else
             {:error, :already_exists}
           end
+        end
+
+        def delete(key) do
+          :ets.delete(:payment_dedup, key)
+          :ok
         end
       end
 
@@ -149,6 +161,19 @@ defmodule MPP.Tempo.Store do
   def update_capable?({ConCacheStore, _opts}), do: update_capable?(ConCacheStore)
   def update_capable?(store) when is_atom(store), do: Code.ensure_loaded?(store) and function_exported?(store, :update, 3)
   def update_capable?(_store), do: false
+
+  @doc """
+  Whether `store` exports the optional `delete/1` callback used to release a
+  reserved dedup slot.
+
+  Loads the module first, for the same reason as `dedup_capable?/1`. Stores
+  that return `false` still participate in `delete/2` via the `update/3`
+  fallback when they export it.
+  """
+  @spec delete_capable?(term()) :: boolean()
+  def delete_capable?({ConCacheStore, _opts}), do: delete_capable?(ConCacheStore)
+  def delete_capable?(store) when is_atom(store), do: Code.ensure_loaded?(store) and function_exported?(store, :delete, 1)
+  def delete_capable?(_store), do: false
 
   @doc """
   Apply an optional `:key_prefix` from store opts to a logical dedup key.
@@ -224,7 +249,21 @@ defmodule MPP.Tempo.Store do
             ) :: {:ok, result} | {:error, term()}
             when result: term()
 
-  @optional_callbacks update: 3
+  @doc """
+  Delete a previously reserved key.
+
+  Used to **release** a transaction-path dedup slot after a failure that
+  definitely did not broadcast (hosted fill, co-sign, missing `rpc_url`,
+  a reverting `eth_simulateV1`). Ambiguous broadcast outcomes must **retain**
+  the slot instead of calling this.
+
+  Optional. `delete/2` falls back to `update/3` with `{:delete, :ok}` when
+  this callback is missing, and returns `{:error, :unsupported}` when the
+  store exports neither — the caller then retains the key until TTL expiry.
+  """
+  @callback delete(key :: String.t()) :: :ok | {:error, term()}
+
+  @optional_callbacks [update: 3, delete: 1]
 
   @doc """
   Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
@@ -261,4 +300,32 @@ defmodule MPP.Tempo.Store do
   end
 
   def update(store, key, fun, opts), do: store.update(key, fun, opts)
+
+  @doc """
+  Delete a key using either a store module or configured `ConCacheStore`.
+
+  Prefers native `delete/1`. Stores that omit it fall back to `update/3`
+  with `{:delete, :ok}` when they export that callback. Otherwise returns
+  `{:error, :unsupported}` so the caller can retain the slot until TTL expiry.
+  """
+  @spec delete(store_ref(), String.t()) :: :ok | {:error, term()}
+  def delete({ConCacheStore, opts}, key), do: ConCacheStore.delete(key, opts)
+
+  def delete(store, key) when is_atom(store) do
+    cond do
+      delete_capable?(store) -> store.delete(key)
+      update_capable?(store) -> delete_via_update(store, key)
+      true -> {:error, :unsupported}
+    end
+  end
+
+  def delete(_store, _key), do: {:error, :unsupported}
+
+  @spec delete_via_update(store_ref(), String.t()) :: :ok | {:error, term()}
+  defp delete_via_update(store, key) do
+    case update(store, key, fn _current -> {:delete, :ok} end) do
+      {:ok, _result} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
 end
