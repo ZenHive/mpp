@@ -1,5 +1,8 @@
 defmodule MPP.Methods.XRPL.SessionTest do
-  use ExUnit.Case, async: true
+  # RedeemLock is a node-global ETS table keyed by Destination. These tests share
+  # fixture Destination addresses and some hold the lease across a gate, so
+  # they cannot run in parallel with each other.
+  use ExUnit.Case, async: false
 
   alias MPP.Errors
   alias MPP.Intents.Charge
@@ -931,10 +934,10 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert_receive {:ready, pid_a}
     assert_receive {:ready, pid_b}
     send(pid_a, :go)
-    assert_receive {:sequence_read, ^pid_a, 1}
+    assert_receive {:sequence_read, ^pid_a, 1}, 1_000
     :erlang.trace(pid_b, true, [:running])
     send(pid_b, :go)
-    assert_receive {:trace, ^pid_b, :out, {RedeemLock, :wait_for_owner, 3}}
+    assert_receive {:trace, ^pid_b, :out, {RedeemLock, :wait_for_owner, 3}}, 1_000
     :erlang.trace(pid_b, false, [:running])
     refute_received {:sequence_read, ^pid_b, _}
     send(pid_a, :submit)
