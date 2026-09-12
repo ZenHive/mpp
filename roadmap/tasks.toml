@@ -3146,7 +3146,7 @@ scored_at = "2026-09-12"
 id = "120"
 phase = 8
 bundle = "tempo"
-status = "in_progress"
+status = "done"
 title = "Make the Tempo dedup reserve release exception-safe and ownership-checked"
 scores = { d = 3, b = 6, u = 5 }
 markers = ["security", "parallel"]
@@ -3164,6 +3164,13 @@ Converges on Task 115 (reviewer proposal plus architect-seat review, 2026-09-12)
 2. **Ownership-checked release.** `claim_atomic` stores only a timestamp and `delete/2` deletes unconditionally, so an attempt that outlives the store TTL (default 10 min in ConCacheStore) can delete a later attempt's successful reservation or post-broadcast mark for the same signed bytes. Store an attempt token with the reservation and release with compare-and-delete on that token (`update/3` fallback compares the stored value; stores supporting neither keep TTL-only retention as today). Document the callback contract change in `MPP.Tempo.Store` and keep the optional-callback fallback chain.
 
 Editing tempo.ex invalidates `test/mutation/payment_security_ledger.json`'s fingerprint: regenerate it and run `mix mutation.security` — every mutant must still be killed."""
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1789184240779-6c284349, 3a28273567c5e4c1c73e6178ff443a022711173e)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1789184240779-6c284349"
 created_at = "2026-09-12"
 started_at = "2026-09-12"
 scored_at = "2026-09-12"
+done_at = "2026-09-12"
+shipped_in = "3a28273567c5e4c1c73e6178ff443a022711173e"
