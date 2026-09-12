@@ -4935,7 +4935,7 @@
       "id": "120",
       "phase": 8,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Make the Tempo dedup reserve release exception-safe and ownership-checked",
       "scores": {
         "d": 3,
@@ -4976,6 +4976,7 @@
       ],
       "body": "Converges on Task 115 (reviewer proposal plus architect-seat review, 2026-09-12). Two coupled gaps in the new pre-broadcast release path of `MPP.Methods.Tempo`.\n\n1. **Exception safety.** `safe_dedup_release/2` handles only an `{:error, reason}` return from `MPP.Tempo.Store.delete/2`. A custom store that raises or exits inside `delete/1` (Redis partition, dead Agent — the repo's own `FailingPutStore` shows stores raise) propagates out of `verify/2`, turning the request's original 402 problem response into a 500 and losing the original failure reason. `safe_dedup_post_broadcast/3` already solves the same class with a documented `rescue` + `catch :exit` pair and a `reach:disable-next-line` justification; apply the same shape. The release failure is logged at warning level and the slot stays reserved (conservative retain).\n\n2. **Ownership-checked release.** `claim_atomic` stores only a timestamp and `delete/2` deletes unconditionally, so an attempt that outlives the store TTL (default 10 min in ConCacheStore) can delete a later attempt's successful reservation or post-broadcast mark for the same signed bytes. Store an attempt token with the reservation and release with compare-and-delete on that token (`update/3` fallback compares the stored value; stores supporting neither keep TTL-only retention as today). Document the callback contract change in `MPP.Tempo.Store` and keep the optional-callback fallback chain.\n\nEditing tempo.ex invalidates `test/mutation/payment_security_ledger.json`'s fingerprint: regenerate it and run `mix mutation.security` — every mutant must still be killed.",
       "created_at": "2026-09-12",
+      "started_at": "2026-09-12",
       "scored_at": "2026-09-12",
       "cross_repo": []
     }
