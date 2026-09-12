@@ -2994,7 +2994,7 @@ shipped_in = "3a73c53e822d39b5de5cd841b024ec23f74ba3a9"
 id = "115"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Release the Tempo dedup reserve slot when a post-reserve step fails before broadcast, retaining it on ambiguous outcomes"
 scores = { d = 5, b = 5, u = 3 }
 markers = ["parallel"]
@@ -3008,6 +3008,7 @@ body = """
 
 mppx takes the other route: reserve before verify, release on failure (`refs/mppx/src/tempo/server/Charge.ts` ~215-273); `MPP.Methods.Tempo.SponsorBudget` (Task 78) already encodes the release/retain distinction for the sponsor accounting — reuse its vocabulary. Design: distinguish 'definitely not broadcast' failures (fill, co-sign, config, simulate reverted with a definitive error) which release the slot, from 'may have been broadcast' outcomes (simulate or broadcast timeout, ambiguous RPC transport error) which must stay reserved. Prefer a compensating release on the transaction path over a TTL-only provisional reserve; if the `MPP.Tempo.Store` behaviour needs a new optional callback, add it as optional with a documented fallback so third-party stores keep working, and bump the CHANGELOG accordingly."""
 created_at = "2026-09-11"
+started_at = "2026-09-12"
 scored_at = "2026-09-11"
 
 [[task]]
