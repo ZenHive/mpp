@@ -5,6 +5,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
   alias MPP.Methods.XRPL.Codec
+  alias MPP.Methods.XRPL.RedeemLock
   alias MPP.Methods.XRPL.RPC
   alias MPP.Methods.XRPL.Session, as: XRPLSession
   alias MPP.Methods.XRPL.Wallet
@@ -698,6 +699,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
       )
 
     {:ok, channel} = Channel.activate(channel)
+    {:ok, channel} = Channel.close(channel)
     assert :ok = Store.put(context.store, channel)
 
     {:ok, session} =
@@ -771,6 +773,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
       )
 
     {:ok, channel} = Channel.activate(channel)
+    {:ok, channel} = Channel.close(channel)
     assert :ok = Store.put(context.store, channel)
 
     {:ok, session} =
@@ -910,7 +913,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
 
     put_redeemable!(context, @channel_id, wallet.address)
     put_redeemable!(context, other_id, wallet.address)
-    counters = stub_redeem(%{context | session: session}, destination: wallet.address)
+    counters = stub_redeem(%{context | session: session}, destination: wallet.address, gate: true)
     parent = self()
 
     start = fn channel_id ->
@@ -928,7 +931,19 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert_receive {:ready, pid_a}
     assert_receive {:ready, pid_b}
     send(pid_a, :go)
+    assert_receive {:sequence_read, ^pid_a, 1}
+    :erlang.trace(pid_b, true, [:running])
     send(pid_b, :go)
+    assert_receive {:trace, ^pid_b, :out, {RedeemLock, :wait_for_owner, 3}}
+    :erlang.trace(pid_b, false, [:running])
+    refute_received {:sequence_read, ^pid_b, _}
+    send(pid_a, :submit)
+    assert_receive {:validation_waiting, ^pid_a}
+    assert_receive {:sequence_read, ^pid_b, 2}
+    send(pid_b, :submit)
+    assert_receive {:validation_waiting, ^pid_b}
+    send(pid_a, :validate)
+    send(pid_b, :validate)
 
     results = Enum.map([task_a, task_b], &Task.await(&1, 5_000))
 
@@ -1054,8 +1069,94 @@ defmodule MPP.Methods.XRPL.SessionTest do
     details = Map.put(session.method_details, "session_store", UpdateFailStore)
     stub_redeem(%{context | session: %{session | method_details: details}})
 
-    assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, details)
+    log =
+      ExUnit.CaptureLog.capture_log([level: :error], fn ->
+        assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, details)
+        assert type == Errors.new(:settlement_failed, "").type
+      end)
+
+    [blob] = submitted_blobs()
+    assert log =~ "[error]"
+    assert log =~ RPC.blob_hash(blob)
+    assert {:ok, id} = Channel.normalize_id(@channel_id)
+    assert log =~ id
+    assert log =~ @fixture["destination"]["ed25519"]["address"]
+  end
+
+  test "queued claims wait for validation and fail closed when validation is unavailable", context do
+    session = redeemable!(context)
+
+    stub(%{context | session: session}, @hash,
+      submit: %{"engine_result" => "terQUEUED", "tx_json" => %{"hash" => @fixture["claim"]["ed25519"]["hash"]}},
+      lease_address: @fixture["destination"]["ed25519"]["address"],
+      validated: false
+    )
+
+    assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, session.method_details)
     assert type == Errors.new(:settlement_failed, "").type
+
+    stub(%{context | session: session}, @hash,
+      submit: %{"engine_result" => "terQUEUED", "tx_json" => %{"hash" => @fixture["claim"]["ed25519"]["hash"]}},
+      lease_address: @fixture["destination"]["ed25519"]["address"],
+      missing: true
+    )
+
+    assert {:ok, _} = XRPLSession.redeem(@channel_id, session.method_details)
+  end
+
+  test "active channels refuse redemption and keep accepting vouchers", context do
+    stub(context, @hash)
+
+    assert {:ok, _} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               context.session
+             )
+
+    counters = stub_redeem(context, destination: @recipient)
+    assert {:error, %Errors{type: type, detail: detail}} = XRPLSession.redeem(@channel_id, context.session.method_details)
+    assert type == Errors.new(:verification_failed, "").type
+    assert detail =~ "channel_not_closed"
+    assert :atomics.get(counters.submits, 1) == 0
+
+    assert {:ok, _} =
+             XRPLSession.verify(
+               %{"action" => "voucher", "channelId" => @channel_id, "amount" => "200000", "signature" => @voucher_sig},
+               context.session
+             )
+
+    assert {:ok, %Channel{status: :active, cumulative_amount: 200_000}} = Store.get(context.store, @channel_id)
+    assert :atomics.get(counters.submits, 1) == 0
+  end
+
+  test "a stuck Destination lease times out and retains a redeemable claim", context do
+    session = redeemable!(context)
+    counters = stub_redeem(%{context | session: session})
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        RedeemLock.with_account(@fixture["destination"]["ed25519"]["address"], fn ->
+          send(parent, :held)
+
+          receive do
+            :release -> :ok
+          end
+        end)
+      end)
+
+    assert_receive :held
+    config = Map.put(session.method_details, "redeem_lock_timeout_ms", 30)
+    assert {:error, %Errors{type: type}} = XRPLSession.redeem(@channel_id, config)
+    assert type == Errors.new(:settlement_failed, "").type
+    assert :atomics.get(counters.submits, 1) == 0
+    assert {:ok, %Channel{status: :closed, proof: %{amount: 200_000} = proof}} = Store.get(context.store, @channel_id)
+    refute Map.has_key?(proof, :tx_hash)
+    assert Process.alive?(holder.pid)
+    send(holder.pid, :release)
+    assert :ok = Task.await(holder)
+    assert {:ok, _} = XRPLSession.redeem(@channel_id, config)
+    assert :atomics.get(counters.submits, 1) == 1
   end
 
   defp redeemable!(context) do
@@ -1170,8 +1271,19 @@ defmodule MPP.Methods.XRPL.SessionTest do
 
   defp redeem_rpc_result("server_info", _params, _owner, _opts, _counters, _past), do: %{"info" => %{"network_id" => 1}}
 
-  defp redeem_rpc_result("account_info", _params, _owner, _opts, counters, _past) do
-    %{"account_data" => %{"Sequence" => :atomics.get(counters.sequence, 1)}}
+  defp redeem_rpc_result("account_info", params, owner, opts, counters, _past) do
+    assert params["ledger_index"] == "current"
+    sequence = :atomics.get(counters.sequence, 1)
+
+    if Keyword.get(opts, :gate) do
+      send(owner, {:sequence_read, self(), sequence})
+
+      receive do
+        :submit -> :ok
+      end
+    end
+
+    %{"account_data" => %{"Sequence" => sequence}}
   end
 
   defp redeem_rpc_result("ledger", _params, _owner, _opts, _counters, _past) do
@@ -1200,7 +1312,15 @@ defmodule MPP.Methods.XRPL.SessionTest do
     end
   end
 
-  defp redeem_rpc_result("tx", params, _owner, _opts, _counters, _past) do
+  defp redeem_rpc_result("tx", params, owner, opts, _counters, _past) do
+    if Keyword.get(opts, :gate) do
+      send(owner, {:validation_waiting, self()})
+
+      receive do
+        :validate -> :ok
+      end
+    end
+
     hash = params["transaction"]
 
     %{
@@ -1301,6 +1421,11 @@ defmodule MPP.Methods.XRPL.SessionTest do
   defp rpc_result("submit", hash, opts, params, claimed, owner), do: submit_result(hash, opts, params, claimed, owner)
 
   defp rpc_result("tx", hash, opts, params, _claimed, _owner) do
+    if address = opts[:lease_address] do
+      assert {:error, %Errors{}} =
+               RedeemLock.with_account(address, fn -> flunk("queued lease released before validation") end, 0)
+    end
+
     queried = params["transaction"] || hash
     tx_rpc(queried, hash, opts)
   end

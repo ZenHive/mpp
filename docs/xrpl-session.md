@@ -153,18 +153,42 @@ same Sequence collide; the loser fails `tefPAST_SEQ`
 The claim itself is not applied, so no value is lost — the retained proof
 can be submitted again.
 
-`redeem/2` (and close, which calls it) takes an exclusive ETS lease keyed by
-Destination address (`MPP.Methods.XRPL.RedeemLock`) before reading Sequence,
-so concurrent closes of different channels that share a Destination cannot
-share a Sequence. The lease is single-node: it coordinates callers on this
-BEAM node and does not span a cluster. A `tefPAST_SEQ` result is retried
-once with a fresh Sequence, which absorbs one collision with a submission
-from another node or another transaction from the same account outside this
-lease; it does not cover sustained multi-node contention. Cross-node
-idempotency rests on a shared session store making the recorded txHash
-visible to every replica. After a validated `tesSUCCESS`,
-the claim txHash is stored on the channel proof; a later `redeem/2` returns
-that hash and does not submit again.
+`redeem/2` requires stored status `:closed`; other statuses return
+`verification_failed` with `channel_not_closed` in the detail, without submitting.
+Close records the retained proof before invoking redemption.
+
+`redeem/2` takes a single-node ETS lease keyed by Destination address
+(`MPP.Methods.XRPL.RedeemLock`) through the `account_info` Sequence read
+(`ledger_index: "current"`), signing, and `submit`, including one `tefPAST_SEQ`
+retry. After `tesSUCCESS`, validation runs outside the Destination lease.
+The live testnet probe checks that current Sequence advances after submit.
+For `terQUEUED`, the Destination lease remains held until validation: queued
+transactions are separate from current account state
+([account_info](https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/account-methods/account_info)).
+A separate channel lease spans validation and persistence, preventing duplicate
+submits for the same channel while allowing other channels to settle concurrently.
+
+Each lease acquisition is bounded by `redeem_lock_timeout_ms` (non-negative
+integer, default `30_000`). Waiters block on a monitor; release or caller death
+wakes them without polling. Expiry returns `settlement_failed` without submitting
+or discarding the retained claim, which can be redeemed after contention clears.
+This timeout bounds acquisition, not the RPC calls performed by the holder.
+
+Leases coordinate only this BEAM node, not a cluster. The single `tefPAST_SEQ`
+retry absorbs one collision with an external submission; it does not cover
+sustained multi-node contention. Cross-node idempotency rests on a shared
+session store making the recorded txHash visible to every replica.
+After validated settlement, a later `redeem/2` returns the stored hash without
+submitting again.
+
+If settlement validates but persisting the hash fails, redemption returns
+`settlement_failed` and emits an error log containing `txHash`, `channel_id`,
+and `Destination`. Preserve that log. An operator must query `tx` by the logged
+hash, verify `validated: true`, `tesSUCCESS`, the Destination account and the
+channel's claim effects, then use the configured session store's atomic update
+to put that hash in the closed channel's `proof.tx_hash`, preserving the rest of
+the proof. Confirm that `redeem/2` returns the recorded hash. Reconcile before
+retrying submission: the on-ledger channel may already be deleted.
 
 ## Verification
 

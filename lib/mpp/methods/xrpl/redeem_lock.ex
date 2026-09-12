@@ -16,8 +16,10 @@ defmodule MPP.Methods.XRPL.RedeemLock do
 
   use GenServer
 
+  alias MPP.Errors
+
   @table __MODULE__
-  @wait_ms 5
+  @default_timeout_ms 30_000
 
   @doc "Start the ETS table owner for Destination-account leases."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -28,16 +30,25 @@ defmodule MPP.Methods.XRPL.RedeemLock do
   @doc """
   Run `fun` while holding the exclusive lease for `address`.
 
-  Not re-entrant. A crashed holder is unblocked by the next waiter.
+  Not re-entrant. Acquisition is bounded by `timeout_ms` (default 30,000).
+  Waiters monitor a lease process that exits on release or caller death.
   """
-  @spec with_account(String.t(), (-> result)) :: result when result: var
-  def with_account(address, fun) when is_binary(address) and is_function(fun, 0) do
-    acquire(address)
+  @spec with_account(String.t(), (-> result), non_neg_integer()) :: result | {:error, Errors.t()} when result: var
+  def with_account(address, fun, timeout_ms \\ @default_timeout_ms)
+      when is_binary(address) and is_function(fun, 0) and is_integer(timeout_ms) and timeout_ms >= 0 do
+    caller = self()
+    {lease, ref} = spawn_monitor(fn -> lease_lifetime(caller) end)
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
 
     try do
-      fun.()
+      with :ok <- acquire(address, lease, deadline), do: fun.()
     after
-      release(address)
+      :ets.delete_object(@table, {address, lease})
+      send(lease, :release)
+
+      receive do
+        {:DOWN, ^ref, :process, ^lease, _} -> :ok
+      end
     end
   end
 
@@ -47,31 +58,50 @@ defmodule MPP.Methods.XRPL.RedeemLock do
     {:ok, table}
   end
 
-  defp acquire(address) do
-    if :ets.insert_new(@table, {address, self()}) do
+  defp lease_lifetime(caller) do
+    ref = Process.monitor(caller)
+
+    receive do
+      :release -> :ok
+      {:DOWN, ^ref, :process, ^caller, _} -> :ok
+    end
+  end
+
+  defp acquire(address, lease, deadline) do
+    if :ets.insert_new(@table, {address, lease}) do
       :ok
     else
-      wait_for_owner(address)
-      acquire(address)
+      wait_for_owner(address, lease, deadline)
     end
   end
 
-  defp wait_for_owner(address) do
-    with [{^address, owner}] <- :ets.lookup(@table, address) do
-      ref = Process.monitor(owner)
+  defp wait_for_owner(address, lease, deadline) do
+    case :ets.lookup(@table, address) do
+      [{^address, owner}] ->
+        ref = Process.monitor(owner)
 
-      receive do
-        {:DOWN, ^ref, :process, ^owner, _} ->
-          :ets.delete_object(@table, {address, owner})
-      after
-        @wait_ms ->
-          Process.demonitor(ref, [:flush])
-      end
+        receive do
+          {:DOWN, ^ref, :process, ^owner, _} ->
+            :ets.delete_object(@table, {address, owner})
+            retry_acquire(address, lease, deadline)
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            Process.demonitor(ref, [:flush])
+            timeout()
+        end
+
+      [] ->
+        retry_acquire(address, lease, deadline)
     end
   end
 
-  defp release(address) do
-    :ets.delete_object(@table, {address, self()})
-    :ok
+  defp retry_acquire(address, lease, deadline) do
+    if System.monotonic_time(:millisecond) < deadline do
+      acquire(address, lease, deadline)
+    else
+      timeout()
+    end
   end
+
+  defp timeout, do: {:error, Errors.new(:settlement_failed, "XRPL redemption lease acquisition timed out")}
 end

@@ -138,6 +138,42 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
     assert proof.signature == voucher_sig
   end
 
+  test "current Sequence advances after a successful claim submit", context do
+    session = session(context)
+    {channel_id, signature} = open_channel!(context, session)
+    info = rpc!(context.url, "account_info", %{"account" => context.recipient["address"], "ledger_index" => "current"})
+    sequence = info["account_data"]["Sequence"]
+    ledger = rpc!(context.url, "ledger_current", %{})
+
+    signed =
+      js!(%{
+        "seed" => context.recipient["seed"],
+        "tx" => %{
+          "TransactionType" => "PaymentChannelClaim",
+          "Account" => context.recipient["address"],
+          "Channel" => channel_id,
+          "Balance" => "100000",
+          "Amount" => "100000",
+          "Signature" => signature,
+          "PublicKey" => context.payer["publicKey"],
+          "Flags" => 2_147_614_720,
+          "Fee" => "12",
+          "Sequence" => sequence,
+          "LastLedgerSequence" => ledger["ledger_current_index"] + 20
+        }
+      })
+
+    submitted = rpc!(context.url, "submit", %{"tx_blob" => signed["tx_blob"]})
+    assert submitted["engine_result"] == "tesSUCCESS"
+    current = rpc!(context.url, "account_info", %{"account" => context.recipient["address"], "ledger_index" => "current"})
+    assert current["account_data"]["Sequence"] == sequence + 1
+
+    assert {:ok, validated} =
+             MPP.Methods.XRPL.RPC.await_validated(signed["hash"], session.method_details, submitted: true)
+
+    assert validated["meta"]["TransactionResult"] == "tesSUCCESS"
+  end
+
   @tag timeout: 300_000
   test "two concurrent closes to one Destination both settle with distinct Sequences", context do
     session = session(context)

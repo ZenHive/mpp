@@ -40,6 +40,8 @@ defmodule MPP.Methods.XRPL.Session do
   alias MPP.Session.Payload
   alias MPP.Session.Store
 
+  require Logger
+
   @public_fields ~w(network)
   @default_settle_delay 3_600
   @default_closing_margin 3_600
@@ -164,6 +166,10 @@ defmodule MPP.Methods.XRPL.Session do
   so concurrent closes cannot share a `Sequence`. An already-settled
   channel returns the recorded txHash without submitting again. A
   `tefPAST_SEQ` submit is retried once with a fresh Sequence.
+  Only closed channels may redeem. Lease acquisition defaults to 30 seconds
+  (`redeem_lock_timeout_ms`). Successful submits validate outside the account
+  lease; queued submits retain it through validation. A channel lease covers
+  validation and persistence for same-channel idempotency.
   """
   @spec redeem(String.t(), map()) :: {:ok, String.t()} | {:error, Errors.t()}
   def redeem(channel_id, config) when is_binary(channel_id) and is_map(config) do
@@ -508,13 +514,21 @@ defmodule MPP.Methods.XRPL.Session do
     end
   end
 
+  defp redeem_channel(%Channel{status: status}, _config) when status != :closed do
+    {:error, Errors.new(:verification_failed, "channel_not_closed: close the channel before redemption")}
+  end
+
   defp redeem_channel(channel, config) do
     case settled_hash(channel) do
       {:ok, hash} ->
         {:ok, hash}
 
       :not_settled ->
-        RedeemLock.with_account(channel.recipient, fn -> redeem_locked(channel.channel_id, config) end)
+        RedeemLock.with_account(
+          "channel:" <> channel.channel_id,
+          fn -> redeem_locked(channel.channel_id, config) end,
+          lock_timeout(config)
+        )
     end
   end
 
@@ -530,8 +544,7 @@ defmodule MPP.Methods.XRPL.Session do
   defp submit_redemption(channel, config) do
     with {:ok, proof} <- stored_proof(channel),
          {:ok, wallet} <- destination_wallet(config, channel),
-         {:ok, hash} <- submit_with_retry(channel, proof, wallet, config),
-         {:ok, result} <- RPC.await_validated(hash, config, submitted: true),
+         {:ok, hash, result} <- submit_and_validate(channel, proof, wallet, config),
          :ok <- claimed?(result, hash, channel, proof),
          :ok <- confirm_ledger(channel.channel_id, proof.amount, config),
          :ok <- record_hash(channel, hash, config) do
@@ -541,6 +554,27 @@ defmodule MPP.Methods.XRPL.Session do
       _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
     end
   end
+
+  defp submit_and_validate(channel, proof, wallet, config) do
+    result =
+      RedeemLock.with_account(
+        channel.recipient,
+        fn -> submit_with_retry(channel, proof, wallet, config) end,
+        lock_timeout(config)
+      )
+
+    case result do
+      {:ok, hash} ->
+        with {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
+          {:ok, hash, validated}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp lock_timeout(config), do: Map.get(config, "redeem_lock_timeout_ms", 30_000)
 
   defp submit_with_retry(channel, proof, wallet, config) do
     submit_claim_attempt(channel, proof, wallet, config, false)
@@ -573,8 +607,17 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp submit_claim(blob, hash, config) do
     case RPC.call(config, "submit", %{"tx_blob" => blob}) do
-      {:ok, result} -> accept_submit(result, hash)
-      _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
+      {:ok, %{"engine_result" => "terQUEUED"} = result} ->
+        with {:ok, ^hash} <- accept_submit(result, hash),
+             {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
+          {:ok, hash, validated}
+        end
+
+      {:ok, result} ->
+        accept_submit(result, hash)
+
+      _ ->
+        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
     end
   end
 
@@ -604,8 +647,15 @@ defmodule MPP.Methods.XRPL.Session do
 
   defp record_hash(channel, hash, config) do
     case Store.update(store(config), channel.channel_id, &put_tx_hash(&1, hash)) do
-      {:ok, _} -> :ok
-      _ -> {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
+      {:ok, _} ->
+        :ok
+
+      _ ->
+        Logger.error(
+          "XRPL validated redemption hash persistence failed: txHash=#{hash} channel_id=#{channel.channel_id} Destination=#{channel.recipient}"
+        )
+
+        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim settlement failed")}
     end
   end
 
@@ -633,7 +683,7 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp account_sequence(address, config) do
-    case RPC.call(config, "account_info", %{"account" => address, "ledger_index" => "validated"}) do
+    case RPC.call(config, "account_info", %{"account" => address, "ledger_index" => "current"}) do
       {:ok, %{"account_data" => %{"Sequence" => sequence}}} when is_integer(sequence) and sequence >= 0 ->
         {:ok, sequence}
 
