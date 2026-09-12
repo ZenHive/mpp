@@ -4834,7 +4834,7 @@
       "id": "118",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Serialize XRPL redemption submits per Destination account so concurrent closes do not collide on Sequence",
       "scores": {
         "d": 4,
@@ -4870,10 +4870,17 @@
         "test/mpp/methods/xrpl_session_integration_test.exs",
         "docs/xrpl-session.md"
       ],
+      "shipped_in": "4cbd43feb64b18aba83efdc258dddf9bd41a0ab0",
       "body": "`MPP.Methods.XRPL.Session.redeem/2` (via `redeem_channel/2` → `account_sequence/2`) reads the Destination account's `Sequence` from `account_info` immediately before signing, with no coordination and no idempotency mark. Two closes redeeming different channels that share a Destination account, or an operator calling `redeem/2` while a close is settling, can pick the same Sequence; the loser fails with a tef/tec code and the client sees `settlement-failed`. No value is lost — the retained claim survives and can be redeemed again (verified by the Task 117 review reading `account_sequence/2` and `maybe_redeem/4`) — but a busy server sees spurious settlement failures. Provider-owned authority: xrpl.org on Sequence / LastLedgerSequence / tefPAST_SEQ semantics and the live testnet.\n\nBuild: serialize submits per Destination account (a per-account lock or a Registry/GenServer-free approach such as `:global`-free ETS lease keyed by address in the existing session store) or allocate distinct sequences under that lock; retry once on tefPAST_SEQ with a fresh Sequence; keep redeem/2 idempotent for an already-redeemed channel (return the recorded txHash instead of resubmitting). Document the guarantee and its single-node scope in docs/xrpl-session.md.",
       "created_at": "2026-09-11",
       "started_at": "2026-09-12",
+      "done_at": "2026-09-12",
       "scored_at": "2026-09-11",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1789179841121-48f3f6cd, 4cbd43feb64b18aba83efdc258dddf9bd41a0ab0).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789179841121-48f3f6cd",
       "cross_repo": []
     }
   ]
