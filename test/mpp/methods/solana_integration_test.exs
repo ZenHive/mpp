@@ -206,6 +206,8 @@ defmodule MPP.Methods.SolanaIntegrationTest do
   end
 
   defp put_confidential_context(context) do
+    refresh_bundles!()
+
     names = ~w(
       SOLANA_CONFIDENTIAL_MINT
       SOLANA_CONFIDENTIAL_RECIPIENT
@@ -237,6 +239,34 @@ defmodule MPP.Methods.SolanaIntegrationTest do
            "SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON"
          )
      })}
+  end
+
+  # A bundle dies with its blockhash (~60 s on devnet), which is shorter than a
+  # full run of this file, so the two confidential tests cannot share one set of
+  # exported bundles. `SOLANA_CONFIDENTIAL_BUNDLE_CMD` names a command that
+  # reprints both bundles as a JSON object of env names to values; each test
+  # then submits bundles minted seconds earlier.
+  defp refresh_bundles! do
+    case System.get_env("SOLANA_CONFIDENTIAL_BUNDLE_CMD") do
+      nil ->
+        :ok
+
+      command ->
+        case System.cmd("sh", ["-c", command]) do
+          {output, 0} -> put_refreshed_bundles!(output)
+          {output, status} -> flunk("SOLANA_CONFIDENTIAL_BUNDLE_CMD exited #{status}: #{output}")
+        end
+    end
+  end
+
+  defp put_refreshed_bundles!(output) do
+    case Jason.decode(output) do
+      {:ok, values} when is_map(values) and values != %{} ->
+        Enum.each(values, fn {name, value} -> System.put_env(name, value) end)
+
+      _other ->
+        flunk("SOLANA_CONFIDENTIAL_BUNDLE_CMD must print a JSON object of fixture exports, got: #{output}")
+    end
   end
 
   defp confidential_charge(context) do
@@ -284,10 +314,17 @@ defmodule MPP.Methods.SolanaIntegrationTest do
     """
     Missing Solana confidential-transfer devnet fixtures!
 
-    Configure a Token-2022 confidential-transfer mint and recipient account,
-    then export the recipient's own ElGamal secret and two fresh fee-sponsored
-    bundles. The second bundle must transfer a different amount than the
-    challenged SOLANA_CONFIDENTIAL_AMOUNT:
+    scripts/solana-confidential-fixtures.sh generates every fixture below from
+    the funded devnet keypair:
+
+      ./scripts/solana-confidential-fixtures.sh setup         # one-off devnet state
+      ./scripts/solana-confidential-fixtures.sh secrets       # persist the stable exports to ~/.secrets
+      ./scripts/solana-confidential-fixtures.sh confidential  # regenerate the bundles and run these two tests
+
+    To configure it by hand instead: create a Token-2022 confidential-transfer
+    mint and recipient account, then export the recipient's own ElGamal secret
+    and two fresh fee-sponsored bundles. The second bundle must transfer a
+    different amount than the challenged SOLANA_CONFIDENTIAL_AMOUNT:
 
       export SOLANA_CONFIDENTIAL_MINT="<Token-2022 confidential mint>"
       export SOLANA_CONFIDENTIAL_RECIPIENT="<recipient wallet address>"
@@ -299,7 +336,11 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
     Both bundles must use the SOLANA_PRIVATE_KEY public key as fee payer, leave
     its signature slot empty, return all proof-account rent to it, and use a
-    current devnet blockhash. Regenerate both bundles before every run.
+    current devnet blockhash. A bundle dies with its blockhash (~60 s), which is
+    shorter than a full run of this file, so either run the two tests separately
+    against freshly generated bundles, or have each test mint its own pair:
+
+      export SOLANA_CONFIDENTIAL_BUNDLE_CMD="./scripts/solana-confidential-fixtures.sh bundles-json"
 
     Setup guide:
       https://solana.com/docs/tokens/extensions/confidential-transfer

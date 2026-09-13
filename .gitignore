@@ -45,3 +45,6 @@ mpp-*.tar
 /npm.lock
 /package.json
 /package-lock.json
+
+# Build artifacts of the dev-only Solana confidential-fixture generator.
+/scripts/solana_confidential_fixtures/target/

@@ -8,6 +8,19 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/solana-confidential-fixtures.sh` regenerates every
+  `SOLANA_CONFIDENTIAL_*` fixture the Token-2022 confidential-bundle
+  integration tests need — the confidential-transfer mint, the recipient
+  confidential account, two funded sender accounts, and both signed bundles
+  (proof-context setup, `ConfidentialTransfer`, proof-context close). With it
+  the confidential profile is verified end to end on live devnet: the bundle
+  settles and `MPP.Methods.Solana.Confidential` decrypts the recipient's
+  pending-balance delta down to the challenged amount, while a bundle crediting
+  a different amount is rejected. A bundle dies with its blockhash, so the tests
+  accept `SOLANA_CONFIDENTIAL_BUNDLE_CMD` to mint a fresh pair per test.
+
 ### Fixed
 
 - XRPL session redemption serializes claims per Destination on one BEAM node,
