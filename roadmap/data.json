@@ -4993,6 +4993,43 @@
       "verified_by": "claude",
       "verification_ref": "harness-run:run-1789184240779-6c284349",
       "cross_repo": []
+    },
+    {
+      "id": "121",
+      "phase": 9,
+      "bundle": "solana",
+      "status": "in_progress",
+      "title": "Run the Token-2022 confidential bundle integration tests live on devnet",
+      "scores": {
+        "d": 5,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.3,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "human",
+      "acceptance_criteria": [
+        "The two confidential-bundle integration tests pass live against devnet at least once, with the run output kept as evidence (JSON output path or commit-bound note)",
+        "A committed script regenerates every SOLANA_CONFIDENTIAL_* fixture from the funded devnet keypair; the exports are documented, the secrets themselves stay in ~/.secrets",
+        "Any library defect the live run exposes in MPP.Methods.Solana or MPP.Methods.Solana.Confidential is fixed with a unit test derived from the observed live response, and noted in the Unreleased changelog",
+        "If devnet rejects confidential transfers (proof program disabled or similar), the exact observed RPC error is recorded in the task and the tests keep flunking loudly with the setup instructions"
+      ],
+      "out_of_scope": [
+        "Changing the confidential profile semantics from draft-solana-charge-00",
+        "Mainnet execution"
+      ],
+      "touches": [
+        "test/mpp/methods/solana_integration_test.exs",
+        "scripts/"
+      ],
+      "body": "Convergence on Task 88: its acceptance criterion \"Live Token-2022 confidential-transfer test mint: one real bundle success and one relevant real rejection\" was never executed. The reviewer of harness run run-1787125030148-84f91644 recorded as a concern that SOLANA_RPC_URL / SOLANA_PRIVATE_KEY were unset in its environment, so the two tests in the \"confidential bundle profile\" describe block only ever flunked on the missing SOLANA_CONFIDENTIAL_* fixtures. The SOL / SPL tests in the same file ran green on devnet on 2026-09-13 after the preflight-commitment fix (8c66b20), so the base credentials now exist.\n\nHand-build reason (assignee human): the funded devnet keypair lives only in the operator's ~/.secrets; the harness node has no SOLANA_* credentials, so a dispatched agent cannot reach devnet. Executed by a local subagent on the operator host.\n\nProduce the fixtures reproducibly: a script that creates a Token-2022 mint with the confidential-transfer extension on devnet, configures and funds a recipient confidential account, builds the success bundle (proof-context setup, confidential Transfer, proof-context close) and the wrong-amount bundle, and prints the exact SOLANA_CONFIDENTIAL_* exports. Authority: live devnet behaviour plus the spl-token-2022 program and draft-solana-charge-00; the ZK ElGamal proof program availability on devnet is a premise to confirm live, not assume. If devnet cannot execute confidential transfers, the deliverable is that finding with the observed error, not a mock.\n",
+      "created_at": "2026-09-13",
+      "started_at": "2026-09-13",
+      "scored_at": "2026-09-13",
+      "cross_repo": []
     }
   ]
 }
