@@ -1189,7 +1189,7 @@ dependencies = [
  "parking_lot",
  "portable-atomic",
  "quanta",
- "rand 0.8.5",
+ "rand 0.8.8",
  "smallvec",
  "spinning_top",
 ]
@@ -2203,9 +2203,9 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -3098,7 +3098,7 @@ dependencies = [
  "futures-util",
  "indexmap",
  "log",
- "rand 0.8.5",
+ "rand 0.8.8",
  "rayon",
  "solana-keypair",
  "solana-measure",
@@ -3385,7 +3385,7 @@ dependencies = [
  "ed25519-dalek",
  "ed25519-dalek-bip32",
  "five8 1.0.0",
- "rand 0.8.5",
+ "rand 0.8.8",
  "solana-address 2.6.0",
  "solana-derivation-path",
  "solana-seed-derivable",
@@ -3492,7 +3492,7 @@ dependencies = [
  "itertools 0.12.1",
  "log",
  "nix",
- "rand 0.8.5",
+ "rand 0.8.8",
  "serde",
  "socket2",
  "solana-serde",
@@ -3568,7 +3568,7 @@ dependencies = [
  "libc",
  "log",
  "nix",
- "rand 0.8.5",
+ "rand 0.8.8",
  "rayon",
  "serde",
  "solana-hash 3.1.0",
@@ -3695,7 +3695,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8909d399deb0851aa524420beeb5646b115fd253ef446e35fe4504c904da3941"
 dependencies = [
- "rand 0.8.5",
+ "rand 0.8.8",
  "solana-address 1.1.0",
 ]
 
@@ -4098,7 +4098,7 @@ checksum = "4bb8057cc0e9f7b5e89883d49de6f407df655bb6f3a71d0b7baf9986a2218fd9"
 dependencies = [
  "ed25519-dalek",
  "five8 0.2.1",
- "rand 0.8.5",
+ "rand 0.8.8",
  "serde",
  "serde-big-array",
  "serde_derive",
@@ -4195,7 +4195,7 @@ dependencies = [
  "percentage",
  "quinn",
  "quinn-proto",
- "rand 0.8.5",
+ "rand 0.8.8",
  "rustls",
  "smallvec",
  "socket2",
@@ -4231,7 +4231,7 @@ version = "3.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2511decc60b5c1c56d65670b42952b9a9139f0a7fa432a2a7a639c12f71f0e8"
 dependencies = [
- "rand 0.8.5",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -4421,7 +4421,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "log",
- "rand 0.8.5",
+ "rand 0.8.8",
  "solana-packet",
  "solana-perf",
  "solana-short-vec",
@@ -4475,7 +4475,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d1c28ae4e600f7b2b76cce76696c7ee4ab2078f5428125d04ed31c421dfb122"
 dependencies = [
  "agave-feature-set",
- "rand 0.8.5",
+ "rand 0.8.8",
  "semver",
  "serde",
  "solana-sanitize",
@@ -4542,7 +4542,7 @@ dependencies = [
  "merlin",
  "num-derive",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.8",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4574,7 +4574,7 @@ dependencies = [
  "curve25519-dalek",
  "itertools 0.14.0",
  "merlin",
- "rand 0.8.5",
+ "rand 0.8.8",
  "serde",
  "serde_derive",
  "serde_json",
