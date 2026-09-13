@@ -8,6 +8,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Fixed
+
+- Hexdocs build without reference warnings: the README links to the XRPL guides on GitHub (the `docs/` tree is not part of the Hex package), and the two intentional references to `@moduledoc false` internals (CHANGELOG prose, the WebSocket session meter type) are exempted from ex_doc's hidden-reference warning.
+
 ## [0.17.1] — 2026-09-13
 
 ### Added

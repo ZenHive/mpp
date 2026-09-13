@@ -170,7 +170,10 @@ defmodule MPP.MixProject do
         "MPP.Headers.parse_accept_payment/1",
         "MPP.Replay"
       ],
-      extras: ["README.md", "CHANGELOG.md", "LICENSE", "SECURITY.md"]
+      extras: ["README.md", "CHANGELOG.md", "LICENSE", "SECURITY.md"],
+      # CHANGELOG names @moduledoc-false internals by design; WebSocket.t() types its
+      # meter field with the hidden Session.Meter.t() so dialyzer keeps the precise type.
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md", "MPP.Transports.WebSocket"]
     ]
   end
 
