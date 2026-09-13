@@ -56,10 +56,12 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-p9fv-9w58-95x2` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo subscription key authorization was not bound to the issuing challenge — captured activation credential replayable under a fresh challenge (mppx #882 parity) |
 | `GHSA-8x7x-5j8g-8hcx` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo pre-broadcast dedup reserve keyed on the caller-supplied encoding — a non-canonical re-encoding reserved a second slot (mppx #818 parity) |
 | `GHSA-82qh-vrvm-gqvc` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | `Payment-Receipt` and `Cache-Control: private` written before the downstream app ran — consumer `Cache-Control` could expose paid responses to shared caches (mpp-rs #381/#399 parity) |
+| `GHSA-rp92-r4rc-42gw` | — (CVE request to the EEF CNA pending) | LOW | 0.17.1 | XRPL session redemption held the Destination lease through ledger validation with unbounded waiter queueing — a slow validation stalled every other redemption on that Destination |
 | `GHSA-65c4-v2vw-rr64` | — (CVE request to the EEF CNA pending) | LOW | 0.17.0 | Tempo canonical dedup reserve did not normalize one signature re-encoding — a second slot for one signed transaction; the live node rejected that encoding at broadcast (residual of `GHSA-8x7x-5j8g-8hcx`) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
-remaining four was requested from the EEF CNA on 2026-08-18.
+remaining four was requested from the EEF CNA on 2026-08-18. The six advisories marked
+pending (0.16.2 through 0.17.1) have not yet been submitted to the CNA.
 
 ---
 
@@ -131,7 +133,7 @@ remaining four was requested from the EEF CNA on 2026-08-18.
 
 ## Open hardening items
 
-**1 open item** as of 2026-09-12 (a low-severity draft advisory from the post-landing content review of the 0.17.0 wave, tracked as a sanitized rmap task; it is published with the release that ships the fix). Earlier: the draft advisory from the post-landing content review of the 0.16.2 wave (Task 114) shipped in 0.17.0 and was published the same day (`GHSA-65c4-v2vw-rr64`). The four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
+**0 open items** as of 2026-09-13 — the low-severity draft advisory from the post-landing content review of the 0.17.0 wave (Task 119) shipped in 0.17.1 and was published the same day (`GHSA-rp92-r4rc-42gw`). Earlier: the draft advisory from the post-landing content review of the 0.16.2 wave (Task 114) shipped in 0.17.0 and was published the same day (`GHSA-65c4-v2vw-rr64`). The four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Every advisory tracked against this repo is published with its
 patched release; the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
 (published 2026-06-29). When a new gap is found, its detail goes to a **private draft security

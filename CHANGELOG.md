@@ -8,6 +8,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-09-13
+
 ### Added
 
 - `scripts/solana-confidential-fixtures.sh` regenerates every
