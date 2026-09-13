@@ -561,22 +561,28 @@ defmodule MPP.Methods.XRPL.Session do
     end
   end
 
+  # A tesSUCCESS submit validates outside the Destination lease; a terQUEUED
+  # submit already validated inside it (see submit_claim/3) and arrives here
+  # as {:ok, hash, validated}.
   defp submit_and_validate(channel, proof, wallet, config) do
-    with {:ok, timeout_ms} <- lock_timeout(config),
-         {:ok, hash} <-
-           RedeemLock.with_account(
-             channel.recipient,
-             fn -> submit_with_retry(channel, proof, wallet, config) end,
-             timeout_ms
-           ),
-         {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
+    with {:ok, timeout_ms} <- lock_timeout(config) do
+      channel.recipient
+      |> RedeemLock.with_account(fn -> submit_with_retry(channel, proof, wallet, config) end, timeout_ms)
+      |> validate_submitted(config)
+    end
+  end
+
+  defp validate_submitted({:ok, hash}, config) do
+    with {:ok, validated} <- RPC.await_validated(hash, config, submitted: true) do
       {:ok, hash, validated}
     end
   end
 
+  defp validate_submitted({:ok, _hash, _validated} = validated, _config), do: validated
+  defp validate_submitted(other, _config), do: other
+
   # Validated once per redeem/2 before the channel lease; the second call
   # inside the lease cannot fail.
-
   defp lock_timeout(config) do
     case Map.get(config, "redeem_lock_timeout_ms", 30_000) do
       timeout_ms when is_integer(timeout_ms) and timeout_ms >= 0 ->

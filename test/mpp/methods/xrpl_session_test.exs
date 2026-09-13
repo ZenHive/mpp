@@ -1011,7 +1011,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
 
   test "concurrent redeem/2 of one channel returns the recorded hash without a second submit", context do
     session = redeemable!(context)
-    counters = stub_redeem(%{context | session: session})
+    counters = stub_redeem(%{context | session: session}, gate: true)
     parent = self()
 
     start = fn ->
@@ -1029,7 +1029,20 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert_receive {:ready, pid_a}
     assert_receive {:ready, pid_b}
     send(pid_a, :go)
+    assert_receive {:sequence_read, ^pid_a, 1}, 1_000
+    send(pid_a, :submit)
+    assert_receive {:validation_waiting, ^pid_a}, 1_000
+
+    # A is past submit and parked in validation; B must wait on the channel
+    # lease and never read a Sequence while the first claim is unpersisted.
+    :erlang.trace(pid_b, true, [:running])
     send(pid_b, :go)
+    assert_receive {:trace, ^pid_b, :out, {RedeemLock, :wait_for_owner, 3}}, 1_000
+    :erlang.trace(pid_b, false, [:running])
+    refute_received {:sequence_read, ^pid_b, _}
+    assert :atomics.get(counters.submits, 1) == 1
+
+    send(pid_a, :validate)
 
     hashes =
       Enum.map([task_a, task_b], fn task ->

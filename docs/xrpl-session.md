@@ -177,9 +177,11 @@ This timeout bounds acquisition, not the RPC calls performed by the holder.
 Leases coordinate only this BEAM node, not a cluster. The single `tefPAST_SEQ`
 retry absorbs one collision with an external submission; it does not cover
 sustained multi-node contention. Cross-node idempotency rests on a shared
-session store making the recorded txHash visible to every replica.
-After validated settlement, a later `redeem/2` returns the stored hash without
-submitting again.
+session store making the recorded txHash visible to every replica, and it
+holds only once that hash is persisted: two nodes redeeming the same channel
+at the same time can both read an unset hash and both submit, since nothing
+coordinates them before persistence. After validated settlement, a later
+`redeem/2` returns the stored hash without submitting again.
 
 If settlement validates but persisting the hash fails, redemption returns
 `settlement_failed` and emits an error log containing `txHash`, `channel_id`,

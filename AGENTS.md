@@ -868,7 +868,7 @@ MPP.Methods.XRPL           — XRPL native XRP / issued currency / MPT charge ve
 MPP.Methods.XRPL.Codec     — Bounded XRPL Payment / PaymentChannelCreate decoder and PaymentChannelClaim codec
 MPP.Methods.XRPL.Claim     — Payment-channel claim message (CLM\\0) and signature verification
 MPP.Methods.XRPL.Session   — XRPL payment-channel session intent (open / voucher / close); redeem/2 serializes per Destination
-MPP.Methods.XRPL.RedeemLock — Single-node Destination-account lease for PaymentChannelClaim Sequence serialization
+MPP.Methods.XRPL.RedeemLock — Single-node ETS lease (Destination account, and per-channel) with bounded acquisition for PaymentChannelClaim Sequence serialization
 MPP.Methods.NearIntents    — NEAR Intents hash-credential charge verification via 1Click + origin RPC
 MPP.Methods.Tempo.SessionReceipt — Session-intent receipt for Tempo (to_header/from_header, camelCase wire keys)
 MPP.Methods.Tempo.FeePayerPolicy — Sponsor policy: bounds every client-controlled 0x76 envelope field (gas economics, access/authorization lists, key authorization, call value/calldata) before fee-payer co-sign (anti-drain)

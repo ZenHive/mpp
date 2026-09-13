@@ -15,7 +15,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   transaction hash when redeeming an already-settled channel. Waiting for the
   Destination lease is bounded (`redeem_lock_timeout_ms`, default 30 000 ms) and
   fails as `settlement_failed` instead of blocking; the lease covers only the
-  Sequence read and submit, validation waits outside it. `redeem/2` accepts only
+  Sequence read and submit, validation waits outside it (a `terQUEUED` submit
+  keeps the lease through validation). `redeem/2` accepts only
   closed channels, and a validated claim whose ledger confirmation or hash
   persistence fails afterwards is logged at error level with the transaction
   hash and channel id for manual recovery. A malformed `redeem_lock_timeout_ms`
