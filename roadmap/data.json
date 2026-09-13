@@ -4998,7 +4998,7 @@
       "id": "121",
       "phase": 9,
       "bundle": "solana",
-      "status": "in_progress",
+      "status": "done",
       "title": "Run the Token-2022 confidential bundle integration tests live on devnet",
       "scores": {
         "d": 5,
@@ -5028,7 +5028,9 @@
       "body": "Convergence on Task 88: its acceptance criterion \"Live Token-2022 confidential-transfer test mint: one real bundle success and one relevant real rejection\" was never executed. The reviewer of harness run run-1787125030148-84f91644 recorded as a concern that SOLANA_RPC_URL / SOLANA_PRIVATE_KEY were unset in its environment, so the two tests in the \"confidential bundle profile\" describe block only ever flunked on the missing SOLANA_CONFIDENTIAL_* fixtures. The SOL / SPL tests in the same file ran green on devnet on 2026-09-13 after the preflight-commitment fix (8c66b20), so the base credentials now exist.\n\nHand-build reason (assignee human): the funded devnet keypair lives only in the operator's ~/.secrets; the harness node has no SOLANA_* credentials, so a dispatched agent cannot reach devnet. Executed by a local subagent on the operator host.\n\nProduce the fixtures reproducibly: a script that creates a Token-2022 mint with the confidential-transfer extension on devnet, configures and funds a recipient confidential account, builds the success bundle (proof-context setup, confidential Transfer, proof-context close) and the wrong-amount bundle, and prints the exact SOLANA_CONFIDENTIAL_* exports. Authority: live devnet behaviour plus the spl-token-2022 program and draft-solana-charge-00; the ZK ElGamal proof program availability on devnet is a premise to confirm live, not assume. If devnet cannot execute confidential transfers, the deliverable is that finding with the observed error, not a mock.\n",
       "created_at": "2026-09-13",
       "started_at": "2026-09-13",
+      "done_at": "2026-09-13",
       "scored_at": "2026-09-13",
+      "implemented": "Devnet fixture generator (scripts/solana-confidential-fixtures.sh + Rust crate) creates the confidential mint, recipient account and fresh per-test bundles; both confidential-bundle integration tests passed live on devnet (ZK ElGamal proof program active). No library defect found.",
       "cross_repo": []
     }
   ]

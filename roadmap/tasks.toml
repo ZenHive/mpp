@@ -3186,7 +3186,7 @@ shipped_in = "3a28273567c5e4c1c73e6178ff443a022711173e"
 id = "121"
 phase = 9
 bundle = "solana"
-status = "in_progress"
+status = "done"
 title = "Run the Token-2022 confidential bundle integration tests live on devnet"
 scores = { d = 5, b = 7, u = 6 }
 acceptance_criteria = ["The two confidential-bundle integration tests pass live against devnet at least once, with the run output kept as evidence (JSON output path or commit-bound note)", "A committed script regenerates every SOLANA_CONFIDENTIAL_* fixture from the funded devnet keypair; the exports are documented, the secrets themselves stay in ~/.secrets", "Any library defect the live run exposes in MPP.Methods.Solana or MPP.Methods.Solana.Confidential is fixed with a unit test derived from the observed live response, and noted in the Unreleased changelog", "If devnet rejects confidential transfers (proof program disabled or similar), the exact observed RPC error is recorded in the task and the tests keep flunking loudly with the setup instructions"]
@@ -3200,6 +3200,8 @@ Hand-build reason (assignee human): the funded devnet keypair lives only in the 
 
 Produce the fixtures reproducibly: a script that creates a Token-2022 mint with the confidential-transfer extension on devnet, configures and funds a recipient confidential account, builds the success bundle (proof-context setup, confidential Transfer, proof-context close) and the wrong-amount bundle, and prints the exact SOLANA_CONFIDENTIAL_* exports. Authority: live devnet behaviour plus the spl-token-2022 program and draft-solana-charge-00; the ZK ElGamal proof program availability on devnet is a premise to confirm live, not assume. If devnet cannot execute confidential transfers, the deliverable is that finding with the observed error, not a mock.
 """
+implemented = "Devnet fixture generator (scripts/solana-confidential-fixtures.sh + Rust crate) creates the confidential mint, recipient account and fresh per-test bundles; both confidential-bundle integration tests passed live on devnet (ZK ElGamal proof program active). No library defect found."
 created_at = "2026-09-13"
 started_at = "2026-09-13"
 scored_at = "2026-09-13"
+done_at = "2026-09-13"
