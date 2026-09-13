@@ -29,9 +29,9 @@
 #       bundles — one `mix test` run of the whole file otherwise outlives the
 #       blockhash of whichever test goes second.
 #
-#   ./scripts/solana-confidential-fixtures.sh confidential [--output-dir DIR]
+#   ./scripts/solana-confidential-fixtures.sh confidential [OUTPUT_DIR]
 #       Run the two confidential tests, each against freshly generated bundles,
-#       with a cooldown in between. This is the invocation to use: public
+#       with a cooldown in between; JSON results land in OUTPUT_DIR (default /tmp). This is the invocation to use: public
 #       devnet caps sendTransaction at 10 calls per rate-limit window and one
 #       bundle costs five, so running both tests back to back in a single
 #       `mix test` reliably 429s on the second one.
@@ -60,10 +60,9 @@ require_credentials() {
 }
 
 build() {
-  if [ ! -x "$bin" ] || [ "$crate/src/main.rs" -nt "$bin" ]; then
-    log "• building the fixture generator (cargo build --release)"
-    cargo build --release --manifest-path "$crate/Cargo.toml" >&2
-  fi
+  # cargo's own fingerprint covers src/, Cargo.toml, Cargo.lock and the
+  # toolchain; a fresh tree is a sub-second no-op.
+  cargo build --release --quiet --manifest-path "$crate/Cargo.toml" >&2
 }
 
 load_stable_exports() {
@@ -114,16 +113,18 @@ case "${1:-confidential}" in
     secrets="$HOME/.secrets"
     touch "$secrets"
     chmod 600 "$secrets"
-    tmp="$(mktemp)"
-    grep -vE '^export SOLANA_CONFIDENTIAL_(MINT|RECIPIENT|ELGAMAL_SECRET_KEY|AMOUNT|DECIMALS)=' \
-      "$secrets" >"$tmp" || true
+    # Assemble the new file beside the old one and swap it in with one rename,
+    # so a failure part-way never leaves ~/.secrets truncated. grep exits 1 when
+    # nothing survives the filter (fine) and 2 when it could not read (abort).
+    tmp="$(mktemp "$secrets.XXXXXX")"
+    chmod 600 "$tmp"
     {
-      cat "$tmp"
+      grep -vE '^export SOLANA_CONFIDENTIAL_(MINT|RECIPIENT|ELGAMAL_SECRET_KEY|AMOUNT|DECIMALS)=' \
+        "$secrets" || [ $? -eq 1 ]
       printf '\n# MPP Token-2022 confidential-transfer devnet fixtures (scripts/solana-confidential-fixtures.sh)\n'
       cat "$exports_env"
-    } >"$secrets"
-    rm -f "$tmp"
-    chmod 600 "$secrets"
+    } >"$tmp"
+    mv "$tmp" "$secrets"
     log "• refreshed the SOLANA_CONFIDENTIAL_* entries in $secrets (values not printed)"
     ;;
 

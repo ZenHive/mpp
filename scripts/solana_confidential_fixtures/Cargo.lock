@@ -1766,6 +1766,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
+ "bs58",
  "bytemuck",
  "serde_json",
  "solana-address 2.6.0",

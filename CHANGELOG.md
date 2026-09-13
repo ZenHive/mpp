@@ -10,6 +10,12 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- The Solana confidential-fixture generator accepts the same `SOLANA_PRIVATE_KEY`
+  formats as the integration tests (JSON, hex, base58), creates its secret
+  files owner-only from the first byte, tops up the sender accounts on every
+  `bundles` run instead of only at `setup`, and rewrites `~/.secrets`
+  atomically. The tests' `SOLANA_CONFIDENTIAL_BUNDLE_CMD` hook now rejects a
+  reply that omits either bundle export instead of silently keeping stale ones.
 - Hexdocs build without reference warnings: the README links to the XRPL guides on GitHub (the `docs/` tree is not part of the Hex package), and the two intentional references to `@moduledoc false` internals (CHANGELOG prose, the WebSocket session meter type) are exempted from ex_doc's hidden-reference warning.
 
 ## [0.17.1] — 2026-09-13

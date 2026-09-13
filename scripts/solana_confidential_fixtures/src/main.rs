@@ -126,6 +126,9 @@ const AMOUNT: u64 = 1_000;
 const WRONG_AMOUNT: u64 = 2_500;
 /// Public units minted (then deposited) whenever a sender runs low.
 const TOPUP_UNITS: u64 = 200_000;
+/// `ConfigureAccount`'s maximum_pending_balance_credit_counter: how many
+/// incoming transfers a recipient may accumulate before it must apply them.
+const MAX_PENDING_BALANCE_CREDIT_COUNTER: u64 = 65_536;
 
 fn main() -> Res<()> {
     let command = std::env::args().nth(1).unwrap_or_else(|| "bundles".into());
@@ -174,15 +177,22 @@ fn load_payer() -> Res<Keypair> {
     keypair_from_str(fs::read_to_string(path)?.trim())
 }
 
+/// The same three formats, with the same precedence, as the integration
+/// test's `decode_seed!/1`: a Solana CLI JSON byte array, a 64- or 128-digit
+/// hex seed (optionally `0x`-prefixed), else base58.
 fn keypair_from_str(raw: &str) -> Res<Keypair> {
+    let hex = raw.strip_prefix("0x").unwrap_or(raw);
     let bytes = if raw.starts_with('[') {
         serde_json::from_str::<Vec<u8>>(raw)?
-    } else {
-        let hex = raw.strip_prefix("0x").unwrap_or(raw);
+    } else if hex.bytes().all(|b| b.is_ascii_hexdigit()) && (hex.len() == 64 || hex.len() == 128) {
         (0..hex.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
             .collect::<Result<Vec<u8>, _>>()?
+    } else {
+        bs58::decode(raw)
+            .into_vec()
+            .map_err(|e| format!("key is neither JSON, 64/128-digit hex, nor base58: {e}"))?
     };
     if bytes.len() != 32 && bytes.len() != 64 {
         return Err(format!("expected a 32- or 64-byte key, got {}", bytes.len()).into());
@@ -203,10 +213,36 @@ fn load_or_create_keypair(path: &Path) -> Res<Keypair> {
         .copied()
         .chain(keypair.pubkey().to_bytes())
         .collect();
-    fs::write(path, serde_json::to_string(&bytes)?)?;
-    set_owner_only(path)?;
+    write_owner_only(path, &serde_json::to_string(&bytes)?)?;
     eprintln!("• generated {} -> {}", path.display(), keypair.pubkey());
     Ok(keypair)
+}
+
+/// Write a secret-bearing file that is owner-only from its first byte: the
+/// file is created with mode 0600 (never at the umask default and chmod'ed
+/// afterwards), and an existing file is re-tightened after the write.
+fn write_owner_only(path: &Path, contents: &str) -> Res<()> {
+    use std::io::Write as _;
+    let mut file = owner_only_options()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    file.write_all(contents.as_bytes())?;
+    set_owner_only(path)
+}
+
+#[cfg(unix)]
+fn owner_only_options() -> fs::OpenOptions {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = fs::OpenOptions::new();
+    options.mode(0o600);
+    options
+}
+
+#[cfg(not(unix))]
+fn owner_only_options() -> fs::OpenOptions {
+    fs::OpenOptions::new()
 }
 
 #[cfg(unix)]
@@ -286,8 +322,7 @@ fn setup(client: &RpcClient, payer: &Keypair) -> Res<()> {
     ensure_available(client, payer, &fixtures.sender_b, &mint, WRONG_AMOUNT)?;
 
     let recipient_ta = token_account(&fixtures.recipient.pubkey(), &mint);
-    let recipient_elgamal = ElGamalKeypair::new_from_signer(&fixtures.recipient, &recipient_ta.to_bytes())
-        .map_err(|e| format!("derive recipient ElGamal keypair: {e}"))?;
+    let recipient_elgamal = derive_elgamal(&fixtures.recipient, &recipient_ta)?;
 
     let exports = format!(
         "export SOLANA_CONFIDENTIAL_MINT=\"{mint}\"\n\
@@ -300,8 +335,7 @@ fn setup(client: &RpcClient, payer: &Keypair) -> Res<()> {
     );
 
     let path = state_dir()?.join("exports.env");
-    fs::write(&path, &exports)?;
-    set_owner_only(&path)?;
+    write_owner_only(&path, &exports)?;
 
     eprintln!("\n✅ setup complete");
     eprintln!("   mint      {mint}");
@@ -363,10 +397,8 @@ fn configure_confidential_account(
     mint: &Pubkey,
 ) -> Res<()> {
     let address = token_account(&authority.pubkey(), mint);
-    let elgamal = ElGamalKeypair::new_from_signer(authority, &address.to_bytes())
-        .map_err(|e| format!("derive ElGamal keypair: {e}"))?;
-    let aes = AeKey::new_from_signer(authority, &address.to_bytes())
-        .map_err(|e| format!("derive AES key: {e}"))?;
+    let elgamal = derive_elgamal(authority, &address)?;
+    let aes = derive_aes(authority, &address)?;
 
     let decryptable_balance = PodAeCiphertextLegacy::from(aes.encrypt(0u64).to_bytes());
     let proof_data = build_pubkey_validity_proof_data(&elgamal)
@@ -408,7 +440,7 @@ fn configure_confidential_account(
         &address,
         mint,
         &decryptable_balance,
-        65536,
+        MAX_PENDING_BALANCE_CREDIT_COUNTER,
         &authority.pubkey(),
         &[],
         location,
@@ -474,10 +506,8 @@ fn ensure_available(
 
 fn apply_pending(client: &RpcClient, payer: &Keypair, owner: &Keypair, mint: &Pubkey) -> Res<()> {
     let address = token_account(&owner.pubkey(), mint);
-    let elgamal = ElGamalKeypair::new_from_signer(owner, &address.to_bytes())
-        .map_err(|e| format!("derive ElGamal keypair: {e}"))?;
-    let aes = AeKey::new_from_signer(owner, &address.to_bytes())
-        .map_err(|e| format!("derive AES key: {e}"))?;
+    let elgamal = derive_elgamal(owner, &address)?;
+    let aes = derive_aes(owner, &address)?;
 
     let data = client.get_account(&address)?;
     let state = StateWithExtensions::<TokenAccount>::unpack(&data.data)?;
@@ -547,6 +577,11 @@ fn bundles(client: &RpcClient, payer: &Keypair, format: Format) -> Res<()> {
     if account_missing(client, &mint)? {
         return Err("mint does not exist — run `setup` first".into());
     }
+
+    // Every settled bundle drains its sender; top up before minting so a
+    // long-lived fixture set never fails mid-proof on an empty balance.
+    ensure_available(client, payer, &fixtures.sender_a, &mint, AMOUNT)?;
+    ensure_available(client, payer, &fixtures.sender_b, &mint, WRONG_AMOUNT)?;
 
     let recipient = fixtures.recipient.pubkey();
     let blockhash = client.get_latest_blockhash()?;
@@ -628,10 +663,8 @@ fn build_bundle(
         .transpose()?
     };
 
-    let sender_elgamal = ElGamalKeypair::new_from_signer(sender, &sender_ta.to_bytes())
-        .map_err(|e| format!("derive sender ElGamal keypair: {e}"))?;
-    let sender_aes = AeKey::new_from_signer(sender, &sender_ta.to_bytes())
-        .map_err(|e| format!("derive sender AES key: {e}"))?;
+    let sender_elgamal = derive_elgamal(sender, &sender_ta)?;
+    let sender_aes = derive_aes(sender, &sender_ta)?;
 
     let sender_extension = confidential_extension(client, &sender_ta)?;
     let available: ElGamalCiphertext = to_v6_ciphertext(&sender_extension.available_balance)?;
@@ -936,12 +969,24 @@ fn confidential_extension(
 fn available_balance(client: &RpcClient, owner: &Keypair, mint: &Pubkey) -> Res<u64> {
     let address = token_account(&owner.pubkey(), mint);
     let extension = confidential_extension(client, &address)?;
-    let elgamal = ElGamalKeypair::new_from_signer(owner, &address.to_bytes())
-        .map_err(|e| format!("derive ElGamal keypair: {e}"))?;
+    let elgamal = derive_elgamal(owner, &address)?;
     let available = to_v6_ciphertext(&extension.available_balance)?
         .decrypt_u32(elgamal.secret())
         .ok_or("decrypt available_balance")?;
     Ok(available as u64)
+}
+
+/// Token-2022 derives a confidential account's ElGamal and AES keys from the
+/// owner's signature over the token-account address; every reader and writer
+/// of that account must derive them the same way.
+fn derive_elgamal(owner: &Keypair, address: &Pubkey) -> Res<ElGamalKeypair> {
+    ElGamalKeypair::new_from_signer(owner, &address.to_bytes())
+        .map_err(|e| format!("derive ElGamal keypair for {address}: {e}").into())
+}
+
+fn derive_aes(owner: &Keypair, address: &Pubkey) -> Res<AeKey> {
+    AeKey::new_from_signer(owner, &address.to_bytes())
+        .map_err(|e| format!("derive AES key for {address}: {e}").into())
 }
 
 fn address_of(pubkey: &Pubkey) -> Address {

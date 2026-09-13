@@ -246,6 +246,8 @@ defmodule MPP.Methods.SolanaIntegrationTest do
   # exported bundles. `SOLANA_CONFIDENTIAL_BUNDLE_CMD` names a command that
   # reprints both bundles as a JSON object of env names to values; each test
   # then submits bundles minted seconds earlier.
+  @bundle_names ~w(SOLANA_CONFIDENTIAL_SUCCESS_BUNDLE_JSON SOLANA_CONFIDENTIAL_WRONG_AMOUNT_BUNDLE_JSON)
+
   defp refresh_bundles! do
     case System.get_env("SOLANA_CONFIDENTIAL_BUNDLE_CMD") do
       nil ->
@@ -260,14 +262,21 @@ defmodule MPP.Methods.SolanaIntegrationTest do
   end
 
   defp put_refreshed_bundles!(output) do
-    case Jason.decode(output) do
-      {:ok, values} when is_map(values) and values != %{} ->
-        Enum.each(values, fn {name, value} -> System.put_env(name, value) end)
-
+    with {:ok, values} when is_map(values) <- Jason.decode(output),
+         true <- Enum.all?(values, &fixture_export?/1),
+         true <- Enum.all?(@bundle_names, &Map.has_key?(values, &1)) do
+      Enum.each(values, fn {name, value} -> System.put_env(name, value) end)
+    else
       _other ->
-        flunk("SOLANA_CONFIDENTIAL_BUNDLE_CMD must print a JSON object of fixture exports, got: #{output}")
+        flunk(
+          "SOLANA_CONFIDENTIAL_BUNDLE_CMD must print a JSON object of SOLANA_CONFIDENTIAL_* string exports " <>
+            "including both #{Enum.join(@bundle_names, " and ")}, got: #{output}"
+        )
     end
   end
+
+  defp fixture_export?({"SOLANA_CONFIDENTIAL_" <> _, value}), do: is_binary(value)
+  defp fixture_export?(_other), do: false
 
   defp confidential_charge(context) do
     {:ok, charge} =
