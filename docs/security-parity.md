@@ -52,16 +52,17 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-j4j7-7xpr-c7cr` | `CVE-2026-73541` | MEDIUM | 0.12.0 | Fee-payer sponsorship bounds each tx individually but not aggregate exposure |
 | `GHSA-5qrp-r24c-w6jr` | `CVE-2026-82750` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never inspected the EIP-7702 authorization list — sponsored gas drain and free account delegation (reported by kai-kka) |
 | `GHSA-rpwj-vrf7-4x36` | `CVE-2026-82751` | HIGH | 0.16.1 | Tempo fee-payer sponsorship never bounded the `0x76` key-authorization field — sponsored gas drain and free key provisioning (reported by kai-kka) |
-| `GHSA-8c63-r789-xrrf` | — (CVE request to the EEF CNA pending) | HIGH | 0.16.2 | Session voucher that adds no new funds was served without a charge — unlimited units after one paid voucher (mpp-rs #415 parity) |
-| `GHSA-p9fv-9w58-95x2` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo subscription key authorization was not bound to the issuing challenge — captured activation credential replayable under a fresh challenge (mppx #882 parity) |
-| `GHSA-8x7x-5j8g-8hcx` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | Tempo pre-broadcast dedup reserve keyed on the caller-supplied encoding — a non-canonical re-encoding reserved a second slot (mppx #818 parity) |
-| `GHSA-82qh-vrvm-gqvc` | — (CVE request to the EEF CNA pending) | MEDIUM | 0.16.2 | `Payment-Receipt` and `Cache-Control: private` written before the downstream app ran — consumer `Cache-Control` could expose paid responses to shared caches (mpp-rs #381/#399 parity) |
-| `GHSA-rp92-r4rc-42gw` | — (CVE request to the EEF CNA pending) | LOW | 0.17.1 | XRPL session redemption held the Destination lease through ledger validation with unbounded waiter queueing — a slow validation stalled every other redemption on that Destination |
-| `GHSA-65c4-v2vw-rr64` | — (CVE request to the EEF CNA pending) | LOW | 0.17.0 | Tempo canonical dedup reserve did not normalize one signature re-encoding — a second slot for one signed transaction; the live node rejected that encoding at broadcast (residual of `GHSA-8x7x-5j8g-8hcx`) |
+| `GHSA-8c63-r789-xrrf` | — (requested from the EEF CNA 2026-09-14) | HIGH | 0.16.2 | Session voucher that adds no new funds was served without a charge — unlimited units after one paid voucher (mpp-rs #415 parity) |
+| `GHSA-p9fv-9w58-95x2` | — (requested from the EEF CNA 2026-09-14) | MEDIUM | 0.16.2 | Tempo subscription key authorization was not bound to the issuing challenge — captured activation credential replayable under a fresh challenge (mppx #882 parity) |
+| `GHSA-8x7x-5j8g-8hcx` | — (requested from the EEF CNA 2026-09-14) | MEDIUM | 0.16.2 | Tempo pre-broadcast dedup reserve keyed on the caller-supplied encoding — a non-canonical re-encoding reserved a second slot (mppx #818 parity) |
+| `GHSA-82qh-vrvm-gqvc` | — (requested from the EEF CNA 2026-09-14) | MEDIUM | 0.16.2 | `Payment-Receipt` and `Cache-Control: private` written before the downstream app ran — consumer `Cache-Control` could expose paid responses to shared caches (mpp-rs #381/#399 parity) |
+| `GHSA-rp92-r4rc-42gw` | — (not requested: LOW-severity hardening, flagged to the CNA 2026-09-14 in case they see it differently) | LOW | 0.17.1 | XRPL session redemption held the Destination lease through ledger validation with unbounded waiter queueing — a slow validation stalled every other redemption on that Destination |
+| `GHSA-65c4-v2vw-rr64` | — (not requested: LOW-severity hardening, flagged to the CNA 2026-09-14 in case they see it differently) | LOW | 0.17.0 | Tempo canonical dedup reserve did not normalize one signature re-encoding — a second slot for one signed transaction; the live node rejected that encoding at broadcast (residual of `GHSA-8x7x-5j8g-8hcx`) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
-remaining four was requested from the EEF CNA on 2026-08-18. The six advisories marked
-pending (0.16.2 through 0.17.1) have not yet been submitted to the CNA.
+remaining four was requested from the EEF CNA on 2026-08-18, and for the four 0.16.2
+advisories on 2026-09-14 (cases pending); the two LOW advisories from 0.17.0/0.17.1 were
+deliberately not requested.
 
 ---
 
