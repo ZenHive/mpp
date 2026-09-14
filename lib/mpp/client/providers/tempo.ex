@@ -12,7 +12,9 @@ defmodule MPP.Client.Providers.Tempo do
 
     * `:private_key` — required 32-byte private key, raw or hex encoded
     * `:rpc_url` — required Tempo JSON-RPC URL
-    * `:expected_chain_id` — optional additional chain pin
+    * `:expected_chain_id` — optional chain pin, enforced on the charge and
+      subscription paths alike: an advertised `chainId` that disagrees with it
+      is refused before any RPC or wallet call
     * `:expected_recipients` — optional allowlist of payment recipients.
       When set, both the primary `recipient` and every `methodDetails.splits`
       recipient must be in the list (case-insensitive / checksum-agnostic).
@@ -74,8 +76,8 @@ defmodule MPP.Client.Providers.Tempo do
     with {:ok, subscription} <- Shared.parse_subscription(challenge, "tempo"),
          {:ok, wallet_rpc_url} <- Shared.required_config(config, :wallet_rpc_url),
          {:ok, details} <- subscription_method_details(subscription),
-         {:ok, chain_id} <- advertised_chain_id(details["chainId"]),
-         true <- is_integer(chain_id),
+         {:ok, expected_chain_id} <- optional_chain_id(config[:expected_chain_id]),
+         {:ok, chain_id} <- resolve_chain_id(details, expected_chain_id),
          {:ok, access_key, key_type} <- subscription_access_key(details),
          {:ok, params} <-
            KeyAuthorization.wallet_params(subscription,
@@ -98,9 +100,6 @@ defmodule MPP.Client.Providers.Tempo do
          payload: %{"type" => "keyAuthorization", "signature" => KeyAuthorization.serialize(authorization)},
          source: DID.evm_did(authorization.source, chain_id)
        }}
-    else
-      false -> {:error, :invalid_chain_id}
-      {:error, _reason} = error -> error
     end
   end
 

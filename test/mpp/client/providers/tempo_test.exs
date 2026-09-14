@@ -374,6 +374,13 @@ defmodule MPP.Client.Providers.TempoTest do
                "0x" <> Base.encode16(SubscriptionHelpers.challenge_witness(challenge.id), case: :lower)
     end
 
+    test "honors the explicit chain pin before calling the wallet" do
+      config = Map.put(wallet_provider_config(), :expected_chain_id, 1)
+
+      assert {:error, {:chain_id_mismatch, 1, @chain_id}} =
+               Tempo.pay(subscription_challenge(), config)
+    end
+
     test "returns wallet errors and rejects malformed subscription challenges" do
       Req.Test.stub(__MODULE__, fn conn ->
         Req.Test.json(conn, %{

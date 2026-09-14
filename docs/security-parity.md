@@ -118,6 +118,7 @@ pending (0.16.2 through 0.17.1) have not yet been submitted to the CNA.
 | mppx #864 (commit 7949db6, 2026-09-04) expiring nonces for server-side session precompile calls | Nonce collisions when several server processes share one signer | Not applicable to our sessions (no server-side session broadcasts; channels are voucher-settled through `MPP.Session.Store`); the one server-signed Tempo path, sponsored subscription settlement, already uses the expiring nonce key — `subscription_transaction.ex:26,90` |
 | mppx #814 / #832 / #845 / #842 / #823 hosted and remote fee-payer transport plumbing | — (viem-transport routing of the sponsor call; no bounding change) | Equivalent HTTP fill already in `MPP.Methods.Tempo.HostedFeePayer.fill/3` — `hosted_fee_payer.ex`, `tempo.ex:963-975` |
 | mppx #887 (commit c0ce0fe, 2026-09-10) client recipient allowlist covers the primary recipient and every split | Hostile/misconfigured server redirecting a client TIP-20 transfer to an unlisted address, including via splits or the zero-amount proof path | `MPP.Client.Providers.Tempo` `:expected_recipients` — primary and every `methodDetails.splits` recipient must be listed; refused before RPC or signing; checksum-agnostic — `client/providers/tempo.ex` |
+| mppx #888 (commit 3c14a65, 2026-09-11) client `allowedChainIds` policy on the charge, session, and session-manager clients (with mpp-rs `8880cf7` client chain pinning) | Hostile/misconfigured server steering a client payment or session onto a chain the operator never approved, or a resolved RPC client serving a different chain than the challenge names | `MPP.Client.Providers.Tempo` `:expected_chain_id` refuses a disagreeing advertised `chainId` on both the charge and subscription paths before any RPC or wallet call, and the charge path additionally verifies the configured RPC serves the resolved chain via `eth_chainId` before signing (stricter than the upstream client-object check); multi-chain deployments hold one pinned provider entry per chain in `MPP.Client.MultiProvider`; no Tempo session client exists in this library — `client/providers/tempo.ex` (confirmed 2026-09-14 sweep) |
 
 ---
 
@@ -127,7 +128,6 @@ pending (0.16.2 through 0.17.1) have not yet been submitted to the CNA.
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
 | Session integrity parity for published upstream advisories | 📋 **Task 50** (done) built the session machinery; residual hardening is tracked as counted open items, never enumerated here |
-| Client-side Tempo chain pinning (mpp-rs `8880cf7`) | 📋 Task 33e — built-in Tempo provider |
 
 ---
 

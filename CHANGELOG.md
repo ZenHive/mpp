@@ -10,6 +10,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- `MPP.Client.Providers.Tempo` honors `:expected_chain_id` on the subscription path too: a challenge advertising a different chain is refused before the wallet is asked to authorize an access key (mppx #888 parity sweep).
 - The Solana confidential-fixture generator accepts the same `SOLANA_PRIVATE_KEY`
   formats as the integration tests (JSON, hex, base58), creates its secret
   files owner-only from the first byte, tops up the sender accounts on every
