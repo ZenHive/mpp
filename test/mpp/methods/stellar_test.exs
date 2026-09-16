@@ -1106,8 +1106,8 @@ defmodule MPP.Methods.StellarTest do
       |> XDR.ContractEvent.encode_xdr!()
       |> Base.encode64()
 
-    assert [%{name: nil, amount: amount}] = Envelope.contract_events([no_symbol])
-    assert is_integer(amount) or is_nil(amount)
+    assert [%{name: nil, contract: nil, amount: amount}] = Envelope.contract_events([no_symbol])
+    assert amount == observed["amount"]
 
     empty_event = Base.encode64(<<0, 0, 0, 0>>)
     assert Envelope.contract_events([empty_event]) == []
@@ -1239,15 +1239,13 @@ defmodule MPP.Methods.StellarTest do
       "getLedgerEntries" -> %{"entries" => [%{"xdr" => observed["getLedgerEntries"]["xdr"]}]}
     end)
 
-    assert {:ok, sequence} = RPC.account_sequence(observed["payer"], config)
-    assert is_integer(sequence)
+    assert {:ok, 20_197_014_989_963_265 = sequence} = RPC.account_sequence(observed["payer"], config)
 
     stub_rpc(context, fn
       "getLedgerEntries" -> %{"entries" => [%{"xdr" => Fixtures.ledger_entry_xdr(observed["getLedgerEntries"]["xdr"])}]}
     end)
 
-    assert {:ok, wrapped} = RPC.account_sequence(observed["payer"], config)
-    assert is_integer(wrapped)
+    assert {:ok, ^sequence} = RPC.account_sequence(observed["payer"], config)
 
     stub_rpc(context, fn
       "getLedgerEntries" -> %{"entries" => [%{"xdr" => "!!!!"}]}
