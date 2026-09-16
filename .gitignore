@@ -48,3 +48,6 @@ mpp-*.tar
 
 # Build artifacts of the dev-only Solana confidential-fixture generator.
 /scripts/solana_confidential_fixtures/target/
+
+# Playwright MCP session dumps
+.playwright-mcp/
