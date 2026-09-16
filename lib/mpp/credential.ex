@@ -59,7 +59,7 @@ defmodule MPP.Credential do
   defstruct [:challenge, :payload, :source]
 
   @challenge_required_keys ~w(id realm method intent request)
-  @challenge_optional_keys ~w(description digest expires opaque)
+  @challenge_optional_keys ~w(description digest expires header opaque)
 
   api(:decode, "Decode a base64url JSON string into a credential with echoed challenge validation.",
     params: [
@@ -169,6 +169,7 @@ defmodule MPP.Credential do
         description: map["description"],
         digest: map["digest"],
         expires: map["expires"],
+        header: Challenge.advertised_header(map["header"]),
         opaque: map["opaque"]
       }
 
@@ -228,6 +229,7 @@ defmodule MPP.Credential do
     |> maybe_put("digest", challenge.digest)
     |> maybe_put("expires", challenge.expires)
     |> maybe_put("opaque", challenge.opaque)
+    |> maybe_put("header", challenge.header)
   end
 
   # Adds a key-value pair to the map only if the value is non-nil.

@@ -27,8 +27,8 @@ defmodule MPP.Test.SecurityMutations do
         "hmac-request-slot-omitted",
         "hmac-domain",
         "lib/mpp/challenge.ex",
-        "          challenge.request,\n",
-        "          \"\",\n",
+        "      challenge.request,\n",
+        "      \"\",\n",
         ["test/mpp/challenge_conformance_test.exs"],
         false
       ),
@@ -36,8 +36,8 @@ defmodule MPP.Test.SecurityMutations do
         "hmac-digest-slot-omitted",
         "digest-hmac-domain",
         "lib/mpp/challenge.ex",
-        "          challenge.digest || \"\",\n",
-        "          \"\",\n",
+        "      challenge.digest || \"\"\n",
+        "      \"\"\n",
         ["test/mpp/challenge_conformance_test.exs"],
         false
       ),

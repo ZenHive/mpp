@@ -166,6 +166,63 @@ defmodule MPP.Client.ReqTest do
       assert_received {:paid, "tempo"}
     end
 
+    test "pays a server that advertises header and attaches Payment-Authorization" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      header = Headers.format_challenge(challenge)
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "payment-authorization") do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+
+          ["Payment " <> _blob] ->
+            assert Plug.Conn.get_req_header(conn, "authorization") == []
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} =
+               Req.get(req, url: "http://example.com/resource")
+
+      assert_received {:paid, "tempo"}
+    end
+
+    test "does not pay a challenge whose header is not Payment-Authorization" do
+      challenge =
+        Challenge.create(
+          [realm: "api.example.com", method: "tempo", intent: "charge", request: @request, header: "X-Custom"],
+          @secret_key
+        )
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("www-authenticate", Headers.format_challenge(challenge))
+        |> Plug.Conn.send_resp(402, "pay")
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, %ClientReq.Error{reason: :no_supported_challenge}} =
+               Req.get(req, url: "http://example.com/resource")
+
+      refute_received {:paid, _}
+    end
+
     test "selects the first supported challenge in server order" do
       plug = fn conn ->
         case Plug.Conn.get_req_header(conn, "authorization") do

@@ -22,8 +22,9 @@ defmodule MPP.Client.Transport.HTTP do
     * Challenges: one or more `WWW-Authenticate` headers carrying the `Payment`
       scheme. Multiple challenges may appear as repeated header values or as a
       single comma-separated header value; both forms are handled.
-    * Credential attachment: `Authorization: Payment <base64url-json>`,
-      produced via `MPP.Headers.format_credential/1`.
+    * Credential attachment: `Authorization: Payment <base64url-json>` by default,
+      or `Payment-Authorization` when the selected challenge advertised `header`.
+      Produced via `MPP.Headers.format_credential/1`.
     * Sponsor-capacity responses remain payable 402 challenges. Call
       `retry_after/1` to consume their delta-seconds backoff signal; retry policy
       remains with the caller.
@@ -104,18 +105,47 @@ defmodule MPP.Client.Transport.HTTP do
     end
   end
 
-  api(:set_credential, "Attach a credential to a Req.Request as `Authorization: Payment <...>`.",
+  api(:set_credential, "Attach a credential to a Req.Request on the challenge's advertised field.",
     params: [
       request: [kind: :value, description: "Req.Request struct"],
       credential: [kind: :value, description: "MPP.Credential struct"]
     ],
-    returns: %{type: :struct, description: "Req.Request with the Authorization header set"}
+    returns: %{
+      type: :struct,
+      description: "Req.Request with the credential header set (`Authorization` or `Payment-Authorization`)"
+    }
   )
 
   @impl Transport
   @spec set_credential(Req.Request.t(), Credential.t()) :: Req.Request.t()
   def set_credential(%Req.Request{} = request, %Credential{} = credential) do
-    Req.Request.put_header(request, "authorization", Headers.format_credential(credential))
+    header_name = credential.challenge |> Challenge.credential_header() |> String.downcase(:ascii)
+    value = Headers.format_credential(credential)
+
+    request
+    |> clear_stale_payment_headers(header_name)
+    |> Req.Request.put_header(header_name, value)
+  end
+
+  # Never erase ordinary application credentials from Authorization. A stale
+  # `Payment` scheme on Authorization is cleared when attaching to
+  # Payment-Authorization (mppx `setCredentialHeader`). The unused alternate
+  # field is always dropped so a retry cannot present credentials in both.
+  defp clear_stale_payment_headers(request, "payment-authorization") do
+    request
+    |> delete_payment_scheme("authorization")
+    |> Req.Request.delete_header("payment-authorization")
+  end
+
+  defp clear_stale_payment_headers(request, _authorization) do
+    Req.Request.delete_header(request, "payment-authorization")
+  end
+
+  defp delete_payment_scheme(request, name) do
+    case Req.Request.get_header(request, name) do
+      ["Payment " <> _ | _] -> Req.Request.delete_header(request, name)
+      _other -> request
+    end
   end
 
   api(

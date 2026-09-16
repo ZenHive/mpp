@@ -51,7 +51,9 @@ defmodule MPP.Test.MppxChallengeBundle do
       QuickBEAM.eval(
         rt,
         "globalThis.mppxSerialize = (c) => MppxChallenge.serialize(c); " <>
-          "globalThis.mppxDeserialize = (h) => MppxChallenge.deserialize(h); 1"
+          "globalThis.mppxDeserialize = (h) => MppxChallenge.deserialize(h); " <>
+          "globalThis.mppxFrom = (p) => MppxChallenge.from(p); " <>
+          "globalThis.mppxCredentialHeader = (c) => MppxChallenge.credentialHeader(c); 1"
       )
 
     :ok

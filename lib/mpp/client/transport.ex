@@ -61,7 +61,8 @@ defmodule MPP.Client.Transport do
   Return a new request with the given credential attached in transport-specific
   form.
 
-  For HTTP, this sets `Authorization: Payment <base64url>`. For MCP, this
+  For HTTP, this sets `Authorization: Payment <base64url>` or
+      `Payment-Authorization` when the challenge advertised that field. For MCP, this
   injects the credential into `params._meta["org.paymentauth/credential"]`.
   Each transport owns its wire format — the credential struct is passed in
   decoded form so the transport is free to serialise it however it needs to.

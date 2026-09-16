@@ -31,8 +31,9 @@ defmodule MPP.Plug do
 
   ## Flow
 
-  1. Request without `Authorization: Payment` → 402 with `WWW-Authenticate` challenge(s)
+  1. Request without a Payment credential in the selected field → 402 with `WWW-Authenticate` challenge(s)
   2. Client pays off-band, retries with `Authorization: Payment <credential>`
+     (or `Payment-Authorization` when `:requires_auth` is set)
   3. Valid credential → request passes through with receipt in assigns; successful responses get `Payment-Receipt`
   4. Invalid credential → 402 with fresh challenge(s) + RFC 9457 error body
 
@@ -50,6 +51,10 @@ defmodule MPP.Plug do
     * `:intent` — (optional) `"charge"` (default), `"session"`, or `"subscription"`
     * `:session_store` — (optional, session intent) `MPP.Session.Store` reference;
       defaults to the application-started `MPP.Session.ETSStore`
+    * `:requires_auth` — (optional) when `true`, challenges advertise
+      `header="Payment-Authorization"` and credentials are read from that
+      field only, leaving `Authorization` free for ordinary authentication
+      (mppx / mpp-rs `requiresAuth`)
 
   ## Single-Method Options
 
@@ -132,7 +137,8 @@ defmodule MPP.Plug do
             opaque: String.t() | nil,
             store: module() | {module(), keyword()} | nil,
             intent: String.t(),
-            session_store: SessionStore.store_ref() | nil
+            session_store: SessionStore.store_ref() | nil,
+            requires_auth: boolean()
           }
 
     @enforce_keys [:secret_key, :realm, :method_entries]
@@ -145,7 +151,8 @@ defmodule MPP.Plug do
       :opaque,
       :store,
       intent: "charge",
-      session_store: nil
+      session_store: nil,
+      requires_auth: false
     ]
   end
 
@@ -176,7 +183,8 @@ defmodule MPP.Plug do
       opaque: Keyword.get(opts, :opaque),
       store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve(),
       intent: intent,
-      session_store: session_store
+      session_store: session_store,
+      requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false))
     }
   end
 
@@ -194,6 +202,12 @@ defmodule MPP.Plug do
 
   defp validate_expires_in!(_seconds) do
     raise ArgumentError, "MPP.Plug: :expires_in must be a positive integer"
+  end
+
+  defp validate_requires_auth!(value) when is_boolean(value), do: value
+
+  defp validate_requires_auth!(_value) do
+    raise ArgumentError, "MPP.Plug: :requires_auth must be true or false"
   end
 
   # `nil`/absent resolves to the default store (replay protection on by default);
@@ -385,12 +399,29 @@ defmodule MPP.Plug do
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
   def call(conn, %Config{} = config) do
-    case extract_credential(conn) do
+    case extract_credential(conn, config) do
       nil ->
         respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
 
       {:error, :invalid_scheme} ->
         respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
+
+      {:error, :wrong_credential_header} ->
+        respond_error(
+          conn,
+          config,
+          Errors.new(:payment_required, "Payment credential must be sent in Payment-Authorization")
+        )
+
+      {:error, :duplicate_credential} ->
+        respond_error(
+          conn,
+          config,
+          Errors.new(
+            :malformed_credential,
+            "Payment credential presented in both Authorization and Payment-Authorization"
+          )
+        )
 
       {:error, reason} ->
         respond_error(conn, config, Errors.new(:malformed_credential, "#{reason}"))
@@ -411,13 +442,48 @@ defmodule MPP.Plug do
     end
   end
 
-  # Extracts and parses the Authorization header.
-  # Returns nil if no header, {:error, reason} if malformed, {:ok, credential} if parsed.
-  defp extract_credential(conn) do
+  # Extracts and parses the Payment credential from the field selected by this
+  # endpoint. Unconfigured plugs read `Authorization` only. `:requires_auth`
+  # reads `Payment-Authorization` only, rejects a Payment credential in
+  # `Authorization`, and rejects Payment credentials presented in both fields.
+  defp extract_credential(conn, %Config{requires_auth: true}) do
+    authorization = Plug.Conn.get_req_header(conn, "authorization")
+    payment_authorization = Plug.Conn.get_req_header(conn, "payment-authorization")
+    auth_payment? = presented_payment_credential?(authorization)
+    alt_payment? = presented_payment_credential?(payment_authorization)
+
+    cond do
+      auth_payment? and alt_payment? ->
+        {:error, :duplicate_credential}
+
+      auth_payment? ->
+        {:error, :wrong_credential_header}
+
+      alt_payment? ->
+        parse_first_credential(payment_authorization)
+
+      true ->
+        nil
+    end
+  end
+
+  defp extract_credential(conn, %Config{}) do
     case Plug.Conn.get_req_header(conn, "authorization") do
       [] -> nil
       [header | _] -> Headers.parse_credential(header)
     end
+  end
+
+  defp parse_first_credential([header | _]), do: Headers.parse_credential(header)
+
+  defp presented_payment_credential?(headers) when is_list(headers) do
+    Enum.any?(headers, fn value ->
+      case Headers.parse_credential(value) do
+        {:error, :invalid_scheme} -> false
+        {:ok, _} -> true
+        {:error, _} -> true
+      end
+    end)
   end
 
   # Finds the MethodEntry matching the credential's method name.
@@ -568,6 +634,7 @@ defmodule MPP.Plug do
       |> maybe_add(:expires, compute_expires(config.expires_in))
       |> maybe_add(:digest, config.digest)
       |> maybe_add(:opaque, config.opaque)
+      |> maybe_add(:header, advertised_header(config))
 
     Challenge.create(params, config.secret_key)
   end
@@ -582,6 +649,9 @@ defmodule MPP.Plug do
   # Appends a keyword pair only if the value is non-nil.
   defp maybe_add(params, _key, nil), do: params
   defp maybe_add(params, key, value), do: Keyword.put(params, key, value)
+
+  defp advertised_header(%Config{requires_auth: true}), do: Challenge.payment_authorization_header()
+  defp advertised_header(%Config{}), do: nil
 
   # Fetches a required option or raises with a clear message.
   defp require_opt!(opts, key) do

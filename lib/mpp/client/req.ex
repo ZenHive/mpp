@@ -4,7 +4,8 @@ defmodule MPP.Client.Req do
 
   Intercepts HTTP 402 responses, selects a challenge through
   `MPP.Client.SelectionPolicy`, pays via `MPP.Client.MultiProvider`, and retries
-  with `Authorization: Payment`. Non-402 responses pass through unchanged.
+  with `Authorization: Payment` (or `Payment-Authorization` when the challenge
+  advertised `header`). Non-402 responses pass through unchanged.
 
       Req.new()
       |> MPP.Client.Req.attach(provider: my_provider)

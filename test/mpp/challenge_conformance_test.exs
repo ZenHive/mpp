@@ -115,10 +115,56 @@ defmodule MPP.ChallengeConformanceTest do
     end
   end
 
-  describe "property: all seven HMAC slots are binding domains" do
+  describe "HMAC challenge-ID header slot (SDK layout, insert before opaque)" do
+    # Independent HMAC of the SDK input
+    # realm|method|intent|request|||Payment-Authorization|
+    # draft-01 appends header after opaque; we follow mppx/mpp-rs.
+    test "Payment-Authorization is inserted before the empty opaque slot" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: b64(~S({"amount":"1000000"})),
+            header: "Payment-Authorization"
+          ],
+          @secret
+        )
+
+      assert challenge.id == "S91xi-OFGZPMs-j7GsX0FDpIkmCcZT1P9XyV58WNy_U"
+      assert challenge.header == "Payment-Authorization"
+    end
+
+    test "explicit Authorization is omitted and keeps the 0.16.0 id" do
+      implicit =
+        Challenge.create(
+          [realm: "api.example.com", method: "tempo", intent: "charge", request: b64(~S({"amount":"1000000"}))],
+          @secret
+        )
+
+      explicit =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: b64(~S({"amount":"1000000"})),
+            header: "Authorization"
+          ],
+          @secret
+        )
+
+      assert explicit.header == nil
+      assert explicit.id == implicit.id
+      assert implicit.id == "X6v1eo7fJ76gAxqY0xN9Jd__4lUyDDYmriryOM-5FO4"
+    end
+  end
+
+  describe "property: all HMAC slots are binding domains" do
     property "changing any generated slot changes the challenge ID" do
       check all(
-              slot <- StreamData.member_of([:realm, :method, :intent, :request, :expires, :digest, :opaque]),
+              slot <- StreamData.member_of([:realm, :method, :intent, :request, :expires, :digest, :opaque, :header]),
               suffix <- StreamData.string(:alphanumeric, min_length: 1, max_length: 16),
               max_runs: @property_runs
             ) do
@@ -129,7 +175,8 @@ defmodule MPP.ChallengeConformanceTest do
           request: b64(~S({"amount":"1000000"})),
           expires: "2030-01-01T00:00:00Z",
           digest: "sha-256=:base:",
-          opaque: b64(~S({"route":"base"}))
+          opaque: b64(~S({"route":"base"})),
+          header: "Payment-Authorization"
         ]
 
         changed = Keyword.update!(base, slot, &mutate_slot(slot, &1, suffix))
@@ -144,5 +191,6 @@ defmodule MPP.ChallengeConformanceTest do
 
   defp mutate_slot(:request, value, suffix), do: b64(~s({"value":"#{value <> suffix}"}))
   defp mutate_slot(:opaque, value, suffix), do: b64(~s({"value":"#{value <> suffix}"}))
+  defp mutate_slot(:header, _value, suffix), do: "X-" <> suffix
   defp mutate_slot(_slot, value, suffix), do: value <> suffix
 end

@@ -17,6 +17,10 @@ defmodule MPP.Challenge do
   when absent, preserving slot positions. The `request` and `opaque` fields are
   used as their raw base64url-encoded strings (never re-serialized).
 
+  When the optional `header` auth-param is advertised, an extra slot is
+  inserted immediately before `opaque` (mppx / mpp-rs layout). Header-less
+  challenges keep the seven-slot input byte-for-byte. See `compute_id/2`.
+
   ## Fields
 
     * `id` — HMAC-SHA256 challenge ID (computed by `create/2`)
@@ -27,6 +31,8 @@ defmodule MPP.Challenge do
     * `description` — (optional) human-readable description
     * `digest` — (optional) content digest per RFC 9530
     * `expires` — (optional) RFC 3339 expiration timestamp
+    * `header` — (optional) credential HTTP field; only `"Payment-Authorization"`
+      is payable. `Authorization` (the default) is never stored or advertised.
     * `opaque` — (optional) base64url-encoded JSON server correlation data
   """
 
@@ -41,20 +47,23 @@ defmodule MPP.Challenge do
           description: String.t() | nil,
           digest: String.t() | nil,
           expires: String.t() | nil,
+          header: String.t() | nil,
           opaque: String.t() | nil
         }
 
   @enforce_keys [:realm, :method, :intent, :request]
-  defstruct [:id, :realm, :method, :intent, :request, :description, :digest, :expires, :opaque]
+  defstruct [:id, :realm, :method, :intent, :request, :description, :digest, :expires, :header, :opaque]
 
   @hmac_separator "|"
+  @authorization_header "Authorization"
+  @payment_authorization_header "Payment-Authorization"
 
   api(:create, "Create a new challenge with an HMAC-SHA256 bound ID.",
     params: [
       params: [
         kind: :value,
         description:
-          "Keyword list with `:realm`, `:method`, `:intent`, `:request` (required) and `:description`, `:digest`, `:expires`, `:opaque` (optional)"
+          "Keyword list with `:realm`, `:method`, `:intent`, `:request` (required) and `:description`, `:digest`, `:expires`, `:header`, `:opaque` (optional)"
       ],
       secret_key: [kind: :value, description: "HMAC-SHA256 secret key for challenge binding"]
     ],
@@ -64,7 +73,12 @@ defmodule MPP.Challenge do
 
   @spec create(keyword(), String.t()) :: t()
   def create(params, secret_key) when is_list(params) and is_binary(secret_key) do
-    challenge = struct!(__MODULE__, Keyword.delete(params, :id))
+    challenge =
+      params
+      |> Keyword.delete(:id)
+      |> Keyword.update(:header, nil, &normalize_header/1)
+      |> then(&struct!(__MODULE__, &1))
+
     %{challenge | id: compute_id(challenge, secret_key)}
   end
 
@@ -215,24 +229,122 @@ defmodule MPP.Challenge do
 
   defp validate_expires(_expires), do: {:error, :invalid_expires}
 
-  # Computes the HMAC-SHA256 challenge ID from 7 fixed positional slots.
+  api(
+    :payment_authorization_header,
+    "Return the only non-default credential field name this specification allows (`Payment-Authorization`).",
+    returns: %{type: :string, description: "`Payment-Authorization`"}
+  )
+
+  @doc "Return the only non-default credential field name the draft allows."
+  @spec payment_authorization_header() :: String.t()
+  def payment_authorization_header, do: @payment_authorization_header
+
+  api(:credential_header, "Return the HTTP field a client must use for this challenge's Payment credential.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct"]
+    ],
+    returns: %{
+      type: :string,
+      description: "`Payment-Authorization` when advertised, otherwise `Authorization`"
+    }
+  )
+
+  @doc """
+  Return the HTTP field a client must use for this challenge's Payment credential.
+
+  `Authorization` is the implicit default and is never advertised. An advertised
+  `header` other than `Payment-Authorization` is not payable (`payable?/1`).
+  """
+  @spec credential_header(t()) :: String.t()
+  def credential_header(%__MODULE__{header: header}) do
+    case advertised_header(header) do
+      nil -> @authorization_header
+      advertised -> advertised
+    end
+  end
+
+  api(:payable?, "Return whether a client may send a Payment credential for this challenge.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct"]
+    ],
+    returns: %{
+      type: :boolean,
+      description: "false when `header` is present and is not `Payment-Authorization`"
+    }
+  )
+
+  @doc """
+  Return whether a client may send a Payment credential for this challenge.
+
+  The draft allows only `Payment-Authorization` as a non-default `header` value.
+  Any other advertised value is an unrecognized challenge (draft-01 § Credentials).
+  """
+  @spec payable?(t()) :: boolean()
+  def payable?(%__MODULE__{header: header}) do
+    case advertised_header(header) do
+      nil -> true
+      @payment_authorization_header -> true
+      _other -> false
+    end
+  end
+
+  # `Authorization` (any ASCII case) and empty string are the implicit default
+  # and are never stored — matching mppx `isDefaultCredentialHeader` and
+  # mpp-rs `advertised_credential_header`.
+  defp normalize_header(header) when is_binary(header) or is_nil(header) do
+    advertised_header(header)
+  end
+
+  api(
+    :advertised_header,
+    "Normalize a credential-header name: `Authorization` (any ASCII case) and empty become nil; any other value is returned as advertised.",
+    params: [header: [kind: :value, description: "Advertised `header` auth-param or nil"]],
+    returns: %{type: :string, description: "Advertised field name, or nil for the Authorization default"}
+  )
+
+  @doc false
+  @spec advertised_header(String.t() | nil) :: String.t() | nil
+  def advertised_header(nil), do: nil
+  def advertised_header(""), do: nil
+
+  def advertised_header(header) when is_binary(header) do
+    if default_credential_header?(header), do: nil, else: header
+  end
+
+  defp default_credential_header?(header) when is_binary(header) do
+    String.downcase(header, :ascii) == String.downcase(@authorization_header, :ascii)
+  end
+
+  # Computes the HMAC-SHA256 challenge ID.
   #
-  # Input format: realm|method|intent|request|expires_or_empty|digest_or_empty|opaque_or_empty
-  # Result: base64url(HMAC-SHA256(secret_key, input)) with no padding
+  # Legacy seven-slot input (header-less, 0.16.0 byte-for-byte):
+  #   realm|method|intent|request|expires_or_empty|digest_or_empty|opaque_or_empty
+  #
+  # When a non-default `header` is advertised, that value is inserted immediately
+  # before `opaque` (mppx `idBindingInput`, refs/mppx/src/Challenge.ts:691-713;
+  # mpp-rs `compute_challenge_id_with_header`, refs/mpp-rs/src/protocol/core/challenge.rs:522-538).
+  #
+  # Deliberate interoperability exception: draft-httpauth-payment-01.md:380-427
+  # appends `header` *after* `opaque`. Two independent SDKs agree on the insert-
+  # before-opaque layout; interop is the point of the feature. Follow the SDKs.
+  # Tracked as tempoxyz/mpp-specs#357.
   defp compute_id(%__MODULE__{} = challenge, secret_key) do
-    input =
-      Enum.join(
-        [
-          challenge.realm,
-          challenge.method,
-          challenge.intent,
-          challenge.request,
-          challenge.expires || "",
-          challenge.digest || "",
-          challenge.opaque || ""
-        ],
-        @hmac_separator
-      )
+    slots = [
+      challenge.realm,
+      challenge.method,
+      challenge.intent,
+      challenge.request,
+      challenge.expires || "",
+      challenge.digest || ""
+    ]
+
+    header_slot =
+      case advertised_header(challenge.header) do
+        nil -> []
+        header -> [header]
+      end
+
+    input = Enum.join(slots ++ header_slot ++ [challenge.opaque || ""], @hmac_separator)
 
     :hmac
     |> :crypto.mac(:sha256, secret_key, input)

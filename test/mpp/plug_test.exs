@@ -203,6 +203,10 @@ defmodule MPP.PlugTest do
 
     params = if config.digest, do: Keyword.put(params, :digest, config.digest), else: params
     params = if config.opaque, do: Keyword.put(params, :opaque, config.opaque), else: params
+
+    params =
+      if config.requires_auth, do: Keyword.put(params, :header, Challenge.payment_authorization_header()), else: params
+
     challenge = Challenge.create(params, config.secret_key)
 
     credential = %Credential{challenge: challenge, payload: payload}
@@ -306,6 +310,7 @@ defmodule MPP.PlugTest do
       assert config.expires_in == 300
       assert config.digest == nil
       assert config.opaque == nil
+      assert config.requires_auth == false
       assert config.store == ConCacheStore
       assert first_entry(config).charge.recipient == nil
     end
@@ -551,6 +556,111 @@ defmodule MPP.PlugTest do
       assert conn.status == 402
       body = decode_json_body(conn)
       assert body["type"] =~ "payment-required"
+    end
+  end
+
+  describe "call/2 with requires_auth (Payment-Authorization)" do
+    setup do
+      {:ok, config: init_config(requires_auth: true)}
+    end
+
+    test "advertises header=Payment-Authorization on 402 and never Authorization", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      assert conn.status == 402
+      www_auth = get_resp_header(conn, "www-authenticate")
+      assert www_auth =~ ~s(header="Payment-Authorization")
+      {:ok, challenge} = Headers.parse_challenge(www_auth)
+      assert challenge.header == "Payment-Authorization"
+      assert Challenge.payable?(challenge)
+    end
+
+    test "raises when requires_auth is not a boolean" do
+      assert_raise ArgumentError, ~r/:requires_auth must be true or false/, fn ->
+        init_config(requires_auth: "yes")
+      end
+    end
+
+    test "accepts a credential in Payment-Authorization", %{config: config} do
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", "Bearer ordinary-authentication")
+        |> Plug.Conn.put_req_header("payment-authorization", auth_header)
+        |> call_plug(config)
+
+      refute conn.halted
+      conn = send_success(conn)
+      assert get_resp_header(conn, "payment-receipt")
+      assert get_resp_header(conn, "cache-control") == "private"
+    end
+
+    test "rejects a credential presented in Authorization", %{config: config} do
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.halted
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "payment-required"
+      assert body["detail"] =~ "Payment-Authorization"
+    end
+
+    test "rejects a credential presented in both headers", %{config: config} do
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> Plug.Conn.put_req_header("payment-authorization", auth_header)
+        |> call_plug(config)
+
+      assert conn.halted
+      assert conn.status == 402
+      body = decode_json_body(conn)
+      assert body["type"] =~ "malformed-credential"
+    end
+
+    test "unconfigured Plug still reads Authorization and ignores Payment-Authorization" do
+      config = init_config()
+      auth_header = build_authorization_header(config)
+
+      accepted =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      refute accepted.halted
+
+      ignored =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("payment-authorization", auth_header)
+        |> call_plug(config)
+
+      assert ignored.halted
+      assert ignored.status == 402
+    end
+
+    test "402 responses still carry Cache-Control: no-store", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> call_plug(config)
+
+      assert get_resp_header(conn, "cache-control") == "no-store"
     end
   end
 

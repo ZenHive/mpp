@@ -45,6 +45,7 @@ defmodule MPP.HeadersTest do
       refute header =~ "digest="
       refute header =~ "description="
       refute header =~ "opaque="
+      refute header =~ "header="
     end
 
     test "includes optional fields when present" do
@@ -53,6 +54,21 @@ defmodule MPP.HeadersTest do
 
       assert header =~ ~s(expires="2025-01-15T12:05:00Z")
       assert header =~ ~s(description="Test payment")
+    end
+
+    test "includes header when Payment-Authorization is advertised" do
+      challenge = make_challenge(header: "Payment-Authorization")
+      header = Headers.format_challenge(challenge)
+
+      assert header =~ ~s(header="Payment-Authorization")
+      refute header =~ ~s(header="Authorization")
+    end
+
+    test "omits header when Authorization is the implicit default" do
+      challenge = make_challenge(header: "Authorization")
+      header = Headers.format_challenge(challenge)
+
+      refute header =~ "header="
     end
 
     test "escapes quotes in values" do
@@ -152,6 +168,43 @@ defmodule MPP.HeadersTest do
       assert parsed.opaque == original.opaque
     end
 
+    test "roundtrip preserves Payment-Authorization header" do
+      original = make_challenge(header: "Payment-Authorization")
+      header = Headers.format_challenge(original)
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+
+      assert parsed.header == "Payment-Authorization"
+      assert parsed.id == original.id
+    end
+
+    test "roundtrips a non-payable header value without paying it" do
+      original = make_challenge(header: "X-Custom")
+      header = Headers.format_challenge(original)
+
+      assert header =~ ~s(header="X-Custom")
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == "X-Custom"
+      refute Challenge.payable?(parsed)
+    end
+
+    test "parses header=Payment-Authorization from a foreign server" do
+      original = make_challenge()
+
+      header =
+        Headers.format_challenge(original) <> ~s(, header="Payment-Authorization")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == "Payment-Authorization"
+    end
+
+    test "treats header=Authorization as absent" do
+      original = make_challenge()
+      header = Headers.format_challenge(original) <> ~s(, header="Authorization")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == nil
+    end
+
     test "roundtrip preserves escaped quotes in description" do
       original = make_challenge(description: ~s(Say "hello"))
       header = Headers.format_challenge(original)
@@ -204,6 +257,14 @@ defmodule MPP.HeadersTest do
     test "rejects unknown params" do
       assert {:error, :invalid_auth_params} =
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", unknown="x"))
+    end
+
+    test "accepts header as a known optional param (Task 83 whitelist is not loosened)" do
+      original = make_challenge()
+      header = Headers.format_challenge(original) <> ~s(, header="Payment-Authorization")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == "Payment-Authorization"
     end
 
     test "accepts uppercase and mixed-case auth-param names (RFC 9110 §11.2, mppx #788)" do
@@ -847,6 +908,32 @@ defmodule MPP.HeadersTest do
       {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
 
       assert mppx_parsed["description"] == description
+    end
+
+    test "mppx serializes header=Payment-Authorization and we parse it", %{rt: rt} do
+      {:ok, header} =
+        QuickBEAM.call(rt, "mppxSerialize", [
+          %{
+            "id" => "abc123",
+            "realm" => "api.example.com",
+            "method" => "tempo",
+            "intent" => "charge",
+            "request" => %{"amount" => "1000000"},
+            "header" => "Payment-Authorization"
+          }
+        ])
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == "Payment-Authorization"
+    end
+
+    test "we serialize header=Payment-Authorization and mppx parses it", %{rt: rt} do
+      challenge = make_challenge(method: "tempo", header: "Payment-Authorization")
+      header = Headers.format_challenge(challenge)
+
+      {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
+
+      assert mppx_parsed["header"] == "Payment-Authorization"
     end
   end
 end

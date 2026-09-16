@@ -119,6 +119,15 @@ defmodule MPP.Client.SelectionPolicyTest do
                SelectionPolicy.select([], MultiProvider.new([{TempoProvider, %{}}]))
     end
 
+    test "does not select a challenge whose header is not Payment-Authorization" do
+      payable = make_challenge("tempo")
+      unrecognized = %{payable | header: "X-Custom"}
+      multi = MultiProvider.new([{TempoProvider, %{}}])
+
+      assert {:error, :no_supported_challenge} = SelectionPolicy.select([unrecognized], multi)
+      assert {:ok, ^payable} = SelectionPolicy.select([unrecognized, payable], multi)
+    end
+
     test "unknown policy raises ArgumentError" do
       challenges = [make_challenge("tempo")]
       multi = MultiProvider.new([{TempoProvider, %{}}])

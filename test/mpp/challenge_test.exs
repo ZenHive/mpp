@@ -62,6 +62,33 @@ defmodule MPP.ChallengeTest do
       refute without_expires.id == with_expires.id
     end
 
+    test "Payment-Authorization header is bound into the HMAC ID" do
+      without = Challenge.create(@base_params, @secret_key)
+      with_header = Challenge.create(@base_params ++ [header: "Payment-Authorization"], @secret_key)
+
+      refute without.id == with_header.id
+      assert with_header.header == "Payment-Authorization"
+      assert :ok = Challenge.verify(with_header, @secret_key)
+    end
+
+    test "Authorization is the implicit default and is not stored" do
+      implicit = Challenge.create(@base_params, @secret_key)
+      explicit = Challenge.create(@base_params ++ [header: "authorization"], @secret_key)
+
+      assert explicit.header == nil
+      assert explicit.id == implicit.id
+      assert Challenge.credential_header(explicit) == "Authorization"
+      assert Challenge.payable?(explicit)
+    end
+
+    test "a non-Payment-Authorization header is not payable" do
+      challenge = Challenge.create(@base_params ++ [header: "X-Custom"], @secret_key)
+
+      assert challenge.header == "X-Custom"
+      refute Challenge.payable?(challenge)
+      assert Challenge.credential_header(challenge) == "X-Custom"
+    end
+
     test "ID is valid base64url without padding" do
       challenge = Challenge.create(@base_params, @secret_key)
 
@@ -148,6 +175,13 @@ defmodule MPP.ChallengeTest do
       params = @base_params ++ [expires: "2026-06-01T00:00:00Z"]
       challenge = Challenge.create(params, @secret_key)
       tampered = %{challenge | expires: "2099-01-01T00:00:00Z"}
+
+      assert {:error, :invalid_challenge} = Challenge.verify(tampered, @secret_key)
+    end
+
+    test "tampered header fails verification" do
+      challenge = Challenge.create(@base_params ++ [header: "Payment-Authorization"], @secret_key)
+      tampered = %{challenge | header: nil}
 
       assert {:error, :invalid_challenge} = Challenge.verify(tampered, @secret_key)
     end

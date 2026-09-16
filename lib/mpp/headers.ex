@@ -5,7 +5,9 @@ defmodule MPP.Headers do
   ## Headers
 
     * `WWW-Authenticate: Payment` — challenge header using RFC 9110 auth-param syntax
-    * `Authorization: Payment` — credential header (scheme + base64url JSON blob)
+    * `Authorization: Payment` — default credential header (scheme + base64url JSON blob)
+    * `Payment-Authorization: Payment` — alternate credential header when the
+      challenge advertises `header="Payment-Authorization"`
     * `Payment-Receipt` — receipt header (bare base64url JSON blob)
 
   The `Accept-Payment` client-preference header lives in `MPP.AcceptPayment`.
@@ -44,7 +46,7 @@ defmodule MPP.Headers do
   @payment_scheme "Payment"
 
   @required_params ~w(id realm method intent request)
-  @optional_params ~w(expires digest description opaque)
+  @optional_params ~w(expires digest description header opaque)
   @all_params @required_params ++ @optional_params
 
   # 16 KiB cap on client-supplied header tokens, enforced BEFORE any base64url
@@ -81,6 +83,7 @@ defmodule MPP.Headers do
           {"expires", challenge.expires},
           {"digest", challenge.digest},
           {"description", challenge.description},
+          {"header", Challenge.advertised_header(challenge.header)},
           {"opaque", challenge.opaque}
         ],
         fn {_k, v} -> is_nil(v) end
@@ -523,6 +526,9 @@ defmodule MPP.Headers do
   end
 
   # Builds a Challenge struct from parsed auth-params.
+  # `header="Authorization"` (the implicit default) is stored as nil so it is
+  # never advertised, matching mppx / mpp-rs. Other values are kept so a
+  # non-payable header still round-trips; `Challenge.payable?/1` refuses them.
   defp params_to_challenge(params) do
     %Challenge{
       id: params["id"],
@@ -533,6 +539,7 @@ defmodule MPP.Headers do
       expires: params["expires"],
       digest: params["digest"],
       description: params["description"],
+      header: Challenge.advertised_header(params["header"]),
       opaque: params["opaque"]
     }
   end

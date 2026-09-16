@@ -71,6 +71,21 @@ defmodule MPP.CredentialTest do
       assert decoded.challenge.opaque == "eyJvcmRlcklkIjoiNDIifQ"
     end
 
+    test "roundtrip preserves Payment-Authorization header and omits it when absent" do
+      with_header =
+        Challenge.create(@challenge_params ++ [header: "Payment-Authorization"], @secret_key)
+
+      encoded = Credential.encode(%Credential{challenge: with_header, payload: %{"sig" => "0x"}})
+      assert {:ok, decoded} = Credential.decode(encoded)
+      assert decoded.challenge.header == "Payment-Authorization"
+
+      without = Challenge.create(@challenge_params, @secret_key)
+      encoded_without = Credential.encode(%Credential{challenge: without, payload: %{"sig" => "0x"}})
+      {:ok, decoded_without} = Credential.decode(encoded_without)
+      assert decoded_without.challenge.header == nil
+      refute encoded_without |> Base.url_decode64!(padding: false) |> Jason.decode!() |> get_in(["challenge", "header"])
+    end
+
     test "encode produces valid base64url string" do
       credential = build_credential()
       encoded = Credential.encode(credential)

@@ -158,6 +158,80 @@ defmodule MPP.Client.Transport.HTTPTest do
       assert Req.Request.get_header(updated, "content-type") == ["application/json"]
       assert [_auth] = Req.Request.get_header(updated, "authorization")
     end
+
+    test "attaches to Payment-Authorization when the challenge advertised header" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"type" => "hash"}, source: nil}
+      request = %Req.Request{}
+
+      updated = HTTP.set_credential(request, credential)
+
+      assert Req.Request.get_header(updated, "authorization") == []
+      assert [value] = Req.Request.get_header(updated, "payment-authorization")
+      assert {:ok, parsed} = Headers.parse_credential(value)
+      assert parsed.challenge.id == challenge.id
+      assert parsed.challenge.header == "Payment-Authorization"
+    end
+
+    test "clears a stale Payment Authorization when attaching to Payment-Authorization" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"type" => "hash"}, source: nil}
+
+      request =
+        %Req.Request{}
+        |> Req.Request.put_header("authorization", "Payment stale")
+        |> Req.Request.put_header("x-app", "keep")
+
+      updated = HTTP.set_credential(request, credential)
+
+      assert Req.Request.get_header(updated, "authorization") == []
+      assert Req.Request.get_header(updated, "x-app") == ["keep"]
+      assert [_value] = Req.Request.get_header(updated, "payment-authorization")
+    end
+
+    test "preserves Bearer Authorization when attaching to Payment-Authorization" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      credential = %Credential{challenge: challenge, payload: %{"type" => "hash"}, source: nil}
+
+      request = Req.Request.put_header(%Req.Request{}, "authorization", "Bearer ordinary")
+      updated = HTTP.set_credential(request, credential)
+
+      assert Req.Request.get_header(updated, "authorization") == ["Bearer ordinary"]
+      assert [_value] = Req.Request.get_header(updated, "payment-authorization")
+    end
   end
 
   # -- Transport.select_challenge/2 -----------------------------------------------
@@ -189,6 +263,17 @@ defmodule MPP.Client.Transport.HTTPTest do
     test "returns error on empty challenge list" do
       assert {:error, :no_supported_challenge} =
                Transport.select_challenge([], MultiProvider.new([{TempoProvider, %{}}]))
+    end
+
+    test "skips a challenge whose header is not Payment-Authorization" do
+      payable = make_challenge("tempo")
+      unrecognized = %{payable | header: "X-Custom"}
+      multi = MultiProvider.new([{TempoProvider, %{}}])
+
+      assert {:error, :no_supported_challenge} =
+               Transport.select_challenge([unrecognized], multi)
+
+      assert {:ok, ^payable} = Transport.select_challenge([unrecognized, payable], multi)
     end
 
     test "ranks by Accept-Payment before picking supported challenge" do
