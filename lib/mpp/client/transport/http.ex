@@ -143,8 +143,14 @@ defmodule MPP.Client.Transport.HTTP do
 
   defp delete_payment_scheme(request, name) do
     case Req.Request.get_header(request, name) do
-      ["Payment " <> _ | _] -> Req.Request.delete_header(request, name)
-      _other -> request
+      [header | _] ->
+        case Headers.parse_credential(header) do
+          {:error, :invalid_scheme} -> request
+          _payment -> Req.Request.delete_header(request, name)
+        end
+
+      [] ->
+        request
     end
   end
 

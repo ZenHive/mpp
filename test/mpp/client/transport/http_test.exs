@@ -199,19 +199,27 @@ defmodule MPP.Client.Transport.HTTPTest do
 
       credential = %Credential{challenge: challenge, payload: %{"type" => "hash"}, source: nil}
 
-      request =
-        %Req.Request{}
-        |> Req.Request.put_header("authorization", "Payment stale")
-        |> Req.Request.put_header("x-app", "keep")
+      "Payment " <> token = Headers.format_credential(credential)
 
-      updated = HTTP.set_credential(request, credential)
+      for prefix <- ["Payment ", "payment ", "PAYMENT\t", "pAyMeNt  ", " \tpayment\t ", "payment\n"],
+          payload <- [token, "stale", ""] do
+        stale = prefix <> payload
+        refute Headers.parse_credential(stale) == {:error, :invalid_scheme}
 
-      assert Req.Request.get_header(updated, "authorization") == []
-      assert Req.Request.get_header(updated, "x-app") == ["keep"]
-      assert [_value] = Req.Request.get_header(updated, "payment-authorization")
+        request =
+          %Req.Request{}
+          |> Req.Request.put_header("authorization", stale)
+          |> Req.Request.put_header("x-app", "keep")
+
+        updated = HTTP.set_credential(request, credential)
+
+        assert Req.Request.get_header(updated, "authorization") == [], inspect(stale)
+        assert Req.Request.get_header(updated, "x-app") == ["keep"]
+        assert Req.Request.get_header(updated, "payment-authorization") == [Headers.format_credential(credential)]
+      end
     end
 
-    test "preserves Bearer Authorization when attaching to Payment-Authorization" do
+    test "preserves non-Payment Authorization when attaching to Payment-Authorization" do
       challenge =
         Challenge.create(
           [
@@ -226,11 +234,14 @@ defmodule MPP.Client.Transport.HTTPTest do
 
       credential = %Credential{challenge: challenge, payload: %{"type" => "hash"}, source: nil}
 
-      request = Req.Request.put_header(%Req.Request{}, "authorization", "Bearer ordinary")
-      updated = HTTP.set_credential(request, credential)
+      for authorization <- ["Bearer ordinary", "Basic dXNlcjpwYXNz", "paymentish token", "payment", ""] do
+        assert Headers.parse_credential(authorization) == {:error, :invalid_scheme}
+        request = Req.Request.put_header(%Req.Request{}, "authorization", authorization)
+        updated = HTTP.set_credential(request, credential)
 
-      assert Req.Request.get_header(updated, "authorization") == ["Bearer ordinary"]
-      assert [_value] = Req.Request.get_header(updated, "payment-authorization")
+        assert Req.Request.get_header(updated, "authorization") == [authorization]
+        assert [_value] = Req.Request.get_header(updated, "payment-authorization")
+      end
     end
   end
 

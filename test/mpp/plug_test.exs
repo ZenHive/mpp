@@ -2,6 +2,7 @@ defmodule MPP.PlugTest do
   use ExUnit.Case, async: true
 
   alias MPP.Challenge
+  alias MPP.Client.Transport.HTTP
   alias MPP.Credential
   alias MPP.Errors
   alias MPP.Headers
@@ -598,6 +599,42 @@ defmodule MPP.PlugTest do
       conn = send_success(conn)
       assert get_resp_header(conn, "payment-receipt")
       assert get_resp_header(conn, "cache-control") == "private"
+    end
+
+    test "transport replaces stale Payment Authorization before retrying", %{config: config} do
+      "Payment " <> token = build_authorization_header(config)
+
+      for prefix <- ["payment ", "PAYMENT\t", " \tpAyMeNt  "] do
+        stale = prefix <> token
+
+        rejected =
+          :get
+          |> Plug.Test.conn("/premium")
+          |> Plug.Conn.put_req_header("authorization", stale)
+          |> call_plug(config)
+
+        assert rejected.status == 402
+        assert {:ok, challenge} = Headers.parse_challenge(get_resp_header(rejected, "www-authenticate"))
+        credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+
+        request =
+          %Req.Request{}
+          |> Req.Request.put_header("authorization", stale)
+          |> HTTP.set_credential(credential)
+
+        assert Req.Request.get_header(request, "authorization") == []
+
+        conn = Plug.Test.conn(:get, "/premium")
+
+        retried =
+          request.headers
+          |> Enum.reduce(conn, fn {name, [value]}, conn -> Plug.Conn.put_req_header(conn, name, value) end)
+          |> call_plug(config)
+
+        refute retried.halted
+        assert %Receipt{} = retried.assigns.mpp_receipt
+        assert retried |> send_success() |> get_resp_header("payment-receipt")
+      end
     end
 
     test "rejects a credential presented in Authorization", %{config: config} do
