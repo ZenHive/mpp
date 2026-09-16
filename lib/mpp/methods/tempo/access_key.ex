@@ -1,6 +1,7 @@
 defmodule MPP.Methods.Tempo.AccessKey do
   @moduledoc false
 
+  alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Address
   alias Onchain.Contract
 
@@ -14,9 +15,16 @@ defmodule MPP.Methods.Tempo.AccessKey do
   """
   @spec active?(String.t(), String.t(), keyword()) :: boolean()
   def active?(account, access_key, opts) when is_binary(account) and is_binary(access_key) do
+    match?({:ok, _type}, fetch_active(account, access_key, opts))
+  end
+
+  @doc "Read the primitive type of an active key from the AccountKeychain precompile."
+  @spec fetch_active(String.t(), String.t(), keyword()) ::
+          {:ok, KeyAuthorization.key_type()} | {:error, term()}
+  def fetch_active(account, access_key, opts) do
     with {:ok, account_bin} <- Address.validate(account),
          {:ok, access_key_bin} <- Address.validate(access_key),
-         {:ok, [_signature_type, _key_id, expiry, _enforce_limits, is_revoked]} <-
+         {:ok, [signature_type, _key_id, expiry, _enforce_limits, is_revoked]} <-
            Contract.call(
              @account_keychain,
              "getKey(address,address)",
@@ -25,9 +33,10 @@ defmodule MPP.Methods.Tempo.AccessKey do
              opts
            ) do
       now = System.os_time(:second)
-      not is_revoked and expiry > now
-    else
-      {:error, _} -> false
+
+      if not is_revoked and expiry > now,
+        do: KeyAuthorization.key_type(signature_type),
+        else: {:error, :inactive_access_key}
     end
   end
 end

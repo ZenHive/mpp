@@ -16,6 +16,7 @@ defmodule MPP.Methods.Tempo.Subscription do
   alias MPP.Errors
   alias MPP.Intents.Subscription
   alias MPP.Methods.Shared
+  alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.SubscriptionTransaction
   alias MPP.Receipt
@@ -175,7 +176,7 @@ defmodule MPP.Methods.Tempo.Subscription do
 
     with {:ok, tx, memo} <-
            SubscriptionTransaction.build(subscription, authorization, authorization.source, config, settlement_reference),
-         :ok <- simulate_sponsored(tx, authorization.source, config),
+         :ok <- simulate_sponsored(tx, authorization.source, authorization.key_type, config),
          :ok <- claim_activation(config, serialized_authorization) do
       finalize_activation(
         settle_activation(subscription, authorization, serialized_authorization, config, tx, memo),
@@ -252,8 +253,9 @@ defmodule MPP.Methods.Tempo.Subscription do
     subscription = record.subscription
     source = record.method_state.source
 
-    with {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, source, config, reference),
-         :ok <- simulate_sponsored(tx, source, config) do
+    with {:ok, key_type} <- renewal_key_type(record, config),
+         {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, source, config, reference),
+         :ok <- simulate_sponsored(tx, source, key_type, config) do
       case broadcast(tx.raw, config) do
         {:ok, tx_hash, chain_receipt} ->
           confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)
@@ -414,7 +416,7 @@ defmodule MPP.Methods.Tempo.Subscription do
       method_state: %{
         source: authorization.source,
         access_key: access_key,
-        access_key_type: :secp256k1,
+        access_key_type: authorization.key_type,
         key_authorization: serialized
       },
       billing_anchor: settled_at,
@@ -449,10 +451,20 @@ defmodule MPP.Methods.Tempo.Subscription do
     end
   end
 
-  defp simulate_sponsored(_tx, _source, %{"fee_payer" => value}) when value != true, do: :ok
-  defp simulate_sponsored(_tx, _source, config) when not is_map_key(config, "fee_payer"), do: :ok
+  defp renewal_key_type(record, config) do
+    opts = Keyword.put(req_options(config), :rpc_url, config["rpc_url"])
 
-  defp simulate_sponsored(tx, source, config) do
+    case AccessKey.fetch_active(record.method_state.source, record.method_state.access_key, opts) do
+      {:ok, :secp256k1 = type} -> {:ok, type}
+      {:ok, type} -> {:error, "unsupported subscription signing key type: #{type}"}
+      {:error, _reason} -> {:error, "subscription access key is inactive or unavailable"}
+    end
+  end
+
+  defp simulate_sponsored(_tx, _source, _key_type, %{"fee_payer" => value}) when value != true, do: :ok
+  defp simulate_sponsored(_tx, _source, _key_type, config) when not is_map_key(config, "fee_payer"), do: :ok
+
+  defp simulate_sponsored(tx, source, key_type, config) do
     rpc_url = config["rpc_url"]
     [call] = tx.calls
     fields = tx.fields
@@ -468,6 +480,8 @@ defmodule MPP.Methods.Tempo.Subscription do
       "maxPriorityFeePerGas" => field_quantity(fields, 1),
       "chainId" => field_quantity(fields, 0),
       "type" => "0x76",
+      "keyType" => KeyAuthorization.key_type_name(key_type),
+      "keyId" => elem(access_key(config), 1),
       "feeToken" => hex(Enum.at(fields, 10))
     }
 

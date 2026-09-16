@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "33fec5aea4575f3d5040968ae44a4a32cff80892dcc6fc46d8cafd958f046874",
+    "fingerprint_sha256": "dc055eecb57eca9156e3f2f25b35abfaab2a93ab9ec5e2f00c39f54740d12031",
     "mutations": [
       {
         "id": "jcs-descending-key-order",

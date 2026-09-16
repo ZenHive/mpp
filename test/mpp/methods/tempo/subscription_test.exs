@@ -449,7 +449,10 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       assert {:ok, %Receipt{reference: @tx_hash}} =
                Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
 
-      assert_received {:rpc, "eth_simulateV1", [_simulation]}
+      assert_received {:rpc, "eth_simulateV1", [simulation]}
+      [request] = hd(simulation["blockStateCalls"])["calls"]
+      assert request["keyType"] == "secp256k1"
+      assert request["keyId"] == SubscriptionHelpers.access_address()
       assert_received {:rpc, "eth_sendRawTransactionSync", [raw]}
       assert {:ok, tx} = Transaction.deserialize(raw)
       assert [_recovery_id, _r, _s] = Enum.at(tx.fields, 11)
@@ -589,28 +592,62 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     end
   end
 
+  test "renewal reads the on-chain type and releases the claim for unusable keys", %{store: store} do
+    stub_successful_chain()
+    config = config(store)
+    subscription = subscription(config)
+    {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+    assert {:ok, activation} =
+             Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+    assert {:ok, _record} =
+             Store.update(store, activation.subscription_id, fn record ->
+               {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+             end)
+
+    for {opts, message} <- [
+          {[key_type: 1], "unsupported subscription signing key type: p256"},
+          {[key_type: 2], "unsupported subscription signing key type: web_authn"},
+          {[expiry: 0], "subscription access key is inactive or unavailable"}
+        ] do
+      stub_successful_chain(opts)
+      assert {:error, error} = Subscription.renew(activation.subscription_id, config)
+      assert error.detail == message
+      assert {:ok, record} = Store.get(store, activation.subscription_id)
+      assert record.in_flight_period == nil
+      assert record.last_charged_period == 0
+    end
+
+    stub_successful_chain()
+    assert {:ok, _receipt} = Subscription.renew(activation.subscription_id, config)
+  end
+
   defp stub_successful_chain(opts \\ []) do
     test_pid = self()
     block_timestamp = Keyword.get(opts, :block_timestamp, System.os_time(:second))
     simulation = Keyword.get(opts, :simulation, :success)
 
-    Req.Test.stub(__MODULE__, fn conn ->
-      request = request(conn)
-      send(test_pid, {:rpc, request["method"], request["params"]})
+    stub_rpc(
+      fn conn ->
+        request = request(conn)
+        send(test_pid, {:rpc, request["method"], request["params"]})
 
-      case request do
-        %{"method" => "eth_simulateV1"} when simulation == :unsupported ->
-          Req.Test.json(conn, %{
-            "jsonrpc" => "2.0",
-            "id" => request["id"],
-            "error" => %{"code" => -32_601, "message" => "method not found"}
-          })
+        case request do
+          %{"method" => "eth_simulateV1"} when simulation == :unsupported ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "id" => request["id"],
+              "error" => %{"code" => -32_601, "message" => "method not found"}
+            })
 
-        _request ->
-          result = chain_result(request, block_timestamp)
-          Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
-      end
-    end)
+          _request ->
+            result = chain_result(request, block_timestamp)
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+        end
+      end,
+      opts
+    )
   end
 
   defp chain_result(request, block_timestamp) do
@@ -630,7 +667,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   end
 
   defp stub_sponsorship_failure(failure) do
-    Req.Test.stub(__MODULE__, fn conn ->
+    stub_rpc(fn conn ->
       request = request(conn)
 
       case failure do
@@ -651,7 +688,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   end
 
   defp stub_missing_settlement do
-    Req.Test.stub(__MODULE__, fn conn ->
+    stub_rpc(fn conn ->
       request = request(conn)
 
       result =
@@ -665,7 +702,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   end
 
   defp stub_reverted_chain do
-    Req.Test.stub(__MODULE__, fn conn ->
+    stub_rpc(fn conn ->
       request = request(conn)
 
       "eth_sendRawTransactionSync" = request["method"]
@@ -675,7 +712,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   end
 
   defp stub_broadcast_failure do
-    Req.Test.stub(__MODULE__, fn conn ->
+    stub_rpc(fn conn ->
       request = request(conn)
       "eth_sendRawTransactionSync" = request["method"]
       Req.Test.transport_error(conn, :timeout)
@@ -683,7 +720,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   end
 
   defp stub_success_without_transfer do
-    Req.Test.stub(__MODULE__, fn conn ->
+    stub_rpc(fn conn ->
       request = request(conn)
 
       result =
@@ -725,6 +762,24 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       ]
     }
   end
+
+  defp stub_rpc(handler, opts \\ []) do
+    Req.Test.stub(__MODULE__, fn conn ->
+      request = request(conn)
+
+      if request["method"] == "eth_call" do
+        {:ok, key} = Onchain.Address.validate(SubscriptionHelpers.access_address())
+        type = Keyword.get(opts, :key_type, 0)
+        expiry = Keyword.get(opts, :expiry, 4_000_000_000)
+        result = "0x" <> Base.encode16(<<type::256, 0::96, key::binary, expiry::256, 0::256, 0::256>>)
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+      else
+        handler.(Plug.Conn.assign(conn, :rpc_request, request))
+      end
+    end)
+  end
+
+  defp request(%{assigns: %{rpc_request: request}}), do: request
 
   defp request(conn) do
     {:ok, body, _conn} = Plug.Conn.read_body(conn)

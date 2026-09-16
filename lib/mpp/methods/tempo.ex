@@ -676,11 +676,16 @@ defmodule MPP.Methods.Tempo do
   defp verify_proof_access_key_authorization(proof_params, config, signature, source_address, mismatch_detail) do
     with {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          rpc_opts = Keyword.merge([rpc_url: rpc_url], rpc_options(config)),
-         {:ok, access_key} <- Proof.recover_authorized_proof_signer(proof_params, signature, source_address),
-         true <- AccessKey.active?(source_address, access_key, rpc_opts) do
+         {:ok, %{address: access_key, key_type: key_type}} <-
+           Proof.recover_authorized_proof_key(proof_params, signature, source_address),
+         {:ok, ^key_type} <- AccessKey.fetch_active(source_address, access_key, rpc_opts) do
       :ok
     else
-      _ -> {:error, Errors.new(:verification_failed, mismatch_detail)}
+      {:error, "unsupported proof signature type: WebAuthn" = detail} ->
+        {:error, Errors.new(:verification_failed, detail)}
+
+      _ ->
+        {:error, Errors.new(:verification_failed, mismatch_detail)}
     end
   end
 

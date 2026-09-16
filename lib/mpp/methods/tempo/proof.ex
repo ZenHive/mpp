@@ -16,6 +16,7 @@ defmodule MPP.Methods.Tempo.Proof do
   alias Cartouche.Typed.Type
   alias Curvy.Signature, as: CurvySignature
   alias MPP.Hex
+  alias MPP.Methods.Tempo.ProofSignature
   alias MPP.Methods.Tempo.SignatureEnvelope
 
   @domain_name "MPP"
@@ -82,26 +83,35 @@ defmodule MPP.Methods.Tempo.Proof do
   @spec recover_authorized_proof_signer(params(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   def recover_authorized_proof_signer(params, signature_hex, source_address) do
+    with {:ok, key} <- recover_authorized_proof_key(params, signature_hex, source_address) do
+      {:ok, key.address}
+    end
+  end
+
+  @doc "Recover a verified proof signer together with its primitive key type."
+  @spec recover_authorized_proof_key(params(), String.t(), String.t()) ::
+          {:ok, %{address: String.t(), key_type: MPP.Methods.Tempo.KeyAuthorization.key_type()}} | {:error, String.t()}
+  def recover_authorized_proof_key(params, signature_hex, source_address) do
     digest = hash(params)
 
-    with {:ok, envelope} <- SignatureEnvelope.deserialize(signature_hex),
+    with {:ok, envelope} <- ProofSignature.deserialize(signature_hex),
          {:ok, signer} <- recover_authorized_signer(envelope, digest, source_address) do
-      {:ok, signer}
+      {:ok, %{address: signer, key_type: ProofSignature.key_type(envelope)}}
     else
+      {:error, "unsupported proof signature type: WebAuthn"} = error -> error
       _ -> {:error, "proof signature recovery failed"}
     end
+  end
+
+  defp recover_authorized_signer({:keychain, _user, {:keychain, _, _, _}, _version}, _digest, _source) do
+    {:error, "proof signature recovery failed"}
   end
 
   defp recover_authorized_signer({:keychain, user_address, inner, version}, digest, source_address) do
     if Onchain.Address.equal?(user_address, source_address) do
       keychain_payload = keychain_payload(digest, source_address, version)
 
-      with {:ok, signer} <- SignatureEnvelope.extract_address(inner, keychain_payload),
-           true <- SignatureEnvelope.verify_secp256k1(inner, keychain_payload, signer) do
-        {:ok, signer}
-      else
-        _ -> {:error, "proof signature recovery failed"}
-      end
+      recover_authorized_signer(inner, keychain_payload, source_address)
     else
       {:error, "proof signature recovery failed"}
     end
@@ -114,6 +124,10 @@ defmodule MPP.Methods.Tempo.Proof do
     else
       _ -> {:error, "proof signature recovery failed"}
     end
+  end
+
+  defp recover_authorized_signer({:p256, _} = envelope, digest, _source_address) do
+    ProofSignature.extract_address(envelope, digest)
   end
 
   defp keychain_payload(digest, source_address, :v2) do

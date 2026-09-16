@@ -102,7 +102,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
       params = %{
         "address" => access_key,
         "expiry" => expiry,
-        "keyType" => key_type_to_wire(key_type),
+        "keyType" => key_type_name(key_type),
         "limits" => [
           %{
             "token" => token,
@@ -119,6 +119,11 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
       put_wallet_witness(params, opts[:challenge_id])
     end
   end
+
+  @doc "Decode the key type returned by Tempo's AccountKeychain precompile."
+  @spec key_type(non_neg_integer()) :: {:ok, key_type()} | {:error, String.t()}
+  def key_type(type) when type in 0..2, do: parse_key_type(<<type>>)
+  def key_type(_type), do: {:error, "unsupported access key type"}
 
   @doc "Return the decoded RLP field inserted into a Tempo transaction."
   @spec transaction_field(t()) :: list()
@@ -528,9 +533,11 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
     end
   end
 
-  defp key_type_to_wire(:secp256k1), do: "secp256k1"
-  defp key_type_to_wire(:p256), do: "p256"
-  defp key_type_to_wire(:web_authn), do: "webAuthn"
+  @doc "Return Tempo’s RPC name for a primitive key type."
+  @spec key_type_name(key_type()) :: String.t()
+  def key_type_name(:secp256k1), do: "secp256k1"
+  def key_type_name(:p256), do: "p256"
+  def key_type_name(:web_authn), do: "webAuthn"
 
   defp required_integer(opts, key) do
     case opts[key] do
