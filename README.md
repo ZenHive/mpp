@@ -113,7 +113,7 @@ pipeline :paid_evm do
 end
 ```
 
-Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce.
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce. Enable Permit2 with `"permit2" => true` and `"private_key"`: the client signs an off-chain witness authorization (`MPP.Methods.EVM.Permit2.sign/5`) and the server submits, paying gas. Optional `"splits"` add ordered extra recipient/amount legs (Permit2 only).
 
 ### Solana (SOL and SPL tokens)
 
@@ -348,6 +348,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.Tempo.SessionReceipt` | Tempo session receipt wire format |
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
+| `MPP.Methods.EVM.Permit2` | Permit2 witness credentials, gas-sponsored settlement, and ordered splits |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Methods.XRPL` | XRPL signed-blob and hash charge verification via JSON-RPC |
 | `MPP.Methods.XRPL.Session` | XRPL payment-channel session verification (open / voucher / close) |

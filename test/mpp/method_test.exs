@@ -101,6 +101,7 @@ defmodule MPP.MethodTest do
       assert "hash" in MPP.Methods.Tempo.credential_types()
       assert "hash" in EVM.credential_types()
       assert "authorization" in EVM.credential_types()
+      assert "permit2" in EVM.credential_types()
     end
 
     test "Solana declares transaction, signature, and bundle" do

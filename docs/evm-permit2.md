@@ -40,12 +40,14 @@ Witness and charge authority: [draft-evm-charge-00 at a938bfd](https://github.co
 * Permit2 signs the spender (`msg.sender`). The draft defines no discovery
   field, so the signing API requires the server's spender address explicitly.
 
-There is no `refs/` checkout in this worktree. At pickup, upstream
+At review (2026-09-16), upstream
 [mppx `src/evm/Methods.ts`:21](https://github.com/wevm/mppx/blob/main/src/evm/Methods.ts#L21)
-still defaults to authorization, and
+still defaults to `credentialTypes = ['authorization']`, and
 [`Types.ts`:18,96](https://github.com/wevm/mppx/blob/main/src/evm/Types.ts#L18)
-defines only the authorization credential schema. Upstream mpp-rs has an `src/evm.rs` utility
-module, but no EVM Permit2 payment method. Neither is used as the oracle.
+defines only the authorization credential schema. Upstream
+[mpp-rs `src/evm.rs`](https://github.com/tempoxyz/mpp-rs/blob/main/src/evm.rs)
+is shared address/amount helpers for Tempo, not an EVM Permit2 payment method.
+Neither SDK is used as the oracle.
 
 ## Live evidence and checks
 

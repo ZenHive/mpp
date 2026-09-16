@@ -41,13 +41,17 @@ defmodule MPP.Methods.EVM do
       implementing `MPP.Tempo.Store` (Redis/Postgres for multi-node) or
       `{MPP.Tempo.ConCacheStore, opts}`; a configured store MUST implement the atomic
       `check_and_mark/2`. Pass `store: false` to opt out (not recommended)
-    * `"private_key"` — (required for `type="authorization"`) server-only
-      secp256k1 key used to submit `transferWithAuthorization` (pays gas)
+    * `"private_key"` — (required for `type="authorization"` and `type="permit2"`)
+      server-only secp256k1 key used to submit settlement (pays gas)
+    * `"permit2"` — (optional) `true` to advertise and settle `type="permit2"`
+    * `"splits"` — (optional) ordered extra `%{"recipient" => ..., "amount" => ...}`
+      legs; advertised and settled only via Permit2. Sum must be strictly less
+      than the charge amount (primary recipient gets the remainder)
     * `"authorization"` — (optional) EIP-712 domain `%{"name" => ..., "version" => ...}`
       for a custom EIP-3009 token. Known Circle USDC/EURC contracts are
       resolved automatically
     * `"max_fee_per_gas"` / `"max_priority_fee_per_gas"` — (optional) EIP-1559
-      fees for authorization settlement, as wei integers or `{n, :gwei}` tuples
+      fees for authorization and Permit2 settlement, as wei integers or `{n, :gwei}` tuples
     * `"req_options"` — (optional) merged into the `Onchain.RPC` call as
       `:req_options` (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
 
@@ -177,7 +181,7 @@ defmodule MPP.Methods.EVM do
       payload: [
         kind: :value,
         description:
-          ~s{Credential payload map: `"hash"` (0x-prefixed transaction hash) or `type="authorization"` EIP-3009 fields}
+          ~s{Credential payload map: `"hash"` (0x-prefixed transaction hash), `type="authorization"` EIP-3009 fields, or `type="permit2"` Permit2 fields}
       ],
       charge: [
         kind: :value,
