@@ -20,6 +20,11 @@ defmodule MPP.McpTest do
     def method_name, do: "mock"
 
     @impl MPP.Method
+    def verify(%{"problem_type" => type}, _charge) do
+      {:error, Errors.new(String.to_existing_atom(type), "detail")}
+    end
+
+    @impl MPP.Method
     def verify(%{"proof" => "valid"}, _charge) do
       {:ok, Receipt.new(method: method_name(), reference: "ref_mcp", timestamp: "2026-04-04T12:00:00Z")}
     end
@@ -292,24 +297,90 @@ defmodule MPP.McpTest do
   end
 
   # draft-payment-transport-mcp-00 § 10.1 plus mppx errorCode extras
-  # (invalid-payload → -32602). Types not listed default to -32043.
+  # (invalid-payload → -32602). Every type must be classified explicitly.
   @json_rpc_code_overrides %{
     payment_required: -32_042,
     malformed_credential: -32_602,
     invalid_payload: -32_602,
     internal_payment_error: -32_603,
-    sponsor_capacity_exhausted: -32_042
+    sponsor_capacity_exhausted: -32_042,
+    payment_insufficient: -32_043,
+    payment_expired: -32_043,
+    verification_failed: -32_043,
+    method_unsupported: -32_043,
+    invalid_challenge: -32_043,
+    credential_mismatch: -32_043,
+    bad_request: -32_043,
+    payment_action_required: -32_043,
+    settlement_failed: -32_043,
+    settlement_unavailable: -32_043,
+    settlement_timeout: -32_043,
+    insufficient_balance: -32_043,
+    invalid_signature: -32_043,
+    signer_mismatch: -32_043,
+    amount_exceeds_deposit: -32_043,
+    delta_too_small: -32_043,
+    channel_not_found: -32_043,
+    channel_closed: -32_043
   }
 
   describe "error_code/1" do
     test "maps every MPP problem type to the spec JSON-RPC code" do
+      assert Enum.sort(Errors.types()) == Enum.sort(Map.keys(@json_rpc_code_overrides))
+
       for type <- Errors.types() do
-        expected = Map.get(@json_rpc_code_overrides, type, -32_043)
+        expected = Map.fetch!(@json_rpc_code_overrides, type)
         error = Errors.new(type, "detail")
 
         assert Mcp.error_code(error) == expected,
                "#{type} mapped to #{Mcp.error_code(error)}, expected #{expected}"
       end
+    end
+
+    test "every public error builder uses the selector for every problem" do
+      builders =
+        :functions
+        |> Mcp.__info__()
+        |> Enum.filter(fn {name, _arity} -> String.ends_with?(Atom.to_string(name), "_error") end)
+        |> Enum.sort()
+
+      assert builders == [payment_required_error: 1, verification_failed_error: 2]
+
+      for type <- Errors.types() do
+        problem = Errors.new(type, "detail")
+        request = json_rpc_request_with_credential(%{"problem_type" => Atom.to_string(type)})
+
+        for challenges <- [sample_challenge(), [sample_challenge()], []],
+            {builder, arity} <- builders do
+          args = if arity == 1, do: [challenges], else: [challenges, problem]
+          expected_problem = if arity == 1, do: nil, else: problem
+          error = apply(Mcp, builder, args)
+          assert error["code"] == Mcp.error_code(expected_problem)
+
+          if arity == 2 do
+            assert error["message"] == problem.title
+            assert error["data"]["problem"] == Errors.to_map(problem)
+          end
+        end
+
+        for transport <- [Mcp, MPP.Transports.JsonRpc] do
+          response = transport.call(request, server_config(), fn _ -> flunk("must reject") end)
+          assert response["error"]["code"] == Mcp.error_code(problem)
+          assert response["error"]["data"]["problem"] == Errors.to_map(problem)
+        end
+
+        conn = Plug.Test.conn(:post, "/rpc", Jason.encode!(request))
+        state = %{config: server_config(), handler: fn _ -> flunk("must reject") end}
+        response = conn |> MPP.Transports.JsonRpc.Plug.call(state) |> Map.fetch!(:resp_body) |> Jason.decode!()
+        assert response["error"]["code"] == Mcp.error_code(problem)
+        assert response["error"]["data"]["problem"] == Errors.to_map(problem)
+      end
+    end
+
+    test "unknown problem URIs retain the verification-failed fallback" do
+      problem = %{Errors.new(:verification_failed, "detail") | type: "urn:unknown:problem"}
+      assert Mcp.error_code(problem) == Mcp.verification_failed_code()
+      assert Mcp.verification_failed_error([], problem)["code"] == Mcp.error_code(problem)
     end
 
     test "nil maps to payment-required, matching mppx errorCode(!error)" do
@@ -429,7 +500,7 @@ defmodule MPP.McpTest do
       error = Mcp.verification_failed_error(challenge, problem)
 
       assert error["code"] == -32_043
-      assert error["message"] == "Payment Verification Failed"
+      assert error["message"] == "Verification Failed"
       assert error["data"]["httpStatus"] == 402
       assert error["data"]["problem"]["type"] == "https://paymentauth.org/problems/verification-failed"
       assert error["data"]["problem"]["detail"] == "Invalid transaction hash"

@@ -437,6 +437,14 @@ On the server side, `MPP.Mcp.init/1` validates the transport config and
 configured payment methods, their intents, and credential types under
 `experimental.payment.methods` (draft-payment-transport-mcp-00).
 
+For a hand-written MCP server, use `MPP.Mcp.payment_required_error/1` to issue
+challenges without a problem (`-32042`), or `MPP.Mcp.verification_failed_error/2`
+when you have an `MPP.Errors` problem. Despite its historical name, the latter
+uses the problem title as its message and `MPP.Mcp.error_code/1` for its code:
+`payment_required` / `sponsor_capacity_exhausted` → `-32042`,
+`malformed_credential` / `invalid_payload` → `-32602`,
+`internal_payment_error` → `-32603`, all other problems → `-32043`.
+
 Generic (non-MCP) JSON-RPC uses root-level `_meta` so `params` can be an array.
 `MPP.Transports.JsonRpc.Plug` mounts on a Plug route; `MPP.Client.Transport.JsonRpc`
 attaches the credential at `_meta["org.paymentauth/credential"]` on the request

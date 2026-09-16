@@ -38,8 +38,13 @@ defmodule MPP.Mcp do
     * `capabilities/1` — advertise configured payment methods and intents
     * `extract_credential/1` — pull credential from `params._meta`
     * `payment_required_error/1` — build `-32042` error with challenges
-    * `verification_failed_error/2` — build `-32043` error with problem details
+    * `verification_failed_error/2` — use when you have an `MPP.Errors` problem;
+      the code comes from `error_code/1` and the message from the problem title
     * `attach_receipt/3` — add receipt + challengeId to `result._meta`
+
+  Problem codes: `payment_required` and `sponsor_capacity_exhausted` → `-32042`;
+  `malformed_credential` and `invalid_payload` → `-32602`;
+  `internal_payment_error` → `-32603`; all other problems → `-32043`.
 
   ## Client Helpers
 
@@ -72,6 +77,10 @@ defmodule MPP.Mcp do
 
   # JSON-RPC error code: internal payment processor failure (JSON-RPC Internal Error)
   @internal_error_code -32_603
+
+  @payment_required_types Enum.map([:payment_required, :sponsor_capacity_exhausted], &Errors.new(&1, "").type)
+  @invalid_params_types Enum.map([:malformed_credential, :invalid_payload], &Errors.new(&1, "").type)
+  @internal_error_type Errors.new(:internal_payment_error, "").type
 
   # Metadata key for credentials in params._meta
   @credential_meta_key "org.paymentauth/credential"
@@ -145,9 +154,9 @@ defmodule MPP.Mcp do
 
   def error_code(%Errors{type: type}) do
     cond do
-      payment_required_type?(type) -> @payment_required_code
-      invalid_params_type?(type) -> @invalid_params_code
-      type == "https://paymentauth.org/problems/internal-payment-error" -> @internal_error_code
+      type in @payment_required_types -> @payment_required_code
+      type in @invalid_params_types -> @invalid_params_code
+      type == @internal_error_type -> @internal_error_code
       true -> @verification_failed_code
     end
   end
@@ -311,7 +320,7 @@ defmodule MPP.Mcp do
   @spec payment_required_error([Challenge.t()]) :: map()
   def payment_required_error(challenges) when is_list(challenges) do
     %{
-      "code" => @payment_required_code,
+      "code" => error_code(nil),
       "message" => "Payment Required",
       "data" => %{
         "httpStatus" => 402,
@@ -323,7 +332,7 @@ defmodule MPP.Mcp do
 
   api(
     :verification_failed_error,
-    "Build a JSON-RPC error map for verification failed (`-32043`) with problem details.",
+    "Build a JSON-RPC error map with problem details, using `error_code/1` and the problem title.",
     params: [
       challenges: [
         kind: :value,
@@ -349,8 +358,8 @@ defmodule MPP.Mcp do
   @spec verification_failed_error([Challenge.t()], Errors.t()) :: map()
   def verification_failed_error(challenges, %Errors{} = problem) when is_list(challenges) do
     %{
-      "code" => @verification_failed_code,
-      "message" => "Payment Verification Failed",
+      "code" => error_code(problem),
+      "message" => problem.title,
       "data" => %{
         "httpStatus" => problem.status,
         "challenges" => Enum.map(challenges, &challenge_to_map/1),
@@ -664,18 +673,4 @@ defmodule MPP.Mcp do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  defp payment_required_type?(type) do
-    type in [
-      "https://paymentauth.org/problems/payment-required",
-      "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
-    ]
-  end
-
-  defp invalid_params_type?(type) do
-    type in [
-      "https://paymentauth.org/problems/malformed-credential",
-      "https://paymentauth.org/problems/invalid-payload"
-    ]
-  end
 end
