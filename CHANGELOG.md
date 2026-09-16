@@ -8,6 +8,33 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Added
+
+- `MPP.Discovery.OpenApi` routes accept `:parameters` (OpenAPI Parameter Objects
+  with `in` of `query`, `path`, `header`, or `cookie`) and an optional
+  `:response_schema` / `:response_media_type` for the `200` response. Path
+  templates are checked against the declared `in: path` parameters in both
+  directions — a `{placeholder}` without a parameter, or a path parameter that
+  does not appear in the template, is an `ArgumentError` at generation time —
+  and duplicate `name`+`in` pairs are rejected. Generated documents are
+  validated against an independent OpenAPI 3.1 decoder in the test suite.
+
+### Changed
+
+- MCP error codes follow `draft-payment-transport-mcp-00` § 10.1: malformed
+  credentials and invalid payloads map to `-32602`, the new
+  `:internal_payment_error` problem maps to `-32603`, `payment-required` and
+  `sponsor-capacity-exhausted` stay on `-32042`, everything else is `-32043`.
+  The mapping is one function, `MPP.Mcp.error_code/1`, shared by the MCP and
+  bare JSON-RPC server adapters instead of being duplicated per transport.
+- `MPP.Client.MCP.call/4` retries a `-32043` re-challenge that still carries
+  challenges, so a server rotating its challenge mid-flight no longer fails the
+  call. Payment attempts are bounded at **two** (the initial `-32042` plus one
+  re-challenge) — a deliberate divergence from mppx `maxPaymentAttempts = 3` so
+  a malicious server cannot drain a wallet through repeated re-challenges. The
+  approval hook fires before every payment; a `-32043` without challenges is
+  returned as-is.
+
 ### Fixed
 
 - `MPP.Client.Providers.Tempo` honors `:expected_chain_id` on the subscription path too: a challenge advertising a different chain is refused before the wallet is asked to authorize an access key (mppx #888 parity sweep).

@@ -536,7 +536,10 @@ defmodule MPP.Discovery.OpenApiTest do
     assert is_binary(document["info"]["version"])
     assert map_size(document["paths"]) > 0
     assert {:ok, _json} = Jason.encode(document)
-    # Independent validator: OpenApiSpex.OpenApi.from_map/1 (open_api_spex).
+    # Independent decoder: OpenApiSpex.OpenApi.from_map/1 (open_api_spex). It
+    # decodes rather than schema-validates, so the signal is that every field we
+    # emit lands on the typed struct a real 3.1 consumer would read — the
+    # per-test assertions on spec.paths[...] are what exercise that.
     assert %OpenApiSpex.OpenApi{openapi: "3.1.0"} = OpenApiSpex.OpenApi.from_map(document)
 
     for {path, path_item} <- document["paths"], {method, operation} <- path_item do

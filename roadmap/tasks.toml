@@ -3358,3 +3358,27 @@ Authority: Circle's Gateway API documentation and the live sandbox for semantics
 """
 created_at = "2026-09-16"
 scored_at = "2026-09-16"
+
+[[task]]
+id = "124"
+phase = 11
+bundle = "mcp"
+status = "pending"
+title = "Make MPP.Mcp.error_code/1 the only place a JSON-RPC error code is chosen, and assert it"
+scores = { d = 4, b = 6, u = 5 }
+acceptance_criteria = ["Every JSON-RPC error map this library emits takes its `code` from MPP.Mcp.error_code/1 — no module outside error_code/1 selects a code from a problem, and the -32042/-32602/-32603/-32043 literals survive only as the @-constants error_code/1 and the *_code/0 accessors read", "A test enforces the invariant rather than restating it per call site: for every MPP.Errors.types/0 problem, the code carried by each public error-map builder equals MPP.Mcp.error_code(problem) — a new problem type or a new builder fails the test until it is mapped", "MPP.Mcp.verification_failed_error/2 — today's violation, public, documented under Server Helpers, and used only by consumers hand-rolling an MCP server — no longer returns -32043 for a problem that error_code/1 maps elsewhere. Name and arity keep working for existing callers; whether that means delegating, deprecating, or generalizing is the implementer's call, but the `message` string must not keep claiming verification failure for a -32602/-32603 payload", "error_code/1 stops matching on literal problem-URI strings: the mapping is keyed off MPP.Errors in a way that fails loudly (compile error or test failure) if a suffix in @problem_types changes, instead of silently demoting the problem to the -32043 fallback", "The Server Helpers list in the MPP.Mcp @moduledoc and the README MCP section say which helper to reach for and what code each problem class yields", "mix ci passes"]
+out_of_scope = ["Changing the mapping itself — draft-payment-transport-mcp-00 § 10.1 as implemented by Task 106 is the contract, this task only makes it the single source", "MPP.Transports.JsonRpc.Adapter's call paths, already converted by Task 106", "The client-side retry budget in MPP.Client.MCP"]
+touches = ["lib/mpp/mcp.ex", "lib/mpp/errors.ex", "test/mpp/mcp_test.exs", "README.md"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Found in the post-merge audit of e11a037 (Task 106, commit c8a2aff).
+
+Task 106 did the right thing for the paths it touched: it lifted the per-transport `error_code/1` private clauses out of `MPP.Transports.JsonRpc.Adapter` into the shared `MPP.Mcp.error_code/1`, so `MPP.Mcp.call/3` and the bare JSON-RPC adapter now agree. What it did not do is make that the *only* way a code gets chosen — and `MPP.Mcp.verification_failed_error/2`, four hundred lines up in the same module, still writes `@verification_failed_code` unconditionally for whatever problem it is handed.
+
+The result is two conformance answers from one module. A consumer building an MCP server with the documented helper and `Errors.new(:invalid_payload, ...)` emits -32043; the built-in adapter emits -32602 for the identical problem. The helper is unused inside this library, so nothing in the suite noticed.
+
+Filing the class rather than the instance, per the DD-8 sibling check: the fix that matters is the assertion that no second emitter can drift, not the one-line repair of this one. Fold in the URI-literal coupling while there — `error_code/1` matches problem URIs as literal strings while `MPP.Errors` builds them as `@base_uri <> suffix`, so a suffix edit in Errors silently demotes a problem to the -32043 fallback with no compile or test failure. Same drift class, same test can cover it.
+"""
+created_at = "2026-09-16"
+scored_at = "2026-09-16"

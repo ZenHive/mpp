@@ -885,7 +885,7 @@ MPP.Replay                 — Internal credential single-use dedup shared by th
 MPP.Plug                   — HTTP Plug middleware, delegates verification to MPP.Verifier
 MPP.Plug.MethodEntry       — Per-method config within a multi-method endpoint (method, charge, request, method_config)
 MPP.Plug.Config            — Validated endpoint config struct (shared settings + list of MethodEntry structs)
-MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32043, meta keys), server transport adapter (init/1 + call/3 with replay dedup), initialize capabilities/1, server/client helpers
+MPP.Mcp                    — MCP (JSON-RPC) transport: constants (-32042/-32602/-32603/-32043, meta keys), error_code/1 problem->code mapping, server transport adapter (init/1 + call/3 with replay dedup), initialize capabilities/1, server/client helpers
 MPP.Transports.JsonRpc     — Bare JSON-RPC transport: root-level `_meta` credential/receipt, init/1 + call/3, Plug adapter
 MPP.Transports.WebSocket   — WS adapter: handshake challenge, credential/receipt frames, JSON-RPC message frames (library-agnostic)
 MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)
@@ -899,9 +899,9 @@ MPP.Client.Transport.HTTP  — HTTP transport over Req: 402 detection, WWW-Authe
 MPP.Client.Transport.MCP   — MCP/JSON-RPC transport: -32042 detection, error.data.challenges, params._meta credential attach
 MPP.Client.Transport.JsonRpc — Bare JSON-RPC transport: -32042 detection, root-level `_meta` credential attach
 MPP.Client.Transport.WebSocket — WS transport: challenge frames, Payment credential frames, retry/backoff (no payment amplification)
-MPP.Client.MCP             — Payment-aware MCP client: SelectionPolicy, approval hook, MultiProvider pay, single retry
+MPP.Client.MCP             — Payment-aware MCP client: SelectionPolicy, approval hook, MultiProvider pay, at most two payment attempts (-32042 plus one -32043 re-challenge)
 MPP.Client.AcceptPolicy    — Gates Accept-Payment header injection on outgoing requests
-MPP.Discovery.OpenApi      — OpenAPI 3.1.0 discovery document generation (x-payment-info, 402 responses; mix mpp.openapi)
+MPP.Discovery.OpenApi      — OpenAPI 3.1.0 discovery document generation (x-payment-info, 402 responses, route parameters, response schemas; mix mpp.openapi)
 MPP.Discovery.PaymentInfo  — Parse/normalize the x-payment-info discovery extension
 MPP.Telemetry              — Server-side payment telemetry events for challenges, verification, receipts
 MPP.Expires                — Expiration helpers: seconds/minutes/hours/days/weeks/months/years, assert!
