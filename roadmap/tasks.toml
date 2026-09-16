@@ -3501,3 +3501,25 @@ Report the before/after per-module percentages for the two modules you raise, an
 """
 created_at = "2026-09-16"
 scored_at = "2026-09-16"
+
+[[task]]
+id = "128"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Reject an EVM type=transaction credential the challenge did not offer"
+scores = { d = 2, b = 5, u = 5 }
+markers = ["security"]
+depends_on = [86]
+acceptance_criteria = ["""MPP.Methods.EVM.verify/2 rejects a type="transaction" credential when the charge's method_details does not set "transaction" => true, before any RPC call is made, with a problem whose detail says the credential type was not offered (distinct from the invalid-payload / invalid-transaction rejections)""", 'A credential on a charge with "transaction" => true still settles exactly as Task 86 landed it (the existing unit suite and the Sepolia :integration test pass unchanged apart from enabling the flag where a test relied on lenient acceptance)', "A unit test pins the rejection on a well-formed, otherwise-valid signed transfer against a charge without the flag, and asserts no eth_sendRawTransaction was issued (Req.Test stub records zero calls)", "The MPP.Methods.EVM.Transaction @moduledoc and the README EVM prose no longer say the flag gates advertisement only; they state that the flag gates acceptance and advertisement together, citing draft-evm-charge-00 § credentialTypes negotiation for why the server's populated credentialTypes makes the omitted-list MUST-accept clause inapplicable", "mix ci passes"]
+out_of_scope = ["Changing which credential types other EVM paths (hash, authorization, permit2) accept without a flag — hash is the always-on default per the draft", "Adding a new MPP.Errors problem type; reuse an existing one with a distinguishing detail unless the draft names a specific problem for an unoffered credential type"]
+touches = ["lib/mpp/methods/evm.ex", "lib/mpp/methods/evm/transaction.ex", "test/mpp/methods/evm/transaction_test.exs", "test/mpp/methods/evm_test.exs"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Decision (vetoable): gate acceptance on the opt-in flag, not only advertisement. Task 86 landed MPP.Methods.EVM.Transaction with `"transaction" => true` gating advertisement only, so an endpoint whose 402 challenge advertised `credentialTypes: ["hash"]` still deserializes and broadcasts a client-signed transaction on the operator's RPC endpoint (evidence: Task 86's reviewer report, run run-1789535256752-9efe6805; `Transaction.validate/2` never reads `config["transaction"]`, only `advertised_credential_types/1` does). The reviewer left it lenient because draft-evm-charge-00 says servers MUST accept `transaction` when `credentialTypes` is omitted from the challenge. That clause does not apply to us: `MPP.Methods.EVM.challenge_method_details/1` always populates `credentialTypes`, so the server has explicitly negotiated the type away and a client sending it anyway is off-contract. Confirm both premises against `refs/mpp-specs/specs/methods/evm/draft-evm-charge-00.md` (the negotiation section near line 305) and `lib/mpp/methods/evm.ex` before building; if the draft turns out to require acceptance even when `credentialTypes` is populated and omits `transaction`, keep the lenient behaviour and instead pin it with a test — say in the delivery which you found.
+
+Blast radius today is small (the transaction must still be an exact-amount ERC-20 transfer to the charge recipient on the charge chain, and settlement is verified against the Transfer log), so this is a negotiation-consistency and operator-consent fix, not an exploit closure. Mirror how the authorization path already refuses to run when its own opt-in (`private_key`) is absent.
+"""
+created_at = "2026-09-16"
+scored_at = "2026-09-16"
