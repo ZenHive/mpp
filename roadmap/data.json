@@ -3405,7 +3405,7 @@
       "id": "86",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "in_progress",
       "title": "EVM signed-transaction credential path",
       "scores": {
         "d": 6,
@@ -3436,6 +3436,7 @@
       ],
       "body": "Add the EVM type=transaction credential path defined by draft-evm-charge. The client supplies a signed EIP-1559 transaction for server broadcast; the server must validate it against the charge before broadcasting, verify settlement, and preserve the existing atomic replay guarantees. Use the provider-owned draft and live Sepolia behavior as semantic authority, with current mppx and mpp-rs implementations as compatibility evidence.\n\n2026-09-16 (review, Claude + Codex second opinion): the compatibility-evidence AC was vacuous (no SDK implements EVM type=transaction); expiry clarified as challenge expiry; Transfer-event settlement check and the credential_types/0 vs advertised distinction made explicit. Scores unchanged.\n",
       "created_at": "2026-08-19",
+      "started_at": "2026-09-16",
       "scored_at": "2026-09-16",
       "cross_repo": []
     },

@@ -2304,7 +2304,7 @@ shipped_in = "60255e7fbaf8eb5862945398f124377eb8340370"
 id = "86"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "EVM signed-transaction credential path"
 scores = { d = 6, b = 7, u = 7 }
 acceptance_criteria = [
@@ -2325,6 +2325,7 @@ Add the EVM type=transaction credential path defined by draft-evm-charge. The cl
 2026-09-16 (review, Claude + Codex second opinion): the compatibility-evidence AC was vacuous (no SDK implements EVM type=transaction); expiry clarified as challenge expiry; Transfer-event settlement check and the credential_types/0 vs advertised distinction made explicit. Scores unchanged.
 """
 created_at = "2026-08-19"
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]
