@@ -2891,7 +2891,7 @@ scored_at = "2026-09-16"
 id = "107"
 phase = 9
 bundle = "utilities"
-status = "pending"
+status = "in_progress"
 title = "Verify Tempo charge proofs and access keys signed with P-256 keys; handle WebAuthn envelopes explicitly"
 scores = { d = 8, b = 7, u = 6 }
 acceptance_criteria = [
@@ -2913,6 +2913,7 @@ Add verification for the key types Tempo's keychain precompile actually recogniz
 2026-09-16 (review, Claude + Codex second opinion): premise partly stale — KeyAuthorization already knows all three key types and AccessKey discards rather than hardcodes the type; only Subscription hardcodes. Title and ACs now say what WebAuthn gets (verified if a live key is obtainable, otherwise explicit rejection). D 6→8 for the added curve plus live P-256 key provisioning on Moderato.
 """
 created_at = "2026-09-04"
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]
