@@ -2852,7 +2852,7 @@ scored_at = "2026-09-16"
 id = "106"
 phase = 11
 bundle = "mcp"
-status = "pending"
+status = "in_progress"
 title = "Align MCP payment error codes with the spec: -32602 for invalid payload, -32603 internal payment error, retry on -32043 re-challenge"
 scores = { d = 4, b = 6, u = 6 }
 acceptance_criteria = [
@@ -2874,6 +2874,7 @@ mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes w
 2026-09-16 (review, Claude + Codex second opinion): the 2026-09-11 addendum is wrong. mpp-specs #353 (commit 2e3de24) is "fix: derive problem pages from the core specification" — a pages/script change; the core spec is still draft-00 and `internal-payment-error` appears nowhere in mpp-specs (scripts/gen_problems.py CORE_PROBLEMS lists seven types). The type exists only in mppx (Errors.ts:153), so the AC now cites mppx parity. The MCP transport draft does list -32602/-32603 (:703-706), so the spec-as-authority claim for the code table stands. Retry budget made precise. D 3→4 for the client retry-state change.
 """
 created_at = "2026-09-04"
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]

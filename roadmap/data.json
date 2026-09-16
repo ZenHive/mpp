@@ -4282,7 +4282,7 @@
       "id": "106",
       "phase": 11,
       "bundle": "mcp",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Align MCP payment error codes with the spec: -32602 for invalid payload, -32603 internal payment error, retry on -32043 re-challenge",
       "scores": {
         "d": 4,
@@ -4318,6 +4318,7 @@
       ],
       "body": "mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes with the spec: `invalid-payload` problems map to -32602, an `internal-payment-error` problem type maps to -32603, and a client receiving -32043 with challenges attached treats it as a re-challenge and retries payment a bounded number of times. Our MPP.Mcp constants and the JSON-RPC adapter map only -32042/-32602/-32043 today, and MPP.Client.Transport.MCP / MPP.Client.MCP do not retry on -32043. Bring the server mapping and the client retry behaviour to the same table, with the spec's MCP section as the authority and mppx as the compatibility reference. Bound retries so a malicious server cannot drain a client wallet through repeated re-challenges (one retry, mirroring the existing single-retry rule).\n\n2026-09-11 (sdk-delta-watch): mpp-specs #353 promoted the core spec to draft-01 and registered `bad-request`, `invalid-payload`, `internal-payment-error` (500) and `payment-action-required` as problem types; MPP.Errors already has all but `internal-payment-error`, so add that type here as part of the -32603 mapping rather than in a separate task.\n\n2026-09-16 (review, Claude + Codex second opinion): the 2026-09-11 addendum is wrong. mpp-specs #353 (commit 2e3de24) is \"fix: derive problem pages from the core specification\" — a pages/script change; the core spec is still draft-00 and `internal-payment-error` appears nowhere in mpp-specs (scripts/gen_problems.py CORE_PROBLEMS lists seven types). The type exists only in mppx (Errors.ts:153), so the AC now cites mppx parity. The MCP transport draft does list -32602/-32603 (:703-706), so the spec-as-authority claim for the code table stands. Retry budget made precise. D 3→4 for the client retry-state change.\n",
       "created_at": "2026-09-04",
+      "started_at": "2026-09-16",
       "scored_at": "2026-09-16",
       "cross_repo": []
     },
