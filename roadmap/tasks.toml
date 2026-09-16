@@ -2820,7 +2820,7 @@ shipped_in = "e12bd4a1cea2e97c2a01fc059c48e5594a7b4a43"
 id = "105"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "in_progress"
 title = "Support the `header` challenge parameter and the Payment-Authorization credential header"
 scores = { d = 6, b = 8, u = 8 }
 acceptance_criteria = [
@@ -2846,6 +2846,7 @@ Scope: parse and echo `header` (client ignores or honors it, never rejects the c
 2026-09-16 (review, Claude + Codex second opinion): "client ignores or honors it" and "the named header" were too loose — the draft allows only the value Payment-Authorization and forbids paying any other value. Premise re-verified: spec appends slot 7 after opaque (draft:375-420), mppx (refs/mppx/src/Challenge.ts:691-708) and mpp-rs (refs/mpp-rs/src/protocol/core/challenge.rs:344) insert it before opaque. D 5→6 for the cross-layer breadth.
 """
 created_at = "2026-09-04"
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]
