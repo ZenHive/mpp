@@ -90,6 +90,14 @@ defmodule MPP.MixProject do
       # onchain wrapper. Two-segment for the same reason as onchain above.
       {:cartouche, "~> 0.8"},
 
+      # Stellar XDR used by MPP.Methods.Stellar to decode signed envelopes,
+      # inspect invokeHostFunction ops, and rebuild sponsored transactions.
+      # Soroban RPC itself is called through Req (same pattern as XRPL).
+      # stellar_sdk is not used: it pulls hackney ~> 1.17, which is unpatched
+      # for EEF-CVE-2026-47071 (fixed only in hackney 4.0.1+).
+      {:stellar_base, "~> 0.17"},
+      {:ed25519, "~> 1.5"},
+
       # Tempo chain primitives (Tempo method) — sender-recovery plus
       # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
       # simulation (MPP.Methods.Tempo) calls directly. Two-segment for the
@@ -115,7 +123,7 @@ defmodule MPP.MixProject do
     """
     Elixir implementation of the Machine Payments Protocol (MPP) — HTTP 402
     payment middleware for AI agents and machine-to-machine commerce. Supports
-    Stripe, Tempo, generic EVM, Solana, XRPL, and NEAR Intents payment methods with
+    Stripe, Tempo, generic EVM, Solana, Stellar, XRPL, and NEAR Intents payment methods with
     pluggable architecture.
     """
   end
@@ -152,6 +160,8 @@ defmodule MPP.MixProject do
         :onchain,
         :onchain_tempo,
         :cartouche,
+        :stellar_base,
+        :ed25519,
         :hieroglyph,
         :curvy,
         :ex_rlp,

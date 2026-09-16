@@ -135,6 +135,35 @@ end
 
 Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs. Set `"confidential" => true` (Token-2022 mints only) to require the confidential transfer profile: the client submits a `type="bundle"` credential whose final transaction carries the single Token-2022 confidential `Transfer`/`TransferWithFee`, and the server confirms the amount by decrypting the recipient pending-balance delta with `"recipient_elgamal_secret_key"`.
 
+### Stellar (SEP-41 tokens)
+
+`MPP.Methods.Stellar` verifies one-time SEP-41 token transfers on Stellar.
+Pull mode (`type="transaction"`) accepts a base64 TransactionEnvelope XDR and
+submits it via Soroban RPC. Push mode (`type="hash"`) fetches a confirmed hash
+with `getTransaction`. Set `"feePayer" => true` with `"fee_payer_secret"` to
+sponsor fees: the client signs authorization entries against the all-zeros
+source account and the server rebuilds, signs and submits.
+
+```elixir
+pipeline :paid_stellar do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    method: MPP.Methods.Stellar,
+    amount: "10000000",
+    currency: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    recipient: "G...",
+    method_config: %{
+      "rpc_url" => "https://soroban-testnet.stellar.org",
+      "network" => "stellar:testnet"
+    }
+end
+```
+
+Currency is the C-prefixed SEP-41 contract address (native XLM SAC on testnet
+shown above). `network` is the CAIP-2 identifier `stellar:pubnet` or
+`stellar:testnet`.
+
 ### XRPL (XRP, issued currencies and MPTs)
 
 `MPP.Methods.XRPL` supports signed-blob and transaction-hash charge credentials,

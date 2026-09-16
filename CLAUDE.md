@@ -110,6 +110,7 @@ MPP.Methods.EVM.Authorization — EIP-3009 transferWithAuthorization credential 
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle verification (type="bundle", recipient pending-balance decryption)
+MPP.Methods.Stellar        — Stellar SEP-41 token charge verification (pull signed XDR + push hash; sponsored and unsponsored)
 MPP.Methods.XRPL           — XRPL native XRP / issued currency / MPT charge verification (pull blob + push hash)
 MPP.Methods.XRPL.Codec     — Bounded XRPL Payment / PaymentChannelCreate decoder and PaymentChannelClaim codec
 MPP.Methods.XRPL.Claim     — Payment-channel claim message (CLM\\0) and signature verification
@@ -156,7 +157,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 
@@ -198,6 +199,8 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
 - `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
 - `cartouche` — Solana RPC, legacy transaction codec, and System/Token/ATA instruction builders (Solana method)
+- `stellar_base` — Stellar XDR used by the Stellar method to decode envelopes and rebuild sponsored transactions
+- `ed25519` — Ed25519 signing for sponsored Stellar fee-payer envelopes
 - `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store
 
 Dev/test analysis stack (vibe_kit baseline, all `only: [:dev, :test], runtime: false`): `credo` (+ `ex_slop` plugin for AI-slop antipatterns, configured in `.credo.exs`), `dialyxir`, `ex_dna` (clone detection), `ex_ast` (structural search), `reach` (architecture/smell checks, policy in `.reach.exs`), plus `styler`, `sobelow`, `doctor`, `ex_unit_json`, `dialyzer_json`, `tidewave`.
