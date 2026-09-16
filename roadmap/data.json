@@ -4350,7 +4350,7 @@
       "id": "107",
       "phase": 9,
       "bundle": "utilities",
-      "status": "in_progress",
+      "status": "done",
       "title": "Verify Tempo charge proofs and access keys signed with P-256 keys; handle WebAuthn envelopes explicitly",
       "scores": {
         "d": 8,
@@ -4384,10 +4384,17 @@
         "lib/mpp/methods/tempo.ex",
         "test/mpp/methods/tempo/"
       ],
+      "shipped_in": "e347956bbfb2e198b823917cc8dbff9a57cca91f",
       "body": "mpp-rs #391 (commit 175bea7, src/protocol/methods/tempo/proof.rs) accepts Tempo proof signatures and access keys of additional key types (P-256 and WebAuthn envelopes, as issued by Tempo Wallet per the v0.12.0 release notes). Our MPP.Methods.Tempo.SignatureEnvelope accepts only 65-byte secp256k1 signatures and the keychain 0x03/0x04 envelopes, and access_key / subscription hardcode `key_type: :secp256k1`, so a charge from a wallet holding a non-secp256k1 access key is rejected with \"invalid proof signature\". Rejecting is fail-closed, so this is an interop gap, not a security one.\n\nAdd verification for the key types Tempo's keychain precompile actually recognizes, with the Tempo protocol documentation and the on-chain keychain contract as the authority and mpp-rs / mppx as compatibility references. The signature recovery for the transaction sender lives in onchain_tempo (`recover_sender/2` accepts only 65-byte signatures — premise from a read of deps/onchain_tempo 0.10.0; confirm at pickup); if the primitive belongs there, ship it there first and bump the dep. Each accepted key type needs a Moderato integration test against a real access key of that type, plus a negative test per type for a malformed or wrong-key signature.\n\n2026-09-16 (review, Claude + Codex second opinion): premise partly stale — KeyAuthorization already knows all three key types and AccessKey discards rather than hardcodes the type; only Subscription hardcodes. Title and ACs now say what WebAuthn gets (verified if a live key is obtainable, otherwise explicit rejection). D 6→8 for the added curve plus live P-256 key provisioning on Moderato.\n",
       "created_at": "2026-09-04",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1789530134165-0f64a3d5, e347956bbfb2e198b823917cc8dbff9a57cca91f).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789530134165-0f64a3d5",
       "cross_repo": []
     },
     {
