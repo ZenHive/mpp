@@ -2,9 +2,13 @@ defmodule MPP.Methods.Stellar.RPC do
   @moduledoc false
 
   alias MPP.Errors
+  alias MPP.Methods.Shared
+  alias StellarBase.XDR.AccountEntry
   alias StellarBase.XDR.LedgerEntry
+  alias StellarBase.XDR.LedgerEntryData
   alias StellarBase.XDR.LedgerEntryType
   alias StellarBase.XDR.LedgerKey
+  alias StellarBase.XDR.SequenceNumber
 
   @passphrases %{
     "stellar:pubnet" => "Public Global Stellar Network ; September 2015",
@@ -21,19 +25,11 @@ defmodule MPP.Methods.Stellar.RPC do
 
   @doc false
   @spec valid_url?(term()) :: boolean()
-  def valid_url?(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: "https", host: host, userinfo: nil} when is_binary(host) and host != "" -> true
-      %URI{scheme: "http", host: host} when host in ["localhost", "127.0.0.1", "::1"] -> true
-      _ -> false
-    end
-  end
-
-  def valid_url?(_), do: false
+  def valid_url?(url), do: Shared.valid_rpc_url?(url)
 
   @doc false
   @spec timeout(map()) :: pos_integer()
-  def timeout(config) when is_map(config), do: Map.get(config, "poll_timeout_ms", 60_000)
+  def timeout(config) when is_map(config), do: Shared.poll_timeout_ms(config)
 
   @doc false
   @spec interval(map()) :: pos_integer()
@@ -214,22 +210,40 @@ defmodule MPP.Methods.Stellar.RPC do
     end
   end
 
+  # Stellar RPC documents getLedgerEntries[].xdr as LedgerEntryData
+  # (https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries).
+  # A full LedgerEntry is accepted as a fallback for older nodes.
   defp decode_sequence(xdr) when is_binary(xdr) do
-    with {:ok, bytes} <- Base.decode64(xdr),
-         {%LedgerEntry{data: data}, ""} <- LedgerEntry.decode_xdr!(bytes),
-         %StellarBase.XDR.LedgerEntryData{
-           type: %LedgerEntryType{identifier: :ACCOUNT},
-           value: %StellarBase.XDR.AccountEntry{seq_num: %StellarBase.XDR.SequenceNumber{sequence_number: sequence}}
-         } <- data do
-      {:ok, sequence}
-    else
-      _ -> :error
+    case Base.decode64(xdr) do
+      {:ok, bytes} -> sequence_from_bytes(bytes)
+      :error -> :error
     end
-  rescue
-    _ -> :error
   end
 
   defp decode_sequence(_), do: :error
+
+  defp sequence_from_bytes(bytes) do
+    case LedgerEntryData.decode_xdr(bytes) do
+      {:ok, {data, ""}} ->
+        account_sequence(data)
+
+      _ ->
+        case LedgerEntry.decode_xdr(bytes) do
+          {:ok, {%LedgerEntry{data: data}, ""}} -> account_sequence(data)
+          _ -> :error
+        end
+    end
+  end
+
+  defp account_sequence(%LedgerEntryData{
+         type: %LedgerEntryType{identifier: :ACCOUNT},
+         value: %AccountEntry{seq_num: %SequenceNumber{sequence_number: sequence}}
+       })
+       when is_integer(sequence) do
+    {:ok, sequence}
+  end
+
+  defp account_sequence(_), do: :error
 
   defp rpc_error(_error), do: unavailable()
 

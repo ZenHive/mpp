@@ -8,6 +8,14 @@ defmodule MPP.Methods.Stellar.Envelope do
 
   @zero_account "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
   @transfer "transfer"
+  @xdr_errors [
+    ArgumentError,
+    ErlangError,
+    MatchError,
+    FunctionClauseError,
+    CaseClauseError,
+    Protocol.UndefinedError
+  ]
 
   @type transfer :: %{contract: String.t(), from: String.t(), to: String.t(), amount: integer()}
   @type auth :: %{
@@ -50,7 +58,7 @@ defmodule MPP.Methods.Stellar.Envelope do
        }}
     end
   rescue
-    _ -> malformed()
+    _ in @xdr_errors -> malformed()
   end
 
   def decode(_), do: malformed()
@@ -74,6 +82,27 @@ defmodule MPP.Methods.Stellar.Envelope do
   def encode(%{envelope: %XDR.TransactionEnvelope{} = envelope}), do: encode(envelope)
 
   @doc false
+  @spec signed_by_source?(inspected(), String.t()) :: boolean()
+  def signed_by_source?(%{tx: tx, envelope: envelope, source: source}, passphrase) when is_binary(passphrase) do
+    with {:ok, raw} <- StrKey.decode(source, :ed25519_public_key),
+         {:ok, signatures} <- v1_signatures(envelope) do
+      payload = payload_hash(tx, passphrase)
+
+      Enum.any?(signatures, fn
+        %XDR.DecoratedSignature{signature: %XDR.Signature{signature: signature}} ->
+          Ed25519.valid_signature?(signature, payload, raw)
+
+        _ ->
+          false
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  def signed_by_source?(_, _), do: false
+
+  @doc false
   @spec rebuild(inspected(), String.t(), non_neg_integer(), String.t() | nil, pos_integer() | nil) ::
           {:ok, XDR.Transaction.t()} | {:error, Errors.t()}
   def rebuild(inspected, source, sequence, soroban_data, fee)
@@ -93,7 +122,7 @@ defmodule MPP.Methods.Stellar.Envelope do
        )}
     end
   rescue
-    _ -> malformed()
+    _ in @xdr_errors -> malformed()
   end
 
   @doc false
@@ -167,7 +196,7 @@ defmodule MPP.Methods.Stellar.Envelope do
       _ -> malformed()
     end
   rescue
-    _ -> malformed()
+    _ in @xdr_errors -> malformed()
   end
 
   @doc false
@@ -184,7 +213,7 @@ defmodule MPP.Methods.Stellar.Envelope do
       {:ok, encode(envelope)}
     end
   rescue
-    _ -> malformed()
+    _ in @xdr_errors -> malformed()
   end
 
   @doc false
@@ -199,7 +228,7 @@ defmodule MPP.Methods.Stellar.Envelope do
       _ -> malformed()
     end
   rescue
-    _ -> malformed()
+    _ in @xdr_errors -> malformed()
   end
 
   @doc false
@@ -285,6 +314,28 @@ defmodule MPP.Methods.Stellar.Envelope do
 
   defp transaction(_), do: malformed()
 
+  defp v1_signatures(%XDR.TransactionEnvelope{
+         type: %XDR.EnvelopeType{identifier: :ENVELOPE_TYPE_TX},
+         envelope: %XDR.TransactionV1Envelope{signatures: %XDR.DecoratedSignatures{signatures: signatures}}
+       }) do
+    {:ok, signatures}
+  end
+
+  defp v1_signatures(%XDR.TransactionEnvelope{
+         type: %XDR.EnvelopeType{identifier: :ENVELOPE_TYPE_TX_FEE_BUMP},
+         envelope: %XDR.FeeBumpTransactionEnvelope{
+           tx: %XDR.FeeBumpTransaction{
+             inner_tx: %XDR.FeeBumpInnerTx{
+               envelope: %XDR.TransactionV1Envelope{signatures: %XDR.DecoratedSignatures{signatures: signatures}}
+             }
+           }
+         }
+       }) do
+    {:ok, signatures}
+  end
+
+  defp v1_signatures(_), do: :error
+
   defp single_invoke(%XDR.Transaction{operations: %XDR.Operations{operations: [operation]}}) do
     case operation.body do
       %XDR.OperationBody{
@@ -345,13 +396,13 @@ defmodule MPP.Methods.Stellar.Envelope do
         value: %XDR.SorobanAddressCredentials{address: address, signature_expiration_ledger: expiration}
       } ->
         {:ok, encoded} = sc_address(address)
-        %{type: :address, address: encoded, expiration: expiration.datum, sub_invocations: subs}
+        auth_record(:address, encoded, expiration.datum, subs)
 
       %XDR.SorobanCredentials{type: %XDR.SorobanCredentialsType{identifier: :SOROBAN_CREDENTIALS_SOURCE_ACCOUNT}} ->
-        %{type: :source_account, address: nil, expiration: nil, sub_invocations: subs}
+        auth_record(:source_account, nil, nil, subs)
 
       _ ->
-        %{type: :source_account, address: nil, expiration: nil, sub_invocations: subs}
+        auth_record(:source_account, nil, nil, subs)
     end
   end
 
@@ -540,7 +591,7 @@ defmodule MPP.Methods.Stellar.Envelope do
       _ -> []
     end
   rescue
-    _ -> []
+    _ in @xdr_errors -> []
   end
 
   defp decode_event(_), do: []
@@ -623,6 +674,10 @@ defmodule MPP.Methods.Stellar.Envelope do
       {:ok, bytes} -> {:ok, bytes}
       :error -> malformed()
     end
+  end
+
+  defp auth_record(type, address, expiration, sub_invocations) do
+    %{type: type, address: address, expiration: expiration, sub_invocations: sub_invocations}
   end
 
   defp malformed, do: {:error, Errors.new(:malformed_credential, "Malformed Stellar transaction XDR")}

@@ -16,6 +16,68 @@ defmodule MPP.Test.Stellar do
   @spec passphrase() :: String.t()
   def passphrase, do: @passphrase
 
+  @spec address_auth_xdr(String.t(), String.t(), non_neg_integer()) :: String.t()
+  def address_auth_xdr(envelope_xdr, account, expiration_ledger)
+      when is_binary(envelope_xdr) and is_binary(account) and is_integer(expiration_ledger) do
+    alias StellarBase.XDR
+
+    {:ok, inspected} = Envelope.decode(envelope_xdr)
+    [operation] = inspected.tx.operations.operations
+    args = operation.body.value.host_function.value
+    {:ok, raw} = StrKey.decode(account, :ed25519_public_key)
+    public = XDR.PublicKey.new(XDR.UInt256.new(raw), XDR.PublicKeyType.new())
+    address = XDR.SCAddress.new(XDR.AccountID.new(public), XDR.SCAddressType.new(:SC_ADDRESS_TYPE_ACCOUNT))
+
+    credentials =
+      XDR.SorobanAddressCredentials.new(
+        address,
+        XDR.Int64.new(1),
+        XDR.UInt32.new(expiration_ledger),
+        XDR.SCVal.new(XDR.Void.new(), XDR.SCValType.new(:SCV_VOID))
+      )
+
+    function =
+      XDR.SorobanAuthorizedFunction.new(
+        args,
+        XDR.SorobanAuthorizedFunctionType.new(:SOROBAN_AUTHORIZED_FUNCTION_TYPE_CONTRACT_FN)
+      )
+
+    invocation = XDR.SorobanAuthorizedInvocation.new(function, XDR.SorobanAuthorizedInvocationList.new([]))
+
+    credentials
+    |> XDR.SorobanCredentials.new(XDR.SorobanCredentialsType.new(:SOROBAN_CREDENTIALS_ADDRESS))
+    |> XDR.SorobanAuthorizationEntry.new(invocation)
+    |> XDR.SorobanAuthorizationEntry.encode_xdr!()
+    |> Base.encode64()
+  end
+
+  @spec account_entry_data_xdr(String.t(), non_neg_integer()) :: String.t()
+  def account_entry_data_xdr(account, sequence) when is_binary(account) and is_integer(sequence) do
+    alias StellarBase.XDR
+
+    {:ok, raw} = StrKey.decode(account, :ed25519_public_key)
+    account_id = raw |> XDR.UInt256.new() |> XDR.PublicKey.new(XDR.PublicKeyType.new()) |> XDR.AccountID.new()
+
+    entry =
+      XDR.AccountEntry.new(
+        account_id,
+        XDR.Int64.new(0),
+        XDR.SequenceNumber.new(sequence),
+        XDR.UInt32.new(0),
+        XDR.OptionalAccountID.new(),
+        XDR.UInt32.new(0),
+        XDR.String32.new(""),
+        XDR.Thresholds.new(master_weight: 1, low: 0, med: 0, high: 0),
+        XDR.Signers.new([]),
+        XDR.AccountEntryExt.new(XDR.Void.new(), 0)
+      )
+
+    entry
+    |> XDR.LedgerEntryData.new(XDR.LedgerEntryType.new(:ACCOUNT))
+    |> XDR.LedgerEntryData.encode_xdr!()
+    |> Base.encode64()
+  end
+
   @spec keypair() :: %{public: String.t(), secret: String.t()}
   def keypair do
     {secret, public} = Ed25519.generate_key_pair()

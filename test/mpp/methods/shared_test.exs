@@ -46,4 +46,26 @@ defmodule MPP.Methods.SharedTest do
       assert {:error, %Errors{}} = Shared.parse_charge_amount("100abc")
     end
   end
+
+  describe "valid_rpc_url?/1" do
+    test "accepts https without userinfo" do
+      assert Shared.valid_rpc_url?("https://soroban-testnet.stellar.org")
+    end
+
+    test "rejects https with userinfo" do
+      refute Shared.valid_rpc_url?("https://user:pass@rpc.example")
+    end
+
+    test "accepts loopback http and rejects other http" do
+      assert Shared.valid_rpc_url?("http://127.0.0.1:8000")
+      refute Shared.valid_rpc_url?("http://rpc.example")
+    end
+  end
+
+  describe "poll_timeout_ms/1" do
+    test "uses the configured timeout or the default" do
+      assert Shared.poll_timeout_ms(%{"poll_timeout_ms" => 5_000}) == 5_000
+      assert Shared.poll_timeout_ms(%{}) == 60_000
+    end
+  end
 end

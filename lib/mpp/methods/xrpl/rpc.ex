@@ -1,6 +1,8 @@
 defmodule MPP.Methods.XRPL.RPC do
   @moduledoc false
 
+  alias MPP.Methods.Shared
+
   @networks %{"mainnet" => 0, "testnet" => 1, "devnet" => 2}
   @miss_budget 2
 
@@ -24,19 +26,11 @@ defmodule MPP.Methods.XRPL.RPC do
 
   @doc false
   @spec valid_url?(term()) :: boolean()
-  def valid_url?(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: "https", host: host, userinfo: nil} when is_binary(host) and host != "" -> true
-      %URI{scheme: "http", host: host} when host in ["localhost", "127.0.0.1", "::1"] -> true
-      _ -> false
-    end
-  end
-
-  def valid_url?(_), do: false
+  def valid_url?(url), do: Shared.valid_rpc_url?(url)
 
   @doc false
   @spec timeout(map()) :: pos_integer()
-  def timeout(config) when is_map(config), do: Map.get(config, "poll_timeout_ms", 60_000)
+  def timeout(config) when is_map(config), do: Shared.poll_timeout_ms(config)
 
   @doc false
   @spec call(map(), String.t(), map()) :: {:ok, map()} | :error

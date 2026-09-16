@@ -75,14 +75,13 @@ defmodule MPP.Methods.Stellar do
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
 
-    %{
+    config
+    |> Map.take(@public_fields)
+    |> Map.merge(%{
       "network" => network(config),
       "feePayer" => fee_payer?(config),
       "credentialTypes" => credential_types()
-    }
-    |> Map.merge(Map.take(config, @public_fields))
-    |> Map.put("credentialTypes", credential_types())
-    |> Map.put("feePayer", fee_payer?(config))
+    })
   end
 
   api(:verify, "Verify a Stellar SEP-41 charge credential in pull or push mode.")
@@ -115,13 +114,13 @@ defmodule MPP.Methods.Stellar do
          {:ok, amount} <- parse_amount(charge.amount),
          :ok <- require_contract(charge.currency),
          :ok <- unused(store, hash_key(hash)),
-         :ok <- unused(store, challenge_key(config)),
+         :ok <- unused_challenge(store, config),
          {:ok, result} <- RPC.await_existing(hash, config),
          :ok <- success_status(result),
          {:ok, inspected} <- envelope_xdr(result),
          :ok <- match_transfer(inspected, charge, amount),
          :ok <- mark(store, hash_key(hash)),
-         :ok <- mark(store, challenge_key(config)) do
+         :ok <- mark_challenge(store, config) do
       receipt(hash, charge)
     end
   end
@@ -140,14 +139,15 @@ defmodule MPP.Methods.Stellar do
          :ok <- match_source(inspected, sponsored?),
          :ok <- match_expiry(inspected, charge, config, sponsored?),
          :ok <- match_auth(inspected, config, sponsored?),
-         :ok <- unused(store, challenge_key(config)),
+         :ok <- match_signatures(inspected, config, sponsored?),
+         :ok <- unused_challenge(store, config),
          {:ok, simulated} <- RPC.simulate(xdr, config),
          :ok <- match_simulation(simulated, inspected.transfer),
          {:ok, submitted} <- settle_pull(inspected, xdr, simulated, config, sponsored?),
          {:ok, result} <- RPC.await_transaction(submitted, config),
          :ok <- settled(result),
          :ok <- mark(store, hash_key(submitted)),
-         :ok <- mark(store, challenge_key(config)) do
+         :ok <- mark_challenge(store, config) do
       receipt(submitted, charge)
     end
   end
@@ -166,14 +166,15 @@ defmodule MPP.Methods.Stellar do
     with {:ok, secret} <- require_secret(config),
          {:ok, payer} <- public_from_secret(secret),
          :ok <- reject_server_in_transfer(inspected, payer),
+         {:ok, passphrase} <- network_passphrase(config),
          {:ok, sequence} <- RPC.account_sequence(payer, config),
          {:ok, rebuilt} <- Envelope.rebuild(inspected, payer, sequence + 1, nil, nil),
-         {:ok, unsigned} <- Envelope.sign(rebuilt, secret, passphrase!(config)),
+         {:ok, unsigned} <- Envelope.sign(rebuilt, secret, passphrase),
          {:ok, simulated} <- RPC.simulate(unsigned, config),
          :ok <- match_simulation(simulated, inspected.transfer),
          {:ok, prepared} <-
            Envelope.rebuild(inspected, payer, sequence + 1, simulated["transactionData"], resource_fee(simulated)),
-         {:ok, signed} <- Envelope.sign(prepared, secret, passphrase!(config)),
+         {:ok, signed} <- Envelope.sign(prepared, secret, passphrase),
          {:ok, result} <- RPC.send_transaction(signed, config),
          hash when is_binary(hash) <- result["hash"] do
       {:ok, String.downcase(hash)}
@@ -243,6 +244,18 @@ defmodule MPP.Methods.Stellar do
   end
 
   defp match_expiry(_inspected, _charge, _config, true), do: :ok
+
+  defp match_signatures(_inspected, _config, true), do: :ok
+
+  defp match_signatures(inspected, config, false) do
+    with {:ok, passphrase} <- network_passphrase(config) do
+      if Envelope.signed_by_source?(inspected, passphrase) do
+        :ok
+      else
+        {:error, Errors.new(:verification_failed, "Stellar transaction is not signed for the configured network")}
+      end
+    end
+  end
 
   defp match_auth(_inspected, _config, false), do: :ok
 
@@ -385,6 +398,16 @@ defmodule MPP.Methods.Stellar do
     end
   end
 
+  defp unused_challenge(nil, _config), do: :ok
+
+  defp unused_challenge(store, %{"challenge_id" => id}) when is_binary(id) and id != "" do
+    unused(store, @store_key_prefix <> "challenge:" <> id)
+  end
+
+  defp unused_challenge(_store, _config) do
+    {:error, Errors.new(:verification_failed, "Stellar method missing required config: challenge_id")}
+  end
+
   defp mark(nil, _key), do: :ok
 
   defp mark(store, key) do
@@ -395,10 +418,17 @@ defmodule MPP.Methods.Stellar do
     end
   end
 
-  defp hash_key(hash), do: @store_key_prefix <> "tx:" <> hash
+  defp mark_challenge(nil, _config), do: :ok
 
-  defp challenge_key(%{"challenge_id" => id}) when is_binary(id) and id != "", do: @store_key_prefix <> "challenge:" <> id
-  defp challenge_key(_), do: @store_key_prefix <> "challenge:"
+  defp mark_challenge(store, %{"challenge_id" => id}) when is_binary(id) and id != "" do
+    mark(store, @store_key_prefix <> "challenge:" <> id)
+  end
+
+  defp mark_challenge(_store, _config) do
+    {:error, Errors.new(:verification_failed, "Stellar method missing required config: challenge_id")}
+  end
+
+  defp hash_key(hash), do: @store_key_prefix <> "tx:" <> hash
 
   defp receipt(hash, charge) do
     {:ok, Receipt.new(method: "stellar", reference: hash, external_id: charge.external_id)}
@@ -420,8 +450,11 @@ defmodule MPP.Methods.Stellar do
 
   defp network(config), do: config["network"] || "stellar:testnet"
 
-  defp passphrase!(config) do
-    RPC.passphrase(network(config)) || RPC.passphrase("stellar:testnet")
+  defp network_passphrase(config) do
+    case RPC.passphrase(network(config)) do
+      passphrase when is_binary(passphrase) -> {:ok, passphrase}
+      _ -> {:error, Errors.new(:verification_failed, "Stellar network must be stellar:pubnet or stellar:testnet")}
+    end
   end
 
   defp secret?(secret) when is_binary(secret) do

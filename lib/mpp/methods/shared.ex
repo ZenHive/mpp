@@ -49,4 +49,24 @@ defmodule MPP.Methods.Shared do
       _ -> {:error, Errors.new(:verification_failed, "Invalid charge amount: not a valid integer")}
     end
   end
+
+  @doc """
+  True when `url` is HTTPS without userinfo, or HTTP to loopback.
+  """
+  @spec valid_rpc_url?(term()) :: boolean()
+  def valid_rpc_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: "https", host: host, userinfo: nil} when is_binary(host) and host != "" -> true
+      %URI{scheme: "http", host: host} when host in ["localhost", "127.0.0.1", "::1"] -> true
+      _ -> false
+    end
+  end
+
+  def valid_rpc_url?(_), do: false
+
+  @doc """
+  Poll timeout in milliseconds, defaulting to 60_000.
+  """
+  @spec poll_timeout_ms(map()) :: pos_integer()
+  def poll_timeout_ms(config) when is_map(config), do: Map.get(config, "poll_timeout_ms", 60_000)
 end

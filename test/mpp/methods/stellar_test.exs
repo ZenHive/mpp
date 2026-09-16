@@ -247,13 +247,14 @@ defmodule MPP.Methods.StellarTest do
   end
 
   test "pull unsponsored simulates, submits and returns settlement-failed on FAILED", context do
+    event = Fixtures.transfer_event_xdr(context.payer.public, context.recipient.public, 1_000_000)
+
     stub_rpc(context, fn
       "simulateTransaction" ->
         %{
-          "events" => [],
+          "events" => [event],
           "results" => [%{"auth" => []}],
-          "minResourceFee" => "100",
-          "transactionData" => Base.encode64(<<0, 0, 0, 0>>)
+          "minResourceFee" => "100"
         }
 
       "sendTransaction" ->
@@ -264,7 +265,7 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, error} = Stellar.verify(%{"type" => "transaction", "transaction" => context.signed}, context.charge)
-    assert error.type in [Errors.new(:verification_failed, "").type, Errors.new(:settlement_failed, "").type]
+    assert error.type == Errors.new(:settlement_failed, "").type
   end
 
   test "pull unsponsored succeeds when simulation events match the SEP-41 transfer", context do
@@ -451,6 +452,127 @@ defmodule MPP.Methods.StellarTest do
 
     assert {:error, error} = Stellar.verify(%{"type" => "transaction", "transaction" => context.signed}, context.charge)
     assert error.status == 503
+  end
+
+  test "unsigned unsponsored pull is verification-failed before RPC", context do
+    assert {:error, error} =
+             Stellar.verify(%{"type" => "transaction", "transaction" => context.unsigned}, context.charge)
+
+    assert error.type == Errors.new(:verification_failed, "").type
+    assert error.detail =~ "signed"
+  end
+
+  test "unsponsored pull signed for a different network is verification-failed", context do
+    charge = %{context.charge | method_details: Map.put(context.charge.method_details, "network", "stellar:pubnet")}
+
+    assert {:error, error} = Stellar.verify(%{"type" => "transaction", "transaction" => context.signed}, charge)
+    assert error.type == Errors.new(:verification_failed, "").type
+    assert error.detail =~ "network"
+  end
+
+  test "replay store requires a challenge_id", context do
+    charge = %{context.charge | method_details: Map.delete(context.charge.method_details, "challenge_id")}
+
+    stub_rpc(context, fn
+      "getTransaction" -> %{"status" => "SUCCESS", "envelopeXdr" => context.signed, "txHash" => context.hash}
+    end)
+
+    assert {:error, error} = Stellar.verify(%{"type" => "hash", "hash" => context.hash}, charge)
+    assert error.detail =~ "challenge_id"
+  end
+
+  test "getLedgerEntries LedgerEntryData yields the account sequence without Horizon", context do
+    xdr = Fixtures.account_entry_data_xdr(context.payer.public, 42)
+
+    stub_rpc(context, fn
+      "getLedgerEntries" -> %{"entries" => [%{"xdr" => xdr}]}
+      "horizon" -> %{"sequence" => "99"}
+    end)
+
+    assert {:ok, 42} = RPC.account_sequence(context.payer.public, context.charge.method_details)
+  end
+
+  test "sign_auth writes address credentials and attach_auth round-trips them", context do
+    {:ok, draft} =
+      Envelope.unsigned(
+        Envelope.zero_account(),
+        @native_sac,
+        context.payer.public,
+        context.recipient.public,
+        1_000_000,
+        nil
+      )
+
+    auth = Fixtures.address_auth_xdr(draft, context.payer.public, 15)
+    {:ok, signed} = Envelope.sign_auth(auth, context.payer.secret, @passphrase, 25)
+    {:ok, inspected} = Envelope.decode(draft)
+    {:ok, with_auth} = Envelope.attach_auth(inspected, [signed])
+    {:ok, decoded} = Envelope.decode(with_auth)
+    [entry] = decoded.auth
+    assert entry.type == :address
+    assert entry.address == context.payer.public
+    assert entry.expiration == 25
+    assert entry.sub_invocations == 0
+    {:ok, signed_inspected} = Envelope.decode(context.signed)
+    assert Envelope.signed_by_source?(signed_inspected, @passphrase)
+    refute Envelope.signed_by_source?(inspected, @passphrase)
+  end
+
+  test "sponsored pull rebuilds, submits, and rejects a fee-payer drain", context do
+    fee_payer = Fixtures.keypair()
+    event = Fixtures.transfer_event_xdr(context.payer.public, context.recipient.public, 1_000_000)
+
+    {:ok, draft} =
+      Envelope.unsigned(
+        Envelope.zero_account(),
+        @native_sac,
+        context.payer.public,
+        context.recipient.public,
+        1_000_000,
+        nil
+      )
+
+    auth = Fixtures.address_auth_xdr(draft, context.payer.public, 20)
+    {:ok, inspected} = Envelope.decode(draft)
+    {:ok, sponsored} = Envelope.attach_auth(inspected, [auth])
+
+    charge = %{
+      context.charge
+      | method_details:
+          context.charge.method_details
+          |> Map.put("feePayer", true)
+          |> Map.put("fee_payer_secret", fee_payer.secret)
+    }
+
+    stub_rpc(context, fn
+      "getLatestLedger" -> %{"sequence" => 10}
+      "simulateTransaction" -> %{"events" => [event], "results" => [%{"auth" => [auth]}]}
+      "getLedgerEntries" -> %{"entries" => [%{"xdr" => Fixtures.account_entry_data_xdr(fee_payer.public, 12)}]}
+      "sendTransaction" -> %{"status" => "PENDING", "hash" => context.hash}
+      "getTransaction" -> %{"status" => "SUCCESS", "envelopeXdr" => sponsored, "txHash" => context.hash}
+    end)
+
+    assert {:ok, %Receipt{} = receipt} = Stellar.verify(%{"type" => "transaction", "transaction" => sponsored}, charge)
+    assert receipt.reference == context.hash
+
+    {:ok, drain_draft} =
+      Envelope.unsigned(
+        Envelope.zero_account(),
+        @native_sac,
+        fee_payer.public,
+        context.recipient.public,
+        1_000_000,
+        nil
+      )
+
+    drain_auth = Fixtures.address_auth_xdr(drain_draft, fee_payer.public, 20)
+    {:ok, drain_inspected} = Envelope.decode(drain_draft)
+    {:ok, drain} = Envelope.attach_auth(drain_inspected, [drain_auth])
+    drain_charge = %{charge | method_details: Map.put(charge.method_details, "challenge_id", "stellar-drain")}
+
+    assert {:error, drain_error} = Stellar.verify(%{"type" => "transaction", "transaction" => drain}, drain_charge)
+    assert drain_error.type == Errors.new(:verification_failed, "").type
+    assert drain_error.detail =~ "fee payer"
   end
 
   defp stub_rpc(_context, fun) do
