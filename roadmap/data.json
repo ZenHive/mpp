@@ -4245,7 +4245,7 @@
       "id": "105",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "in_progress",
+      "status": "done",
       "title": "Support the `header` challenge parameter and the Payment-Authorization credential header",
       "scores": {
         "d": 6,
@@ -4282,10 +4282,17 @@
         "lib/mpp/client/req.ex",
         "test/mpp/"
       ],
+      "shipped_in": "03a967f9edf85e991ca32dccbab02916ee12c7f6",
       "body": "mpp-specs #328 (commit ccab885, specs/core/draft-httpauth-payment-00.md) adds an optional `header` challenge auth-param naming an alternate credential header (`Payment-Authorization`) so a resource can require both ordinary authorization and payment. Both SDKs shipped it: mppx #821 (commit 4e4810a, src/Challenge.ts) and mpp-rs #400 (commit a58b747, `requires_auth`). Today MPP.Headers hard-rejects any unknown auth-param, so our client cannot pay a conformant server that advertises `header`, and MPP.Plug reads credentials only from `Authorization`.\n\nOpen decision, decided vetoably: the spec text appends `header` as an eighth HMAC slot after `opaque`, while mppx and mpp-rs both insert it immediately before `opaque`. Ship the SDK layout (two independent implementations agree; interop is the point of the feature) and file an mpp-specs issue citing the discrepancy — unless the spec has been amended by pickup, in which case follow the amended spec and say which you found. Header-less challenges must keep the current seven-slot input byte-for-byte.\n\nScope: parse and echo `header` (client ignores or honors it, never rejects the challenge); conditional HMAC slot; a Plug/Config option to advertise it and read the credential from the named header only; client transports attach the credential to the advertised header; `Cache-Control: private` / `no-store` on responses to requests bearing a non-Authorization credential (already the case, add the assertion). Cross-validate the challenge id against both reference SDKs with a `:cross_validation` test. Task 83 kept the strict unknown-param whitelist deliberately; this task adds `header` to the whitelist, it does not loosen the whitelist.\n\n2026-09-16 (review, Claude + Codex second opinion): \"client ignores or honors it\" and \"the named header\" were too loose — the draft allows only the value Payment-Authorization and forbids paying any other value. Premise re-verified: spec appends slot 7 after opaque (draft:375-420), mppx (refs/mppx/src/Challenge.ts:691-708) and mpp-rs (refs/mpp-rs/src/protocol/core/challenge.rs:344) insert it before opaque. D 5→6 for the cross-layer breadth.\n",
       "created_at": "2026-09-04",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1789530119062-8532a76b, 03a967f9edf85e991ca32dccbab02916ee12c7f6).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1789530119062-8532a76b",
       "cross_repo": []
     },
     {
