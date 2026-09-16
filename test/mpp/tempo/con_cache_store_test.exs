@@ -3,20 +3,25 @@ defmodule MPP.Tempo.ConCacheStoreTest do
 
   alias MPP.Tempo.ConCacheStore
 
+  # Only the tests tagged :short_ttl exercise expiry; every other test runs
+  # against a long-lived cache so a slow suite cannot expire a value between
+  # two assertions (observed once under full-suite load, Task 113).
   @ttl_ms 25
+  @long_ttl_ms to_timeout(minute: 1)
   @ttl_check_interval_ms 10
   @expiry_timeout_ms 250
   @poll_interval_ms 5
   @atomic_attempts 12
   @task_timeout_ms to_timeout(second: 5)
 
-  setup do
+  setup context do
     cache_name = unique_cache_name()
+    ttl = if context[:short_ttl], do: @ttl_ms, else: @long_ttl_ms
 
     start_supervised!(
       ConCacheStore.child_spec(
         name: cache_name,
-        ttl: @ttl_ms,
+        ttl: ttl,
         ttl_check_interval: @ttl_check_interval_ms
       )
     )
@@ -57,6 +62,7 @@ defmodule MPP.Tempo.ConCacheStoreTest do
   end
 
   describe "TTL expiry" do
+    @tag :short_ttl
     test "expires stored values after the configured TTL", %{store_opts: store_opts} do
       key = "mpp:charge:ttl"
 
@@ -181,6 +187,7 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       assert :not_found = ConCacheStore.get(key, store_opts)
     end
 
+    @tag :short_ttl
     test "derives TTL from the exact value written", %{store_opts: store_opts} do
       key = "mpp:sponsor-budget:derived-ttl"
       derived_ttl_ms = @ttl_ms * 3
