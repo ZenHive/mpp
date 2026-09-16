@@ -38,7 +38,7 @@
 | Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
 | Task 103 | ✅ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67] 🎯 |
 | Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33] 📋 |
-| Task 125 | 🔄 | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33] 📋 |
+| Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
