@@ -17,6 +17,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   `bundles` run instead of only at `setup`, and rewrites `~/.secrets`
   atomically. The tests' `SOLANA_CONFIDENTIAL_BUNDLE_CMD` hook now rejects a
   reply that omits either bundle export instead of silently keeping stale ones.
+- The `MPP.Tempo.ConCacheStore` test suite no longer flakes under full-suite load: only the two expiry tests run on the 25 ms TTL; every other test uses a one-minute cache (Task 113).
 - Hexdocs build without reference warnings: the README links to the XRPL guides on GitHub (the `docs/` tree is not part of the Hex package), and the two intentional references to `@moduledoc false` internals (CHANGELOG prose, the WebSocket session meter type) are exempted from ex_doc's hidden-reference warning.
 
 ## [0.17.1] — 2026-09-13

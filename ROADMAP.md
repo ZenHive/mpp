@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 108 — Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) on 2026-09-11
 
-**Up next:** Task 81 — Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06] 📋
+**Up next:** Task 81 — Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -37,7 +37,7 @@
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
 | Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
 | Task 103 | ✅ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67] 🎯 |
-| Task 105 | ⬜ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:5/B:8/U:8 → Eff:1.6] 🚀 |
+| Task 105 | ⬜ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -63,7 +63,7 @@
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
 | Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
 | Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0] 🎯 |
-| Task 100 | ⬜ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:3/B:6/U:4 → Eff:1.67] 🚀 |
+| Task 100 | ⬜ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:4/B:6/U:4 → Eff:1.25] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -145,7 +145,7 @@
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
 | Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
 | Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
-| Task 113 | ⬜ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
+| Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -173,7 +173,7 @@
 | Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8?] 🚀 |
 | Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
-| Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:10/U:9 → Eff:1.06?] 📋 |
+| Task 81 | ⬜ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋 |
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
@@ -189,8 +189,8 @@
 <!-- TASKS:BEGIN phase=13 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:6/B:8/U:8 → Eff:1.33?] 📋 |
-| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:8/B:9/U:8 → Eff:1.06?] 📋 |
+| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ |
+| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ |
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
@@ -224,7 +224,7 @@
 <!-- TASKS:BEGIN phase=15 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:10/U:8 → Eff:1.12?] 📋 |
+| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -236,15 +236,17 @@
 <!-- TASKS:BEGIN phase=16 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:7/B:8/U:7 → Eff:1.07?] 📋 |
-| Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:7/B:8/U:8 → Eff:1.14?] 📋 |
+| Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
+| Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0] 📋 |
 | Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
-| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:6/B:7/U:7 → Eff:1.17?] 📋 |
+| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
-| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method [D:10/B:10/U:10 → Eff:1.0?] 📋 |
+| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 | Task 109 | ✅ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
 | Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
+| Task 122 | ⬜ | 🎁 **additional-methods** · USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75] ⚠️ |
+| Task 123 | ⬜ | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
 <!-- TASKS:END -->
 
 ---

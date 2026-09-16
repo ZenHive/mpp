@@ -195,7 +195,7 @@
       "name": "Payment-aware client SDK",
       "description": "Tests the hypothesis that shared challenge selection, payment-aware HTTP/MCP orchestration, and built-in Tempo/Stripe providers let an Elixir caller complete a 402 payment flow without hand-rolled payment glue.",
       "order": 1,
-      "status": "active",
+      "status": "done",
       "target_version": "0.13.0"
     }
   },
@@ -1346,11 +1346,11 @@
       "status": "pending",
       "title": "Lightning charge method",
       "scores": {
-        "d": 6,
-        "b": 8,
+        "d": 8,
+        "b": 7,
         "u": 8
       },
-      "eff": 1.33,
+      "eff": 0.94,
       "dep_layer": 0,
       "unlocks": 1,
       "markers": [],
@@ -1359,19 +1359,23 @@
       "model": "grok-4.6",
       "acceptance_criteria": [
         "Implements MPP.Method behaviour",
-        "challenge_method_details/1 returns invoice, paymentHash, network",
-        "verify/2 checks SHA256(preimage) == paymentHash",
+        "A fresh BOLT11 invoice is issued per challenge, not once at Plug build time: MPP.Plug currently calls challenge_method_details/1 a single time in build_method_entry (lib/mpp/plug.ex:267-285), so the Method contract or the Plug gains a per-request challenge-details hook and this task ships it",
+        "Challenge details carry invoice, paymentHash (lowercase hex), network and amount in satoshis; invoice amount and payment hash are consistent with the challenge and the invoice expiry is not shorter than the challenge expiry (draft-lightning-charge-00.md:220,295,314)",
+        "verify/2 checks SHA256(preimage) == paymentHash and consumes each payment hash exactly once (atomic single consumption through the dedup store; a concurrent duplicate is rejected, draft:332)",
         "Unit tests with known preimage/hash pairs",
-        "Live regtest Lightning integration: at least one real success (invoice paid, preimage credential verified) and one relevant real error (wrong/duplicate preimage rejected); missing node/credentials flunk loudly with exact setup instructions — never a silent skip"
+        "Live regtest Lightning integration: at least one real success (invoice paid, preimage credential verified) and one relevant real error (wrong/duplicate preimage rejected); missing node/credentials flunk loudly with exact setup instructions — never a silent skip",
+        "Authority named in the delivery: the MPP Lightning draft for wire and lifecycle, BOLT11 for invoices, the chosen node's RPC contract (LND gRPC or CLN REST) for node calls; no Elixir Lightning client exists on Hex at scoring time, so the node client is part of the deliverable"
       ],
       "touches": [
         "mix.exs",
+        "lib/mpp/method.ex",
+        "lib/mpp/plug.ex",
         "lib/mpp/methods/lightning.ex",
         "test/mpp/methods/lightning_test.exs",
         "test/mpp/methods/lightning_integration_test.exs"
       ],
-      "body": "Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).\n",
-      "scored_at": "2026-08-02",
+      "body": "Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).\n\n2026-09-16 (review, Claude + Codex second opinion): per-request invoice issuance does not fit the current Method contract (challenge_method_details/1 runs once per Plug config, lib/mpp/plug.ex:267-285), so the hook is in scope. No Lightning client on Hex (mix hex.search lnd: none). D 6→8; B 8→7 because the draft is unchanged since 2026-04-17 and no MPP SDK implements it.\n",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -1381,11 +1385,11 @@
       "status": "pending",
       "title": "Lightning session method",
       "scores": {
-        "d": 8,
-        "b": 9,
-        "u": 8
+        "d": 9,
+        "b": 8,
+        "u": 7
       },
-      "eff": 1.06,
+      "eff": 0.83,
       "dep_layer": 1,
       "unlocks": 0,
       "markers": [],
@@ -1396,10 +1400,10 @@
       "model": "grok-4.6",
       "acceptance_criteria": [
         "Session lifecycle: open → bearer → topUp → close",
-        "Per-unit metering with balance tracking",
-        "SSE \"need-topup\" event emission",
-        "Refund via return invoice on close",
-        "Session store behaviour (pluggable: ETS, database, etc.)",
+        "Per-unit metering with serialized balance updates (no lost update under concurrent bearer actions)",
+        "SSE `payment-need-topup` event emission with the draft's event name and payload (draft-lightning-session-00.md:744), not `need-topup`",
+        "Refund via return invoice on close; a failed refund does not reopen the session, is logged with sessionId and refundSats, and is never retried unboundedly (draft:713-718)",
+        "Session state goes through the existing MPP.Session.Store behaviour (lib/mpp/session/store.ex); closed sessions are retained for replay rejection; ETS-only durability is documented as single-node and a database-backed store is not required by this task",
         "Live regtest session-lifecycle integration: open → bearer → topUp → close with real invoice settlement and a real refund on close, plus a relevant live error such as invalid top-up preimage or rejected refund invoice; missing node/credentials flunk loudly with exact setup instructions"
       ],
       "touches": [
@@ -1409,8 +1413,8 @@
         "test/mpp/methods/lightning_test.exs",
         "test/mpp/methods/lightning_integration_test.exs"
       ],
-      "body": "Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE \"need-topup\" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.\n",
-      "scored_at": "2026-08-02",
+      "body": "Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE \"need-topup\" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.\n\n2026-09-16 (review, Claude + Codex second opinion): the body's \"needs session store (unlike all other methods)\" is stale — MPP.Session.Store / ETSStore exist and Tempo and XRPL sessions use them; the old \"Session store behaviour\" AC was already delivered and is replaced by a reuse AC. SSE event name corrected to the draft's `payment-need-topup`. D 8→9 for durability + failed-refund lifecycle; B/U 9/8→8/7 for the narrower metered-Lightning surface.\n",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -1426,7 +1430,7 @@
       },
       "eff": 1.5,
       "dep_layer": 0,
-      "unlocks": 2,
+      "unlocks": 4,
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
@@ -1466,24 +1470,22 @@
       "title": "Card charge method",
       "scores": {
         "d": 8,
-        "b": 10,
-        "u": 8
+        "b": 7,
+        "u": 6
       },
-      "eff": 1.13,
+      "eff": 0.81,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "assignee": "codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "Implements MPP.Method behaviour",
-        "RSA key pair generation and JWKS endpoint support",
-        "JWE token decryption (RSA-OAEP-256 + AES-256-GCM)",
-        "Network token validation (PAN, expiry, network)",
-        "Server Enabler integration pattern",
-        "JWE decryption validated against provider-owned test vectors (the token service provider's / card network's official docs are the authority); crafted tokens only for negative cases",
-        "A named conforming Client/Server Enabler test environment is selected from provider-owned documentation before implementation; at least one live successful charge and one relevant live rejection are pinned by integration tests",
+        "The server never parses encryptedPayload: it forwards the credential opaquely to a Server Enabler for decryption and processing (draft-card-charge-00.md:400,482); MPP holds no RSA private key and performs no JWE decryption or PAN validation itself",
+        "Challenge details carry accepted networks, merchant name and exactly one of encryptionJwk or jwksUri as the draft specifies (draft:244)",
+        "Server checks accepted network, exact amount confirmation from the Server Enabler, challenge-id idempotency and cached-success handling per draft-card-charge-00.md:578,584,618",
+        "A named conforming Client/Server Enabler test environment is selected from provider-owned documentation before implementation and recorded in the delivery; at least one live successful charge and one relevant live rejection are pinned by integration tests",
         "If no conforming test environment is actually accessible after checking the named providers, the task transitions to blocked with that evidence rather than completing on crafted tokens; missing credentials flunk loudly with exact setup instructions"
       ],
       "touches": [
@@ -1493,8 +1495,8 @@
         "test/mpp/methods/card_test.exs",
         "test/mpp/methods/card_integration_test.exs"
       ],
-      "body": "Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. The MPP card draft is PSP-agnostic, so the implementation session must identify a concrete conforming enabler and establish its live contract before coding against it.\n",
-      "scored_at": "2026-08-02",
+      "body": "Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. The MPP card draft is PSP-agnostic, so the implementation session must identify a concrete conforming enabler and establish its live contract before coding against it.\n\n2026-09-16 (review, Claude + Codex second opinion): the previous ACs (RSA key generation, JWE decryption, PAN validation in MPP) contradicted the draft, which forbids clients and servers from parsing encryptedPayload and assigns decryption to the Server Enabler. The body's \"Requires RSA key management and JWE library\" is superseded: MPP publishes the Enabler's JWK/JWKS and forwards opaquely. B 10→7: one additional method with no named enabler and a draft unchanged since 2026-04-17.\n",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -1504,11 +1506,11 @@
       "status": "pending",
       "title": "Stellar charge method",
       "scores": {
-        "d": 7,
-        "b": 8,
+        "d": 8,
+        "b": 7,
         "u": 7
       },
-      "eff": 1.07,
+      "eff": 0.88,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1516,20 +1518,19 @@
       "assignee": "grok",
       "model": "grok-4.6",
       "acceptance_criteria": [
-        "MPP.Methods.Stellar implements the MPP.Method behaviour (pull XDR + push hash modes)",
+        "MPP.Methods.Stellar implements the MPP.Method behaviour with pull (type=transaction, signed XDR) and push (type=hash) modes",
+        "Pull mode covers both sponsored and unsponsored transactions, or sponsored pull is explicitly excluded in the delivery; simulation, authorization-tree, expiry and atomic replay checks are asserted (draft-stellar-charge-00.md:479-574,671)",
         "Live Stellar testnet (Soroban RPC) integration: at least one real success and one relevant real error per mode; missing credentials flunk loudly with exact setup instructions",
-        "SEP-41 verification semantics pinned by integration test against the Stellar-owned docs/spec (provider-owned authority; the MPP spec draft defines the wire contract)",
-        "settlement-failed error code added to MPP.Errors and covered by tests"
+        "SEP-41 verification semantics pinned by integration test against the Stellar-owned docs/spec (provider-owned authority; the MPP spec draft defines the wire contract)"
       ],
       "touches": [
         "mix.exs",
         "lib/mpp/methods/stellar.ex",
-        "lib/mpp/errors.ex",
         "test/mpp/methods/stellar_test.exs",
         "test/mpp/methods/stellar_integration_test.exs"
       ],
-      "body": "Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.\n",
-      "scored_at": "2026-08-02",
+      "body": "Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.\n\n2026-09-16 (review, Claude + Codex second opinion): the `settlement-failed` problem type already exists (lib/mpp/errors.ex:65, tested) — that AC is dropped and lib/mpp/errors.ex leaves the write-set. Sponsored pull is a third verification path the old ACs hid. D 7→8; B 8→7 (draft unchanged since 2026-04-17, no SDK implements Stellar).\n",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -1539,22 +1540,24 @@
       "status": "pending",
       "title": "EVM Permit2 credential path",
       "scores": {
-        "d": 7,
+        "d": 8,
         "b": 8,
         "u": 8
       },
-      "eff": 1.14,
+      "eff": 1.0,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "assignee": "codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "Permit2 EIP-712 signing/verification matches the canonical Permit2 contract (Uniswap-owned Permit2 contract + draft-evm-charge-00.md:392-495 are the authorities)",
+        "Payment splits: at least one live atomic multi-leg Permit2 batch settlement with ordered legs, plus witness/challenge binding, externalId and nonce-reuse rejection (draft-evm-charge-00.md:319,350,449)",
+        "credentialTypes advertises permit2 first only when the server is configured for it; existing authorization and hash paths are unchanged",
         "Live Sepolia integration: one real successful Permit2 settlement and one relevant real error (e.g. expired or overspent permit rejected); missing credentials flunk loudly with exact setup instructions",
         "Integration test pins the observed request/response/error semantics; mocks derived from observed live responses only",
-        "Cross-checked against refs/mppx + refs/mpp-rs Permit2 handling where they implement it, with refs/...:line citations"
+        "No reference SDK implements Permit2 at scoring time (mppx EVM advertises only authorization, refs/mppx/src/evm/Methods.ts:21,36; mpp-rs has no EVM method): the Permit2 contract, the draft's witness schema and live Sepolia are the only truth; re-check refs at pickup and cite refs/...:line if that changed"
       ],
       "touches": [
         "mix.exs",
@@ -1562,8 +1565,8 @@
         "test/mpp/methods/evm_test.exs",
         "test/mpp/methods/evm_integration_test.exs"
       ],
-      "body": "Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.\n",
-      "scored_at": "2026-08-02",
+      "body": "Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.\n\n2026-09-16 (review, Claude + Codex second opinion): the old cross-check AC was vacuous — neither SDK implements Permit2. Splits and witness binding, the draft's main claimed benefit, are now explicit ACs. D 7→8 for batch settlement and witness coverage.\n",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -1579,7 +1582,7 @@
       },
       "eff": 1.67,
       "dep_layer": 0,
-      "unlocks": 3,
+      "unlocks": 5,
       "markers": [],
       "depends_on": [],
       "assignee": "grok",
@@ -1848,11 +1851,11 @@
       "status": "pending",
       "title": "Hedera charge method",
       "scores": {
-        "d": 6,
+        "d": 8,
         "b": 7,
         "u": 7
       },
-      "eff": 1.17,
+      "eff": 0.88,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -1860,9 +1863,10 @@
       "assignee": "grok",
       "model": "grok-4.6",
       "acceptance_criteria": [
-        "MPP.Methods.Hedera implements the Method behaviour and the current MPP Hedera charge draft",
-        "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available",
-        "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction; missing credentials flunk loudly with exact setup instructions"
+        "MPP.Methods.Hedera implements both credential types of draft-hedera-charge-00: push (type=hash, default) and pull (type=transaction), with separate live success and rejection evidence per mode",
+        "Attribution memo binding, distinct split legs, Mirror Node indexing delay handling, pre-broadcast validation and atomic transaction-ID consumption are asserted (draft-hedera-charge-00.md:297-375,609,645,724,779,810,835)",
+        "Charge intent verification semantics are established from Hedera-owned network/API documentation; reference SDKs are compatibility evidence where available (none implements Hedera at scoring time)",
+        "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction per mode; missing credentials flunk loudly with exact setup instructions"
       ],
       "touches": [
         "mix.exs",
@@ -1870,9 +1874,9 @@
         "test/mpp/methods/hedera_test.exs",
         "test/mpp/methods/hedera_integration_test.exs"
       ],
-      "body": "Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.\n",
+      "body": "Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.\n\n2026-09-16 (review, Claude + Codex second opinion): \"implements the current draft\" was not gradeable; ACs now name both modes and the draft's material requirements. D 6→8.\n",
       "created_at": "2026-05-16",
-      "scored_at": "2026-08-02",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -3083,15 +3087,15 @@
       "phase": 16,
       "bundle": "additional-methods",
       "status": "pending",
-      "title": "USDC charge method",
+      "title": "USDC charge method: EVM and Solana direct profiles",
       "scores": {
-        "d": 10,
-        "b": 10,
-        "u": 10
+        "d": 7,
+        "b": 8,
+        "u": 8
       },
-      "eff": 1.0,
+      "eff": 1.14,
       "dep_layer": 1,
-      "unlocks": 0,
+      "unlocks": 2,
       "markers": [],
       "depends_on": [
         21,
@@ -3100,27 +3104,29 @@
       "assignee": "grok",
       "model": "grok-4.6",
       "acceptance_criteria": [
-        "MPP.Methods.USDC implements every normative profile in the current draft-usdc-charge specification: direct EVM EIP-3009, direct Solana, direct Stacks USDCx/SIP-010, and Circle Gateway Transfer",
-        "USDC-specific native-asset identity, token-control, replay, and receipt requirements are enforced across all profiles",
-        "Each direct-chain profile has live provider-owned test-network evidence for at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward",
-        "Circle Gateway has at least one sandbox success (attestation/transfer accepted) and one relevant sandbox error such as rejected or expired attestation; missing credentials for any live leg flunk loudly with exact setup instructions",
-        "The EVM profile reuses Task 40's EIP-3009 primitives instead of duplicating them; the Solana profile reuses Task 21's chain integration"
+        "MPP.Methods.USDC implements the `usdc` acceptance surface of draft-usdc-charge-00.md for the direct EVM EIP-3009 profile (draft:289-315) and the direct Solana profile (draft:316-354), reusing Task 40's EIP-3009 primitives and Task 21's Solana integration",
+        "USDC-specific native-asset identity (supported asset forms, draft:908-922), token-control (blocklist/pause, draft:923-939), replay (draft:940-990) and receipt (draft:852-905) requirements are enforced for both profiles, and profile exclusivity is tested (draft:258)",
+        "Each profile has live provider-owned test-network evidence for at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward; missing credentials flunk loudly with exact setup instructions",
+        "The method is structured so Tasks 122 (Stacks) and 123 (Gateway) add profiles without touching the EVM/Solana verification paths",
+        "mix ci passes; touched critical modules stay at or above 95% coverage"
       ],
       "out_of_scope": [
         "Re-implementing EIP-3009 primitives (Task 40)",
-        "Re-implementing generic Solana transfer primitives (Task 21)"
+        "Re-implementing generic Solana transfer primitives (Task 21)",
+        "Stacks USDCx profile (Task 122)",
+        "Circle Gateway Transfer profile (Task 123)"
       ],
       "touches": [
         "mix.exs",
         "lib/mpp/methods/usdc.ex",
         "lib/mpp/methods/evm.ex",
         "lib/mpp/methods/solana.ex",
-        "lib/mpp/methods/stacks.ex",
-        "test/mpp/methods/"
+        "test/mpp/methods/usdc_test.exs",
+        "test/mpp/methods/usdc_integration_test.exs"
       ],
-      "body": "Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.\n\nBoundary with Tasks 40 and 21: Task 40 implements EIP-3009 `transferWithAuthorization` inside MPP.Methods.EVM and Task 21 implements generic Solana payment mechanics. This task implements the distinct first-class `usdc` acceptance surface on top of those primitives and adds the Stacks USDCx and Gateway profiles. Reuse the prerequisite primitives rather than duplicating them.\n",
+      "body": "Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.\n\nBoundary with Tasks 40 and 21: Task 40 implements EIP-3009 `transferWithAuthorization` inside MPP.Methods.EVM and Task 21 implements generic Solana payment mechanics. This task implements the distinct first-class `usdc` acceptance surface on top of those primitives and adds the Stacks USDCx and Gateway profiles. Reuse the prerequisite primitives rather than duplicating them.\n\n2026-09-16 (review, Claude + Codex second opinion): split. Four live environments, a new chain (Stacks) and an off-chain settlement API (Gateway) in one dispatch cycle cannot be reviewed as one diff, and 10/10/10 distinguished nothing. This task keeps the two profiles that sit on existing primitives; Task 122 (Stacks) and Task 123 (Gateway) depend on it. D 10→7, B 10→8, U 10→8.\n",
       "created_at": "2026-08-02",
-      "scored_at": "2026-08-02",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -3131,10 +3137,10 @@
       "title": "Add x402 v2 exact interoperability",
       "scores": {
         "d": 9,
-        "b": 10,
+        "b": 9,
         "u": 9
       },
-      "eff": 1.06,
+      "eff": 1.0,
       "dep_layer": 2,
       "unlocks": 0,
       "markers": [],
@@ -3143,18 +3149,20 @@
         "33c"
       ],
       "assignee": "codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "x402 v2 PAYMENT-REQUIRED, PAYMENT-SIGNATURE, and PAYMENT-RESPONSE headers round-trip against official x402 vectors without being accepted as native Payment-auth headers",
         "The HTTP client discovers supported x402 exact offers alongside native MPP challenges, feeds both through Task 33c's shared selection policy, and emits an exact EIP-3009 credential using Task 40's primitives",
-        "Server-side EVM exact support verifies and settles through a configurable x402 facilitator, returns the official settlement response shape, and can coexist with native MPP on one endpoint",
+        "Nonce boundary is explicit and tested: native EIP-3009 credentials keep the challengeHash nonce (lib/mpp/methods/evm/authorization.ex), x402 exact uses the x402 nonce rules (refs/mppx/src/x402/client/Exact.ts:34); neither contract regresses and the shared code path cannot accept one under the other's rules",
+        "Server-side EVM exact support verifies and settles through a configurable x402 facilitator, returns the official settlement response shape, binds route and body per the x402 spec, prevents duplicate settlement, and can coexist with native MPP on one endpoint",
         "At least one real successful settlement and one relevant real rejection are observed against an official-compatible live facilitator/test environment before implementation; integration tests pin the observed verify/settle/error semantics and missing credentials flunk loudly with exact setup instructions",
-        "A localnet end-to-end test proves pay-and-retry plus replay rejection without replacing the required live-facilitator evidence",
-        "Current refs/mppx/src/x402 and refs/mppx/src/client/Transport.ts behavior is cross-validated as SDK-compatibility evidence, while the official x402 v2 specification and live facilitator remain authoritative"
+        "A localnet end-to-end test proves pay-and-retry plus replay rejection, with the approval hook invoked on every payment, without replacing the required live-facilitator evidence",
+        "Current refs/mppx/src/x402 (scheme `exact` only, refs/mppx/src/x402/Types.ts:11) and refs/mppx/src/client/Transport.ts behavior is cross-validated as SDK-compatibility evidence, while the official x402 v2 specification and live facilitator remain authoritative"
       ],
       "out_of_scope": [
         "x402 schemes or chain families not implemented by the current reference SDK at pickup; record them explicitly rather than silently approximating them",
-        "Re-implementing EIP-3009 authorization primitives owned by Task 40"
+        "Re-implementing EIP-3009 authorization primitives owned by Task 40",
+        "x402 over MCP (refs/mppx/src/x402/mcp.ts) — HTTP transport only; file separately if wanted"
       ],
       "touches": [
         "mix.exs",
@@ -3164,9 +3172,9 @@
         "test/mpp/x402/",
         "test/mpp/client/"
       ],
-      "body": "Add the x402 v2 exact interoperability layer required by the project's explicit SDK-parity goal. Cover the full vertical boundary represented by the current mppx implementation: x402 header/types handling, HTTP transport discovery and credential attachment, EVM exact EIP-3009 client signing, server verification, configurable facilitator settlement, and coexistence with native Payment-auth challenges. Reuse Task 33c's transport-neutral selection policy and Task 40's authorization primitives.\n\nThe official x402 v2 specification, provider-owned contract semantics, and observed live facilitator traffic are authoritative. refs/mppx/src/x402/, refs/mppx/src/client/Transport.ts, and its x402 localnet/e2e tests establish the current SDK compatibility target, not semantic authority. Re-audit those local refs at pickup so the task matches the SDK surface that actually ships then.\n",
+      "body": "Add the x402 v2 exact interoperability layer required by the project's explicit SDK-parity goal. Cover the full vertical boundary represented by the current mppx implementation: x402 header/types handling, HTTP transport discovery and credential attachment, EVM exact EIP-3009 client signing, server verification, configurable facilitator settlement, and coexistence with native Payment-auth challenges. Reuse Task 33c's transport-neutral selection policy and Task 40's authorization primitives.\n\nThe official x402 v2 specification, provider-owned contract semantics, and observed live facilitator traffic are authoritative. refs/mppx/src/x402/, refs/mppx/src/client/Transport.ts, and its x402 localnet/e2e tests establish the current SDK compatibility target, not semantic authority. Re-audit those local refs at pickup so the task matches the SDK surface that actually ships then.\n\n2026-09-16 (review, Claude + Codex second opinion): the reuse of Task 40's primitives needs a stated nonce boundary (native: challengeHash nonce; x402: random/extension-bound nonce) before code is shared; MCP is explicitly out of scope. Kept as one vertical task because client and server share lib/mpp/x402/ and the facilitator contract. B 10→9.\n",
       "created_at": "2026-08-02",
-      "scored_at": "2026-08-02",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -3392,11 +3400,12 @@
       "assignee": "cursor",
       "model": "cursor-grok-4.6-high",
       "acceptance_criteria": [
-        "MPP.Methods.EVM accepts type=transaction credentials with the signed EIP-1559 transaction payload defined by the current provider-owned draft-evm-charge specification, and advertises transaction only when that path is enabled",
-        "The server validates the signed transaction against the challenged chain, currency, recipient, amount, expiry, and supported no-splits constraints before broadcast, then verifies settlement and atomically records the resulting transaction hash for replay prevention",
+        "MPP.Methods.EVM accepts type=transaction credentials with the signed EIP-1559 transaction payload defined by the current provider-owned draft-evm-charge specification, and advertises transaction in challenge methodDetails only when that path is enabled",
+        "The server validates the signed transaction against the challenged chain, currency, recipient, amount and supported no-splits constraints and checks the challenge expiry before broadcast (an ordinary signed transfer carries no expiry of its own), then verifies settlement and atomically records the resulting transaction hash for replay prevention",
+        "Settlement verification requires the ERC-20 Transfer event in the receipt matching recipient and amount, not only status success (draft-evm-charge-00.md:691,872)",
         "A live Sepolia integration pins one successful server-broadcast settlement and one relevant rejection; missing credentials flunk loudly with exact setup instructions",
-        "Wire encoding, transaction hashing, RPC request/response shapes, and failure semantics are cross-checked against current provider-owned specifications and observed live behavior; mppx and mpp-rs are compatibility evidence",
-        "Existing hash credentials remain supported and EVM methodDetails/credential_types report exactly the credential paths implemented by the configured server",
+        "Wire encoding, transaction hashing, RPC request/response shapes, and failure semantics are cross-checked against current provider-owned specifications and observed live behavior; no reference SDK implements EVM type=transaction at scoring time (mppx: authorization only, refs/mppx/src/evm/Methods.ts:21; mpp-rs: no EVM method), so re-check refs at pickup and cite if that changed",
+        "Existing hash and authorization credentials remain supported; credential_types/0 stays the capability inventory (lib/mpp/method.ex:113) while methodDetails.credentialTypes reflects the configured server (lib/mpp/methods/evm.ex:258)",
         "Touched critical modules remain at least 95% covered and mix ci passes"
       ],
       "touches": [
@@ -3405,9 +3414,9 @@
         "test/mpp/methods/evm_test.exs",
         "test/mpp/methods/evm_integration_test.exs"
       ],
-      "body": "Add the EVM type=transaction credential path defined by draft-evm-charge. The client supplies a signed EIP-1559 transaction for server broadcast; the server must validate it against the charge before broadcasting, verify settlement, and preserve the existing atomic replay guarantees. Use the provider-owned draft and live Sepolia behavior as semantic authority, with current mppx and mpp-rs implementations as compatibility evidence.\n",
+      "body": "Add the EVM type=transaction credential path defined by draft-evm-charge. The client supplies a signed EIP-1559 transaction for server broadcast; the server must validate it against the charge before broadcasting, verify settlement, and preserve the existing atomic replay guarantees. Use the provider-owned draft and live Sepolia behavior as semantic authority, with current mppx and mpp-rs implementations as compatibility evidence.\n\n2026-09-16 (review, Claude + Codex second opinion): the compatibility-evidence AC was vacuous (no SDK implements EVM type=transaction); expiry clarified as challenge expiry; Transfer-event settlement check and the credential_types/0 vs advertised distinction made explicit. Scores unchanged.\n",
       "created_at": "2026-08-19",
-      "scored_at": "2026-08-19",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -4000,11 +4009,11 @@
       "status": "pending",
       "title": "Accept parameters on MPP.Discovery.OpenApi routes",
       "scores": {
-        "d": 3,
+        "d": 4,
         "b": 6,
         "u": 4
       },
-      "eff": 1.67,
+      "eff": 1.25,
       "dep_layer": 2,
       "unlocks": 0,
       "markers": [],
@@ -4015,11 +4024,11 @@
       "model": "grok-4.6",
       "acceptance_criteria": [
         "A route carrying :parameters emits a spec-valid OpenAPI 3.1 `parameters` array on its operation, covering at least `in: query` and `in: path` with `name`, `required`, `schema` and optional `description`",
-        "A route without :parameters is byte-identical to what 0.16.0 generates for it",
-        "Malformed parameter input raises ArgumentError at generation time, consistent with the module's existing route validation, with the offending field named",
-        "A path template with a placeholder and no matching `in: path` parameter is rejected rather than silently published",
-        "Tests cover a paid GET with query parameters alongside a free POST with a request body, and assert the whole document still validates as OpenAPI 3.1.0",
-        "A route carrying :response_schema (or an equivalently named field) emits `content.<media-type>.schema` on its 200 response per mpp-specs draft-payment-discovery-01 (commit 532d5af); a route without one keeps the description-only 200 byte-identical to 0.16.0",
+        "A route without :parameters and without a path placeholder is byte-identical to what 0.16.0 generates for it",
+        "Malformed parameter input raises ArgumentError at generation time, consistent with the module's existing route validation, with the offending field named; duplicate name+location pairs and `in: path` parameters with `required` other than true are rejected",
+        "A path template with a placeholder and no matching `in: path` parameter is rejected rather than silently published — this is the one intentional break versus 0.16.0 and the CHANGELOG says so",
+        "Tests cover a paid GET with query parameters alongside a free POST with a request body, and assert the whole document still validates as OpenAPI 3.1.0 with an independent validator named in the delivery",
+        "A route carrying :response_schema (or an equivalently named field) emits `content.<media-type>.schema` on its 200 response per mpp-specs draft-payment-discovery-01 (commit 532d5af, section Output Schema); the media type defaults to application/json and is overridable; a route without one keeps the description-only 200 byte-identical to 0.16.0",
         "mix precommit.full is green"
       ],
       "out_of_scope": [
@@ -4030,9 +4039,9 @@
         "lib/mpp/discovery/",
         "test/mpp/discovery/"
       ],
-      "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n\nExtended 2026-09-04 (sdk-delta-watch): mpp-specs #326 (commit 532d5af) revised the discovery draft to -01 and asks generators to describe the success response's output schema so a calling agent knows what it gets back, not only what it sends. It shares this task's write-set (`normalize_route!/1`), so it is folded in here rather than filed as a sibling: accept an optional per-route success-response schema alongside `:parameters` and emit it on the 200 response. x-payment-info is unchanged by that draft.\n",
+      "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n\nExtended 2026-09-04 (sdk-delta-watch): mpp-specs #326 (commit 532d5af) revised the discovery draft to -01 and asks generators to describe the success response's output schema so a calling agent knows what it gets back, not only what it sends. It shares this task's write-set (`normalize_route!/1`), so it is folded in here rather than filed as a sibling: accept an optional per-route success-response schema alongside `:parameters` and emit it on the 200 response. x-payment-info is unchanged by that draft.\n\n2026-09-16 (review, Claude + Codex second opinion): the byte-identical AC and the placeholder-rejection AC overlapped for a placeholder route without parameters; the rejection wins and is the declared break. Validation boundaries and media-type selection made explicit. D 3→4 for input plus output validation.\n",
       "created_at": "2026-08-21",
-      "scored_at": "2026-08-21",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -4225,11 +4234,11 @@
       "status": "pending",
       "title": "Support the `header` challenge parameter and the Payment-Authorization credential header",
       "scores": {
-        "d": 5,
+        "d": 6,
         "b": 8,
         "u": 8
       },
-      "eff": 1.6,
+      "eff": 1.33,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -4239,9 +4248,10 @@
       "acceptance_criteria": [
         "A challenge carrying header=\"Payment-Authorization\" parses, round-trips through format, and its id matches the id computed by mppx and mpp-rs for the same inputs (cross_validation test)",
         "A challenge without `header` produces exactly the 0.16.0 id and wire bytes",
-        "MPP.Plug configured to advertise the alternate header rejects a credential presented in `Authorization` and accepts it in `Payment-Authorization`; an unconfigured Plug behaves exactly as before",
-        "MPP.Client.Req and Transport.HTTP pay a server that advertises `header` and attach the credential to the named header",
-        "An mpp-specs issue (or the amended spec) is cited in the delivery for the HMAC slot position",
+        "A challenge whose `header` value is anything other than Payment-Authorization is treated as an unrecognized challenge: the client does not pay it and MPP.Plug never emits one (draft-httpauth-payment-00.md:504-513)",
+        "MPP.Plug configured to advertise the alternate header rejects a credential presented in `Authorization`, rejects a credential presented in both headers, and accepts it in `Payment-Authorization`; an unconfigured Plug behaves exactly as before, including ordinary Authorization handling",
+        "MPP.Client.Req and Transport.HTTP pay a server that advertises `header` and attach the credential to `Payment-Authorization`",
+        "An mpp-specs issue (or the amended spec) is cited in the delivery for the HMAC slot position; the SDK layout is recorded as a deliberate interoperability exception, not as spec compliance",
         "mix ci passes"
       ],
       "out_of_scope": [
@@ -4258,9 +4268,9 @@
         "lib/mpp/client/req.ex",
         "test/mpp/"
       ],
-      "body": "mpp-specs #328 (commit ccab885, specs/core/draft-httpauth-payment-00.md) adds an optional `header` challenge auth-param naming an alternate credential header (`Payment-Authorization`) so a resource can require both ordinary authorization and payment. Both SDKs shipped it: mppx #821 (commit 4e4810a, src/Challenge.ts) and mpp-rs #400 (commit a58b747, `requires_auth`). Today MPP.Headers hard-rejects any unknown auth-param, so our client cannot pay a conformant server that advertises `header`, and MPP.Plug reads credentials only from `Authorization`.\n\nOpen decision, decided vetoably: the spec text appends `header` as an eighth HMAC slot after `opaque`, while mppx and mpp-rs both insert it immediately before `opaque`. Ship the SDK layout (two independent implementations agree; interop is the point of the feature) and file an mpp-specs issue citing the discrepancy — unless the spec has been amended by pickup, in which case follow the amended spec and say which you found. Header-less challenges must keep the current seven-slot input byte-for-byte.\n\nScope: parse and echo `header` (client ignores or honors it, never rejects the challenge); conditional HMAC slot; a Plug/Config option to advertise it and read the credential from the named header only; client transports attach the credential to the advertised header; `Cache-Control: private` / `no-store` on responses to requests bearing a non-Authorization credential (already the case, add the assertion). Cross-validate the challenge id against both reference SDKs with a `:cross_validation` test. Task 83 kept the strict unknown-param whitelist deliberately; this task adds `header` to the whitelist, it does not loosen the whitelist.\n",
+      "body": "mpp-specs #328 (commit ccab885, specs/core/draft-httpauth-payment-00.md) adds an optional `header` challenge auth-param naming an alternate credential header (`Payment-Authorization`) so a resource can require both ordinary authorization and payment. Both SDKs shipped it: mppx #821 (commit 4e4810a, src/Challenge.ts) and mpp-rs #400 (commit a58b747, `requires_auth`). Today MPP.Headers hard-rejects any unknown auth-param, so our client cannot pay a conformant server that advertises `header`, and MPP.Plug reads credentials only from `Authorization`.\n\nOpen decision, decided vetoably: the spec text appends `header` as an eighth HMAC slot after `opaque`, while mppx and mpp-rs both insert it immediately before `opaque`. Ship the SDK layout (two independent implementations agree; interop is the point of the feature) and file an mpp-specs issue citing the discrepancy — unless the spec has been amended by pickup, in which case follow the amended spec and say which you found. Header-less challenges must keep the current seven-slot input byte-for-byte.\n\nScope: parse and echo `header` (client ignores or honors it, never rejects the challenge); conditional HMAC slot; a Plug/Config option to advertise it and read the credential from the named header only; client transports attach the credential to the advertised header; `Cache-Control: private` / `no-store` on responses to requests bearing a non-Authorization credential (already the case, add the assertion). Cross-validate the challenge id against both reference SDKs with a `:cross_validation` test. Task 83 kept the strict unknown-param whitelist deliberately; this task adds `header` to the whitelist, it does not loosen the whitelist.\n\n2026-09-16 (review, Claude + Codex second opinion): \"client ignores or honors it\" and \"the named header\" were too loose — the draft allows only the value Payment-Authorization and forbids paying any other value. Premise re-verified: spec appends slot 7 after opaque (draft:375-420), mppx (refs/mppx/src/Challenge.ts:691-708) and mpp-rs (refs/mpp-rs/src/protocol/core/challenge.rs:344) insert it before opaque. D 5→6 for the cross-layer breadth.\n",
       "created_at": "2026-09-04",
-      "scored_at": "2026-09-04",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -4270,11 +4280,11 @@
       "status": "pending",
       "title": "Align MCP payment error codes with the spec: -32602 for invalid payload, -32603 internal payment error, retry on -32043 re-challenge",
       "scores": {
-        "d": 3,
+        "d": 4,
         "b": 6,
         "u": 6
       },
-      "eff": 2.0,
+      "eff": 1.5,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
@@ -4282,10 +4292,10 @@
       "assignee": "grok",
       "model": "grok-4.6",
       "acceptance_criteria": [
-        "Server mapping: each MPP problem type maps to the spec's JSON-RPC code, including -32602 for invalid-payload and -32603 for internal-payment-error, with a table-driven test",
-        "Client: a -32043 response carrying challenges triggers exactly one re-payment attempt and then surfaces the error; a -32043 without challenges is surfaced immediately",
-        "Cross-validation test compares our code table with mppx's exported constants",
-        "MPP.Errors gains the `internal-payment-error` (500) problem type that core spec draft-01 (mpp-specs #353, commit 2e3de24) adds to the registry, and the -32603 mapping uses it",
+        "Server mapping: each MPP problem type maps to the spec's JSON-RPC code (draft-payment-transport-mcp-00.md:703-706), including -32602 for malformed-credential/invalid-payload and -32603 for internal-payment-error, with a table-driven test",
+        "Client: total payment attempts per call are bounded at two — the initial -32042 payment plus at most one re-payment on a -32043 that carries challenges — then the error surfaces; a -32043 without challenges surfaces immediately; the approval hook fires on every payment; payment-call counts, malformed/empty challenge lists and terminal response propagation are tested. This is a deliberate divergence from mppx's maxPaymentAttempts = 3 (refs/mppx/src/mcp/client/McpClient.ts:21) and is documented as such",
+        "Cross-validation test asserts behavioural parity of the problem→code mapping against mppx Mcp.errorCode (refs/mppx/src/Mcp.ts:22-31), not only equality of exported constants",
+        "MPP.Errors gains the `internal-payment-error` (500) problem type for mppx parity (refs/mppx/src/Errors.ts:153), and the -32603 mapping uses it; the delivery notes that the type is not registered in mpp-specs at scoring time",
         "mix ci passes"
       ],
       "out_of_scope": [
@@ -4301,9 +4311,9 @@
         "test/mpp/transports/",
         "test/mpp/client/"
       ],
-      "body": "mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes with the spec: `invalid-payload` problems map to -32602, an `internal-payment-error` problem type maps to -32603, and a client receiving -32043 with challenges attached treats it as a re-challenge and retries payment a bounded number of times. Our MPP.Mcp constants and the JSON-RPC adapter map only -32042/-32602/-32043 today, and MPP.Client.Transport.MCP / MPP.Client.MCP do not retry on -32043. Bring the server mapping and the client retry behaviour to the same table, with the spec's MCP section as the authority and mppx as the compatibility reference. Bound retries so a malicious server cannot drain a client wallet through repeated re-challenges (one retry, mirroring the existing single-retry rule).\n\n2026-09-11 (sdk-delta-watch): mpp-specs #353 promoted the core spec to draft-01 and registered `bad-request`, `invalid-payload`, `internal-payment-error` (500) and `payment-action-required` as problem types; MPP.Errors already has all but `internal-payment-error`, so add that type here as part of the -32603 mapping rather than in a separate task.\n",
+      "body": "mppx #846 (commit 2735c65, src/Mcp.ts) aligned the MCP transport's error codes with the spec: `invalid-payload` problems map to -32602, an `internal-payment-error` problem type maps to -32603, and a client receiving -32043 with challenges attached treats it as a re-challenge and retries payment a bounded number of times. Our MPP.Mcp constants and the JSON-RPC adapter map only -32042/-32602/-32043 today, and MPP.Client.Transport.MCP / MPP.Client.MCP do not retry on -32043. Bring the server mapping and the client retry behaviour to the same table, with the spec's MCP section as the authority and mppx as the compatibility reference. Bound retries so a malicious server cannot drain a client wallet through repeated re-challenges (one retry, mirroring the existing single-retry rule).\n\n2026-09-11 (sdk-delta-watch): mpp-specs #353 promoted the core spec to draft-01 and registered `bad-request`, `invalid-payload`, `internal-payment-error` (500) and `payment-action-required` as problem types; MPP.Errors already has all but `internal-payment-error`, so add that type here as part of the -32603 mapping rather than in a separate task.\n\n2026-09-16 (review, Claude + Codex second opinion): the 2026-09-11 addendum is wrong. mpp-specs #353 (commit 2e3de24) is \"fix: derive problem pages from the core specification\" — a pages/script change; the core spec is still draft-00 and `internal-payment-error` appears nowhere in mpp-specs (scripts/gen_problems.py CORE_PROBLEMS lists seven types). The type exists only in mppx (Errors.ts:153), so the AC now cites mppx parity. The MCP transport draft does list -32602/-32603 (:703-706), so the spec-as-authority claim for the code table stands. Retry budget made precise. D 3→4 for the client retry-state change.\n",
       "created_at": "2026-09-04",
-      "scored_at": "2026-09-04",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -4311,24 +4321,24 @@
       "phase": 9,
       "bundle": "utilities",
       "status": "pending",
-      "title": "Verify Tempo charge proofs and access keys signed with P-256 and WebAuthn keys",
+      "title": "Verify Tempo charge proofs and access keys signed with P-256 keys; handle WebAuthn envelopes explicitly",
       "scores": {
-        "d": 6,
+        "d": 8,
         "b": 7,
         "u": 6
       },
-      "eff": 1.08,
+      "eff": 0.81,
       "dep_layer": 0,
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
       "assignee": "codex",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
-        "A Tempo charge proof signed by a P-256 access key verifies on Moderato and yields a receipt; the same proof with a tampered signature is rejected",
-        "A WebAuthn-enveloped signature is verified or explicitly rejected with a descriptive error naming the unsupported type, never a crash",
+        "A Tempo charge proof signed by a P-256 access key verifies on Moderato and yields a receipt; the same proof with a tampered signature and a proof from a wrong P-256 key are rejected",
+        "WebAuthn: if a Tempo Wallet-issued WebAuthn access key can be provisioned on Moderato for the live test, verification is implemented and tested the same way; otherwise the envelope is rejected with a descriptive error naming the unsupported type, never a crash, and the delivery records the gap",
         "secp256k1 behaviour is byte-for-byte unchanged (existing tests untouched)",
-        "Key type is carried on the access key record and the simulation request rather than hardcoded",
+        "Key type is read from the keychain getKey result (MPP.Methods.Tempo.AccessKey.active?/3 currently discards signature_type, lib/mpp/methods/tempo/access_key.ex:19) and carried on the simulation request; MPP.Methods.Tempo.Subscription's hardcoded key_type: :secp256k1 (lib/mpp/methods/tempo/subscription.ex:104,130,417) is replaced by the observed type; MPP.Methods.Tempo.KeyAuthorization already models :secp256k1 | :p256 | :web_authn (key_authorization.ex:26) and is reused, not duplicated",
         "mix ci passes"
       ],
       "out_of_scope": [
@@ -4339,12 +4349,14 @@
         "lib/mpp/methods/tempo/signature_envelope.ex",
         "lib/mpp/methods/tempo/proof.ex",
         "lib/mpp/methods/tempo/access_key.ex",
+        "lib/mpp/methods/tempo/subscription.ex",
+        "lib/mpp/methods/tempo/key_authorization.ex",
         "lib/mpp/methods/tempo.ex",
         "test/mpp/methods/tempo/"
       ],
-      "body": "mpp-rs #391 (commit 175bea7, src/protocol/methods/tempo/proof.rs) accepts Tempo proof signatures and access keys of additional key types (P-256 and WebAuthn envelopes, as issued by Tempo Wallet per the v0.12.0 release notes). Our MPP.Methods.Tempo.SignatureEnvelope accepts only 65-byte secp256k1 signatures and the keychain 0x03/0x04 envelopes, and access_key / subscription hardcode `key_type: :secp256k1`, so a charge from a wallet holding a non-secp256k1 access key is rejected with \"invalid proof signature\". Rejecting is fail-closed, so this is an interop gap, not a security one.\n\nAdd verification for the key types Tempo's keychain precompile actually recognizes, with the Tempo protocol documentation and the on-chain keychain contract as the authority and mpp-rs / mppx as compatibility references. The signature recovery for the transaction sender lives in onchain_tempo (`recover_sender/2` accepts only 65-byte signatures — premise from a read of deps/onchain_tempo 0.10.0; confirm at pickup); if the primitive belongs there, ship it there first and bump the dep. Each accepted key type needs a Moderato integration test against a real access key of that type, plus a negative test per type for a malformed or wrong-key signature.\n",
+      "body": "mpp-rs #391 (commit 175bea7, src/protocol/methods/tempo/proof.rs) accepts Tempo proof signatures and access keys of additional key types (P-256 and WebAuthn envelopes, as issued by Tempo Wallet per the v0.12.0 release notes). Our MPP.Methods.Tempo.SignatureEnvelope accepts only 65-byte secp256k1 signatures and the keychain 0x03/0x04 envelopes, and access_key / subscription hardcode `key_type: :secp256k1`, so a charge from a wallet holding a non-secp256k1 access key is rejected with \"invalid proof signature\". Rejecting is fail-closed, so this is an interop gap, not a security one.\n\nAdd verification for the key types Tempo's keychain precompile actually recognizes, with the Tempo protocol documentation and the on-chain keychain contract as the authority and mpp-rs / mppx as compatibility references. The signature recovery for the transaction sender lives in onchain_tempo (`recover_sender/2` accepts only 65-byte signatures — premise from a read of deps/onchain_tempo 0.10.0; confirm at pickup); if the primitive belongs there, ship it there first and bump the dep. Each accepted key type needs a Moderato integration test against a real access key of that type, plus a negative test per type for a malformed or wrong-key signature.\n\n2026-09-16 (review, Claude + Codex second opinion): premise partly stale — KeyAuthorization already knows all three key types and AccessKey discards rather than hardcodes the type; only Subscription hardcodes. Title and ACs now say what WebAuthn gets (verified if a live key is obtainable, otherwise explicit rejection). D 6→8 for the added curve plus live P-256 key provisioning on Moderato.\n",
       "created_at": "2026-09-04",
-      "scored_at": "2026-09-04",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     },
     {
@@ -4587,7 +4599,7 @@
       "id": "113",
       "phase": 10,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Isolate ConCache invalid-update assertions from expiry timing",
       "scores": {
         "d": 2,
@@ -4607,9 +4619,12 @@
       "touches": [
         "test/mpp/tempo/con_cache_store_test.exs"
       ],
+      "shipped_in": "43e991ed4bcc04a0de5fcddc1e4d0119cca2a770",
       "body": "The cold audit of 24b4181 observed test/mpp/tempo/con_cache_store_test.exs:173 fail at line 183: the original value had expired before the invalid-update preservation assertion. The shared setup uses a 25 ms TTL. test.json automatically retried this test and it passed (seed 531377; 1 flaky, 0 confirmed failures). Give non-expiry assertions an expiry-independent setup while preserving explicit expiry tests. This is a test reliability issue, not evidence of a runtime store defect.",
       "created_at": "2026-09-11",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-11",
+      "implemented": "Non-expiry tests now run on a 1-minute cache; only the two expiry tests carry @tag :short_ttl and keep the 25 ms TTL (setup picks the TTL from the tag). Fixed inline during the 2026-09-16 roadmap review instead of dispatching a D2 one-file task.",
       "cross_repo": []
     },
     {
@@ -5031,6 +5046,92 @@
       "done_at": "2026-09-13",
       "scored_at": "2026-09-13",
       "implemented": "Devnet fixture generator (scripts/solana-confidential-fixtures.sh + Rust crate) creates the confidential mint, recipient account and fresh per-test bundles; both confidential-bundle integration tests passed live on devnet (ZK ElGamal proof program active). No library defect found.",
+      "cross_repo": []
+    },
+    {
+      "id": "122",
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "USDC charge method: Stacks USDCx profile",
+      "scores": {
+        "d": 8,
+        "b": 6,
+        "u": 6
+      },
+      "eff": 0.75,
+      "dep_layer": 2,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [
+        80
+      ],
+      "assignee": "grok",
+      "model": "grok-4.6",
+      "acceptance_criteria": [
+        "MPP.Methods.USDC accepts the Stacks USDCx/SIP-010 direct profile of draft-usdc-charge-00.md:355-399 alongside the EVM and Solana profiles delivered by Task 80, with profile exclusivity enforced (a credential for one profile is rejected under another, draft:258)",
+        "USDC-specific native-asset identity, token-control (blocklist/pause, draft:923-939), replay and receipt requirements hold for the Stacks leg",
+        "Live Stacks testnet evidence: at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward; missing credentials flunk loudly with exact setup instructions",
+        "The Stacks RPC/transaction client is dev-scoped or a runtime dep only if it is a maintained Hex package; the delivery records the choice",
+        "mix ci passes; touched critical modules stay at or above 95% coverage"
+      ],
+      "out_of_scope": [
+        "EVM and Solana USDC profiles (Task 80)",
+        "Circle Gateway Transfer profile (its own task)"
+      ],
+      "touches": [
+        "mix.exs",
+        "lib/mpp/methods/usdc.ex",
+        "lib/mpp/methods/stacks.ex",
+        "test/mpp/methods/usdc_test.exs",
+        "test/mpp/methods/usdc_integration_test.exs"
+      ],
+      "body": "Split out of Task 80 on 2026-09-16 (review: four live environments in one dispatch cycle is not reviewable as one diff). Stacks is a new chain with no primitives in this repo or its deps, so this profile is its own implement-review-land cycle on top of the `usdc` acceptance surface Task 80 ships for EVM and Solana.\n\nAuthority: Circle's USDCx documentation and the SIP-010 standard plus observed Stacks testnet behavior for chain semantics; the MPP USDC draft for the wire contract. No MPP reference SDK implements this profile at scoring time; re-check refs at pickup.\n",
+      "created_at": "2026-09-16",
+      "scored_at": "2026-09-16",
+      "cross_repo": []
+    },
+    {
+      "id": "123",
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "USDC charge method: Circle Gateway Transfer profile",
+      "scores": {
+        "d": 8,
+        "b": 7,
+        "u": 7
+      },
+      "eff": 0.88,
+      "dep_layer": 2,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [
+        80
+      ],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "MPP.Methods.USDC accepts the Gateway Transfer profile of draft-usdc-charge-00.md:400-529 including salt binding (draft:471), alongside the profiles delivered by Task 80, with profile exclusivity enforced (draft:258)",
+        "A receipt is issued only after completed destination settlement, never on attestation/transfer acceptance alone; timeout and reconciliation of pending transfers follow draft-usdc-charge-00.md:812-851 (Gateway non-success outcomes) and are tested",
+        "Live Circle Gateway sandbox evidence: at least one completed transfer and one relevant error such as rejected or expired attestation; integration tests pin observed request/response/error semantics and mocks are derived only afterward; missing credentials flunk loudly with exact setup instructions",
+        "Gateway fees (draft:991-1004) and sensitive-field handling (draft:1005-1011) are enforced and covered",
+        "mix ci passes; touched critical modules stay at or above 95% coverage"
+      ],
+      "out_of_scope": [
+        "EVM and Solana USDC profiles (Task 80)",
+        "Stacks USDCx profile (its own task)"
+      ],
+      "touches": [
+        "mix.exs",
+        "lib/mpp/methods/usdc.ex",
+        "lib/mpp/methods/usdc/gateway.ex",
+        "test/mpp/methods/usdc_test.exs",
+        "test/mpp/methods/usdc_integration_test.exs"
+      ],
+      "body": "Split out of Task 80 on 2026-09-16. Gateway is an off-chain Circle API with its own settlement lifecycle (attestation, transfer, destination completion, non-success outcomes), which needs live sandbox reconciliation evidence that the direct-chain profiles do not.\n\nAuthority: Circle's Gateway API documentation and the live sandbox for semantics; the MPP USDC draft for the wire contract. No MPP reference SDK implements this profile at scoring time; re-check refs at pickup.\n",
+      "created_at": "2026-09-16",
+      "scored_at": "2026-09-16",
       "cross_repo": []
     }
   ]
