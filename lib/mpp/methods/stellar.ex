@@ -424,10 +424,6 @@ defmodule MPP.Methods.Stellar do
     mark(store, @store_key_prefix <> "challenge:" <> id)
   end
 
-  defp mark_challenge(_store, _config) do
-    {:error, Errors.new(:verification_failed, "Stellar method missing required config: challenge_id")}
-  end
-
   defp hash_key(hash), do: @store_key_prefix <> "tx:" <> hash
 
   defp receipt(hash, charge) do

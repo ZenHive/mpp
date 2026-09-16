@@ -14,7 +14,16 @@ defmodule MPP.Methods.Stellar.Envelope do
     MatchError,
     FunctionClauseError,
     CaseClauseError,
-    Protocol.UndefinedError
+    Protocol.UndefinedError,
+    :"Elixir.XDR.EnumError",
+    :"Elixir.XDR.UnionError",
+    :"Elixir.XDR.FixedArrayError",
+    :"Elixir.XDR.VariableArrayError",
+    :"Elixir.XDR.FixedOpaqueError",
+    :"Elixir.XDR.VariableOpaqueError",
+    :"Elixir.XDR.StructError",
+    :"Elixir.XDR.OptionalError",
+    :"Elixir.XDR.StringError"
   ]
 
   @type transfer :: %{contract: String.t(), from: String.t(), to: String.t(), amount: integer()}
@@ -378,17 +387,9 @@ defmodule MPP.Methods.Stellar.Envelope do
     {:ok, Enum.map(items, &auth_entry/1)}
   end
 
-  defp auth_entries(_), do: {:ok, []}
-
   defp auth_entry(%XDR.SorobanAuthorizationEntry{credentials: credentials, root_invocation: invocation}) do
-    subs =
-      case invocation do
-        %XDR.SorobanAuthorizedInvocation{sub_invocations: %XDR.SorobanAuthorizedInvocationList{items: items}} ->
-          length(items)
-
-        _ ->
-          0
-      end
+    %XDR.SorobanAuthorizedInvocation{sub_invocations: %XDR.SorobanAuthorizedInvocationList{items: items}} = invocation
+    subs = length(items)
 
     case credentials do
       %XDR.SorobanCredentials{
@@ -399,9 +400,6 @@ defmodule MPP.Methods.Stellar.Envelope do
         auth_record(:address, encoded, expiration.datum, subs)
 
       %XDR.SorobanCredentials{type: %XDR.SorobanCredentialsType{identifier: :SOROBAN_CREDENTIALS_SOURCE_ACCOUNT}} ->
-        auth_record(:source_account, nil, nil, subs)
-
-      _ ->
         auth_record(:source_account, nil, nil, subs)
     end
   end
@@ -417,7 +415,6 @@ defmodule MPP.Methods.Stellar.Envelope do
        }) do
     case time_bounds do
       %{time_bounds: %XDR.TimeBounds{max_time: %XDR.TimePoint{value: value}}} -> value
-      %XDR.TimeBounds{max_time: %XDR.TimePoint{value: value}} -> value
       _ -> nil
     end
   end
@@ -437,8 +434,6 @@ defmodule MPP.Methods.Stellar.Envelope do
        }) do
     {:ok, StrKey.encode!(raw, :ed25519_public_key)}
   end
-
-  defp account_id(_), do: malformed()
 
   defp muxed_account(account) when is_binary(account) do
     case StrKey.decode(account, :ed25519_public_key) do
@@ -590,23 +585,30 @@ defmodule MPP.Methods.Stellar.Envelope do
     else
       _ -> []
     end
-  rescue
-    _ in @xdr_errors -> []
   end
 
   defp decode_event(_), do: []
 
   defp event_from_bytes(bytes) do
-    case XDR.DiagnosticEvent.decode_xdr(bytes) do
-      {:ok, {%XDR.DiagnosticEvent{event: event}, ""}} ->
-        contract_event(event)
+    diagnostic_event(bytes) || contract_event_from_bytes(bytes)
+  end
 
-      _ ->
-        case XDR.ContractEvent.decode_xdr(bytes) do
-          {:ok, {event, ""}} -> contract_event(event)
-          _ -> nil
-        end
+  defp diagnostic_event(bytes) do
+    case XDR.DiagnosticEvent.decode_xdr(bytes) do
+      {:ok, {%XDR.DiagnosticEvent{event: event}, ""}} -> contract_event(event)
+      _ -> nil
     end
+  rescue
+    _ in @xdr_errors -> nil
+  end
+
+  defp contract_event_from_bytes(bytes) do
+    case XDR.ContractEvent.decode_xdr(bytes) do
+      {:ok, {event, ""}} -> contract_event(event)
+      _ -> nil
+    end
+  rescue
+    _ in @xdr_errors -> nil
   end
 
   defp contract_event(%XDR.ContractEvent{
@@ -642,10 +644,8 @@ defmodule MPP.Methods.Stellar.Envelope do
   end
 
   defp event_amount(%XDR.SCVal{type: %XDR.SCValType{identifier: :SCV_I128}} = val) do
-    case sc_val_i128(val) do
-      {:ok, amount} -> amount
-      _ -> nil
-    end
+    {:ok, amount} = sc_val_i128(val)
+    amount
   end
 
   defp event_amount(%XDR.SCVal{

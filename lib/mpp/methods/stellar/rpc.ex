@@ -15,6 +15,19 @@ defmodule MPP.Methods.Stellar.RPC do
     "stellar:testnet" => "Test SDF Network ; September 2015"
   }
 
+  @xdr_errors [
+    ArgumentError,
+    FunctionClauseError,
+    ErlangError,
+    MatchError,
+    :"Elixir.XDR.EnumError",
+    :"Elixir.XDR.UnionError",
+    :"Elixir.XDR.FixedArrayError",
+    :"Elixir.XDR.VariableArrayError",
+    :"Elixir.XDR.FixedOpaqueError",
+    :"Elixir.XDR.VariableOpaqueError"
+  ]
+
   @doc false
   @spec passphrases() :: %{String.t() => String.t()}
   def passphrases, do: @passphrases
@@ -164,23 +177,23 @@ defmodule MPP.Methods.Stellar.RPC do
 
   defp poll_transaction(hash, config, deadline, misses) do
     case get_transaction(hash, config) do
-      {:ok, %{"status" => "SUCCESS"} = result} ->
-        {:ok, result}
-
-      {:ok, %{"status" => "FAILED"} = result} ->
-        {:ok, result}
-
-      {:ok, %{"status" => "NOT_FOUND"}} ->
-        cond do
-          misses == 0 -> {:error, Errors.new(:verification_failed, "Stellar transaction was not found")}
-          System.monotonic_time(:millisecond) >= deadline -> timeout()
-          true -> sleep_and_poll(hash, config, deadline, next_misses(misses))
-        end
-
-      {:error, %Errors{}} = error ->
-        error
+      {:ok, result} -> poll_result(result, hash, config, deadline, misses)
+      {:error, %Errors{}} = error -> error
     end
   end
+
+  defp poll_result(%{"status" => "SUCCESS"} = result, _hash, _config, _deadline, _misses), do: {:ok, result}
+  defp poll_result(%{"status" => "FAILED"} = result, _hash, _config, _deadline, _misses), do: {:ok, result}
+
+  defp poll_result(%{"status" => "NOT_FOUND"}, hash, config, deadline, misses) do
+    cond do
+      misses == 0 -> {:error, Errors.new(:verification_failed, "Stellar transaction was not found")}
+      System.monotonic_time(:millisecond) >= deadline -> timeout()
+      true -> sleep_and_poll(hash, config, deadline, next_misses(misses))
+    end
+  end
+
+  defp poll_result(result, _hash, _config, _deadline, _misses) when is_map(result), do: {:ok, result}
 
   defp sleep_and_poll(hash, config, deadline, misses) do
     Process.sleep(interval(config))
@@ -223,16 +236,28 @@ defmodule MPP.Methods.Stellar.RPC do
   defp decode_sequence(_), do: :error
 
   defp sequence_from_bytes(bytes) do
-    case LedgerEntryData.decode_xdr(bytes) do
-      {:ok, {data, ""}} ->
-        account_sequence(data)
-
-      _ ->
-        case LedgerEntry.decode_xdr(bytes) do
-          {:ok, {%LedgerEntry{data: data}, ""}} -> account_sequence(data)
-          _ -> :error
-        end
+    case ledger_entry_data_sequence(bytes) do
+      {:ok, sequence} -> {:ok, sequence}
+      _ -> full_ledger_entry_sequence(bytes)
     end
+  end
+
+  defp ledger_entry_data_sequence(bytes) do
+    case LedgerEntryData.decode_xdr(bytes) do
+      {:ok, {data, ""}} -> account_sequence(data)
+      _ -> :error
+    end
+  rescue
+    _ in @xdr_errors -> :error
+  end
+
+  defp full_ledger_entry_sequence(bytes) do
+    case LedgerEntry.decode_xdr(bytes) do
+      {:ok, {%LedgerEntry{data: data}, ""}} -> account_sequence(data)
+      _ -> :error
+    end
+  rescue
+    _ in @xdr_errors -> :error
   end
 
   defp account_sequence(%LedgerEntryData{

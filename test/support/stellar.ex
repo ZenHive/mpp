@@ -16,8 +16,17 @@ defmodule MPP.Test.Stellar do
   @spec passphrase() :: String.t()
   def passphrase, do: @passphrase
 
-  @spec address_auth_xdr(String.t(), String.t(), non_neg_integer()) :: String.t()
-  def address_auth_xdr(envelope_xdr, account, expiration_ledger)
+  @observed_transfer_path "test/fixtures/stellar/testnet_sac_transfer.json"
+
+  @spec observed_transfer() :: map()
+  def observed_transfer do
+    @observed_transfer_path
+    |> File.read!()
+    |> Jason.decode!()
+  end
+
+  @spec address_auth_xdr(String.t(), String.t(), non_neg_integer(), keyword()) :: String.t()
+  def address_auth_xdr(envelope_xdr, account, expiration_ledger, opts \\ [])
       when is_binary(envelope_xdr) and is_binary(account) and is_integer(expiration_ledger) do
     alias StellarBase.XDR
 
@@ -42,7 +51,12 @@ defmodule MPP.Test.Stellar do
         XDR.SorobanAuthorizedFunctionType.new(:SOROBAN_AUTHORIZED_FUNCTION_TYPE_CONTRACT_FN)
       )
 
-    invocation = XDR.SorobanAuthorizedInvocation.new(function, XDR.SorobanAuthorizedInvocationList.new([]))
+    nested =
+      if Keyword.get(opts, :nested, false),
+        do: [XDR.SorobanAuthorizedInvocation.new(function, XDR.SorobanAuthorizedInvocationList.new([]))],
+        else: []
+
+    invocation = XDR.SorobanAuthorizedInvocation.new(function, XDR.SorobanAuthorizedInvocationList.new(nested))
 
     credentials
     |> XDR.SorobanCredentials.new(XDR.SorobanCredentialsType.new(:SOROBAN_CREDENTIALS_ADDRESS))
@@ -255,6 +269,114 @@ defmodule MPP.Test.Stellar do
     public = XDR.PublicKey.new(XDR.UInt256.new(raw), XDR.PublicKeyType.new())
     addr = XDR.SCAddress.new(XDR.AccountID.new(public), XDR.SCAddressType.new(:SC_ADDRESS_TYPE_ACCOUNT))
     XDR.SCVal.new(addr, XDR.SCValType.new(:SCV_ADDRESS))
+  end
+
+  @doc """
+  ContractEvent XDR (no DiagnosticEvent wrapper).
+
+  Matches `getTransaction.events.contractEventsXdr` from the observed
+  testnet SAC transfer in `test/fixtures/stellar/testnet_sac_transfer.json`.
+  """
+  @spec contract_event_xdr(String.t(), String.t(), integer(), String.t()) :: String.t()
+  def contract_event_xdr(from, to, amount, contract \\ @native_sac) do
+    alias StellarBase.XDR
+
+    from
+    |> transfer_contract_event(to, amount, contract)
+    |> XDR.ContractEvent.encode_xdr!()
+    |> Base.encode64()
+  end
+
+  @spec map_amount_event_xdr(String.t(), String.t(), integer(), String.t()) :: String.t()
+  def map_amount_event_xdr(from, to, amount, contract \\ @native_sac) do
+    alias StellarBase.XDR
+
+    <<hi::signed-64, lo::unsigned-64>> = <<amount::signed-128>>
+    amount_val = XDR.SCVal.new(XDR.Int128Parts.new(XDR.Int64.new(hi), XDR.UInt64.new(lo)), XDR.SCValType.new(:SCV_I128))
+
+    amount_entry =
+      XDR.SCMapEntry.new(XDR.SCVal.new(XDR.SCSymbol.new("amount"), XDR.SCValType.new(:SCV_SYMBOL)), amount_val)
+
+    other_entry =
+      XDR.SCMapEntry.new(XDR.SCVal.new(XDR.SCSymbol.new("to"), XDR.SCValType.new(:SCV_SYMBOL)), address_scval(to))
+
+    map = XDR.OptionalSCMap.new(XDR.SCMap.new([other_entry, amount_entry]))
+    data = XDR.SCVal.new(map, XDR.SCValType.new(:SCV_MAP))
+
+    from
+    |> transfer_contract_event(to, amount, contract, data)
+    |> then(&XDR.DiagnosticEvent.new(XDR.Bool.new(true), &1))
+    |> XDR.DiagnosticEvent.encode_xdr!()
+    |> Base.encode64()
+  end
+
+  @spec fee_bump_xdr(String.t(), String.t()) :: String.t()
+  def fee_bump_xdr(envelope_xdr, fee_source) when is_binary(envelope_xdr) and is_binary(fee_source) do
+    alias StellarBase.XDR
+
+    {:ok, inspected} = Envelope.decode(envelope_xdr)
+    %XDR.TransactionEnvelope{envelope: %XDR.TransactionV1Envelope{} = inner} = inspected.envelope
+    {:ok, raw} = StrKey.decode(fee_source, :ed25519_public_key)
+    source = XDR.MuxedAccount.new(XDR.UInt256.new(raw), XDR.CryptoKeyType.new(:KEY_TYPE_ED25519))
+    inner_tx = XDR.FeeBumpInnerTx.new(inner, XDR.EnvelopeType.new(:ENVELOPE_TYPE_TX))
+
+    fee_bump =
+      XDR.FeeBumpTransaction.new(source, XDR.Int64.new(1000), inner_tx, XDR.Ext.new())
+
+    fee_bump
+    |> XDR.FeeBumpTransactionEnvelope.new(XDR.DecoratedSignatures.new([]))
+    |> XDR.TransactionEnvelope.new(XDR.EnvelopeType.new(:ENVELOPE_TYPE_TX_FEE_BUMP))
+    |> Envelope.encode()
+  end
+
+  @spec ledger_entry_xdr(String.t()) :: String.t()
+  def ledger_entry_xdr(ledger_entry_data_xdr) when is_binary(ledger_entry_data_xdr) do
+    alias StellarBase.XDR
+
+    {:ok, bytes} = Base.decode64(ledger_entry_data_xdr)
+    {:ok, {data, ""}} = XDR.LedgerEntryData.decode_xdr(bytes)
+
+    1
+    |> XDR.UInt32.new()
+    |> XDR.LedgerEntry.new(data, XDR.LedgerEntryExt.new(XDR.Void.new(), 0))
+    |> XDR.LedgerEntry.encode_xdr!()
+    |> Base.encode64()
+  end
+
+  @spec reencode(map()) :: String.t()
+  def reencode(%{tx: tx, envelope: envelope}) do
+    Envelope.encode(%{envelope | envelope: %{envelope.envelope | tx: tx}})
+  end
+
+  defp transfer_contract_event(from, to, amount, contract, data \\ nil) do
+    alias StellarBase.XDR
+
+    topics =
+      XDR.SCValList.new([
+        XDR.SCVal.new(XDR.SCSymbol.new("transfer"), XDR.SCValType.new(:SCV_SYMBOL)),
+        address_scval(from),
+        address_scval(to)
+      ])
+
+    amount_val = data || i128_scval(amount)
+
+    body = XDR.ContractEventBody.new(XDR.ContractEventV0.new(topics, amount_val), 0)
+    {:ok, contract_raw} = StrKey.decode(contract, :contract)
+    contract_id = XDR.OptionalHash.new(XDR.Hash.new(contract_raw))
+
+    XDR.ContractEvent.new(
+      XDR.ExtensionPoint.new(XDR.Void.new(), 0),
+      contract_id,
+      XDR.ContractEventType.new(:CONTRACT),
+      body
+    )
+  end
+
+  defp i128_scval(amount) when is_integer(amount) do
+    alias StellarBase.XDR
+
+    <<hi::signed-64, lo::unsigned-64>> = <<amount::signed-128>>
+    XDR.SCVal.new(XDR.Int128Parts.new(XDR.Int64.new(hi), XDR.UInt64.new(lo)), XDR.SCValType.new(:SCV_I128))
   end
 
   defp already_funded?(body) when is_map(body) do
