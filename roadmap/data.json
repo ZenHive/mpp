@@ -4011,7 +4011,7 @@
       "id": "100",
       "phase": 3,
       "bundle": "discovery",
-      "status": "in_progress",
+      "status": "done",
       "title": "Accept parameters on MPP.Discovery.OpenApi routes",
       "scores": {
         "d": 4,
@@ -4044,10 +4044,17 @@
         "lib/mpp/discovery/",
         "test/mpp/discovery/"
       ],
+      "shipped_in": "d38c95abfd463b96e70e459760416360e2568e01",
       "body": "`MPP.Discovery.OpenApi` can describe a route's path, method, summary, request body and payment terms, but not its query or path parameters: `normalize_route!/1` (lib/mpp/discovery/open_api.ex:85-96) reads only `:path`, `:method`, `:payment`, `:summary` and `:request_body`, and the module has no other mention of `parameters` (verified by grep against 0.16.0). A generated document therefore describes what a GET endpoint costs but not what it takes, which is the half a calling agent needs in order to construct the request.\n\nAccept a `:parameters` field on a route and emit it as the OpenAPI `parameters` array, validating it the way the other route fields are validated — malformed input should raise at build time rather than publish a broken document, matching the module's existing stance.\n\nThe concrete consumer: `api_toolkit` (ZenHive) maintains its own OpenAPI 3.1 generator over its Discovery metadata, whose main value over this one is exactly the query-parameter and requestBody schemas it derives from provider `defapi` declarations. It cannot delegate to `MPP.Discovery.OpenApi` while routes cannot carry parameters, so the two generators drift — and its `x-payment-info` had already drifted to the single-offer shorthand before being corrected. Closing this gap lets a downstream generator become a metadata adapter over this module instead of a second implementation of the same document.\n\nThe OpenAPI 3.1 Parameter Object and the discovery draft are the authority on the emitted shape; mppx's generator is reference material for cross-SDK agreement, not the definition.\n\nExtended 2026-09-04 (sdk-delta-watch): mpp-specs #326 (commit 532d5af) revised the discovery draft to -01 and asks generators to describe the success response's output schema so a calling agent knows what it gets back, not only what it sends. It shares this task's write-set (`normalize_route!/1`), so it is folded in here rather than filed as a sibling: accept an optional per-route success-response schema alongside `:parameters` and emit it on the 200 response. x-payment-info is unchanged by that draft.\n\n2026-09-16 (review, Claude + Codex second opinion): the byte-identical AC and the placeholder-rejection AC overlapped for a placeholder route without parameters; the rejection wins and is the declared break. Validation boundaries and media-type selection made explicit. D 3→4 for input plus output validation.\n",
       "created_at": "2026-08-21",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1789530106464-d185039f, d38c95abfd463b96e70e459760416360e2568e01).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789530106464-d185039f",
       "cross_repo": []
     },
     {
