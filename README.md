@@ -320,7 +320,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Tempo.Store` | Behaviour for pluggable transaction dedup stores |
 | `MPP.Tempo.ConCacheStore` | Built-in ETS dedup store with TTL via ConCache |
 | `MPP.Telemetry` | Server-side payment telemetry events for challenges, verification, and receipts |
-| `MPP.Discovery.OpenApi` | OpenAPI 3.1.0 discovery document generation (`x-payment-info`, 402 responses; `mix mpp.openapi`) |
+| `MPP.Discovery.OpenApi` | OpenAPI 3.1.0 discovery document generation (`x-payment-info`, 402 responses, parameters, response schemas; `mix mpp.openapi`) |
 | `MPP.Discovery.PaymentInfo` | Parser/normalizer for the `x-payment-info` discovery extension |
 | `MPP.Mcp` | MCP (JSON-RPC) transport: server adapter (`init/1` + `call/3`), initialize `capabilities/1`, error codes, meta keys, client helpers |
 | `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |

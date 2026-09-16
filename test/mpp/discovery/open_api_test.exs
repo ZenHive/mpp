@@ -207,6 +207,273 @@ defmodule MPP.Discovery.OpenApiTest do
       assert_route_error(valid, :payment, %{"offers" => []}, ~r/invalid x-payment-info/)
       assert_route_error(valid, :payment, [{"intent", "charge"}], ~r/x-payment-info must be a map or keyword list/)
       assert_route_error(valid, :payment, %{1 => "charge"}, ~r/keys must be atoms or strings/)
+      assert_route_error(valid, :parameters, %{}, ~r/parameters must be a list/)
+      assert_route_error(valid, :response_schema, [], ~r/response_schema must be a map/)
+
+      assert_route_error(
+        valid,
+        :response_media_type,
+        "application/json",
+        ~r/response_media_type requires response_schema/
+      )
+    end
+
+    test "emits query and path parameters and a success-response schema" do
+      request_body = %{
+        "content" => %{"application/json" => %{"schema" => %{"type" => "object"}}}
+      }
+
+      response_schema = %{
+        "type" => "object",
+        "required" => ["id"],
+        "properties" => %{"id" => %{"type" => "string"}}
+      }
+
+      document =
+        OpenApi.generate(
+          info: %{title: "Items API", version: "1.0.0"},
+          routes: [
+            [
+              method: :get,
+              path: "/items/{id}",
+              summary: "Get item",
+              payment: %{"intent" => "charge", "method" => "tempo", "amount" => "25"},
+              parameters: [
+                [
+                  name: "id",
+                  in: :path,
+                  required: true,
+                  schema: %{type: "string"},
+                  description: "Item id"
+                ],
+                [
+                  name: "lang",
+                  in: "query",
+                  required: false,
+                  schema: %{"type" => "string"},
+                  description: "Locale"
+                ]
+              ],
+              response_schema: response_schema
+            ],
+            [
+              method: :post,
+              path: "/items",
+              request_body: request_body
+            ]
+          ]
+        )
+
+      get = document["paths"]["/items/{id}"]["get"]
+      post = document["paths"]["/items"]["post"]
+
+      assert get["parameters"] == [
+               %{
+                 "name" => "id",
+                 "in" => "path",
+                 "required" => true,
+                 "schema" => %{"type" => "string"},
+                 "description" => "Item id"
+               },
+               %{
+                 "name" => "lang",
+                 "in" => "query",
+                 "required" => false,
+                 "schema" => %{"type" => "string"},
+                 "description" => "Locale"
+               }
+             ]
+
+      assert get["responses"]["200"] == %{
+               "description" => "Successful response",
+               "content" => %{"application/json" => %{"schema" => response_schema}}
+             }
+
+      assert get["responses"]["402"] == %{"description" => "Payment Required"}
+
+      assert get["x-payment-info"]["offers"] == [
+               %{"intent" => "charge", "method" => "tempo", "amount" => "25"}
+             ]
+
+      assert post == %{
+               "requestBody" => request_body,
+               "responses" => %{"200" => %{"description" => "Successful response"}}
+             }
+
+      refute Map.has_key?(post, "x-payment-info")
+      assert_openapi_3_1_0(document)
+
+      spec = OpenApiSpex.OpenApi.from_map(document)
+      params = spec.paths["/items/{id}"].get.parameters
+      locations = Enum.map(params, &{to_string(&1.name), &1.in, &1.required})
+      assert {"id", :path, true} in locations
+      assert {"lang", :query, false} in locations
+      assert spec.paths["/items"].post.requestBody
+    end
+
+    test "overrides the success-response media type" do
+      document =
+        OpenApi.generate(
+          info: %{title: "API", version: "1"},
+          routes: [
+            [
+              method: :get,
+              path: "/export",
+              response_schema: %{"type" => "string"},
+              response_media_type: "text/csv"
+            ]
+          ]
+        )
+
+      assert document["paths"]["/export"]["get"]["responses"]["200"] == %{
+               "description" => "Successful response",
+               "content" => %{"text/csv" => %{"schema" => %{"type" => "string"}}}
+             }
+    end
+
+    test "a route without parameters or response_schema stays description-only" do
+      document =
+        OpenApi.generate(
+          info: %{title: "test-realm", version: "1.0.0"},
+          routes: [
+            [
+              method: :get,
+              path: "/api/resource",
+              payment: %{
+                "intent" => "charge",
+                "method" => "tempo",
+                "amount" => "100",
+                "currency" => "0xUSDC"
+              }
+            ]
+          ]
+        )
+
+      operation = document["paths"]["/api/resource"]["get"]
+      refute Map.has_key?(operation, "parameters")
+      assert operation["responses"]["200"] == %{"description" => "Successful response"}
+    end
+
+    test "rejects malformed parameters and unmatched path placeholders" do
+      valid = valid_config()
+      path_route = valid[:routes] |> hd() |> Keyword.put(:path, "/items/{id}")
+
+      assert_raise ArgumentError, ~r/missing path parameter: id/, fn ->
+        OpenApi.generate(Keyword.put(valid, :routes, [path_route]))
+      end
+
+      assert_route_error(valid, :parameters, [:invalid], ~r/parameters\[0\] must be a map or keyword list/)
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[in: :query, schema: %{"type" => "string"}]],
+        ~r/missing OpenAPI parameters\[0\]\.name/
+      )
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", schema: %{"type" => "string"}]],
+        ~r/missing OpenAPI parameters\[0\]\.in/
+      )
+
+      assert_route_error(valid, :parameters, [[name: "q", in: :query]], ~r/missing OpenAPI parameters\[0\]\.schema/)
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "", in: :query, schema: %{"type" => "string"}]],
+        ~r/parameters\.name must be a non-empty string/
+      )
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", in: :body, schema: %{"type" => "string"}]],
+        ~r/parameters\.in is invalid/
+      )
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", in: 1, schema: %{"type" => "string"}]],
+        ~r/parameters\.in is invalid/
+      )
+
+      assert_route_error(valid, :parameters, [[name: "q", in: :query, schema: []]], ~r/parameters\.schema must be a map/)
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", in: :query, required: "yes", schema: %{"type" => "string"}]],
+        ~r/parameters\.required must be a boolean/
+      )
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", in: :query, schema: %{"type" => "string"}, description: 1]],
+        ~r/description must be a string/
+      )
+
+      assert_route_error(
+        valid,
+        :parameters,
+        [[name: "q", in: :query, schema: %{"type" => "string"}, explode: true]],
+        ~r/unsupported fields/
+      )
+
+      assert_raise ArgumentError, ~r/parameters\.required must be true for path parameter id/, fn ->
+        OpenApi.generate(
+          Keyword.put(valid, :routes, [
+            Keyword.put(path_route, :parameters, [[name: "id", in: :path, required: false, schema: %{"type" => "string"}]])
+          ])
+        )
+      end
+
+      assert_raise ArgumentError, ~r/parameters\.required must be true for path parameter id/, fn ->
+        OpenApi.generate(
+          Keyword.put(valid, :routes, [
+            Keyword.put(path_route, :parameters, [[name: "id", in: :path, schema: %{"type" => "string"}]])
+          ])
+        )
+      end
+
+      assert_raise ArgumentError, ~r/duplicate OpenAPI parameter: query q/, fn ->
+        OpenApi.generate(
+          Keyword.put(valid, :routes, [
+            Keyword.put(hd(valid[:routes]), :parameters, [
+              [name: "q", in: :query, schema: %{"type" => "string"}],
+              [name: "q", in: "query", schema: %{"type" => "integer"}]
+            ])
+          ])
+        )
+      end
+
+      assert_raise ArgumentError, ~r/does not appear in path/, fn ->
+        OpenApi.generate(
+          Keyword.put(valid, :routes, [
+            Keyword.put(hd(valid[:routes]), :parameters, [
+              [name: "id", in: :path, required: true, schema: %{"type" => "string"}]
+            ])
+          ])
+        )
+      end
+
+      schema = %{"type" => "object"}
+
+      assert_raise ArgumentError, ~r/response_media_type must be a string/, fn ->
+        OpenApi.generate(put_route(valid, response_schema: schema, response_media_type: ""))
+      end
+
+      assert_raise ArgumentError, ~r/response_media_type must be a media type/, fn ->
+        OpenApi.generate(put_route(valid, response_schema: schema, response_media_type: "json"))
+      end
+
+      assert_raise ArgumentError, ~r/response_media_type must be a string/, fn ->
+        OpenApi.generate(put_route(valid, response_schema: schema, response_media_type: 42))
+      end
     end
 
     test "rejects duplicate operations" do
@@ -247,6 +514,11 @@ defmodule MPP.Discovery.OpenApiTest do
     ]
   end
 
+  defp put_route(config, extra) do
+    route = config[:routes] |> hd() |> Keyword.merge(extra)
+    Keyword.put(config, :routes, [route])
+  end
+
   defp assert_route_error(config, key, value, message) do
     route = config[:routes] |> hd() |> Keyword.put(key, value)
     assert_raise ArgumentError, message, fn -> OpenApi.generate(Keyword.put(config, :routes, [route])) end
@@ -264,6 +536,8 @@ defmodule MPP.Discovery.OpenApiTest do
     assert is_binary(document["info"]["version"])
     assert map_size(document["paths"]) > 0
     assert {:ok, _json} = Jason.encode(document)
+    # Independent validator: OpenApiSpex.OpenApi.from_map/1 (open_api_spex).
+    assert %OpenApiSpex.OpenApi{openapi: "3.1.0"} = OpenApiSpex.OpenApi.from_map(document)
 
     for {path, path_item} <- document["paths"], {method, operation} <- path_item do
       assert String.starts_with?(path, "/")
