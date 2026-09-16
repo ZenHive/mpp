@@ -3428,3 +3428,26 @@ body = "Audit of task 105 found that MPP.Client.Transport.HTTP.delete_payment_sc
 created_at = "2026-09-16"
 started_at = "2026-09-16"
 scored_at = "2026-09-16"
+
+[[task]]
+id = "126"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Bring the Stellar method modules to the 95% critical-tier coverage floor"
+scores = { d = 4, b = 6, u = 6 }
+depends_on = [36]
+acceptance_criteria = ["MPP.Methods.Stellar, MPP.Methods.Stellar.Envelope and MPP.Methods.Stellar.RPC each report >= 95% in `mix test.json --cover --exclude integration --exclude cross_validation`", "New fixtures are derived from responses the Stellar integration test observed on testnet (cite the test and the observation in the fixture or test), not hand-written", "No behaviour change: the Stellar integration test (`mix test.json test/mpp/methods/stellar_integration_test.exs --include integration`) still passes live, one success and one rejection", "mix ci passes"]
+out_of_scope = ["New Stellar features or verification paths (Task 36 is done)", "Raising other pre-existing under-tier modules (Client.Req.Error, Client.Transport, XRPL.Wallet) — file separately if wanted"]
+touches = ["test/mpp/methods/stellar_test.exs", "test/mpp/methods/stellar/", "lib/mpp/methods/stellar.ex", "lib/mpp/methods/stellar/"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+Task 36 landed MPP.Methods.Stellar with three modules below the repo's 95% floor for money-verification code (CLAUDE.md § Toolchain, critical tier). Measured on main at 830dd51 by `mix ci` on 2026-09-16: MPP.Methods.Stellar 86.96%, MPP.Methods.Stellar.Envelope 73.91%, MPP.Methods.Stellar.RPC 71.60%. The aggregate gate (95.98%) passed, so the per-task reviewer had no signal.
+
+Cover the uncovered branches with unit tests derived from the observed Soroban RPC responses that Task 36's integration test already pinned (fixtures come from those observations, never invented). Uncovered lines are listed in the `--cover` JSON; the likely gaps are envelope-decoding error paths (malformed XDR, wrong operation type, sponsored vs unsponsored), RPC error and timeout handling, and rejection branches of the pull/push verification. Where a branch is unreachable, delete it rather than test it.
+
+Deliver the per-module percentages before and after in the delivery note.
+"""
+created_at = "2026-09-16"
+scored_at = "2026-09-16"

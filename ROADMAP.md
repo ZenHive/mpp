@@ -248,6 +248,7 @@
 | Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
 | Task 122 | ⬜ | 🎁 **additional-methods** · USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75] ⚠️ |
 | Task 123 | 🔶 | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80. |
+| Task 126 | ⬜ | 🎁 **additional-methods** · Bring the Stellar method modules to the 95% critical-tier coverage floor [D:4/B:6/U:6 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---
