@@ -1099,7 +1099,7 @@ shipped_in = "a76194820514c8fbec492989eec8e71ad51ccb04"
 id = 19
 phase = 13
 bundle = "lightning"
-status = "pending"
+status = "blocked"
 title = "Lightning charge method"
 scores = { d = 8, b = 7, u = 8 }
 acceptance_criteria = [
@@ -1114,6 +1114,7 @@ acceptance_criteria = [
 touches = ["mix.exs", "lib/mpp/method.ex", "lib/mpp/plug.ex", "lib/mpp/methods/lightning.ex", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.6"
+blocked_reason = "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service."
 body = """
 Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
 
@@ -1125,7 +1126,7 @@ scored_at = "2026-09-16"
 id = 20
 phase = 13
 bundle = "lightning"
-status = "pending"
+status = "blocked"
 title = "Lightning session method"
 scores = { d = 9, b = 8, u = 7 }
 depends_on = [19]
@@ -1140,6 +1141,7 @@ acceptance_criteria = [
 touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "lib/mpp/session/", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.6"
+blocked_reason = "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service."
 body = """
 Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.
 
@@ -1191,7 +1193,7 @@ shipped_in = "6a4fd9a0c0b6116c64a0eeee1dc2f7d9aa603d64"
 id = 22
 phase = 15
 bundle = "card"
-status = "pending"
+status = "blocked"
 title = "Card charge method"
 scores = { d = 8, b = 7, u = 6 }
 acceptance_criteria = [
@@ -1205,6 +1207,7 @@ acceptance_criteria = [
 touches = ["mix.exs", "lib/mpp/methods/card.ex", "lib/mpp/intents/charge.ex", "test/mpp/methods/card_test.exs", "test/mpp/methods/card_integration_test.exs"]
 assignee = "codex"
 model = "gpt-6-astra"
+blocked_reason = "No conforming MPP card Server Enabler test environment is known or accessible (2026-09-16 review checked mpp-specs and the SDKs: none named). Unblock: name a provider with a sandbox, add its credentials to ~/.secrets on the harness host, restart harness.service."
 body = """
 Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. The MPP card draft is PSP-agnostic, so the implementation session must identify a concrete conforming enabler and establish its live contract before coding against it.
 
@@ -1440,7 +1443,7 @@ shipped_in = "f5315bc2e7286146b3e18faa4250380448bfd415"
 id = 51
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "blocked"
 title = "Hedera charge method"
 scores = { d = 8, b = 7, u = 7 }
 acceptance_criteria = [
@@ -1452,6 +1455,7 @@ acceptance_criteria = [
 touches = ["mix.exs", "lib/mpp/methods/hedera.ex", "test/mpp/methods/hedera_test.exs", "test/mpp/methods/hedera_integration_test.exs"]
 assignee = "grok"
 model = "grok-4.6"
+blocked_reason = "No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service."
 body = """
 Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.
 
@@ -3317,7 +3321,7 @@ scored_at = "2026-09-16"
 id = "123"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "blocked"
 title = "USDC charge method: Circle Gateway Transfer profile"
 scores = { d = 8, b = 7, u = 7 }
 depends_on = [80]
@@ -3326,6 +3330,7 @@ out_of_scope = ["EVM and Solana USDC profiles (Task 80)", "Stacks USDCx profile 
 touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/usdc/gateway.ex", "test/mpp/methods/usdc_test.exs", "test/mpp/methods/usdc_integration_test.exs"]
 assignee = "codex"
 model = "gpt-6-astra"
+blocked_reason = "No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80."
 body = """
 Split out of Task 80 on 2026-09-16. Gateway is an off-chain Circle API with its own settlement lifecycle (attestation, transfer, destination completion, non-success outcomes), which needs live sandbox reconciliation evidence that the direct-chain profiles do not.
 

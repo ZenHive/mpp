@@ -189,8 +189,8 @@
 <!-- TASKS:BEGIN phase=13 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 19 | ⬜ | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ |
-| Task 20 | ⬜ | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ |
+| Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
+| Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
@@ -224,7 +224,7 @@
 <!-- TASKS:BEGIN phase=15 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 22 | ⬜ | 🎁 **card** · Card charge method [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
+| Task 22 | 🔶 | 🎁 **card** · Card charge method [D:8/B:7/U:6 → Eff:0.81] ⚠️ ⛔ No conforming MPP card Server Enabler test environment is known or accessible (2026-09-16 review checked mpp-specs and the SDKs: none named). Unblock: name a provider with a sandbox, add its credentials to ~/.secrets on the harness host, restart harness.service. |
 <!-- TASKS:END -->
 
 ---
@@ -239,14 +239,14 @@
 | Task 36 | ⬜ | 🎁 **additional-methods** · Stellar charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
 | Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0] 📋 |
 | Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
-| Task 51 | ⬜ | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
+| Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service. |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
 | Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 86 | ⬜ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 | Task 109 | ✅ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
 | Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
 | Task 122 | ⬜ | 🎁 **additional-methods** · USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75] ⚠️ |
-| Task 123 | ⬜ | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
+| Task 123 | 🔶 | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80. |
 <!-- TASKS:END -->
 
 ---

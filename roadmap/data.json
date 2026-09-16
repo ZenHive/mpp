@@ -1343,7 +1343,7 @@
       "id": 19,
       "phase": 13,
       "bundle": "lightning",
-      "status": "pending",
+      "status": "blocked",
       "title": "Lightning charge method",
       "scores": {
         "d": 8,
@@ -1376,13 +1376,14 @@
       ],
       "body": "Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).\n\n2026-09-16 (review, Claude + Codex second opinion): per-request invoice issuance does not fit the current Method contract (challenge_method_details/1 runs once per Plug config, lib/mpp/plug.ex:267-285), so the hook is in scope. No Lightning client on Hex (mix hex.search lnd: none). D 6→8; B 8→7 because the draft is unchanged since 2026-04-17 and no MPP SDK implements it.\n",
       "scored_at": "2026-09-16",
+      "blocked_reason": "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service.",
       "cross_repo": []
     },
     {
       "id": 20,
       "phase": 13,
       "bundle": "lightning",
-      "status": "pending",
+      "status": "blocked",
       "title": "Lightning session method",
       "scores": {
         "d": 9,
@@ -1415,6 +1416,7 @@
       ],
       "body": "Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE \"need-topup\" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.\n\n2026-09-16 (review, Claude + Codex second opinion): the body's \"needs session store (unlike all other methods)\" is stale — MPP.Session.Store / ETSStore exist and Tempo and XRPL sessions use them; the old \"Session store behaviour\" AC was already delivered and is replaced by a reuse AC. SSE event name corrected to the draft's `payment-need-topup`. D 8→9 for durability + failed-refund lifecycle; B/U 9/8→8/7 for the narrower metered-Lightning surface.\n",
       "scored_at": "2026-09-16",
+      "blocked_reason": "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service.",
       "cross_repo": []
     },
     {
@@ -1466,7 +1468,7 @@
       "id": 22,
       "phase": 15,
       "bundle": "card",
-      "status": "pending",
+      "status": "blocked",
       "title": "Card charge method",
       "scores": {
         "d": 8,
@@ -1497,6 +1499,7 @@
       ],
       "body": "Implement `MPP.Methods.Card` for charge intent. Client works with a Client Enabler to provision an encrypted network token from a token service provider. Token is encrypted with server's RSA public key via JWE (RSA-OAEP-256 + AES-256-GCM). Credential includes encrypted payload, card network (visa/mastercard/amex/discover), PAN last four, expiration, optional cardholder name and billing address, optional PAR. Server forwards encrypted credential to Server Enabler for decryption and processing. Challenge details include accepted networks, merchant name, encryption key (JWK or JWKS URI). Requires RSA key management and JWE library. The MPP card draft is PSP-agnostic, so the implementation session must identify a concrete conforming enabler and establish its live contract before coding against it.\n\n2026-09-16 (review, Claude + Codex second opinion): the previous ACs (RSA key generation, JWE decryption, PAN validation in MPP) contradicted the draft, which forbids clients and servers from parsing encryptedPayload and assigns decryption to the Server Enabler. The body's \"Requires RSA key management and JWE library\" is superseded: MPP publishes the Enabler's JWK/JWKS and forwards opaquely. B 10→7: one additional method with no named enabler and a draft unchanged since 2026-04-17.\n",
       "scored_at": "2026-09-16",
+      "blocked_reason": "No conforming MPP card Server Enabler test environment is known or accessible (2026-09-16 review checked mpp-specs and the SDKs: none named). Unblock: name a provider with a sandbox, add its credentials to ~/.secrets on the harness host, restart harness.service.",
       "cross_repo": []
     },
     {
@@ -1848,7 +1851,7 @@
       "id": 51,
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "blocked",
       "title": "Hedera charge method",
       "scores": {
         "d": 8,
@@ -1877,6 +1880,7 @@
       "body": "Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.\n\n2026-09-16 (review, Claude + Codex second opinion): \"implements the current draft\" was not gradeable; ACs now name both modes and the draft's material requirements. D 6→8.\n",
       "created_at": "2026-05-16",
       "scored_at": "2026-09-16",
+      "blocked_reason": "No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service.",
       "cross_repo": []
     },
     {
@@ -5095,7 +5099,7 @@
       "id": "123",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "blocked",
       "title": "USDC charge method: Circle Gateway Transfer profile",
       "scores": {
         "d": 8,
@@ -5132,6 +5136,7 @@
       "body": "Split out of Task 80 on 2026-09-16. Gateway is an off-chain Circle API with its own settlement lifecycle (attestation, transfer, destination completion, non-success outcomes), which needs live sandbox reconciliation evidence that the direct-chain profiles do not.\n\nAuthority: Circle's Gateway API documentation and the live sandbox for semantics; the MPP USDC draft for the wire contract. No MPP reference SDK implements this profile at scoring time; re-check refs at pickup.\n",
       "created_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "blocked_reason": "No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80.",
       "cross_repo": []
     }
   ]
