@@ -10,6 +10,35 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- `MPP.Methods.Stellar` — Stellar SEP-41 token charge verification
+  (`draft-stellar-charge-00`). Pull credentials (`type="transaction"`) carry a
+  base64 TransactionEnvelope XDR that the server submits; push credentials
+  (`type="hash"`) name a confirmed transaction hash. `transfer` events are
+  checked through Soroban RPC (`simulateTransaction` on pull, `getTransaction`
+  on push). Sponsored fees are supported: with `"feePayer" => true` and a
+  `"fee_payer_secret"` the client signs authorization entries against the
+  all-zeros source account and the server rebuilds, signs and submits the
+  envelope. Replay protection reuses `MPP.Tempo.Store` and is on by default.
+  Adds `stellar_base` and `ed25519` dependencies — `stellar_sdk` is
+  deliberately not used because it pulls an unpatched hackney (Task 36).
+- `MPP.Methods.EVM.Permit2` — Permit2 witness credentials for the EVM method
+  (`type="permit2"`). The client signs an off-chain, challenge-bound witness
+  with `MPP.Methods.EVM.Permit2.sign/5`; the server submits and pays the gas.
+  Enable with `"permit2" => true` plus a server-only `"private_key"`. Optional
+  `"splits"` add ordered extra recipient/amount legs settled atomically with
+  the primary transfer — a split charge advertises *only* Permit2, and an
+  unsolicited hash or EIP-3009 authorization credential against a split config
+  is rejected rather than settling the primary leg alone. Nonces are checked
+  against the canonical Permit2 bitmap. See `docs/evm-permit2.md` (Task 39).
+- Tempo zero-amount charge proofs accept P-256 access-key signatures, including
+  keychain V1 (`0x03`) and V2 (`0x04`) envelopes. Verification enforces low-s,
+  verifies the embedded public key, handles both digest signing and Tempo's
+  SHA-256 prehash flag, and requires the recovered key to be active on-chain
+  with a matching `getKey.signatureType`. WebAuthn proof envelopes are rejected
+  explicitly with `unsupported proof signature type: WebAuthn` rather than
+  failing as a generic recovery error — no Tempo Wallet-issued WebAuthn key was
+  available to verify interoperability, and a synthetic authenticator is not
+  accepted as evidence. See `docs/tempo-proof-key-types.md` (Task 107).
 - `MPP.Discovery.OpenApi` routes accept `:parameters` (OpenAPI Parameter Objects
   with `in` of `query`, `path`, `header`, or `cookie`) and an optional
   `:response_schema` / `:response_media_type` for the `200` response. Path
@@ -37,6 +66,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- `MPP.Client.Transport.HTTP` strips a stale `Authorization` header using
+  `MPP.Headers.parse_credential/1` instead of a `"Payment "` prefix match, so a
+  credential written with different scheme casing or spacing is cleared before
+  a retry rather than left to collide with the fresh one (Task 125).
 - `MPP.Client.Providers.Tempo` honors `:expected_chain_id` on the subscription path too: a challenge advertising a different chain is refused before the wallet is asked to authorize an access key (mppx #888 parity sweep).
 - The Solana confidential-fixture generator accepts the same `SOLANA_PRIVATE_KEY`
   formats as the integration tests (JSON, hex, base58), creates its secret

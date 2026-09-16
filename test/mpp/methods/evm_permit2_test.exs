@@ -61,6 +61,10 @@ defmodule MPP.Methods.EVMPermit2Test do
     assert EVM.challenge_method_details(charge)["credentialTypes"] == ["permit2"]
     assert {:error, hash_error} = EVM.verify(%{"hash" => "0x" <> String.duplicate("ab", 32)}, charge)
     assert hash_error.detail == "EVM hash credentials do not support splits"
+
+    # An unsolicited EIP-3009 credential would settle only the primary leg.
+    assert {:error, auth_error} = EVM.verify(%{"type" => "authorization"}, charge)
+    assert auth_error.detail == "EVM authorization credentials do not support splits"
   end
 
   test "advertisement is opt-in; authorization/hash stay as before for ordinary charges", ctx do

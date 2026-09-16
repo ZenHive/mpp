@@ -113,7 +113,7 @@ pipeline :paid_evm do
 end
 ```
 
-Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce. Enable Permit2 with `"permit2" => true` and `"private_key"`: the client signs an off-chain witness authorization (`MPP.Methods.EVM.Permit2.sign/5`) and the server submits, paying gas. Optional `"splits"` add ordered extra recipient/amount legs (Permit2 only).
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce. Enable Permit2 with `"permit2" => true` and `"private_key"`: the client signs an off-chain witness authorization (`MPP.Methods.EVM.Permit2.sign/5`) and the server submits, paying gas. Optional `"splits"` add ordered extra recipient/amount legs (Permit2 only). See [EVM Permit2 credentials](https://github.com/ZenHive/mpp/blob/main/docs/evm-permit2.md) for the full configuration and signing walkthrough.
 
 ### Solana (SOL and SPL tokens)
 

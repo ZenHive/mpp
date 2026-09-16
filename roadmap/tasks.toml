@@ -3466,3 +3466,30 @@ Deliver the per-module percentages before and after in the delivery note.
 created_at = "2026-09-16"
 started_at = "2026-09-16"
 scored_at = "2026-09-16"
+
+[[task]]
+id = "127"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module"
+scores = { d = 5, b = 7, u = 6 }
+depends_on = [126]
+acceptance_criteria = ["`mix ci` fails when any module under `lib/mpp/methods/` reports below 95% in the `--cover` JSON, with the module name and percentage in the failure message", "Small-module noise is handled by an explicit absolute allowance (a module is only failed when it is below the floor AND has more than a documented number of uncovered lines); the allowance and its number are justified in a comment at the check", "`MPP.Methods.XRPL.Wallet` (82.35%, uncovered lines 64/81/88/94/97/101) and `MPP.Methods.Tempo.HostedFeePayer` (89.74%, uncovered lines 29/87/94/95/182/209/212/226) are raised above the floor, or the unreachable branches are deleted", "New tests assert real behaviour on those lines (error paths, rejection branches) — not calls that merely execute the line", "The check is part of `mix precommit.full` and runs with no extra test pass (reuse the coverage JSON the existing test+cover step already produces)", "mix ci passes"]
+out_of_scope = ["The Stellar modules — Task 126 owns raising those", "Modules outside `lib/mpp/methods/` (MPP.Client.Req.Error, MPP.Client.Transport, MPP.Client.Transport.JsonRpc are at 66-83% only because a one- or two-line module has nothing to cover)", "Raising the aggregate 95% threshold"]
+touches = ["mix.exs", "test/mpp/methods/xrpl/", "test/mpp/methods/tempo/"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+Task 36 landed three Stellar modules at 71-87% while `mix ci` reported a green aggregate of 95.98%, so no per-task reviewer had a signal that money-verification code had shipped under the critical-tier floor. The audit of f300bb0 found it by reading the per-module `--cover` JSON by hand. That is the "whole-surface defect evades per-task review" class in CLAUDE.md § Domain & Whole-Surface Defects: the fix is a CI failure, not a convention.
+
+The coverage JSON `mix test.json --cover` already emits carries `module`, `percentage` and `uncovered_lines` per module. Add a check that reads that JSON (do not run the suite a second time) and fails the gate for any `lib/mpp/methods/` module below 95%.
+
+Scope the floor to `lib/mpp/methods/` deliberately: that is the money and wire-format tier, and it is where a low module is a real risk. A repo-wide floor would be noise — `MPP.Client.Transport` reports 77.78% with uncovered lines `[1, 120]` and `MPP.Client.Transport.JsonRpc` 83.33% with uncovered line `[1]`, i.e. a behaviour module where the `defmodule` line itself is the denominator. Hence the absolute uncovered-line allowance in the criteria.
+
+Measured on main at f300bb0 (cold `mix ci`, 2026-09-16): aggregate 95.98%, threshold met; Stellar.RPC 71.60%, Stellar.Envelope 73.91%, Stellar 86.96% (Task 126), XRPL.Wallet 82.35%, Tempo.HostedFeePayer 89.74%. Everything else under `lib/mpp/methods/` is at or above 92.65%.
+
+Report the before/after per-module percentages for the two modules you raise, and paste the gate's failure output for a deliberately-lowered module to show the check actually fires.
+"""
+created_at = "2026-09-16"
+scored_at = "2026-09-16"

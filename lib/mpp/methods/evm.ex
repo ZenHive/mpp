@@ -201,6 +201,7 @@ defmodule MPP.Methods.EVM do
     store = Store.resolve(config["store"])
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
+         :ok <- reject_splits(config, "authorization"),
          :ok <- require_recipient(charge),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          {:ok, hash} <- Authorization.settle(payload, charge),
@@ -217,7 +218,7 @@ defmodule MPP.Methods.EVM do
     store = Store.resolve(config["store"])
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
-         :ok <- reject_hash_splits(config),
+         :ok <- reject_splits(config, "hash"),
          {:ok, hash} <- extract_hash(payload),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          :ok <- require_recipient(charge),
@@ -390,9 +391,13 @@ defmodule MPP.Methods.EVM do
     end
   end
 
-  defp reject_hash_splits(config) do
+  # Only Permit2 settles the split legs. Advertising already excludes hash and
+  # authorization on a split charge (`Authorization.offered?/1`,
+  # `advertised_credential_types/1`); this rejects an unsolicited one, which
+  # would otherwise pay the primary recipient the full amount and no split leg.
+  defp reject_splits(config, credential_type) do
     if Map.has_key?(config, "splits"),
-      do: {:error, Errors.new(:verification_failed, "EVM hash credentials do not support splits")},
+      do: {:error, Errors.new(:verification_failed, "EVM #{credential_type} credentials do not support splits")},
       else: :ok
   end
 
