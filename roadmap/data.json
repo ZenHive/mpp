@@ -5192,7 +5192,7 @@
       "id": "124",
       "phase": 11,
       "bundle": "mcp",
-      "status": "in_progress",
+      "status": "done",
       "title": "Make MPP.Mcp.error_code/1 the only place a JSON-RPC error code is chosen, and assert it",
       "scores": {
         "d": 4,
@@ -5225,10 +5225,17 @@
         "test/mpp/mcp_test.exs",
         "README.md"
       ],
+      "shipped_in": "0852bf3fbdf09596b7c4b2817cb06e3c8dec4f43",
       "body": "Found in the post-merge audit of e11a037 (Task 106, commit c8a2aff).\n\nTask 106 did the right thing for the paths it touched: it lifted the per-transport `error_code/1` private clauses out of `MPP.Transports.JsonRpc.Adapter` into the shared `MPP.Mcp.error_code/1`, so `MPP.Mcp.call/3` and the bare JSON-RPC adapter now agree. What it did not do is make that the *only* way a code gets chosen — and `MPP.Mcp.verification_failed_error/2`, four hundred lines up in the same module, still writes `@verification_failed_code` unconditionally for whatever problem it is handed.\n\nThe result is two conformance answers from one module. A consumer building an MCP server with the documented helper and `Errors.new(:invalid_payload, ...)` emits -32043; the built-in adapter emits -32602 for the identical problem. The helper is unused inside this library, so nothing in the suite noticed.\n\nFiling the class rather than the instance, per the DD-8 sibling check: the fix that matters is the assertion that no second emitter can drift, not the one-line repair of this one. Fold in the URI-literal coupling while there — `error_code/1` matches problem URIs as literal strings while `MPP.Errors` builds them as `@base_uri <> suffix`, so a suffix edit in Errors silently demotes a problem to the -32043 fallback with no compile or test failure. Same drift class, same test can cover it.\n",
       "created_at": "2026-09-16",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1789534896536-039224eb, 0852bf3fbdf09596b7c4b2817cb06e3c8dec4f43).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789534896536-039224eb",
       "cross_repo": []
     },
     {
