@@ -73,7 +73,7 @@ defmodule MPP.Methods.EVM do
 
   ## Credential Payload
 
-  Two charge payload types are accepted:
+  Three charge payload types are accepted:
 
     * `type="hash"` (or an untyped `"hash"` field) — client-broadcast transaction
       hash. The server fetches the receipt and matches `token`/`to`/`amount`.
@@ -84,6 +84,13 @@ defmodule MPP.Methods.EVM do
       only when the currency is a known EIP-3009 token (or
       `"authorization" => %{"name" => ..., "version" => ...}` is configured)
       and `"private_key"` is set for settlement.
+
+    * `type="permit2"` — off-chain Permit2 witness authorization. Enable with
+      `"permit2" => true` and `"private_key"`. The server pays gas and settles
+      primary and split transfers atomically. Use `MPP.Methods.EVM.Permit2.sign/5`
+      with the server's spender address; the payer needs an ERC-20 approval.
+      `"splits"` contains ordered recipient/amount maps, subtracted from the total.
+      Split charges accept only Permit2 credentials.
 
   ## Currency Conventions
 
@@ -104,6 +111,7 @@ defmodule MPP.Methods.EVM do
   alias MPP.Hex
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
+  alias MPP.Methods.EVM.Permit2
   alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -134,11 +142,11 @@ defmodule MPP.Methods.EVM do
   @spec method_name() :: String.t()
   def method_name, do: "evm"
 
-  api(:credential_types, "Return the EVM charge payload types currently implemented: authorization and hash.")
+  api(:credential_types, "Return the implemented EVM charge payload types: permit2, authorization, and hash.")
 
   @impl MPP.Method
   @spec credential_types() :: [String.t()]
-  def credential_types, do: ~w(authorization hash)
+  def credential_types, do: ~w(permit2 authorization hash)
 
   api(
     :validate_config!,
@@ -182,6 +190,8 @@ defmodule MPP.Methods.EVM do
 
   @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
+  def verify(%{"type" => "permit2"} = payload, %Charge{} = charge), do: Permit2.settle(payload, charge)
+
   def verify(%{"type" => "authorization"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
     store = Store.resolve(config["store"])
@@ -203,6 +213,7 @@ defmodule MPP.Methods.EVM do
     store = Store.resolve(config["store"])
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
+         :ok <- reject_hash_splits(config),
          {:ok, hash} <- extract_hash(payload),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          :ok <- require_recipient(charge),
@@ -248,6 +259,11 @@ defmodule MPP.Methods.EVM do
       "permit2Address" => config["permit2_address"] || @canonical_permit2_address
     }
 
+    details =
+      if Permit2.offered?(charge) and Map.has_key?(config, "splits"),
+        do: Map.put(details, "splits", config["splits"]),
+        else: details
+
     case config["chain_id"] do
       nil -> details
       chain_id -> Map.put(details, "chainId", chain_id)
@@ -256,7 +272,9 @@ defmodule MPP.Methods.EVM do
 
   @spec advertised_credential_types(Charge.t()) :: [String.t()]
   defp advertised_credential_types(charge) do
-    if Authorization.offered?(charge), do: ~w(authorization hash), else: ~w(hash)
+    types = if Authorization.offered?(charge), do: ~w(authorization hash), else: ~w(hash)
+    types = if Map.has_key?(charge.method_details || %{}, "splits"), do: [], else: types
+    if Permit2.offered?(charge), do: ["permit2" | types], else: types
   end
 
   # --- ERC-20 verification ---
@@ -366,6 +384,12 @@ defmodule MPP.Methods.EVM do
       nil -> [rpc_url: rpc_url]
       req_options -> [rpc_url: rpc_url, req_options: req_options]
     end
+  end
+
+  defp reject_hash_splits(config) do
+    if Map.has_key?(config, "splits"),
+      do: {:error, Errors.new(:verification_failed, "EVM hash credentials do not support splits")},
+      else: :ok
   end
 
   # --- Shared helpers ---

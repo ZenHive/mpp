@@ -197,15 +197,21 @@ defmodule MPP.Mcp do
         {method.method_name(),
          %{
            "intents" => [config.intent],
-           "credentialTypes" => method.credential_types()
+           "credentialTypes" => capability_types(entry)
          }}
       end)
 
     # MCP InitializeResult.capabilities fragment (draft-payment-transport-mcp-00).
     # mppx's server transport does not yet advertise this; `credentialTypes` is
-    # extra vs the spec example and comes from `method.credential_types/0`.
+    # extra vs the spec example; EVM uses its configured challenge types.
     %{"experimental" => %{"payment" => %{"methods" => methods}}}
   end
+
+  defp capability_types(%{method: MPP.Methods.EVM, charge: charge}) do
+    Map.get(charge.method_details || %{}, "credentialTypes", ~w(authorization hash))
+  end
+
+  defp capability_types(%{method: method}), do: method.credential_types()
 
   api(
     :init,
