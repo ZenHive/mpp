@@ -3385,7 +3385,7 @@ scored_at = "2026-09-16"
 id = "124"
 phase = 11
 bundle = "mcp"
-status = "pending"
+status = "in_progress"
 title = "Make MPP.Mcp.error_code/1 the only place a JSON-RPC error code is chosen, and assert it"
 scores = { d = 4, b = 6, u = 5 }
 acceptance_criteria = ["Every JSON-RPC error map this library emits takes its `code` from MPP.Mcp.error_code/1 — no module outside error_code/1 selects a code from a problem, and the -32042/-32602/-32603/-32043 literals survive only as the @-constants error_code/1 and the *_code/0 accessors read", "A test enforces the invariant rather than restating it per call site: for every MPP.Errors.types/0 problem, the code carried by each public error-map builder equals MPP.Mcp.error_code(problem) — a new problem type or a new builder fails the test until it is mapped", "MPP.Mcp.verification_failed_error/2 — today's violation, public, documented under Server Helpers, and used only by consumers hand-rolling an MCP server — no longer returns -32043 for a problem that error_code/1 maps elsewhere. Name and arity keep working for existing callers; whether that means delegating, deprecating, or generalizing is the implementer's call, but the `message` string must not keep claiming verification failure for a -32602/-32603 payload", "error_code/1 stops matching on literal problem-URI strings: the mapping is keyed off MPP.Errors in a way that fails loudly (compile error or test failure) if a suffix in @problem_types changes, instead of silently demoting the problem to the -32043 fallback", "The Server Helpers list in the MPP.Mcp @moduledoc and the README MCP section say which helper to reach for and what code each problem class yields", "mix ci passes"]
@@ -3403,6 +3403,7 @@ The result is two conformance answers from one module. A consumer building an MC
 Filing the class rather than the instance, per the DD-8 sibling check: the fix that matters is the assertion that no second emitter can drift, not the one-line repair of this one. Fold in the URI-literal coupling while there — `error_code/1` matches problem URIs as literal strings while `MPP.Errors` builds them as `@base_uri <> suffix`, so a suffix edit in Errors silently demotes a problem to the -32043 fallback with no compile or test failure. Same drift class, same test can cover it.
 """
 created_at = "2026-09-16"
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]
