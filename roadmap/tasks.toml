@@ -1247,7 +1247,7 @@ scored_at = "2026-09-16"
 id = 39
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "blocked"
 title = "EVM Permit2 credential path"
 scores = { d = 8, b = 8, u = 8 }
 acceptance_criteria = [
@@ -1261,6 +1261,7 @@ acceptance_criteria = [
 touches = ["mix.exs", "lib/mpp/methods/evm.ex", "test/mpp/methods/evm_test.exs", "test/mpp/methods/evm_integration_test.exs"]
 assignee = "codex"
 model = "gpt-6-astra"
+blocked_reason = 'land conflict retained for repair (task 39, run run-1789530129308-316f6f18, branch harness/run-1789530129308-316f6f18); resolver already attempted and the branch still conflicted. resolver witness: agent spawned: cursor model=cursor-grok-4.6-xhigh; rebase continue failed: "[detached HEAD 3c74dd8] harness: agent delivery — task 39 EVM Permit2 credential path (run run-1789530129308-316f6f18)\n Author: harness <harness@localhost>\n 12 files changed, 1387 insertions(+), 7 deletions(-)\n create mode 100644 .harness/cursor-rules-operational.mdc.orig\n create mode 100644 docs/evm-permit2.md\n create mode 100644 lib/mpp/methods/evm/permit2.ex\n create mode 100644 lib/mpp/methods/evm/permit2/settlement.ex\n create mode 100644 test/fixtures/evm_permit2/batch.json\n create mode 100644 test/fixtures/evm_permit2/single.json\n create mode 100644 test/mpp/methods/evm_permit2_integration_test.exs\n create mode 100644 test/mpp/methods/evm_permit2_settlement_test.exs\n create mode 100644 test/mpp/methods/evm_permit2_test.exs\nRebasing (2/2)\rAuto-merging README.md\nAuto-merging test/mutation/payment_security_ledger.json\nCONFLICT (content): Merge conflict in test/mutation/payment_security_ledger.json\nerror: could not apply 9fcd2b7... docs: name Permit2 on the EVM surface and refresh the mutation fingerprint\nhint: Resolve all conflicts manually, mark them as resolved with\nhint: \"git add/rm <conflicted_files>\", then run \"git rebase --continue\".\nhint: You can instead skip this commit: run \"git rebase --skip\".\nhint: To abort and get back to the state before \"git rebase\", run \"git rebase --abort\".\nCould not apply 9fcd2b7... docs: name Permit2 on the EVM surface and refresh the mutation fingerprint\n". Repair: rebase the retained branch onto the target branch, resolve all conflict markers while keeping both reviewed intents, commit the resolved branch, move harness/run-1789530129308-316f6f18 to that commit if you used a scratch branch, then run dispatch-reland run-1789530129308-316f6f18.'
 body = """
 Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-495`. Client signs EIP-712 Permit2 authorization; server submits via Permit2 contract. Enables gas sponsorship and atomic split-payments.
 
