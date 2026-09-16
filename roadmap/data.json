@@ -1506,7 +1506,7 @@
       "id": 36,
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "in_progress",
+      "status": "done",
       "title": "Stellar charge method",
       "scores": {
         "d": 8,
@@ -1532,9 +1532,16 @@
         "test/mpp/methods/stellar_test.exs",
         "test/mpp/methods/stellar_integration_test.exs"
       ],
+      "shipped_in": "83ea225ceed1a3e1ea00fb51049d8381caf7bd67",
       "body": "Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods/stellar/draft-stellar-charge-00.md`). Pull mode (client signs XDR, server submits) + push mode (hash). SEP-41 token verification via Soroban RPC `getTransaction`. Add `settlement-failed` error code to `MPP.Errors`. Neither mppx nor mpp-rs implement Stellar yet.\n\n2026-09-16 (review, Claude + Codex second opinion): the `settlement-failed` problem type already exists (lib/mpp/errors.ex:65, tested) — that AC is dropped and lib/mpp/errors.ex leaves the write-set. Sponsored pull is a third verification path the old ACs hid. D 7→8; B 8→7 (draft unchanged since 2026-04-17, no SDK implements Stellar).\n",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1789530124365-bca50918, 83ea225ceed1a3e1ea00fb51049d8381caf7bd67).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789530124365-bca50918",
       "cross_repo": []
     },
     {

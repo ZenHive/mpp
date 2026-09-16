@@ -1223,7 +1223,7 @@ scored_at = "2026-09-16"
 id = 36
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "done"
 title = "Stellar charge method"
 scores = { d = 8, b = 7, u = 7 }
 acceptance_criteria = [
@@ -1240,8 +1240,15 @@ Implement `MPP.Methods.Stellar` for charge intent (`refs/mpp-specs/specs/methods
 
 2026-09-16 (review, Claude + Codex second opinion): the `settlement-failed` problem type already exists (lib/mpp/errors.ex:65, tested) — that AC is dropped and lib/mpp/errors.ex leaves the write-set. Sponsored pull is a third verification path the old ACs hid. D 7→8; B 8→7 (draft unchanged since 2026-04-17, no SDK implements Stellar).
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1789530124365-bca50918, 83ea225ceed1a3e1ea00fb51049d8381caf7bd67)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1789530124365-bca50918"
 started_at = "2026-09-16"
 scored_at = "2026-09-16"
+done_at = "2026-09-16"
+shipped_in = "83ea225ceed1a3e1ea00fb51049d8381caf7bd67"
 
 [[task]]
 id = 39
