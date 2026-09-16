@@ -237,7 +237,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 36 | 🔄 | 🎁 **additional-methods** · Stellar charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
-| Task 39 | ⬜ | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0] 📋 |
+| Task 39 | 🔄 | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0] 📋 |
 | Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service. |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |

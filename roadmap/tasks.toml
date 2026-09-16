@@ -1247,7 +1247,7 @@ scored_at = "2026-09-16"
 id = 39
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "EVM Permit2 credential path"
 scores = { d = 8, b = 8, u = 8 }
 acceptance_criteria = [
@@ -1266,6 +1266,7 @@ Implement RECOMMENDED Permit2 credential type per `draft-evm-charge-00.md:392-49
 
 2026-09-16 (review, Claude + Codex second opinion): the old cross-check AC was vacuous — neither SDK implements Permit2. Splits and witness binding, the draft's main claimed benefit, are now explicit ACs. D 7→8 for batch settlement and witness coverage.
 """
+started_at = "2026-09-16"
 scored_at = "2026-09-16"
 
 [[task]]
