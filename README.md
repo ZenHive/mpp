@@ -210,6 +210,12 @@ end
 
 Requests without payment get a `402 Payment Required` with a challenge. Requests with a valid `Authorization: Payment` credential pass through with the receipt in `conn.assigns[:mpp_receipt]`. When a successful (2xx) response is sent, MPP attaches `Payment-Receipt` and merges `private` into the response’s `Cache-Control` directives.
 
+For endpoints that also require ordinary authentication, set `requires_auth: true`
+on `MPP.Plug`. Challenges advertise `header="Payment-Authorization"`, and the
+Plug accepts payment credentials only in that field, leaving `Authorization`
+for application authentication. `MPP.Client.Req` honors the advertised field
+and preserves an existing Bearer credential in `Authorization`.
+
 Each route can have its own pricing — just mount `MPP.Plug` with different `amount`/`currency` per pipeline or scope.
 
 ### Recurring subscriptions
@@ -278,7 +284,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Challenge` | HMAC-SHA256 bound challenge creation/verification |
 | `MPP.Credential` | Payment credential encoding/decoding |
 | `MPP.Receipt` | Proof-of-payment receipt serialization |
-| `MPP.Headers` | WWW-Authenticate (incl. multi-challenge), Authorization, Payment-Receipt headers |
+| `MPP.Headers` | WWW-Authenticate (incl. multi-challenge), Authorization, Payment-Authorization, Payment-Receipt headers |
 | `MPP.AcceptPayment` | Accept-Payment client-preference header: parse, format, rank, apply_header |
 | `MPP.Errors` | RFC 9457 Problem Detail error types (incl. session error types) |
 | `MPP.Verifier` | Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify) |

@@ -5207,6 +5207,40 @@
       "created_at": "2026-09-16",
       "scored_at": "2026-09-16",
       "cross_repo": []
+    },
+    {
+      "id": "125",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Align stale Payment header cleanup with credential scheme parsing",
+      "scores": {
+        "d": 3,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 1.33,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Alternate-header attachment removes stale Payment credentials recognized by the existing parser regardless of scheme casing or accepted whitespace",
+        "Bearer and Basic authorization remain untouched",
+        "A retry carrying a previously lowercase Payment authorization succeeds through a requires_auth Plug after replacement",
+        "Relevant module coverage meets the repository threshold and project checks pass"
+      ],
+      "touches": [
+        "lib/mpp/client/transport/http.ex",
+        "test/mpp/client/transport/http_test.exs",
+        "test/mpp/plug_test.exs"
+      ],
+      "body": "Audit of task 105 found that MPP.Client.Transport.HTTP.delete_payment_scheme/2 recognizes only the literal prefix Payment followed by one space, whereas MPP.Headers.strip_scheme/1 accepts case-insensitive scheme names and whitespace separators. A stale lowercase payment credential can survive attachment to Payment-Authorization and then be rejected as a duplicate by MPP.Plug configured with requires_auth. Align cleanup with the existing parser's scheme recognition while preserving ordinary Bearer/Basic credentials. Add regression tests for casing and whitespace through transport attachment and Plug handling. This is a retry interoperability fix.",
+      "created_at": "2026-09-16",
+      "scored_at": "2026-09-16",
+      "cross_repo": []
     }
   ]
 }

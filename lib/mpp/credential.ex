@@ -169,11 +169,12 @@ defmodule MPP.Credential do
         description: map["description"],
         digest: map["digest"],
         expires: map["expires"],
-        header: Challenge.advertised_header(map["header"]),
+        header: map["header"],
         opaque: map["opaque"]
       }
 
       with :ok <- validate_optional_challenge_fields(map),
+           challenge = %{challenge | header: Challenge.advertised_header(challenge.header)},
            :ok <- Challenge.validate_fields(challenge) do
         {:ok, challenge}
       end

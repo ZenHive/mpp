@@ -205,6 +205,17 @@ defmodule MPP.CredentialTest do
       assert {:error, :invalid_optional_field} = Credential.decode(encoded)
     end
 
+    test "validates the optional credential header" do
+      for value <- [42, true, [], %{}] do
+        assert {:error, :invalid_optional_field} = Credential.decode(encode_credential(header: value))
+      end
+
+      for value <- [nil, "", "Authorization", "authorization"] do
+        assert {:ok, credential} = Credential.decode(encode_credential(header: value))
+        assert credential.challenge.header == nil
+      end
+    end
+
     test "rejects a credential whose top-level source is not a string" do
       challenge = %{
         "id" => "ch_123",
