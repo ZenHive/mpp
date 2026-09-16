@@ -23,6 +23,7 @@ defmodule MPP.Methods.EVM.Authorization do
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
+  alias MPP.Methods.EVM.RPC, as: EvmRPC
   alias MPP.Methods.Shared
   alias Onchain.ABI
   alias Onchain.Address
@@ -114,8 +115,8 @@ defmodule MPP.Methods.EVM.Authorization do
          :ok <- match_source(parsed, config),
          {:ok, rpc_url} <- require_rpc_url(config),
          {:ok, private_key} <- require_private_key(config),
-         {:ok, chain_id} <- require_chain_id(config),
-         rpc_opts = rpc_opts(rpc_url, config),
+         {:ok, chain_id} <- EvmRPC.require_chain_id(config),
+         rpc_opts = EvmRPC.rpc_opts(rpc_url, config),
          :ok <- reject_used_nonce(parsed, charge, rpc_opts),
          {:ok, tx_hash} <- broadcast(parsed, charge, private_key, chain_id, rpc_opts),
          :ok <- await_receipt(tx_hash, rpc_opts) do
@@ -262,7 +263,7 @@ defmodule MPP.Methods.EVM.Authorization do
   defp verify_signature(parsed, charge, {name, version}) do
     config = charge.method_details || %{}
 
-    with {:ok, chain_id} <- require_chain_id(config),
+    with {:ok, chain_id} <- EvmRPC.require_chain_id(config),
          {:ok, typed} <- typed_data(parsed, charge.currency, chain_id, name, version),
          {:ok, recovered} <- recover_signer(typed, parsed.signature) do
       if Address.equal?(recovered, parsed.from) do
@@ -365,7 +366,7 @@ defmodule MPP.Methods.EVM.Authorization do
 
   defp match_binary_source(parsed, config, source) do
     with {:ok, %{chain_id: chain_id, address: address}} <- parse_source(source),
-         {:ok, expected_chain} <- require_chain_id(config),
+         {:ok, expected_chain} <- EvmRPC.require_chain_id(config),
          true <- chain_id == expected_chain and Address.equal?(address, parsed.from) do
       :ok
     else
@@ -444,7 +445,7 @@ defmodule MPP.Methods.EVM.Authorization do
 
   defp send_raw(raw, rpc_opts) do
     case RPC.eth_send_raw_transaction(raw, rpc_opts) do
-      {:ok, tx_hash} -> {:ok, canonicalize_hash(tx_hash)}
+      {:ok, tx_hash} -> {:ok, EvmRPC.canonicalize_hash(tx_hash)}
       {:error, reason} -> wrap_rpc_error(reason)
     end
   end
@@ -502,13 +503,6 @@ defmodule MPP.Methods.EVM.Authorization do
     case config["private_key"] do
       key when is_binary(key) and key != "" -> {:ok, key}
       _ -> {:error, Errors.new(:verification_failed, "EVM authorization requires private_key")}
-    end
-  end
-
-  defp require_chain_id(config) do
-    case config["chain_id"] do
-      chain_id when is_integer(chain_id) and chain_id >= 0 -> {:ok, chain_id}
-      _ -> {:error, Errors.new(:verification_failed, "EVM method missing required config: chain_id")}
     end
   end
 
@@ -589,17 +583,6 @@ defmodule MPP.Methods.EVM.Authorization do
   defp decode_bytes32(hex), do: Onchain.Hex.decode(hex)
 
   defp decode_signature_bytes(signature_hex), do: Onchain.Hex.decode(signature_hex)
-
-  defp canonicalize_hash(hash) when is_binary(hash) do
-    "0x" <> String.downcase(Hex.strip_0x(hash))
-  end
-
-  defp rpc_opts(rpc_url, config) do
-    case config["req_options"] do
-      nil -> [rpc_url: rpc_url]
-      req_options -> [rpc_url: rpc_url, req_options: req_options]
-    end
-  end
 
   defp wrap_rpc_error(reason) do
     message = rpc_message(reason)

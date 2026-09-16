@@ -224,6 +224,8 @@ defmodule MPP.Methods.EVMTest do
       assert details["credentialTypes"] == ["hash"]
       assert "hash" in EVM.credential_types()
       assert "authorization" in EVM.credential_types()
+      assert "transaction" in EVM.credential_types()
+      refute "transaction" in details["credentialTypes"]
     end
 
     test "advertises authorization ahead of hash for known USDC when private_key is set", %{charge: charge} do

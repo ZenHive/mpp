@@ -44,6 +44,9 @@ defmodule MPP.Methods.EVM do
     * `"private_key"` — (required for `type="authorization"` and `type="permit2"`)
       server-only secp256k1 key used to submit settlement (pays gas)
     * `"permit2"` — (optional) `true` to advertise and settle `type="permit2"`
+    * `"transaction"` — (optional) `true` to advertise `type="transaction"` for
+      ERC-20 charges without splits. The client signs an EIP-1559 transfer and
+      the server broadcasts it; the client pays gas
     * `"splits"` — (optional) ordered extra `%{"recipient" => ..., "amount" => ...}`
       legs; advertised and settled only via Permit2. Sum must be strictly less
       than the charge amount (primary recipient gets the remainder)
@@ -77,10 +80,14 @@ defmodule MPP.Methods.EVM do
 
   ## Credential Payload
 
-  Three charge payload types are accepted:
+  Four charge payload types are accepted:
 
     * `type="hash"` (or an untyped `"hash"` field) — client-broadcast transaction
       hash. The server fetches the receipt and matches `token`/`to`/`amount`.
+    * `type="transaction"` — client-signed EIP-1559 ERC-20 `transfer`. The
+      server validates chain, token, recipient, amount, and challenge expiry,
+      then broadcasts. Advertised only when `"transaction" => true` and the
+      charge is an ERC-20 without splits. Splits are rejected.
     * `type="authorization"` — EIP-3009 `transferWithAuthorization` for tokens
       that implement it (Circle USDC/EURC). The client signs off-chain; the
       server submits the authorization and pays gas. The EIP-3009 nonce MUST be
@@ -116,6 +123,8 @@ defmodule MPP.Methods.EVM do
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
   alias MPP.Methods.EVM.Permit2
+  alias MPP.Methods.EVM.RPC, as: EvmRPC
+  alias MPP.Methods.EVM.Transaction
   alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -146,11 +155,14 @@ defmodule MPP.Methods.EVM do
   @spec method_name() :: String.t()
   def method_name, do: "evm"
 
-  api(:credential_types, "Return the implemented EVM charge payload types: permit2, authorization, and hash.")
+  api(
+    :credential_types,
+    "Return the implemented EVM charge payload types: permit2, authorization, transaction, and hash."
+  )
 
   @impl MPP.Method
   @spec credential_types() :: [String.t()]
-  def credential_types, do: ~w(permit2 authorization hash)
+  def credential_types, do: ~w(permit2 authorization transaction hash)
 
   api(
     :validate_config!,
@@ -181,7 +193,7 @@ defmodule MPP.Methods.EVM do
       payload: [
         kind: :value,
         description:
-          ~s{Credential payload map: `"hash"` (0x-prefixed transaction hash), `type="authorization"` EIP-3009 fields, or `type="permit2"` Permit2 fields}
+          ~s{Credential payload map: `"hash"` (0x-prefixed transaction hash), `type="transaction"` signed EIP-1559 transfer, `type="authorization"` EIP-3009 fields, or `type="permit2"` Permit2 fields}
       ],
       charge: [
         kind: :value,
@@ -195,6 +207,22 @@ defmodule MPP.Methods.EVM do
   @impl MPP.Method
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "permit2"} = payload, %Charge{} = charge), do: Permit2.settle(payload, charge)
+
+  def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
+    config = charge.method_details || %{}
+    store = Store.resolve(config["store"])
+
+    with :ok <- reject_non_proof_for_zero_amount(charge),
+         :ok <- require_recipient(charge),
+         {:ok, prepared} <- Transaction.validate(payload, charge),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
+         :ok <- check_hash_unused(store, prepared.hash),
+         {:ok, hash} <- Transaction.broadcast(prepared, charge),
+         {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config),
+         :ok <- commit_hash_used(store, hash) do
+      {:ok, receipt}
+    end
+  end
 
   def verify(%{"type" => "authorization"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
@@ -279,7 +307,13 @@ defmodule MPP.Methods.EVM do
   defp advertised_credential_types(charge) do
     types = if Authorization.offered?(charge), do: ~w(authorization hash), else: ~w(hash)
     types = if Map.has_key?(charge.method_details || %{}, "splits"), do: [], else: types
+    types = if Transaction.offered?(charge), do: insert_transaction(types), else: types
     if Permit2.offered?(charge), do: ["permit2" | types], else: types
+  end
+
+  defp insert_transaction(types) do
+    {before, rest} = Enum.split_while(types, &(&1 != "hash"))
+    before ++ ["transaction" | rest]
   end
 
   # --- ERC-20 verification ---
@@ -356,7 +390,7 @@ defmodule MPP.Methods.EVM do
   # Req-stubbable via the `:req_options` opt (e.g. `[plug: {Req.Test, EVM}]`).
 
   defp fetch_receipt(hash, rpc_url, config) do
-    case Onchain.RPC.get_transaction_receipt(hash, rpc_opts(rpc_url, config)) do
+    case Onchain.RPC.get_transaction_receipt(hash, EvmRPC.rpc_opts(rpc_url, config)) do
       {:ok, nil} ->
         {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
 
@@ -370,7 +404,7 @@ defmodule MPP.Methods.EVM do
   end
 
   defp fetch_transaction(hash, rpc_url, config) do
-    case Onchain.RPC.get_transaction_by_hash(hash, rpc_opts(rpc_url, config)) do
+    case Onchain.RPC.get_transaction_by_hash(hash, EvmRPC.rpc_opts(rpc_url, config)) do
       {:ok, nil} ->
         {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
 
@@ -380,14 +414,6 @@ defmodule MPP.Methods.EVM do
       {:error, reason} ->
         Logger.warning("MPP.Methods.EVM: RPC get_transaction_by_hash failed: #{inspect(reason)}")
         {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
-    end
-  end
-
-  # Builds Onchain.RPC opts: the node URL plus optional Req overrides (test stubs).
-  defp rpc_opts(rpc_url, config) do
-    case config["req_options"] do
-      nil -> [rpc_url: rpc_url]
-      req_options -> [rpc_url: rpc_url, req_options: req_options]
     end
   end
 
