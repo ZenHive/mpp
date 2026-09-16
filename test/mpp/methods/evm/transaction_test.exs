@@ -415,6 +415,20 @@ defmodule MPP.Methods.EVM.TransactionTest do
       assert reference == signed.hash
     end
 
+    test "rejects a node hash that differs from the locally computed one", %{signed: signed, charge: charge} do
+      other = "0x" <> String.duplicate("ab", 32)
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_sendRawTransaction" => other,
+          "eth_getTransactionReceipt" => receipt_with_transfer(other)
+        })
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(signed.payload, charge)
+      assert error.detail =~ "Broadcast hash does not match"
+    end
+
     test "broadcast/2 requires rpc_url", %{signed: signed, charge: charge} do
       charge = %{charge | method_details: Map.delete(charge.method_details, "rpc_url")}
       assert {:error, %Errors{} = error} = Transaction.broadcast(%{raw: signed.raw}, charge)

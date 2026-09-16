@@ -9,8 +9,12 @@ defmodule MPP.Methods.EVM.Transaction do
   then broadcasts via `eth_sendRawTransaction`. Settlement still requires the
   ERC-20 `Transfer` log, not only receipt status.
 
-  Advertise this path by setting `"transaction" => true` in method_config.
-  Native ETH and split charges never advertise or accept it.
+  Advertise this path by setting `"transaction" => true` in method_config. The
+  flag gates **advertisement** only — verification still accepts a well-formed
+  `type="transaction"` credential without it, matching the draft's negotiation
+  default ("if omitted, servers MUST accept `transaction`",
+  draft-evm-charge-00.md:305). Native ETH and split charges never advertise it
+  and always reject it.
   """
 
   alias Cartouche.Hash

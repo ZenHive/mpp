@@ -113,7 +113,7 @@ pipeline :paid_evm do
 end
 ```
 
-Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce. Enable Permit2 with `"permit2" => true` and `"private_key"`: the client signs an off-chain witness authorization (`MPP.Methods.EVM.Permit2.sign/5`) and the server submits, paying gas. Optional `"splits"` add ordered extra recipient/amount legs (Permit2 only). See [EVM Permit2 credentials](https://github.com/ZenHive/mpp/blob/main/docs/evm-permit2.md) for the full configuration and signing walkthrough.
+Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH, use `"ETH"` or the zero address. `"chain_id"` is required — the EIP-155 chain ID of the target network (e.g. `1` for Ethereum mainnet). Hash credentials: the client broadcasts a transaction, then sends the hash. For Circle USDC/EURC, set `"private_key"` (server-only settlement key) to advertise `type="authorization"` and settle EIP-3009 `transferWithAuthorization` with `challengeHash` as the nonce. Enable Permit2 with `"permit2" => true` and `"private_key"`: the client signs an off-chain witness authorization (`MPP.Methods.EVM.Permit2.sign/5`) and the server submits, paying gas. Set `"transaction" => true` to advertise `type="transaction"` for split-free ERC-20 charges: the client signs a complete EIP-1559 `transfer` (and pays its gas), the server validates chain/token/recipient/amount plus the challenge expiry, broadcasts it, and requires a matching `Transfer` event. Optional `"splits"` add ordered extra recipient/amount legs (Permit2 only).
 
 ### Solana (SOL and SPL tokens)
 
@@ -349,6 +349,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.EVM` | Generic EVM on-chain transfer verification (any chain) via `onchain` |
 | `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
 | `MPP.Methods.EVM.Permit2` | Permit2 witness credentials, gas-sponsored settlement, and ordered splits |
+| `MPP.Methods.EVM.Transaction` | Client-signed EIP-1559 ERC-20 transfer validated against the charge, then server-broadcast |
 | `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
 | `MPP.Methods.XRPL` | XRPL signed-blob and hash charge verification via JSON-RPC |
 | `MPP.Methods.XRPL.Session` | XRPL payment-channel session verification (open / voucher / close) |
@@ -436,14 +437,6 @@ On the server side, `MPP.Mcp.init/1` validates the transport config and
 `MPP.Mcp.capabilities(config)` into the `initialize` result to advertise the
 configured payment methods, their intents, and credential types under
 `experimental.payment.methods` (draft-payment-transport-mcp-00).
-
-For a hand-written MCP server, use `MPP.Mcp.payment_required_error/1` to issue
-challenges without a problem (`-32042`), or `MPP.Mcp.verification_failed_error/2`
-when you have an `MPP.Errors` problem. Despite its historical name, the latter
-uses the problem title as its message and `MPP.Mcp.error_code/1` for its code:
-`payment_required` / `sponsor_capacity_exhausted` → `-32042`,
-`malformed_credential` / `invalid_payload` → `-32602`,
-`internal_payment_error` → `-32603`, all other problems → `-32043`.
 
 Generic (non-MCP) JSON-RPC uses root-level `_meta` so `params` can be an array.
 `MPP.Transports.JsonRpc.Plug` mounts on a Plug route; `MPP.Client.Transport.JsonRpc`

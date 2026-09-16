@@ -218,6 +218,7 @@ defmodule MPP.Methods.EVM do
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          :ok <- check_hash_unused(store, prepared.hash),
          {:ok, hash} <- Transaction.broadcast(prepared, charge),
+         :ok <- match_broadcast_hash(prepared.hash, hash),
          {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config),
          :ok <- commit_hash_used(store, hash) do
       {:ok, receipt}
@@ -454,6 +455,16 @@ defmodule MPP.Methods.EVM do
   end
 
   defp reject_non_proof_for_zero_amount(_charge), do: :ok
+
+  # The hash eth_sendRawTransaction returns MUST be the keccak of the canonical raw
+  # bytes we computed before broadcast: the dedup fast-reject keys on the computed
+  # hash and the atomic commit keys on the broadcast hash, so a divergence would
+  # split one credential across two store keys.
+  defp match_broadcast_hash(hash, hash), do: :ok
+
+  defp match_broadcast_hash(_computed, _broadcast) do
+    {:error, Errors.new(:verification_failed, "Broadcast hash does not match the signed transaction")}
+  end
 
   # Returns true if the currency represents native ETH (not an ERC-20 token).
   defp native_currency?(currency) when is_binary(currency) do
