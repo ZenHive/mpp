@@ -5284,7 +5284,7 @@
       "id": "126",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "in_progress",
+      "status": "done",
       "title": "Bring the Stellar method modules to the 95% critical-tier coverage floor",
       "scores": {
         "d": 4,
@@ -5316,10 +5316,17 @@
         "lib/mpp/methods/stellar.ex",
         "lib/mpp/methods/stellar/"
       ],
+      "shipped_in": "b0fb662e889d2e415d3da9e3f265c33aca455317",
       "body": "Task 36 landed MPP.Methods.Stellar with three modules below the repo's 95% floor for money-verification code (CLAUDE.md § Toolchain, critical tier). Measured on main at 830dd51 by `mix ci` on 2026-09-16: MPP.Methods.Stellar 86.96%, MPP.Methods.Stellar.Envelope 73.91%, MPP.Methods.Stellar.RPC 71.60%. The aggregate gate (95.98%) passed, so the per-task reviewer had no signal.\n\nCover the uncovered branches with unit tests derived from the observed Soroban RPC responses that Task 36's integration test already pinned (fixtures come from those observations, never invented). Uncovered lines are listed in the `--cover` JSON; the likely gaps are envelope-decoding error paths (malformed XDR, wrong operation type, sponsored vs unsponsored), RPC error and timeout handling, and rejection branches of the pull/push verification. Where a branch is unreachable, delete it rather than test it.\n\nDeliver the per-module percentages before and after in the delivery note.\n",
       "created_at": "2026-09-16",
       "started_at": "2026-09-16",
+      "done_at": "2026-09-16",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1789535569460-d29f0a6e, b0fb662e889d2e415d3da9e3f265c33aca455317).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1789535569460-d29f0a6e",
       "cross_repo": []
     },
     {

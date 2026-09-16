@@ -3447,7 +3447,7 @@ shipped_in = "d1c29e9fd0ff87852ca5840c9efc90cec0c3d74c"
 id = "126"
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "done"
 title = "Bring the Stellar method modules to the 95% critical-tier coverage floor"
 scores = { d = 4, b = 6, u = 6 }
 depends_on = [36]
@@ -3463,9 +3463,16 @@ Cover the uncovered branches with unit tests derived from the observed Soroban R
 
 Deliver the per-module percentages before and after in the delivery note.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1789535569460-d29f0a6e, b0fb662e889d2e415d3da9e3f265c33aca455317)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1789535569460-d29f0a6e"
 created_at = "2026-09-16"
 started_at = "2026-09-16"
 scored_at = "2026-09-16"
+done_at = "2026-09-16"
+shipped_in = "b0fb662e889d2e415d3da9e3f265c33aca455317"
 
 [[task]]
 id = "127"
