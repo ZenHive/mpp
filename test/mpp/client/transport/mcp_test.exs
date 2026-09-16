@@ -65,6 +65,22 @@ defmodule MPP.Client.Transport.MCPTest do
     end
   end
 
+  describe "rechallenge?/1" do
+    test "true for a -32043 error with challenges, including a full envelope" do
+      error = Mcp.verification_failed_error(make_challenge(), MPP.Errors.new(:verification_failed, "bad"))
+      assert MCP.rechallenge?(error)
+      assert MCP.rechallenge?(envelope(error))
+    end
+
+    test "false for -32042, -32043 without challenges, and non-maps" do
+      refute MCP.rechallenge?(payment_error(make_challenge()))
+      refute MCP.rechallenge?(%{"code" => Mcp.verification_failed_code(), "message" => "failed"})
+      refute MCP.rechallenge?(%{"code" => Mcp.verification_failed_code(), "data" => %{"challenges" => []}})
+      refute MCP.rechallenge?("not-a-map")
+      refute MCP.rechallenge?(nil)
+    end
+  end
+
   describe "get_challenges/1" do
     test "parses challenges from a bare error and a full envelope" do
       challenge = make_challenge()
@@ -201,6 +217,7 @@ defmodule MPP.Client.Transport.MCPTest do
     names = for f <- MCP.__api__(), do: f.name
 
     assert :payment_required? in names
+    assert :rechallenge? in names
     assert :get_challenges in names
     assert :set_credential in names
   end

@@ -14,6 +14,7 @@ defmodule MPP.ErrorsTest do
     {:invalid_challenge, 402, "Invalid Challenge"},
     {:credential_mismatch, 402, "Credential Mismatch"},
     {:invalid_payload, 402, "Invalid Payload"},
+    {:internal_payment_error, 500, "Internal Payment Error"},
     {:bad_request, 400, "Bad Request"},
     {:payment_action_required, 402, "Payment Action Required"},
     {:settlement_failed, 402, "Settlement Failed"},
@@ -53,6 +54,14 @@ defmodule MPP.ErrorsTest do
       assert error.type == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
       assert error.status == 402
       assert error.title == "Sponsor Capacity Exhausted"
+    end
+
+    test "internal_payment_error uses the mppx problem URI and HTTP 500" do
+      error = Errors.new(:internal_payment_error, "Payment processor failure")
+
+      assert error.type == "https://paymentauth.org/problems/internal-payment-error"
+      assert error.status == 500
+      assert error.title == "Internal Payment Error"
     end
   end
 
@@ -121,12 +130,13 @@ defmodule MPP.ErrorsTest do
       end
     end
 
-    test "returns all 22 problem types" do
+    test "returns all 23 problem types" do
       types = Errors.types()
 
-      assert Enum.count(types) == 22
+      assert Enum.count(types) == 23
       assert :payment_required in types
       assert :malformed_credential in types
+      assert :internal_payment_error in types
       # Session types
       assert :insufficient_balance in types
       assert :channel_closed in types

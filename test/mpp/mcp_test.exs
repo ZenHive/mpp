@@ -50,6 +50,11 @@ defmodule MPP.McpTest do
     end
 
     @impl MPP.Method
+    def verify(%{"proof" => "internal"}, _charge) do
+      {:error, Errors.new(:internal_payment_error, "Payment processor failure")}
+    end
+
+    @impl MPP.Method
     def verify(_payload, _charge) do
       {:error, Errors.new(:invalid_payload, "Missing proof field")}
     end
@@ -164,6 +169,71 @@ defmodule MPP.McpTest do
     |> DateTime.to_iso8601()
   end
 
+  defp mppx_payment_error_classes(errors_source) do
+    ~r/export class (\w+) extends PaymentError[\s\S]*?readonly type = '(https:[^']+)'/
+    |> Regex.scan(errors_source)
+    |> Enum.map(fn [_, class, uri] -> {class, uri} end)
+  end
+
+  defp eval_mppx_error_code(mcp_source, class_name) do
+    body = extract_mppx_error_code_body!(mcp_source)
+    const_name = match_mppx_error_code_clause(body, class_name)
+    extract_ts_int_const!(mcp_source, const_name)
+  end
+
+  defp extract_mppx_error_code_body!(mcp_source) do
+    case Regex.run(~r/export function errorCode\([^)]*\):\s*number\s*\{(.*?)\}/s, mcp_source) do
+      [_, body] -> body
+      nil -> flunk("could not extract errorCode from mppx Mcp.ts")
+    end
+  end
+
+  defp match_mppx_error_code_clause(body, class_name) do
+    clauses =
+      ~r/if\s*\((.*?)\)\s*return\s+(\w+)/s
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, condition, const_name] -> {condition, const_name} end)
+
+    Enum.find_value(clauses, fn {condition, const_name} ->
+      if mppx_error_code_clause_match?(condition, class_name), do: const_name
+    end) || mppx_error_code_default!(body)
+  end
+
+  defp mppx_error_code_clause_match?(condition, nil), do: String.contains?(condition, "!error")
+  defp mppx_error_code_clause_match?(condition, class_name), do: String.contains?(condition, "Errors.#{class_name}")
+
+  defp mppx_error_code_default!(body) do
+    case Regex.run(~r/return\s+(\w+)\s*;?\s*\z/s, String.trim(body)) do
+      [_, name] -> name
+      _ -> flunk("could not extract default return from mppx errorCode")
+    end
+  end
+
+  defp extract_ts_int_const!(source, name) do
+    case Regex.run(~r/export const #{name} = (-?\d+)/, source) do
+      [_, value] -> String.to_integer(value)
+      nil -> flunk("could not extract #{name} from mppx Mcp.ts")
+    end
+  end
+
+  defp read_mppx_source!(relative) do
+    ["refs/mppx/#{relative}", "node_modules/mppx/#{relative}"]
+    |> Enum.find(&File.exists?/1)
+    |> case do
+      nil ->
+        flunk("""
+        Missing mppx reference source for MCP cross-validation.
+
+        Expected one of:
+          refs/mppx/#{relative}
+          node_modules/mppx/#{relative}
+        """)
+
+      path ->
+        File.read!(path)
+    end
+  end
+
   defp read_mppx_transport_source! do
     [
       "refs/mppx/src/server/Transport.ts",
@@ -200,6 +270,14 @@ defmodule MPP.McpTest do
       assert Mcp.verification_failed_code() == -32_043
     end
 
+    test "invalid_params_code is -32602" do
+      assert Mcp.invalid_params_code() == -32_602
+    end
+
+    test "internal_error_code is -32603" do
+      assert Mcp.internal_error_code() == -32_603
+    end
+
     test "credential_meta_key matches spec" do
       assert Mcp.credential_meta_key() == "org.paymentauth/credential"
     end
@@ -210,6 +288,32 @@ defmodule MPP.McpTest do
 
     test "receipt_meta_key matches spec" do
       assert Mcp.receipt_meta_key() == "org.paymentauth/receipt"
+    end
+  end
+
+  # draft-payment-transport-mcp-00 § 10.1 plus mppx errorCode extras
+  # (invalid-payload → -32602). Types not listed default to -32043.
+  @json_rpc_code_overrides %{
+    payment_required: -32_042,
+    malformed_credential: -32_602,
+    invalid_payload: -32_602,
+    internal_payment_error: -32_603,
+    sponsor_capacity_exhausted: -32_042
+  }
+
+  describe "error_code/1" do
+    test "maps every MPP problem type to the spec JSON-RPC code" do
+      for type <- Errors.types() do
+        expected = Map.get(@json_rpc_code_overrides, type, -32_043)
+        error = Errors.new(type, "detail")
+
+        assert Mcp.error_code(error) == expected,
+               "#{type} mapped to #{Mcp.error_code(error)}, expected #{expected}"
+      end
+    end
+
+    test "nil maps to payment-required, matching mppx errorCode(!error)" do
+      assert Mcp.error_code(nil) == -32_042
     end
   end
 
@@ -510,6 +614,32 @@ defmodule MPP.McpTest do
       result = %{"result" => %{"_meta" => %{"org.paymentauth/payment-required" => %{"challenges" => []}}}}
 
       refute Mcp.payment_required?(result)
+    end
+  end
+
+  describe "rechallenge?/1" do
+    test "returns true for -32043 with a parseable challenge list" do
+      error = Mcp.verification_failed_error(sample_challenge(), Errors.new(:verification_failed, "bad"))
+      assert Mcp.rechallenge?(error)
+      assert Mcp.rechallenge?(%{"jsonrpc" => "2.0", "id" => 1, "error" => error})
+    end
+
+    test "returns false for -32043 without challenges, empty lists, and malformed lists" do
+      refute Mcp.rechallenge?(%{"code" => -32_043, "message" => "Payment Verification Failed"})
+
+      refute Mcp.rechallenge?(%{
+               "code" => -32_043,
+               "data" => %{"challenges" => []}
+             })
+
+      refute Mcp.rechallenge?(%{
+               "code" => -32_043,
+               "data" => %{"challenges" => [%{"not" => "a challenge"}]}
+             })
+    end
+
+    test "returns false for -32042 even when challenges are present" do
+      refute Mcp.rechallenge?(Mcp.payment_required_error(sample_challenge()))
     end
   end
 
@@ -986,6 +1116,28 @@ defmodule MPP.McpTest do
       assert malformed["error"]["message"] == "Malformed Credential"
     end
 
+    test "maps invalid-payload to -32602 and internal-payment-error to -32603" do
+      invalid =
+        %{"no_proof" => true}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+
+      internal =
+        %{"proof" => "internal"}
+        |> json_rpc_request_with_credential()
+        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+
+      assert invalid["error"]["code"] == -32_602
+      assert invalid["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/invalid-payload"
+      assert [_challenge] = invalid["error"]["data"]["challenges"]
+
+      assert internal["error"]["code"] == -32_603
+      assert internal["error"]["data"]["httpStatus"] == 500
+      assert internal["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/internal-payment-error"
+      assert internal["error"]["data"]["problem"]["title"] == "Internal Payment Error"
+      assert [_retry] = internal["error"]["data"]["challenges"]
+    end
+
     test "maps sponsor capacity to payment-required with retry timing" do
       response =
         %{"proof" => "capacity"}
@@ -1131,6 +1283,38 @@ defmodule MPP.McpTest do
                  }
                }
              } = receipt_response
+    end
+
+    @tag :cross_validation
+    test "error_code/1 matches mppx Mcp.errorCode behaviour, not just exported constants" do
+      mcp_source = read_mppx_source!("src/Mcp.ts")
+      errors_source = read_mppx_source!("src/Errors.ts")
+
+      assert mcp_source =~ "export function errorCode"
+      assert mcp_source =~ "Errors.MalformedCredentialError"
+      assert mcp_source =~ "Errors.InvalidPayloadError"
+      assert mcp_source =~ "Errors.InternalPaymentError"
+
+      our_by_uri =
+        Map.new(Errors.types(), fn type ->
+          error = Errors.new(type, "detail")
+          {error.type, error}
+        end)
+
+      for {class, uri} <- mppx_payment_error_classes(errors_source) do
+        mppx_code = eval_mppx_error_code(mcp_source, class)
+
+        case our_by_uri do
+          %{^uri => error} ->
+            assert Mcp.error_code(error) == mppx_code,
+                   "#{class} (#{uri}): MPP.Mcp.error_code/1=#{Mcp.error_code(error)} mppx errorCode=#{mppx_code}"
+
+          _missing ->
+            flunk("mppx #{class} type #{uri} has no MPP.Errors counterpart")
+        end
+      end
+
+      assert eval_mppx_error_code(mcp_source, nil) == Mcp.error_code(nil)
     end
   end
 

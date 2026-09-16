@@ -8,10 +8,14 @@ defmodule MPP.Mcp do
 
   ## Constants
 
-  Five constants defined by the MPP transport spec for MCP:
+  Constants defined by the MPP transport spec for MCP
+  (`draft-payment-transport-mcp-00` § Error Code Mapping):
 
     * `payment_required_code/0` — JSON-RPC error code `-32042`
     * `verification_failed_code/0` — JSON-RPC error code `-32043`
+    * `invalid_params_code/0` — JSON-RPC error code `-32602`
+    * `internal_error_code/0` — JSON-RPC error code `-32603`
+    * `error_code/1` — map an `MPP.Errors` problem to the spec JSON-RPC code
     * `credential_meta_key/0` — `"org.paymentauth/credential"`
     * `payment_required_meta_key/0` — `"org.paymentauth/payment-required"`
     * `receipt_meta_key/0` — `"org.paymentauth/receipt"`
@@ -25,7 +29,7 @@ defmodule MPP.Mcp do
     * `init/1` — build transport config from the same options as `MPP.Plug`
     * `call/3` — verify the request's credential, invoke the handler, attach
       the receipt on `result._meta` (or envelope `_meta` when the result is not
-      an object), or return a `-32042`/`-32602`/`-32043` error with challenges
+      an object), or return a `-32042`/`-32602`/`-32603`/`-32043` error with challenges
 
   ## Server Helpers
 
@@ -42,6 +46,7 @@ defmodule MPP.Mcp do
   Detect payment-required errors and manage credentials:
 
     * `payment_required?/1` — check if error is `-32042`
+    * `rechallenge?/1` — check if error is `-32043` with a non-empty challenge list
     * `extract_challenges/1` — parse challenges from error data
     * `attach_credential/2` — insert credential into `params._meta`
   """
@@ -61,6 +66,12 @@ defmodule MPP.Mcp do
 
   # JSON-RPC error code: credential verification failed
   @verification_failed_code -32_043
+
+  # JSON-RPC error code: malformed credential / invalid payload (JSON-RPC Invalid Params)
+  @invalid_params_code -32_602
+
+  # JSON-RPC error code: internal payment processor failure (JSON-RPC Internal Error)
+  @internal_error_code -32_603
 
   # Metadata key for credentials in params._meta
   @credential_meta_key "org.paymentauth/credential"
@@ -88,6 +99,58 @@ defmodule MPP.Mcp do
 
   @spec verification_failed_code :: integer()
   def verification_failed_code, do: @verification_failed_code
+
+  api(:invalid_params_code, "JSON-RPC error code for malformed credentials (`-32602`).",
+    returns: %{type: :integer, description: "Error code `-32602`"}
+  )
+
+  @spec invalid_params_code :: integer()
+  def invalid_params_code, do: @invalid_params_code
+
+  api(:internal_error_code, "JSON-RPC error code for internal payment errors (`-32603`).",
+    returns: %{type: :integer, description: "Error code `-32603`"}
+  )
+
+  @spec internal_error_code :: integer()
+  def internal_error_code, do: @internal_error_code
+
+  api(
+    :error_code,
+    "Map an MPP problem to the MCP JSON-RPC error code (draft-payment-transport-mcp-00 § 10.1).",
+    params: [
+      error: [
+        kind: :value,
+        description: "`MPP.Errors.t()` or `nil` (`nil` maps to `-32042`, matching mppx `errorCode`)"
+      ]
+    ],
+    returns: %{
+      type: :integer,
+      description: "`-32042`, `-32602`, `-32603`, or `-32043`"
+    },
+    composes_with: [:payment_required_code, :invalid_params_code, :internal_error_code, :verification_failed_code]
+  )
+
+  @doc """
+  Map an MPP problem to the JSON-RPC code in draft-payment-transport-mcp-00 § 10.1.
+
+  Matches mppx `Mcp.errorCode` (`refs/mppx/src/Mcp.ts`): `payment-required` →
+  `-32042`, `malformed-credential` / `invalid-payload` → `-32602`,
+  `internal-payment-error` → `-32603`, everything else → `-32043`. `nil` is
+  `-32042`. `sponsor-capacity-exhausted` is an MPP-only problem and stays on
+  `-32042` so clients retry rather than treating sponsor exhaustion as a
+  verification failure.
+  """
+  @spec error_code(Errors.t() | nil) :: integer()
+  def error_code(nil), do: @payment_required_code
+
+  def error_code(%Errors{type: type}) do
+    cond do
+      payment_required_type?(type) -> @payment_required_code
+      invalid_params_type?(type) -> @invalid_params_code
+      type == "https://paymentauth.org/problems/internal-payment-error" -> @internal_error_code
+      true -> @verification_failed_code
+    end
+  end
 
   api(:credential_meta_key, "Metadata key for credentials in `params._meta`.",
     returns: %{type: :string, description: ~s(Key `"org.paymentauth/credential"`)}
@@ -346,6 +409,30 @@ defmodule MPP.Mcp do
   def payment_required?(%{}), do: false
 
   api(
+    :rechallenge?,
+    "Check whether a JSON-RPC error is `-32043` and carries a non-empty challenge list.",
+    params: [
+      error: [kind: :value, description: "JSON-RPC error map with `code` field, or a full response envelope"]
+    ],
+    returns: %{
+      type: :boolean,
+      description: "`true` if the error code is `-32043` and `data.challenges` parses to at least one challenge"
+    },
+    composes_with: [:payment_required?, :extract_challenges, :verification_failed_code]
+  )
+
+  @spec rechallenge?(map()) :: boolean()
+  def rechallenge?(%{"code" => @verification_failed_code} = error) do
+    match?({:ok, [_ | _]}, extract_challenges(error))
+  end
+
+  @spec rechallenge?(map()) :: boolean()
+  def rechallenge?(%{"error" => error}) when is_map(error), do: rechallenge?(error)
+
+  @spec rechallenge?(map()) :: false
+  def rechallenge?(%{}), do: false
+
+  api(
     :extract_challenges,
     "Extract and parse payment challenges from a JSON-RPC error map or full JSON-RPC response.",
     params: [
@@ -571,4 +658,18 @@ defmodule MPP.Mcp do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp payment_required_type?(type) do
+    type in [
+      "https://paymentauth.org/problems/payment-required",
+      "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
+    ]
+  end
+
+  defp invalid_params_type?(type) do
+    type in [
+      "https://paymentauth.org/problems/malformed-credential",
+      "https://paymentauth.org/problems/invalid-payload"
+    ]
+  end
 end

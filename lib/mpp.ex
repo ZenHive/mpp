@@ -67,7 +67,7 @@ defmodule MPP do
     * `MPP.Client.Providers.Stripe` — Built-in Stripe charge provider (Shared Payment Tokens)
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
-    * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, retry once)
+    * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, at most two payment attempts)
     * `MPP.Client.Transport.WebSocket` — WebSocket transport: `challenge`/`needVoucher` frames, `Payment` credential frames, retry/backoff
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
     * `MPP.Discovery.OpenApi` — OpenAPI 3.1.0 payment discovery generation

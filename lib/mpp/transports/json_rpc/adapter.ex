@@ -17,10 +17,6 @@ defmodule MPP.Transports.JsonRpc.Adapter do
   alias MPP.Transports.JsonRpc
   alias MPP.Verifier
 
-  @payment_required_code -32_042
-  @verification_failed_code -32_043
-  @invalid_params_code -32_602
-
   @type receipt_at :: :root | :nested
 
   @doc """
@@ -60,14 +56,14 @@ defmodule MPP.Transports.JsonRpc.Adapter do
     error = Errors.new(:payment_required, "No payment credential provided")
     challenges = generate_challenges(config)
 
-    {:error, error_response(request, @payment_required_code, "Payment Required", challenges, error)}
+    {:error, error_response(request, Mcp.error_code(error), "Payment Required", challenges, error)}
   end
 
   defp malformed_credential_response(request, config, reason) do
     error = Errors.new(:malformed_credential, "#{reason}")
     challenges = generate_challenges(config)
 
-    {:error, error_response(request, @invalid_params_code, error.title, challenges, error)}
+    {:error, error_response(request, Mcp.error_code(error), error.title, challenges, error)}
   end
 
   defp verify_credential(request, config, credential) do
@@ -76,7 +72,7 @@ defmodule MPP.Transports.JsonRpc.Adapter do
         error = Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
         challenges = generate_challenges(config)
 
-        {:error, error_response(request, @verification_failed_code, error.title, challenges, error)}
+        {:error, error_response(request, Mcp.error_code(error), error.title, challenges, error)}
 
       entry ->
         verify_with_entry(request, config, credential, entry)
@@ -100,7 +96,7 @@ defmodule MPP.Transports.JsonRpc.Adapter do
       {:error, %Errors{} = error} ->
         start_time = Telemetry.verify_start(credential, entry.charge, %{realm: config.realm})
         Telemetry.verify_fail(credential, entry.charge, start_time, error, %{realm: config.realm})
-        {:error, error_response(request, error_code(error), error.title, generate_challenges(config), error)}
+        {:error, error_response(request, Mcp.error_code(error), error.title, generate_challenges(config), error)}
 
       :ok ->
         with {:ok, receipt} <- Verifier.verify(credential, opts),
@@ -109,7 +105,7 @@ defmodule MPP.Transports.JsonRpc.Adapter do
         else
           {:error, %Errors{} = error} ->
             challenges = generate_challenges(config)
-            {:error, error_response(request, error_code(error), error.title, challenges, error)}
+            {:error, error_response(request, Mcp.error_code(error), error.title, challenges, error)}
         end
     end
   end
@@ -147,14 +143,6 @@ defmodule MPP.Transports.JsonRpc.Adapter do
       }
     }
   end
-
-  defp error_code(%Errors{type: "https://paymentauth.org/problems/payment-required"}), do: @payment_required_code
-
-  defp error_code(%Errors{type: "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"}),
-    do: @payment_required_code
-
-  defp error_code(%Errors{type: "https://paymentauth.org/problems/malformed-credential"}), do: @invalid_params_code
-  defp error_code(%Errors{}), do: @verification_failed_code
 
   @doc false
   @spec wrap_handler_response(term(), map()) :: map()

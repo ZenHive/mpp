@@ -10,6 +10,8 @@ defmodule MPP.Client.Transport.MCP do
     * Payment-required response: JSON-RPC error code `-32042`
       (`MPP.Mcp.payment_required_code/0`), or `result._meta` carrying
       `org.paymentauth/payment-required`
+    * Re-challenge: JSON-RPC error code `-32043` with a non-empty
+      `error.data.challenges` list (`MPP.Mcp.rechallenge?/1`)
     * Challenges: `error.data.challenges` (or the payment-required result
       metadata equivalent), parsed by `MPP.Mcp.extract_challenges/1`
     * Credential attachment: `params._meta["org.paymentauth/credential"]`
@@ -41,6 +43,22 @@ defmodule MPP.Client.Transport.MCP do
 
   @spec payment_required?(term()) :: false
   def payment_required?(_response), do: false
+
+  api(:rechallenge?, "Return true if the JSON-RPC message is `-32043` with a non-empty challenge list.",
+    params: [
+      response: [kind: :value, description: "JSON-RPC response envelope or error object"]
+    ],
+    returns: %{
+      type: :boolean,
+      description: "true when the error code is -32043 and challenges parse to a non-empty list"
+    }
+  )
+
+  @spec rechallenge?(term()) :: boolean()
+  def rechallenge?(response) when is_map(response), do: Mcp.rechallenge?(response)
+
+  @spec rechallenge?(term()) :: false
+  def rechallenge?(_response), do: false
 
   api(:get_challenges, "Parse Payment challenges from a JSON-RPC payment-required message.",
     params: [

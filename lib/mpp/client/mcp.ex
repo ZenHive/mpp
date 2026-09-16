@@ -3,14 +3,22 @@ defmodule MPP.Client.MCP do
   Payment-aware MCP client orchestration.
 
   Wraps a JSON-RPC send function: if the response is payment-required
-  (`-32042` or payment-required result metadata), selects a challenge through
+  (`-32042` or payment-required result metadata), or a `-32043` re-challenge
+  carrying a non-empty challenge list, selects a challenge through
   `MPP.Client.SelectionPolicy`, asks `on_payment_required` for approval, pays
-  via `MPP.Client.MultiProvider`, and retries the original request once with
-  the credential attached.
+  via `MPP.Client.MultiProvider`, and retries the original request with the
+  credential attached.
 
-  Approval runs **after** challenge selection and **before** payment — matching
-  `refs/mppx/src/mcp/client/McpClient.ts`. A declined approval neither pays nor
-  retries.
+  Total payment attempts per `call/4` are bounded at **two**: the initial
+  `-32042` payment plus at most one re-payment on a `-32043` that carries
+  challenges. A `-32043` without challenges surfaces immediately. This is a
+  deliberate divergence from mppx `maxPaymentAttempts = 3`
+  (`refs/mppx/src/mcp/client/McpClient.ts`) so a malicious server cannot drain
+  a client wallet through repeated re-challenges.
+
+  Approval runs **after** challenge selection and **before** each payment —
+  matching `refs/mppx/src/mcp/client/McpClient.ts`. A declined approval neither
+  pays nor retries.
 
       client = MPP.Client.MCP.new(provider: my_provider)
       MPP.Client.MCP.call(client, request, &MyTransport.send/1)
@@ -23,6 +31,10 @@ defmodule MPP.Client.MCP do
   alias MPP.Client.SelectionPolicy
   alias MPP.Client.Transport
   alias MPP.Client.Transport.MCP, as: MCPTransport
+
+  # Initial `-32042` payment + at most one `-32043` re-challenge. mppx uses 3
+  # (`maxPaymentAttempts` in refs/mppx/src/mcp/client/McpClient.ts); we stay at 2.
+  @max_payment_attempts 2
 
   @type approval :: (Challenge.t() -> boolean())
 
@@ -68,7 +80,7 @@ defmodule MPP.Client.MCP do
     }
   end
 
-  api(:call, "Send a JSON-RPC request, paying and retrying once if payment is required.",
+  api(:call, "Send a JSON-RPC request, paying at most twice (`-32042` plus one `-32043` re-challenge).",
     params: [
       client: [kind: :value, description: "MPP.Client.MCP struct from new/1"],
       request: [kind: :value, description: "JSON-RPC request map"],
@@ -89,11 +101,14 @@ defmodule MPP.Client.MCP do
   )
 
   @doc """
-  Send `request` through `send_fun`, paying and retrying once on payment required.
+  Send `request` through `send_fun`, paying on `-32042` and at most once more
+  on a `-32043` that carries challenges.
 
   `send_fun` receives the JSON-RPC request map and must return a JSON-RPC
   response map. Per-call `:on_payment_required` overrides the client hook;
-  pass `nil` to bypass it (mppx `onPaymentRequired: null`).
+  pass `nil` to bypass it (mppx `onPaymentRequired: null`). The approval hook
+  fires on every payment. After two payment attempts the terminal response is
+  returned as-is.
   """
   @spec call(t(), map(), (map() -> term()), keyword()) :: {:ok, map()} | {:error, term()}
   def call(%__MODULE__{} = client, %{} = request, send_fun, opts \\ []) when is_function(send_fun, 1) and is_list(opts) do
@@ -101,26 +116,39 @@ defmodule MPP.Client.MCP do
 
     case send_fun.(request) do
       response when is_map(response) ->
-        if MCPTransport.payment_required?(response) do
-          pay_and_retry(client, request, response, send_fun, hook)
-        else
-          {:ok, response}
-        end
+        handle_response(client, request, response, send_fun, hook, 0)
 
       _other ->
         {:error, :malformed_envelope}
     end
   end
 
-  defp pay_and_retry(client, request, response, send_fun, hook) do
+  defp handle_response(client, request, response, send_fun, hook, payments_made) do
+    if payments_made < @max_payment_attempts and payable?(response, payments_made) do
+      pay_and_continue(client, request, response, send_fun, hook, payments_made)
+    else
+      {:ok, response}
+    end
+  end
+
+  defp payable?(response, 0) do
+    MCPTransport.payment_required?(response) or MCPTransport.rechallenge?(response)
+  end
+
+  defp payable?(response, _payments_made), do: MCPTransport.rechallenge?(response)
+
+  defp pay_and_continue(client, request, response, send_fun, hook, payments_made) do
     with {:ok, challenges} <- MCPTransport.get_challenges(response),
          {:ok, challenge} <- Transport.select_challenge(challenges, client.provider, selection: client.selection),
          :ok <- approve(challenge, hook),
          {:ok, credential} <- MultiProvider.pay(client.provider, challenge) do
-      request
-      |> MCPTransport.set_credential(credential)
-      |> send_fun.()
-      |> wrap_response()
+      case request |> MCPTransport.set_credential(credential) |> send_fun.() do
+        next when is_map(next) ->
+          handle_response(client, request, next, send_fun, hook, payments_made + 1)
+
+        _other ->
+          {:error, :malformed_envelope}
+      end
     end
   end
 
@@ -133,9 +161,6 @@ defmodule MPP.Client.MCP do
       other -> raise ArgumentError, "on_payment_required must return a boolean, got: #{inspect(other)}"
     end
   end
-
-  defp wrap_response(response) when is_map(response), do: {:ok, response}
-  defp wrap_response(_response), do: {:error, :malformed_envelope}
 
   defp approval_for_call(client, opts) do
     if Keyword.has_key?(opts, :on_payment_required) do

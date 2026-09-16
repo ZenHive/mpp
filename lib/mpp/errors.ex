@@ -19,6 +19,7 @@ defmodule MPP.Errors do
     * `:invalid_challenge` — challenge ID doesn't match or is unknown (402)
     * `:credential_mismatch` — echoed challenge fields don't match this endpoint (402)
     * `:invalid_payload` — credential payload doesn't match schema (402)
+    * `:internal_payment_error` — unexpected payment-processor failure (500)
     * `:bad_request` — malformed request (400)
     * `:payment_action_required` — payment requires additional action, e.g. 3DS (402)
     * `:sponsor_capacity_exhausted` — fee sponsor capacity is temporarily unavailable (402)
@@ -51,6 +52,13 @@ defmodule MPP.Errors do
     invalid_challenge: %{suffix: "invalid-challenge", title: "Invalid Challenge", status: 402},
     credential_mismatch: %{suffix: "credential-mismatch", title: "Credential Mismatch", status: 402},
     invalid_payload: %{suffix: "invalid-payload", title: "Invalid Payload", status: 402},
+    # mppx parity (`InternalPaymentError`, refs/mppx/src/Errors.ts). Not in
+    # mpp-specs CORE_PROBLEMS at scoring time (draft-00); MCP maps it to -32603.
+    internal_payment_error: %{
+      suffix: "internal-payment-error",
+      title: "Internal Payment Error",
+      status: 500
+    },
     bad_request: %{suffix: "bad-request", title: "Bad Request", status: 400},
     payment_action_required: %{
       suffix: "payment-action-required",
@@ -105,6 +113,7 @@ defmodule MPP.Errors do
           | :invalid_challenge
           | :credential_mismatch
           | :invalid_payload
+          | :internal_payment_error
           | :bad_request
           | :payment_action_required
           | :sponsor_capacity_exhausted

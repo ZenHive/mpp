@@ -386,6 +386,164 @@ defmodule MPP.Client.MCPTest do
       refute_received {:sent, _}
     end
 
+    test "pays a -32043 re-challenge once, fires approval on every payment, then surfaces the terminal response" do
+      required = Mcp.payment_required_error(make_challenge("tempo"))
+      failed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:verification_failed, "stale"))
+      terminal = %{"jsonrpc" => "2.0", "id" => "req-1", "result" => %{"ok" => true}}
+
+      send_fun = fn request ->
+        paid? = get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) != nil
+        send(self(), {:sent, paid?})
+
+        cond do
+          not paid? ->
+            %{"jsonrpc" => "2.0", "id" => request["id"], "error" => required}
+
+          not Process.get(:paid_once, false) ->
+            Process.put(:paid_once, true)
+            %{"jsonrpc" => "2.0", "id" => request["id"], "error" => failed}
+
+          true ->
+            terminal
+        end
+      end
+
+      hook = fn challenge ->
+        send(self(), {:approval, challenge.method})
+        true
+      end
+
+      client =
+        ClientMCP.new(
+          provider: {TempoProvider, %{test_pid: self()}},
+          on_payment_required: hook
+        )
+
+      assert {:ok, ^terminal} = ClientMCP.call(client, json_rpc_request(), send_fun)
+
+      assert_received {:sent, false}
+      assert_received {:approval, "tempo"}
+      assert_received {:paid, "tempo"}
+      assert_received {:sent, true}
+      assert_received {:approval, "tempo"}
+      assert_received {:paid, "tempo"}
+      assert_received {:sent, true}
+      refute_received {:paid, _}
+      refute_received {:approval, _}
+    end
+
+    test "does not pay a third time when the server keeps returning -32043 with challenges" do
+      required = Mcp.payment_required_error(make_challenge("tempo"))
+      failed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:verification_failed, "again"))
+
+      send_fun = fn request ->
+        send(self(), :sent)
+
+        if get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) do
+          %{"jsonrpc" => "2.0", "id" => request["id"], "error" => failed}
+        else
+          %{"jsonrpc" => "2.0", "id" => request["id"], "error" => required}
+        end
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"error" => %{"code" => -32_043}}} = ClientMCP.call(client, json_rpc_request(), send_fun)
+
+      assert_received :sent
+      assert_received {:paid, "tempo"}
+      assert_received :sent
+      assert_received {:paid, "tempo"}
+      assert_received :sent
+      refute_received {:paid, _}
+      refute_received :sent
+    end
+
+    test "surfaces a -32043 without challenges immediately after the initial payment" do
+      required = Mcp.payment_required_error(make_challenge("tempo"))
+
+      send_fun = fn request ->
+        if get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) do
+          %{
+            "jsonrpc" => "2.0",
+            "id" => request["id"],
+            "error" => %{"code" => Mcp.verification_failed_code(), "message" => "Payment Verification Failed"}
+          }
+        else
+          %{"jsonrpc" => "2.0", "id" => request["id"], "error" => required}
+        end
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"error" => %{"code" => -32_043}}} = ClientMCP.call(client, json_rpc_request(), send_fun)
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    test "surfaces a first-call -32043 without challenges without paying" do
+      send_fun = fn request ->
+        %{
+          "jsonrpc" => "2.0",
+          "id" => request["id"],
+          "error" => %{"code" => Mcp.verification_failed_code(), "message" => "Payment Verification Failed"}
+        }
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"error" => %{"code" => -32_043}}} = ClientMCP.call(client, json_rpc_request(), send_fun)
+      refute_received {:paid, _}
+    end
+
+    test "pays a first-call -32043 that carries challenges" do
+      failed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:verification_failed, "try again"))
+
+      send_fun = fn request ->
+        if get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) do
+          %{"jsonrpc" => "2.0", "id" => request["id"], "result" => %{"ok" => true}}
+        else
+          %{"jsonrpc" => "2.0", "id" => request["id"], "error" => failed}
+        end
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"result" => %{"ok" => true}}} = ClientMCP.call(client, json_rpc_request(), send_fun)
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    test "surfaces -32043 with an empty or malformed challenge list without paying again" do
+      required = Mcp.payment_required_error(make_challenge("tempo"))
+
+      for challenges <- [[], [%{"not" => "a challenge"}]] do
+        send_fun = fn request ->
+          if get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) do
+            %{
+              "jsonrpc" => "2.0",
+              "id" => request["id"],
+              "error" => %{
+                "code" => Mcp.verification_failed_code(),
+                "message" => "Payment Verification Failed",
+                "data" => %{"challenges" => challenges}
+              }
+            }
+          else
+            %{"jsonrpc" => "2.0", "id" => request["id"], "error" => required}
+          end
+        end
+
+        client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+        assert {:ok, %{"error" => %{"code" => -32_043, "data" => %{"challenges" => ^challenges}}}} =
+                 ClientMCP.call(client, json_rpc_request(), send_fun)
+
+        assert_received {:paid, "tempo"}
+        refute_received {:paid, _}
+      end
+    end
+
     test "pays a payment-required result._meta the same way as a -32042 error" do
       challenge = make_challenge("tempo")
       [wire] = Mcp.payment_required_error(challenge)["data"]["challenges"]

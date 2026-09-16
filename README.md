@@ -337,7 +337,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Client.Transport.MCP` | MCP/JSON-RPC transport: `-32042` detection, challenge extract, `_meta` credential attach |
 | `MPP.Client.Transport.JsonRpc` | Bare JSON-RPC transport: `-32042` detection, root-level `_meta` credential attach |
 | `MPP.Client.Transport.WebSocket` | WebSocket transport: `challenge`/`needVoucher` frames, `Payment` credential frames, retry/backoff |
-| `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay, retry the tool call once |
+| `MPP.Client.MCP` | Payment-aware MCP client — select, approve, pay; at most two payment attempts (`-32042` plus one `-32043` re-challenge) |
 | `MPP.Client.AcceptPolicy` | Gates `Accept-Payment` header injection on outgoing requests |
 
 ## Client
@@ -386,9 +386,14 @@ client = MPP.Client.MCP.new(provider: my_provider)
 MPP.Client.MCP.call(client, request, &MyTransport.send/1)
 ```
 
-`MPP.Client.MCP` does the same pay-and-retry over JSON-RPC: it detects `-32042`,
-selects a challenge, asks `on_payment_required` for approval, pays, and retries
-once with the credential at `params._meta["org.paymentauth/credential"]`.
+`MPP.Client.MCP` does the same pay-and-retry over JSON-RPC: it detects `-32042`
+(or a `-32043` that still carries challenges), selects a challenge, asks
+`on_payment_required` for approval on every payment, and retries with the
+credential at `params._meta["org.paymentauth/credential"]`. Payment attempts
+are bounded at two (initial `-32042` plus at most one `-32043` re-challenge) —
+a deliberate divergence from mppx `maxPaymentAttempts = 3` so a malicious
+server cannot drain a wallet through repeated re-challenges. A `-32043`
+without challenges is returned immediately.
 
 On the server side, `MPP.Mcp.init/1` validates the transport config and
 `MPP.Mcp.call/3` gates tool calls with replay dedup. Merge
