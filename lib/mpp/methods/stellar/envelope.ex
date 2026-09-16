@@ -15,15 +15,15 @@ defmodule MPP.Methods.Stellar.Envelope do
     FunctionClauseError,
     CaseClauseError,
     Protocol.UndefinedError,
-    :"Elixir.XDR.EnumError",
-    :"Elixir.XDR.UnionError",
-    :"Elixir.XDR.FixedArrayError",
-    :"Elixir.XDR.VariableArrayError",
-    :"Elixir.XDR.FixedOpaqueError",
-    :"Elixir.XDR.VariableOpaqueError",
-    :"Elixir.XDR.StructError",
-    :"Elixir.XDR.OptionalError",
-    :"Elixir.XDR.StringError"
+    Elixir.XDR.EnumError,
+    Elixir.XDR.UnionError,
+    Elixir.XDR.FixedArrayError,
+    Elixir.XDR.VariableArrayError,
+    Elixir.XDR.FixedOpaqueError,
+    Elixir.XDR.VariableOpaqueError,
+    Elixir.XDR.StructError,
+    Elixir.XDR.OptionalError,
+    Elixir.XDR.StringError
   ]
 
   @type transfer :: %{contract: String.t(), from: String.t(), to: String.t(), amount: integer()}

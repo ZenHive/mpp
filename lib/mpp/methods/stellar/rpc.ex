@@ -20,12 +20,12 @@ defmodule MPP.Methods.Stellar.RPC do
     FunctionClauseError,
     ErlangError,
     MatchError,
-    :"Elixir.XDR.EnumError",
-    :"Elixir.XDR.UnionError",
-    :"Elixir.XDR.FixedArrayError",
-    :"Elixir.XDR.VariableArrayError",
-    :"Elixir.XDR.FixedOpaqueError",
-    :"Elixir.XDR.VariableOpaqueError"
+    Elixir.XDR.EnumError,
+    Elixir.XDR.UnionError,
+    Elixir.XDR.FixedArrayError,
+    Elixir.XDR.VariableArrayError,
+    Elixir.XDR.FixedOpaqueError,
+    Elixir.XDR.VariableOpaqueError
   ]
 
   @doc false
