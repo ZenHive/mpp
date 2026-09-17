@@ -82,6 +82,14 @@ defmodule MPP.Methods.EVM.TransactionTest do
       refute Transaction.offered?(charge)
     end
 
+    test "is false when the splits key is present but empty or malformed", %{charge: charge} do
+      for splits <- [[], "nope"] do
+        charge = enable(%{charge | method_details: Map.put(charge.method_details, "splits", splits)})
+        refute Transaction.offered?(charge)
+        assert EVM.challenge_method_details(charge)["credentialTypes"] == []
+      end
+    end
+
     test "is false for the zero address and non-binary currency", %{charge: charge} do
       refute Transaction.offered?(%{enable(charge) | currency: "0x0000000000000000000000000000000000000000"})
       refute Transaction.offered?(%{enable(charge) | currency: nil})
@@ -195,6 +203,16 @@ defmodule MPP.Methods.EVM.TransactionTest do
       signed = signed_transfer()
       assert {:error, %Errors{} = error} = Transaction.validate(signed.payload, charge)
       assert error.detail =~ "splits"
+    end
+
+    test "rejects an empty or malformed splits key", %{charge: charge} do
+      signed = signed_transfer()
+
+      for splits <- [[], "nope"] do
+        charge = %{charge | method_details: Map.put(charge.method_details, "splits", splits)}
+        assert {:error, %Errors{} = error} = Transaction.validate(signed.payload, charge)
+        assert error.detail =~ "splits"
+      end
     end
 
     test "rejects native ETH", %{charge: charge} do

@@ -21,6 +21,19 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   envelope. Replay protection reuses `MPP.Tempo.Store` and is on by default.
   Adds `stellar_base` and `ed25519` dependencies — `stellar_sdk` is
   deliberately not used because it pulls an unpatched hackney (Task 36).
+- `MPP.Methods.EVM.Transaction` — client-signed EIP-1559 transfers for the EVM
+  method (`type="transaction"`, `draft-evm-charge-00` § Transaction Payload).
+  The client signs a complete ERC-20 `transfer` and pays its own gas; the
+  server validates chain ID, token, recipient, amount and the challenge expiry
+  (a signed transfer carries none of its own), broadcasts via
+  `eth_sendRawTransaction`, and still requires a matching `Transfer` log rather
+  than receipt status alone. The broadcast hash must equal the keccak of the
+  canonical raw bytes the server computed, so replay dedup cannot be split
+  across two store keys. Enable with `"transaction" => true`; the flag gates
+  acceptance *and* advertisement together, because EVM challenges always
+  populate `credentialTypes` and the draft's MUST-accept default applies only
+  when that list is omitted. Native ETH and split charges never advertise it
+  and always reject it (Tasks 86, 128).
 - `MPP.Methods.EVM.Permit2` — Permit2 witness credentials for the EVM method
   (`type="permit2"`). The client signs an off-chain, challenge-bound witness
   with `MPP.Methods.EVM.Permit2.sign/5`; the server submits and pays the gas.

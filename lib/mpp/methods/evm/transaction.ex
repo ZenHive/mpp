@@ -235,8 +235,10 @@ defmodule MPP.Methods.EVM.Transaction do
     end
   end
 
-  defp splits?(%{"splits" => splits}) when is_list(splits) and splits != [], do: true
-  defp splits?(_config), do: false
+  # Presence-keyed, matching `MPP.Methods.EVM.reject_splits/2` and
+  # `advertised_credential_types/1`: a `"splits"` key that is empty or malformed still
+  # marks a split charge, so transaction must not be the one type that slips through.
+  defp splits?(config), do: Map.has_key?(config, "splits")
 
   defp reject_native(%Charge{currency: currency}) do
     if native?(currency) do

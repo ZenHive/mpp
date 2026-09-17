@@ -251,6 +251,8 @@
 | Task 126 | ✅ | 🎁 **additional-methods** · Bring the Stellar method modules to the 95% critical-tier coverage floor [D:4/B:6/U:6 → Eff:1.5] 🚀 |
 | Task 127 | 🔄 | 🎁 **additional-methods** · Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module [D:5/B:7/U:6 → Eff:1.3] 📋 |
 | Task 128 | ✅ | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5] 🎯 |
+| Task 129 | ⬜ | 🎁 **additional-methods** · Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 130 | ⬜ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---

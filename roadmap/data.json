@@ -5431,6 +5431,88 @@
       "verified_by": "cursor",
       "verification_ref": "harness-run:run-1789607095322-72ece7b6",
       "cross_repo": []
+    },
+    {
+      "id": "129",
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "Fail the gate when a lib/ module is missing from the CLAUDE.md module map",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.38,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "A test (or mix task folded into `mix precommit.full`) fails when a module defined under `lib/` appears in neither the CLAUDE.md '### Module map' fenced block nor the '@moduledoc false internals' paragraph that follows it, naming the missing module(s)",
+        "It also fails in the other direction: a name listed in either place that no longer resolves to a module under `lib/` (catches renames and deletions)",
+        "The brace-expansion syntax already used in the internals paragraph (`MPP.Methods.Tempo.{AccessKey, EnvelopeFields, ProofSignature, ...}`) is expanded by the checker, not worked around by rewriting the docs",
+        "The check runs against CLAUDE.md only; AGENTS.md stays covered by the existing `mix agents.check` sync check, so a single source of truth is graded once",
+        "Deliberately deleting one module-map line makes the check fail with that module named — paste the output",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "Grading the prose quality of a module-map description",
+        "Auto-generating the module map; the descriptions are hand-written and stay hand-written",
+        "Changing what `mix agents.check` does",
+        "Coverage thresholds of any kind — Task 127 owns that gate"
+      ],
+      "touches": [
+        "test/mpp/",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "mix.exs"
+      ],
+      "body": "The module map in CLAUDE.md (mirrored into AGENTS.md) drifts silently, and only an audit reading the diff by hand catches it. Two instances in one 15-commit range:\n\n- `MPP.Methods.EVM.Permit2` shipped in Task 39 and was not listed until 827887b, a standalone docs commit filed days later.\n- bf1381c, while adding the two new EVM modules, dropped `MPP.Methods.Tempo.ProofSignature` from the `@moduledoc false` internals paragraph even though `lib/mpp/methods/tempo/proof_signature.ex` still exists. The audit of f02524c restored it.\n\nThe internals paragraph states its own purpose — \"listed so a gap-analysis pass doesn't re-file them as missing\" — so a silently-dropped entry actively misleads the next agent. Neither drift is visible to a per-task reviewer, who sees only the task's own diff. This is exactly the whole-surface class CLAUDE.md § \"Domain & Whole-Surface Defects Evade Per-Task Review\" says to turn into a CI failure rather than a convention.\n\n`mix agents.check` already proves CLAUDE.md and AGENTS.md agree with each other; nothing proves either agrees with `lib/`. Parse the fenced block after '### Module map' plus the following internals paragraph, expand the brace groups, and compare against the modules actually defined under `lib/` (walking the source for `defmodule` is enough and avoids depending on a compiled build).\n",
+      "created_at": "2026-09-17",
+      "scored_at": "2026-09-17",
+      "cross_repo": []
+    },
+    {
+      "id": "130",
+      "phase": 16,
+      "bundle": "additional-methods",
+      "status": "pending",
+      "title": "Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it",
+      "scores": {
+        "d": 3,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 1.33,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A decision is recorded in the delivery report and in a comment (in .gitignore if untracked, in the file's own frontmatter if tracked): either .cursor/rules/harness-operational.mdc is repo-owned and stays in git, or it is harness-owned, is removed from the index with `git rm --cached`, and is gitignored",
+        "If it stays tracked, something mechanical fails when it is missing — the simplest being an assertion folded into the existing `mix agents.check` step, since that task already grades agent-instruction files",
+        "If it becomes untracked, `git status` is clean in a freshly dispatched worktree with the file injected, and a plain `git clone` of the repo does not produce it",
+        "Either way, a delivery commit that drops the file can no longer land silently",
+        "mix ci passes"
+      ],
+      "out_of_scope": [
+        "Changing what the rule file says — its content is harness's, synced from harness/priv/includes",
+        "Changing how harness injects it; this task settles only what this repo does with the file it receives",
+        "The other agent-instruction files (.grok/config.toml, .cursor/mcp.json, AGENTS.md)"
+      ],
+      "touches": [
+        ".gitignore",
+        ".cursor/rules/harness-operational.mdc"
+      ],
+      "body": "`.cursor/rules/harness-operational.mdc` has now been deleted by an agent delivery commit three times and restored reactively three times: c395a35 (Task 125 reviewer fixes), b0fb662 (Task 126 delivery follow-up), and 04dbb37 (Task 86 delivery) — the last caught only by the f02524c audit, which restored it again. Each restore is a fix without a cause, so the fourth is already scheduled.\n\nThe file's own frontmatter says \"Harness operational rules injected at dispatch time\", which is in tension with it being checked into git: if harness writes it into every dispatched worktree, git tracking it adds nothing for dispatched agents and only creates a file that agents keep deleting. The counter-argument is that a non-harness Cursor session opening a plain clone gets no operational rules at all.\n\nPick one and make it mechanical. If tracked: a presence assertion belongs next to `agents.check`, which already exists to keep cross-family agent instructions honest. If untracked: `git rm --cached` plus a `.gitignore` entry, with a comment saying harness owns the file, so the deletion can never appear in a diff again.\n\nCheck with the harness checkout (`harness/priv/includes/harness-workflow.md`, `harness/scripts/sync-harness-skills.sh`) whether harness expects the file to be repo-tracked before choosing; say in the delivery what you found.\n",
+      "created_at": "2026-09-17",
+      "scored_at": "2026-09-17",
+      "cross_repo": []
     }
   ]
 }
