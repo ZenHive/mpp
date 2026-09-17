@@ -142,6 +142,8 @@ defmodule MPP.Methods.EVM.TransactionTest do
   end
 
   describe "validate/2" do
+    setup %{charge: charge}, do: {:ok, charge: enable(charge)}
+
     test "accepts a signed EIP-1559 transfer matching the charge", %{signed: signed, charge: charge} do
       assert {:ok, prepared} = Transaction.validate(signed.payload, charge)
       assert prepared.hash == signed.hash
@@ -288,6 +290,36 @@ defmodule MPP.Methods.EVM.TransactionTest do
   end
 
   describe "verify/2" do
+    setup %{charge: charge}, do: {:ok, charge: enable(charge)}
+
+    test "rejects an unoffered valid transfer without any RPC calls", %{signed: signed, charge: charge} do
+      assert {:ok, _prepared} = Transaction.validate(signed.payload, charge)
+      caller = self()
+
+      Req.Test.stub(EVM, fn conn ->
+        {method, id, conn} = read_request(conn)
+        send(caller, {:rpc_call, method})
+        rpc_json(conn, id, "result", nil)
+      end)
+
+      disabled_configs = [
+        Map.delete(charge.method_details, "transaction"),
+        nil
+        | Enum.map([false, nil, "true", 1], &Map.put(charge.method_details, "transaction", &1))
+      ]
+
+      for config <- disabled_configs do
+        unoffered = %{charge | method_details: config}
+        refute "transaction" in EVM.challenge_method_details(unoffered)["credentialTypes"]
+
+        assert {:error, %Errors{} = error} = EVM.verify(signed.payload, unoffered)
+        assert error.type =~ "verification-failed"
+        assert error.detail == "EVM transaction credential type was not offered"
+        assert Transaction.validate(signed.payload, unoffered) == {:error, error}
+        refute_received {:rpc_call, _method}
+      end
+    end
+
     test "broadcasts a valid transfer, requires the Transfer log, and records the hash", %{
       signed: signed,
       charge: charge

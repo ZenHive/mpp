@@ -9,12 +9,12 @@ defmodule MPP.Methods.EVM.Transaction do
   then broadcasts via `eth_sendRawTransaction`. Settlement still requires the
   ERC-20 `Transfer` log, not only receipt status.
 
-  Advertise this path by setting `"transaction" => true` in method_config. The
-  flag gates **advertisement** only — verification still accepts a well-formed
-  `type="transaction"` credential without it, matching the draft's negotiation
-  default ("if omitted, servers MUST accept `transaction`",
-  draft-evm-charge-00.md:305). Native ETH and split charges never advertise it
-  and always reject it.
+  Enable acceptance and advertisement by setting `"transaction" => true` in
+  method_config. Per `draft-evm-charge-00` § Credential Type Negotiation, the
+  MUST-accept default applies only when `credentialTypes` is omitted. EVM
+  challenges always populate that list, so an unoffered transaction credential
+  is rejected before decoding or RPC calls. Native ETH and split charges never
+  advertise it and always reject it.
   """
 
   alias Cartouche.Hash
@@ -53,7 +53,8 @@ defmodule MPP.Methods.EVM.Transaction do
   def validate(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- reject_splits(config),
+    with :ok <- require_enabled(config),
+         :ok <- reject_splits(config),
          :ok <- reject_native(charge),
          {:ok, bytes} <- decode_signature(payload),
          {:ok, tx} <- decode_eip1559(bytes),
@@ -83,6 +84,12 @@ defmodule MPP.Methods.EVM.Transaction do
          :ok <- await_receipt(sent, rpc_opts, deadline(config)) do
       {:ok, sent}
     end
+  end
+
+  defp require_enabled(%{"transaction" => true}), do: :ok
+
+  defp require_enabled(_config) do
+    {:error, Errors.new(:verification_failed, "EVM transaction credential type was not offered")}
   end
 
   defp decode_signature(%{"signature" => value}) when is_binary(value) do
