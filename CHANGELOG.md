@@ -50,6 +50,12 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- Keccak hashing uses `Cartouche.Hash` and its Rust-backed `ex_keccak` NIF,
+  replacing direct `ex_sha3` calls. Supported platforms use precompiled
+  binaries downloaded at build time; no Rust installation is needed. Offline
+  builds need a cached binary; source builds require Rust/Cargo and Rustler.
+  MPP's public API and payment wire formats are unchanged. See
+  [native hashing dependency](README.md#native-hashing-dependency) for setup.
 - MCP error codes follow `draft-payment-transport-mcp-00` § 10.1: malformed
   credentials and invalid payloads map to `-32602`, the new
   `:internal_payment_error` problem maps to `-32603`, `payment-required` and

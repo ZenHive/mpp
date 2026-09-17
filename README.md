@@ -467,6 +467,20 @@ end
 
 `onchain`, `onchain_tempo`, and `con_cache` are pulled in automatically — no extra setup for EVM, Tempo, or the built-in `MPP.Tempo.ConCacheStore` dedup store.
 
+### Native hashing dependency
+
+Keccak hashing uses `Cartouche.Hash`, backed by the Rust-based `ex_keccak` NIF.
+On supported platforms, the build downloads a precompiled binary from GitHub;
+you do not need Rust or Cargo installed. Offline builds need the matching
+binary cached in advance (Rustler Precompiled supports
+`RUSTLER_PRECOMPILED_GLOBAL_CACHE_PATH`).
+
+For targets without a precompiled binary, or to build from source, install
+Rust/Cargo and add `:rustler` to your application's dependencies, then set
+`config :rustler_precompiled, :force_build, ex_keccak: true`. See the
+[ex_keccak build instructions](https://hexdocs.pm/ex_keccak/0.7.8/ExKeccak.html#module-force-compilation).
+This dependency change does not alter MPP's public API or payment wire formats.
+
 ## Live Example
 
 [Strip0x](https://strip0x.com) — blockchain tools API using MPP with Tempo payments. $0.0001 per paid request (100 base units USDC.e on Tempo mainnet).
