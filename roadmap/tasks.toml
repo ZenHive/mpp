@@ -3485,7 +3485,7 @@ shipped_in = "b0fb662e889d2e415d3da9e3f265c33aca455317"
 id = "127"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module"
 scores = { d = 5, b = 7, u = 6 }
 depends_on = [126]
@@ -3506,6 +3506,7 @@ Measured on main at f300bb0 (cold `mix ci`, 2026-09-16): aggregate 95.98%, thres
 Report the before/after per-module percentages for the two modules you raise, and paste the gate's failure output for a deliberately-lowered module to show the check actually fires.
 """
 created_at = "2026-09-16"
+started_at = "2026-09-17"
 scored_at = "2026-09-16"
 
 [[task]]
