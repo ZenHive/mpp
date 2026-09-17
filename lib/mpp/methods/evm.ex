@@ -44,9 +44,11 @@ defmodule MPP.Methods.EVM do
     * `"private_key"` — (required for `type="authorization"` and `type="permit2"`)
       server-only secp256k1 key used to submit settlement (pays gas)
     * `"permit2"` — (optional) `true` to advertise and settle `type="permit2"`
-    * `"transaction"` — (optional) `true` to advertise `type="transaction"` for
-      ERC-20 charges without splits. The client signs an EIP-1559 transfer and
-      the server broadcasts it; the client pays gas
+    * `"transaction"` — (optional) `true` to accept and advertise `type="transaction"`
+      for ERC-20 charges without splits. The client signs an EIP-1559 transfer and
+      the server broadcasts it; the client pays gas. Without the flag, the type is
+      rejected: EVM challenges always populate `credentialTypes`, so the draft's
+      omitted-list MUST-accept default does not apply
     * `"splits"` — (optional) ordered extra `%{"recipient" => ..., "amount" => ...}`
       legs; advertised and settled only via Permit2. Sum must be strictly less
       than the charge amount (primary recipient gets the remainder)
@@ -86,8 +88,8 @@ defmodule MPP.Methods.EVM do
       hash. The server fetches the receipt and matches `token`/`to`/`amount`.
     * `type="transaction"` — client-signed EIP-1559 ERC-20 `transfer`. The
       server validates chain, token, recipient, amount, and challenge expiry,
-      then broadcasts. Advertised only when `"transaction" => true` and the
-      charge is an ERC-20 without splits. Splits are rejected.
+      then broadcasts. Accepted and advertised only when `"transaction" => true`
+      and the charge is an ERC-20 without splits. Splits are rejected.
     * `type="authorization"` — EIP-3009 `transferWithAuthorization` for tokens
       that implement it (Circle USDC/EURC). The client signs off-chain; the
       server submits the authorization and pays gas. The EIP-3009 nonce MUST be
