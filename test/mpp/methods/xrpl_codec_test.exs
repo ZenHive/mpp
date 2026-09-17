@@ -82,6 +82,44 @@ defmodule MPP.Methods.XRPL.CodecTest do
     assert {:error, :malformed_blob} = Codec.decode("120000011202")
   end
 
+  test "decode_seed rejects a classic address that is not a family seed" do
+    account = hd(@vectors)["decoded"]["Account"]
+    assert byte_size(account) in 25..40
+    assert :error = Codec.decode_seed(account)
+  end
+
+  test "encode_account rejects an AccountID that is not 20 bytes" do
+    assert :error = Codec.encode_account(<<>>)
+    assert :error = Codec.encode_account(<<1, 2, 3>>)
+  end
+
+  test "decode rejects objects nested beyond the depth bound" do
+    # Four nested type-14 (Memo) objects: the fourth call is depth 4, which the
+    # bounded object decoder rejects rather than recursing.
+    assert {:error, :malformed_blob} = Codec.decode("120000EAEAEAEA")
+  end
+
+  test "encode_claim rejects a Sequence that does not fit in a uint32" do
+    assert :error =
+             Codec.encode_claim(%{
+               "TransactionType" => "PaymentChannelClaim",
+               "Sequence" => 0x1_0000_0000
+             })
+  end
+
+  test "encode_claim accepts a 0X-prefixed Channel hash" do
+    channel = "7A4178B01DC1B19665745CC5720C1A8198678A3C0048844E86998F35A470D2AE"
+
+    assert {:ok, blob} =
+             Codec.encode_claim(%{
+               "TransactionType" => "PaymentChannelClaim",
+               "Channel" => "0X" <> channel
+             })
+
+    assert {:ok, decoded} = Codec.decode_claim(blob)
+    assert decoded["Channel"] == channel
+  end
+
   defp normalize(map) when is_map(map) do
     Map.new(map, fn
       {"Paths", _} -> {"Paths", :paths}

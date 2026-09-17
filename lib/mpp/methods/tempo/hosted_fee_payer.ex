@@ -77,6 +77,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     end
   end
 
+  # Field-count is already gated by validate_field_count/1; the catch-all
+  # that used to live here was unreachable.
   defp maybe_put_key_authorization(request, fields) do
     case length(fields) do
       @signed_field_count ->
@@ -90,9 +92,6 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
           _ ->
             {:error, "hosted fee payer transaction has malformed key_authorization field"}
         end
-
-      count ->
-        {:error, "#{@unexpected_field_count_detail} (#{count})"}
     end
   end
 
@@ -217,11 +216,15 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   defp decode_quantity("0x" <> hex) do
     hex = if rem(byte_size(hex), 2) == 1, do: "0" <> hex, else: hex
 
-    case Base.decode16(hex, case: :mixed) do
-      {:ok, bin} -> {:ok, :binary.decode_unsigned(bin)}
-      :error -> {:error, :invalid}
+    case hex do
+      "" ->
+        {:ok, 0}
+
+      _ ->
+        case Base.decode16(hex, case: :mixed) do
+          {:ok, bin} -> {:ok, :binary.decode_unsigned(bin)}
+          :error -> {:error, :invalid}
+        end
     end
   end
-
-  defp decode_quantity("0x"), do: {:ok, 0}
 end

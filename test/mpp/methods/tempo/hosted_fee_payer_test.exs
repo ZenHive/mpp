@@ -294,6 +294,85 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     assert {:ok, %{"calls" => [%{"value" => "0x0"}]}} = HostedFeePayer.build_fill_request(tx)
   end
 
+  test "build_fill_request hex-encodes a non-empty key_authorization on 15-field envelopes" do
+    auth = <<0x01, 0x02, 0x03>>
+    calldata = transfer_calldata(@recipient, 1_000_000)
+
+    tx_hex =
+      build_tempo_tx(
+        calls: [build_call(@token_address, calldata)],
+        chain_id: 42_431,
+        fee_payer: true,
+        key_authorization: auth
+      )
+
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    assert length(tx.fields) == EnvelopeFields.signed_with_key_auth_field_count()
+    assert {:ok, request} = HostedFeePayer.build_fill_request(tx)
+    assert request["keyAuthorization"] == "0x" <> Base.encode16(auth, case: :lower)
+  end
+
+  test "build_fill_request treats a non-binary quantity field as zero" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    tx = %{tx | fields: List.replace_at(tx.fields, EnvelopeFields.nonce(), 0)}
+
+    assert {:ok, request} = HostedFeePayer.build_fill_request(tx)
+    assert request["nonce"] == "0x0"
+  end
+
+  test "fill rejects a feePayerSignature that has neither yParity nor v" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+
+    Req.Test.stub(Tempo, fn conn ->
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "result" => %{
+          "tx" => %{
+            "feeToken" => @token_address,
+            "feePayerSignature" => %{"r" => "0x1", "s" => "0x2"}
+          }
+        },
+        "id" => 1
+      })
+    end)
+
+    assert {:error, "hosted fee payer returned an invalid feePayerSignature"} =
+             HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
+  end
+
+  test "fill accepts a raw 0/1 recovery id in v when yParity is absent" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+
+    fill_tx =
+      tx
+      |> hosted_fill_response()
+      |> update_in(["feePayerSignature"], &Map.delete(&1, "yParity"))
+      |> put_in(["feePayerSignature", "v"], "0x1")
+
+    Req.Test.stub(Tempo, fn conn ->
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+    end)
+
+    assert {:ok, filled} = HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
+    assert filled.raw != tx.raw
+  end
+
+  test "fill treats an empty 0x quantity as zero" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    fill_tx = put_in(hosted_fill_response(tx), ["feePayerSignature", "r"], "0x")
+
+    Req.Test.stub(Tempo, fn conn ->
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+    end)
+
+    assert {:ok, filled} = HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
+    assert filled.raw != tx.raw
+  end
+
   test "build_fill_request includes optional gas and validity fields" do
     calldata = transfer_calldata(@recipient, 1_000_000)
 

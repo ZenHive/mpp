@@ -46,8 +46,9 @@ defmodule MPP.Methods.XRPL.Wallet do
   defp derive(:secp256k1, entropy) do
     with private_gen when is_integer(private_gen) <- derive_scalar(entropy),
          {:ok, public_gen} <- compressed_pubkey(private_gen),
-         scalar when is_integer(scalar) <- derive_scalar(public_gen, 0) do
-      finish_secp(rem(scalar + private_gen, @n))
+         scalar when is_integer(scalar) <- derive_scalar(public_gen, 0),
+         private when is_integer(private) and private > 0 <- rem(scalar + private_gen, @n) do
+      finish_secp(private)
     else
       _ -> :error
     end
@@ -60,8 +61,6 @@ defmodule MPP.Methods.XRPL.Wallet do
       finish(:secp256k1, private_key, public)
     end
   end
-
-  defp finish_secp(_private), do: :error
 
   defp finish(algorithm, private_key, public) do
     with {:ok, address} <- Codec.encode_account(account_id(public)) do
@@ -78,27 +77,23 @@ defmodule MPP.Methods.XRPL.Wallet do
   defp sign(%{algorithm: :ed25519, private_key: private_key}, data) do
     {:ok, Base.encode16(:crypto.sign(:eddsa, :none, data, [private_key, :ed25519]))}
   rescue
-    _error in [ArgumentError, ErlangError] -> :error
+    _error in [ArgumentError, ErlangError, FunctionClauseError] -> :error
   end
 
   defp sign(%{algorithm: :secp256k1, private_key: private_key}, data) do
     digest = RPC.sha512_half(data)
     {:ok, Base.encode16(Curvy.sign(digest, private_key, hash: false, normalize: true))}
   rescue
-    _error in [ArgumentError, ErlangError] -> :error
+    _error in [ArgumentError, ErlangError, FunctionClauseError] -> :error
   end
 
   defp compressed_pubkey(scalar) when is_integer(scalar) and scalar > 0 do
     {:ok, Key.to_pubkey(Key.from_privkey(<<scalar::unsigned-256>>))}
   rescue
-    _error in [ArgumentError, ErlangError] -> :error
+    _error in [ArgumentError, ErlangError, FunctionClauseError] -> :error
   end
 
-  defp compressed_pubkey(_scalar), do: :error
-
   defp derive_scalar(bytes, discrim \\ nil), do: derive_scalar(bytes, discrim, 0)
-
-  defp derive_scalar(_bytes, _discrim, seq) when seq > 0xFFFFFFFF, do: :error
 
   defp derive_scalar(bytes, discrim, seq) do
     <<n::unsigned-256>> = RPC.sha512_half(bytes <> discrim_bytes(discrim) <> <<seq::unsigned-32>>)
