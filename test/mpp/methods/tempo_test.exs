@@ -2443,10 +2443,10 @@ defmodule MPP.Methods.TempoTest do
   end
 
   defp attribution_memo(realm, challenge_id) do
-    tag = binary_part(ExSha3.keccak_256("mpp"), 0, 4)
-    server = binary_part(ExSha3.keccak_256(realm), 0, 10)
+    tag = binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
+    server = binary_part(Cartouche.Hash.keccak(realm), 0, 10)
     client = <<0::80>>
-    nonce = binary_part(ExSha3.keccak_256(challenge_id), 0, 7)
+    nonce = binary_part(Cartouche.Hash.keccak(challenge_id), 0, 7)
 
     "0x" <> Base.encode16(tag <> <<1>> <> server <> client <> nonce, case: :lower)
   end

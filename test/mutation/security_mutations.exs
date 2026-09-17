@@ -195,7 +195,7 @@ defmodule MPP.Test.SecurityMutations do
             canonical_fields = canonicalize_fields(fields)
             binary = <<0x76>> <> ExRLP.encode(canonical_fields)
             hex = "0x" <> Base.encode16(binary, case: :lower)
-            hash = "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+            hash = "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
             {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
         """,
         """

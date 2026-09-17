@@ -178,7 +178,7 @@ defmodule MPP.Methods.Tempo do
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
   @attribution_memo_length 32
-  @attribution_tag binary_part(ExSha3.keccak_256("mpp"), 0, 4)
+  @attribution_tag binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
   @attribution_version 1
   @attribution_server_fingerprint_length 10
   @attribution_client_fingerprint_length 10
@@ -1341,13 +1341,13 @@ defmodule MPP.Methods.Tempo do
     canonical_fields = canonicalize_fields(fields)
     binary = <<0x76>> <> ExRLP.encode(canonical_fields)
     hex = "0x" <> Base.encode16(binary, case: :lower)
-    hash = "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+    hash = "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
     {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
   end
 
   defp transaction_hash(%Transaction{raw: raw}) when is_binary(raw) do
     {:ok, binary} = Base.decode16(Hex.strip_0x(raw), case: :mixed)
-    "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+    "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
   end
 
   defp canonicalize_fields(fields) do
@@ -1735,8 +1735,8 @@ defmodule MPP.Methods.Tempo do
   defp attribution_memo_bound?(memo, realm, challenge_id) do
     with {:ok, bytes} <- decode_memo(memo),
          {:ok, server, nonce} <- decode_attribution_parts(bytes) do
-      server == binary_part(ExSha3.keccak_256(realm), 0, @attribution_server_fingerprint_length) and
-        nonce == binary_part(ExSha3.keccak_256(challenge_id), 0, @attribution_nonce_length)
+      server == binary_part(Cartouche.Hash.keccak(realm), 0, @attribution_server_fingerprint_length) and
+        nonce == binary_part(Cartouche.Hash.keccak(challenge_id), 0, @attribution_nonce_length)
     else
       _ -> false
     end

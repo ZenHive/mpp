@@ -37,7 +37,7 @@ defmodule MPP.Methods.Tempo.MachineToken do
 
   # keccak256("swapTo(address,uint256,address,address,bytes32)")[:4]
   # Live Moderato calldata starts 0x34189fed (tx 0x6b1cdd67…c2f0).
-  @swap_to_selector binary_part(ExSha3.keccak_256("swapTo(address,uint256,address,address,bytes32)"), 0, 4)
+  @swap_to_selector binary_part(Cartouche.Hash.keccak("swapTo(address,uint256,address,address,bytes32)"), 0, 4)
 
   @type call :: %{to: binary(), value: non_neg_integer(), input: binary()}
 

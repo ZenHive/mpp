@@ -1709,10 +1709,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   defp attribution_memo(challenge) do
-    tag = binary_part(ExSha3.keccak_256("mpp"), 0, 4)
-    server = binary_part(ExSha3.keccak_256(challenge.realm), 0, @attribution_server_fingerprint_length)
+    tag = binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
+    server = binary_part(Cartouche.Hash.keccak(challenge.realm), 0, @attribution_server_fingerprint_length)
     client = <<0::size(@attribution_client_fingerprint_length * 8)>>
-    nonce = binary_part(ExSha3.keccak_256(challenge.id), 0, @attribution_nonce_length)
+    nonce = binary_part(Cartouche.Hash.keccak(challenge.id), 0, @attribution_nonce_length)
 
     "0x" <> Base.encode16(tag <> <<@attribution_memo_version>> <> server <> client <> nonce, case: :lower)
   end

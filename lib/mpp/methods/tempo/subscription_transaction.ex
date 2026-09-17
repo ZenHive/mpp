@@ -227,7 +227,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   defp fee_payer_enabled?(%{"fee_payer_url" => url}) when is_binary(url), do: true
   defp fee_payer_enabled?(_config), do: false
 
-  defp attribution_memo(reference), do: ExSha3.keccak_256("mpp-subscription|" <> reference)
+  defp attribution_memo(reference), do: Hash.keccak("mpp-subscription|" <> reference)
 
   defp encode_transaction(fields), do: hex(<<@tempo_transaction_type>> <> ExRLP.encode(fields))
   defp encode_uint(0), do: <<>>

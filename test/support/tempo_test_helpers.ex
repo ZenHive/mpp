@@ -174,7 +174,7 @@ defmodule MPP.Test.TempoTestHelpers do
   @doc "keccak256 of a hex payload as a 0x-prefixed hex string."
   def keccak256_hex(hex) when is_binary(hex) do
     {:ok, binary} = Base.decode16(strip_0x(hex), case: :mixed)
-    "0x" <> Base.encode16(ExSha3.keccak_256(binary), case: :lower)
+    "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
   end
 
   @doc "Re-encode a 0x76 envelope with nonce as `<<0>>` instead of RLP empty (same integer zero)."

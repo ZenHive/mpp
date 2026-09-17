@@ -231,18 +231,18 @@ defmodule MPP.Client.Providers.Tempo do
   defp payment_memo(challenge, _details, client_id) do
     client =
       if is_binary(client_id) and client_id != "",
-        do: binary_part(ExSha3.keccak_256(client_id), 0, @client_fingerprint_bytes),
+        do: binary_part(Cartouche.Hash.keccak(client_id), 0, @client_fingerprint_bytes),
         else: <<0::size(@client_fingerprint_bytes * @bits_per_byte)>>
 
     {:ok,
-     binary_part(ExSha3.keccak_256("mpp"), 0, @tag_bytes) <>
+     binary_part(Cartouche.Hash.keccak("mpp"), 0, @tag_bytes) <>
        <<@attribution_version>> <>
        fingerprint(challenge.realm) <>
        client <>
-       binary_part(ExSha3.keccak_256(challenge.id), 0, @challenge_nonce_bytes)}
+       binary_part(Cartouche.Hash.keccak(challenge.id), 0, @challenge_nonce_bytes)}
   end
 
-  defp fingerprint(value), do: binary_part(ExSha3.keccak_256(value), 0, @server_fingerprint_bytes)
+  defp fingerprint(value), do: binary_part(Cartouche.Hash.keccak(value), 0, @server_fingerprint_bytes)
 
   defp decode_memo("0x" <> hex), do: decode_memo(hex)
 
