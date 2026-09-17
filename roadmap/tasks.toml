@@ -3575,7 +3575,7 @@ scored_at = "2026-09-17"
 id = "130"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "done"
 title = "Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it"
 scores = { d = 3, b = 4, u = 4 }
 acceptance_criteria = ["A decision is recorded in the delivery report and in a comment (in .gitignore if untracked, in the file's own frontmatter if tracked): either .cursor/rules/harness-operational.mdc is repo-owned and stays in git, or it is harness-owned, is removed from the index with `git rm --cached`, and is gitignored", "If it stays tracked, something mechanical fails when it is missing — the simplest being an assertion folded into the existing `mix agents.check` step, since that task already grades agent-instruction files", "If it becomes untracked, `git status` is clean in a freshly dispatched worktree with the file injected, and a plain `git clone` of the repo does not produce it", "Either way, a delivery commit that drops the file can no longer land silently", "mix ci passes"]
@@ -3592,5 +3592,8 @@ Pick one and make it mechanical. If tracked: a presence assertion belongs next t
 
 Check with the harness checkout (`harness/priv/includes/harness-workflow.md`, `harness/scripts/sync-harness-skills.sh`) whether harness expects the file to be repo-tracked before choosing; say in the delivery what you found.
 """
+implemented = "Harness-owned: .cursor/rules/harness-operational.mdc is injected per dispatch and removed before staging, so it was untracked (git rm --cached) and gitignored with the decision recorded in .gitignore; a plain clone no longer carries it and delivery commits stop deleting it."
 created_at = "2026-09-17"
 scored_at = "2026-09-17"
+done_at = "2026-09-17"
+shipped_in = "eec93c019faf33ac7fdd9811a05bcda74c69eb9e"
