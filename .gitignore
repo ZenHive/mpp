@@ -51,3 +51,8 @@ mpp-*.tar
 
 # Playwright MCP session dumps
 .playwright-mcp/
+
+# Harness-owned: injected into every dispatched worktree at dispatch time and
+# removed again before staging, so tracking it only makes delivery commits
+# delete it (Task 130). A plain clone gets no operational rules by design.
+/.cursor/rules/harness-operational.mdc

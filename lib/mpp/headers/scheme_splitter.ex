@@ -80,8 +80,12 @@ defmodule MPP.Headers.SchemeSplitter do
     do: find_boundaries(rest, pos + 1, false, false, acc)
 
   # Extracts a scheme token (RFC 9110: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ))
-  # followed by at least one whitespace character. Returns {:ok, token, total_len}
-  # where total_len includes the token + first whitespace char.
+  # followed by at least one whitespace character, or by the end of the header
+  # (a bare `auth-scheme` with no params is a valid challenge, so a trailing
+  # `, Basic` ends the previous segment instead of corrupting its auth-params;
+  # mppx's auth-param parser stops at the same token). Returns
+  # {:ok, token, total_len} where total_len includes the token + the first
+  # whitespace char when one follows.
   defp extract_scheme_token(bin), do: extract_scheme_token(bin, 0)
 
   defp extract_scheme_token(bin, len) when len < byte_size(bin) do
@@ -99,6 +103,7 @@ defmodule MPP.Headers.SchemeSplitter do
     end
   end
 
+  defp extract_scheme_token(bin, len) when len > 0 and len == byte_size(bin), do: {:ok, bin, len}
   defp extract_scheme_token(_bin, _len), do: :not_scheme
 
   # Checks if the scheme token at `pos` is exactly "Payment" (case-insensitive).

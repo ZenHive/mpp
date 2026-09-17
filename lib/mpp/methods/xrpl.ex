@@ -108,7 +108,7 @@ defmodule MPP.Methods.XRPL do
          :ok <- network(config),
          {:ok, hash} <- submit(prepared, config),
          :ok <- unused(config, "tx:" <> hash),
-         {:ok, result} <- await_transaction(hash, config),
+         {:ok, result} <- await_transaction(hash, prepared, config),
          :ok <- settled(result, hash, charge, config),
          :ok <- transaction_age(result, config),
          :ok <- freshness(config),
@@ -172,8 +172,11 @@ defmodule MPP.Methods.XRPL do
     end
   end
 
-  defp await_transaction(hash, config) do
-    case RPC.await_validated(hash, config) do
+  # A blob this server just broadcast is known to exist, so it may take the
+  # full poll deadline to propagate; a caller-supplied hash keeps the bounded
+  # `txnNotFound` budget (RPC.await_validated/3).
+  defp await_transaction(hash, prepared, config) do
+    case RPC.await_validated(hash, config, submitted: match?({:blob, _}, prepared)) do
       {:ok, result} -> {:ok, result}
       :error -> failed()
     end

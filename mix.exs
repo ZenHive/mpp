@@ -211,10 +211,11 @@ defmodule MPP.MixProject do
         # preferred_envs (cli/0) is ignored for alias steps — set MIX_ENV via `env`
         # (Elixir 1.20's `mix cmd` no longer parses a leading VAR=val prefix).
         "cmd env MIX_ENV=test mix test.json --quiet --cover --cover-threshold 95 --exclude integration --exclude cross_validation --output _build/test/cover.json",
-        # Per-module floor for lib/mpp/methods/. Reads the JSON the test.json
-        # step just wrote — no second suite run. An aggregate 95% pass can
-        # still hide a 70% money-verification module (f300bb0 / Task 127).
-        "mpp.cover.methods",
+        # Per-module floor for the money-critical tier (payment methods plus the
+        # verification core). Reads the JSON the test.json step just wrote — no
+        # second suite run. An aggregate 95% pass can still hide a 70%
+        # money-verification module (f300bb0 / Task 127).
+        "mpp.cover.critical",
         # --skip honors inline # sobelow_skip annotations (MPP is Plug-facing).
         "sobelow --skip --exit low"
       ],

@@ -421,6 +421,25 @@ defmodule MPP.Methods.XRPLTest do
     refute_received {:rpc, "tx"}
   end
 
+  test "an unrecognised tx response fails closed instead of polling", context do
+    stub(context, %{"error" => "noPermission"})
+    assert_error(XRPL.verify(payload("hash"), context.charge), :verification_failed)
+    assert_received {:rpc, "tx"}
+    refute_received {:rpc, "tx"}
+  end
+
+  test "a transaction this server submitted may take the full deadline to appear", context do
+    counter = start_supervised!({Agent, fn -> 0 end})
+
+    # Three misses would exhaust the caller-supplied hash budget above; a
+    # server-submitted transaction is known to exist, so it keeps polling.
+    stub(context, fn ->
+      if Agent.get_and_update(counter, &{&1, &1 + 1}) < 3, do: %{"error" => "txnNotFound"}, else: @ledger
+    end)
+
+    assert {:ok, _} = XRPL.verify(payload("transaction"), context.charge)
+  end
+
   test "unvalidated ledger cannot produce a receipt, but subsequent validation can", context do
     stub(context, Map.put(@ledger, "validated", false))
     assert_error(XRPL.verify(payload("hash"), config_charge(context, %{"poll_timeout_ms" => 1})), :verification_failed)

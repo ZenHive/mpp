@@ -18,6 +18,27 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
     assert {:ok, {:secp256k1, _}} = SignatureEnvelope.deserialize(sig_hex)
   end
 
+  test "rejects secp256k1 envelopes whose scalars or recovery id are out of range" do
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+    hex = fn r, s, v -> "0x" <> Base.encode16(<<r::unsigned-256, s::unsigned-256, v::8>>, case: :lower) end
+
+    # r = 0 / s = 0 crashed recovery with a FunctionClauseError and v outside
+    # 27..30 with a RuntimeError before decoding rejected them.
+    for {r, s, v} <- [{0, 1, 27}, {1, 0, 28}, {n, 1, 27}, {1, n, 27}, {1, 1, 26}, {1, 1, 31}, {1, 1, 0}] do
+      assert {:error, "invalid proof signature"} = SignatureEnvelope.deserialize(hex.(r, s, v))
+    end
+
+    assert {:ok, {:secp256k1, _}} = SignatureEnvelope.deserialize(hex.(1, n - 1, 30))
+  end
+
+  test "recovery fails closed when the library raises on an unusable signature" do
+    unusable = {:secp256k1, %Elixir.Curvy.Signature{crv: :secp256k1, r: 0, s: 0, recid: 0}}
+    zero = "0x" <> String.duplicate("0", 40)
+
+    refute SignatureEnvelope.verify_secp256k1(unusable, @digest_a, zero)
+    assert {:error, "proof signature recovery failed"} = SignatureEnvelope.extract_address(unusable, @digest_a)
+  end
+
   test "deserializes keychain v1 and v2 envelopes" do
     {:ok, root_address} = Curvy.get_address(@root_private_key)
     {:ok, access_address} = Curvy.get_address(@access_private_key)

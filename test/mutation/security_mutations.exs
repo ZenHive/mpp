@@ -114,6 +114,15 @@ defmodule MPP.Test.SecurityMutations do
         false
       ),
       mutation(
+        "evm-transaction-opt-in-bypassed",
+        "evm-transaction-acceptance-gate",
+        "lib/mpp/methods/evm/transaction.ex",
+        ~s|  defp require_enabled(%{"transaction" => true}), do: :ok\n|,
+        ~s|  defp require_enabled(%{"transaction" => _}), do: :ok\n|,
+        ["test/mpp/methods/evm/transaction_test.exs"],
+        false
+      ),
+      mutation(
         "tempo-amount-match-bypassed",
         "tempo-amount-authorization",
         "lib/mpp/methods/tempo.ex",

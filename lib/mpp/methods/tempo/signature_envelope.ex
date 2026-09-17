@@ -87,26 +87,29 @@ defmodule MPP.Methods.Tempo.SignatureEnvelope do
 
   defp split_user_and_inner(_), do: {:error, "invalid keychain signature"}
 
-  defp decode_secp256k1(bytes) do
-    <<r::binary-size(32), s::binary-size(32), v::8>> = bytes
-    recid = v - 27
+  # secp256k1 group order. A well-formed ECDSA signature has 1 <= r, s < n and
+  # a recovery id in 0..3 (v in 27..30). Anything else is rejected here, before
+  # the recovery library sees a signature it cannot use: it reports those by
+  # raising, not by returning an error, and not always as an `ArgumentError`.
+  @secp256k1_n 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+  @max_scalar @secp256k1_n - 1
 
-    {:ok,
-     {:secp256k1,
-      %CurvySignature{
-        crv: :secp256k1,
-        r: :binary.decode_unsigned(r),
-        s: :binary.decode_unsigned(s),
-        recid: recid
-      }}}
+  defp decode_secp256k1(<<r::unsigned-256, s::unsigned-256, v::8>>)
+       when v in 27..30 and r in 1..@max_scalar and s in 1..@max_scalar do
+    {:ok, {:secp256k1, %CurvySignature{crv: :secp256k1, r: r, s: s, recid: v - 27}}}
   end
+
+  defp decode_secp256k1(_bytes), do: {:error, "invalid proof signature"}
 
   defp recover_address(payload, %CurvySignature{recid: recid} = signature)
        when is_binary(payload) and is_integer(recid) do
     addr = Recover.recover_eth_from_digest(payload, signature)
     {:ok, to_hex(addr)}
   rescue
-    ArgumentError -> {:error, "proof signature recovery failed"}
+    # Decoding already rejects out-of-range scalars; this is the fail-closed
+    # backstop for whatever else the recovery library raises on a signature it
+    # cannot use, so a malformed credential answers 401, never 500.
+    _error in [ArgumentError, FunctionClauseError, RuntimeError] -> {:error, "proof signature recovery failed"}
   end
 
   defp strip_magic(bytes) do

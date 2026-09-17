@@ -538,6 +538,25 @@ defmodule MPP.HeadersTest do
       assert p2.realm == "second.com"
     end
 
+    test "an escaped quote inside a quoted value does not end the challenge" do
+      c2 = make_challenge(realm: "second.com")
+
+      header =
+        ~s(Payment id="x", realm="a\\"b, c", method="m", intent="charge", request="eyJhIjoxfQ", ) <>
+          Headers.format_challenge(c2)
+
+      assert {:ok, [p1, p2]} = Headers.parse_challenges(header)
+      assert p1.realm == ~s(a"b, c)
+      assert p2.realm == "second.com"
+    end
+
+    test "a trailing bare scheme token is ignored" do
+      challenge = make_challenge(realm: "only.com")
+      header = Headers.format_challenge(challenge) <> ", Basic"
+      assert {:ok, [parsed]} = Headers.parse_challenges(header)
+      assert parsed.realm == "only.com"
+    end
+
     test "case-insensitive scheme matching" do
       c1 = make_challenge(realm: "upper.com")
       c2 = make_challenge(realm: "lower.com")

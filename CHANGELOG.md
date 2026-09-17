@@ -10,6 +10,33 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- Payment-security mutant `evm-transaction-opt-in-bypassed`: the campaign now
+  proves the `type="transaction"` opt-in gate in `MPP.Methods.EVM.Transaction`
+  is test-covered.
+
+### Changed
+
+- `mix mpp.cover.critical` replaces `mix mpp.cover.methods` in `mix precommit`.
+  The per-module 95% floor now covers the whole money-critical tier
+  (`lib/mpp/methods/`, `lib/mpp/session/`, headers, verifier, challenge,
+  credential, replay, JCS, body digest), and the only exemption is a module
+  with at most 10 relevant lines (behaviour-sized) instead of any module with
+  at most two uncovered lines.
+
+### Fixed
+
+- `MPP.Methods.Tempo.SignatureEnvelope` fails closed on a malformed secp256k1
+  proof signature (out-of-range scalar or recovery id) with a verification
+  error instead of raising inside request handling.
+- `MPP.Methods.XRPL` lets a `type="transaction"` blob this server just
+  broadcast take the full poll deadline to appear, as the session path already
+  did; only caller-supplied hashes keep the bounded not-found budget.
+- `MPP.Headers.parse_challenges/1` tolerates a trailing bare auth scheme
+  (`…, Basic`) instead of rejecting the preceding `Payment` challenge,
+  matching mppx.
+
+### Added
+
 - `MPP.Methods.Stellar` — Stellar SEP-41 token charge verification
   (`draft-stellar-charge-00`). Pull credentials (`type="transaction"`) carry a
   base64 TransactionEnvelope XDR that the server submits; push credentials

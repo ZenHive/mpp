@@ -69,7 +69,7 @@
     "command": "mix mutation.security",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "seed": 0,
-    "fingerprint_sha256": "9500a5b91705c552bab73262970ba15e27092b2deeb401cf85ccaf57d01c0c77",
+    "fingerprint_sha256": "90a86b8a5bfaf3dfe55575a2a6b75e68657f0612d4fd1753c973c8db9cd69ede",
     "mutations": [
       {
         "id": "jcs-descending-key-order",
@@ -147,6 +147,13 @@
         "status": "killed",
         "evidence": "the EVM authorization test rejects a token/to/amount-matching Transfer from a different sender",
         "classification": "non-equivalent; accepts settlement from an address other than the EIP-3009 signer"
+      },
+      {
+        "id": "evm-transaction-opt-in-bypassed",
+        "class": "evm-transaction-acceptance-gate",
+        "status": "killed",
+        "evidence": "the unoffered-credential test rejects a well-formed transfer under \"transaction\" => false without any RPC call",
+        "classification": "non-equivalent; accepts a type=transaction credential the challenge did not offer"
       },
       {
         "id": "tempo-amount-match-bypassed",
