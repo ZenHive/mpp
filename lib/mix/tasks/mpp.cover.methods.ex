@@ -41,6 +41,8 @@ defmodule Mix.Tasks.Mpp.Cover.Methods do
           Mix.raise("mpp.cover.methods: cannot read #{path} (#{inspect(reason)})")
       end
 
+    IO.puts("[mpp.cover.methods] #{summary_line(document)} — suite JSON: #{path}")
+
     case evaluate(document) do
       :ok ->
         IO.puts(
@@ -75,6 +77,17 @@ defmodule Mix.Tasks.Mpp.Cover.Methods do
     {:error, "mpp.cover.methods: coverage JSON is missing coverage.modules"}
   end
 
+  # `test.json --output` writes the suite JSON to a file *instead of* stdout, so
+  # the gate log would otherwise carry no test or coverage summary at all. Echo
+  # the headline numbers and the path that holds the per-test failure detail.
+  defp summary_line(document) do
+    summary = Map.get(document, "summary", %{})
+    coverage = Map.get(document, "coverage", %{})
+
+    "#{Map.get(summary, "passed", 0)} passed, #{Map.get(summary, "failed", 0)} failed, " <>
+      "#{Map.get(summary, "excluded", 0)} excluded · aggregate #{Map.get(coverage, "total_percentage", 0)}%"
+  end
+
   defp decode_coverage!(json, path) do
     case Jason.decode(json) do
       {:ok, document} when is_map(document) ->
@@ -97,9 +110,14 @@ defmodule Mix.Tasks.Mpp.Cover.Methods do
     percentage(module) < @floor and over_uncovered_allowance?(module)
   end
 
-  defp over_uncovered_allowance?(module) do
-    module |> uncovered_lines() |> Enum.drop(@max_uncovered_lines) != []
+  # Fail closed on a malformed entry: an absent `uncovered_lines` key means the
+  # coverage schema changed under us, and the allowance must not be the thing
+  # that silently lets a below-floor module through.
+  defp over_uncovered_allowance?(%{"uncovered_lines" => lines}) when is_list(lines) do
+    Enum.drop(lines, @max_uncovered_lines) != []
   end
+
+  defp over_uncovered_allowance?(_module), do: true
 
   defp percentage(%{"percentage" => percentage}) when is_number(percentage), do: percentage
   defp percentage(_module), do: 0

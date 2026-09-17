@@ -65,6 +65,23 @@ defmodule Mix.Tasks.Mpp.Cover.MethodsTest do
       assert message =~ "MPP.Methods.Unknown 0% (3 uncovered lines)"
     end
 
+    test "fails a methods module whose entry has no uncovered_lines key" do
+      document =
+        coverage_document([
+          %{"module" => "MPP.Methods.Schema", "file" => "lib/mpp/methods/schema.ex", "percentage" => 50.0}
+        ])
+
+      assert {:error, message} = Methods.evaluate(document)
+      assert message =~ "MPP.Methods.Schema 50.0%"
+    end
+
+    test "fails loudly when the document carries no coverage.modules" do
+      assert {:error, message} = Methods.evaluate(%{"summary" => %{"result" => "passed"}})
+      assert message =~ "missing coverage.modules"
+
+      assert {:error, _} = Methods.evaluate(%{"coverage" => %{"total_percentage" => 97.5}})
+    end
+
     test "ignores entries without a file path" do
       document =
         coverage_document([%{"module" => "MPP.Methods.Ghost", "percentage" => 10, "uncovered_lines" => [1, 2, 3]}])
@@ -88,9 +105,11 @@ defmodule Mix.Tasks.Mpp.Cover.MethodsTest do
         ])
       ])
 
-      assert_raise Mix.Error, ~r/MPP.Methods.Tempo.HostedFeePayer 89.74% \(8 uncovered lines\)/, fn ->
-        Methods.run([path])
-      end
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r/MPP.Methods.Tempo.HostedFeePayer 89.74% \(8 uncovered lines\)/, fn ->
+          Methods.run([path])
+        end
+      end)
     end
 
     test "succeeds when every methods module meets the floor", %{path: path} do
@@ -98,6 +117,11 @@ defmodule Mix.Tasks.Mpp.Cover.MethodsTest do
 
       output = capture_io(fn -> assert Methods.run([path]) == :ok end)
       assert output =~ "lib/mpp/methods/ modules at or above 95%"
+      # --output sends the suite JSON to a file, so the gate echoes the headline
+      # numbers and the path that holds the per-test failure detail.
+      assert output =~ "10 passed, 0 failed, 2 excluded"
+      assert output =~ "aggregate 95.98%"
+      assert output =~ "suite JSON: #{path}"
     end
 
     test "raises when the coverage file is missing" do
@@ -153,7 +177,7 @@ defmodule Mix.Tasks.Mpp.Cover.MethodsTest do
 
   defp coverage_document(modules) do
     %{
-      "summary" => %{"result" => "passed"},
+      "summary" => %{"result" => "passed", "passed" => 10, "failed" => 0, "excluded" => 2},
       "coverage" => %{
         "total_percentage" => 95.98,
         "threshold_met" => true,
