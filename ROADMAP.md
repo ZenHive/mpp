@@ -192,7 +192,7 @@
 |------|--------|-------|
 | Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
 | Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
-| Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58] 🚀 |
+| Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58?] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
 | Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0] 🎯 |
@@ -250,7 +250,7 @@
 | Task 123 | 🔶 | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80. |
 | Task 126 | ✅ | 🎁 **additional-methods** · Bring the Stellar method modules to the 95% critical-tier coverage floor [D:4/B:6/U:6 → Eff:1.5] 🚀 |
 | Task 127 | ⬜ | 🎁 **additional-methods** · Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module [D:5/B:7/U:6 → Eff:1.3] 📋 |
-| Task 128 | ⬜ | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5] 🎯 |
+| Task 128 | 🔄 | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---
