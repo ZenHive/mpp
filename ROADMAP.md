@@ -253,6 +253,7 @@
 | Task 128 | ✅ | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5] 🎯 |
 | Task 129 | ⬜ | 🎁 **additional-methods** · Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 130 | ✅ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33] 📋 |
+| Task 131 | ⬜ | 🎁 **additional-methods** · MPP.Methods.EVM.Split: atomic fee split through a splitter contract [D:7/B:8/U:7 → Eff:1.07] 📋 |
 <!-- TASKS:END -->
 
 ---

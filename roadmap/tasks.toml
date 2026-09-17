@@ -3597,3 +3597,47 @@ created_at = "2026-09-17"
 scored_at = "2026-09-17"
 done_at = "2026-09-17"
 shipped_in = "eec93c019faf33ac7fdd9811a05bcda74c69eb9e"
+
+[[task]]
+id = "131"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "MPP.Methods.EVM.Split: atomic fee split through a splitter contract"
+scores = { d = 7, b = 8, u = 7 }
+depends_on = [40]
+acceptance_criteria = ["A new method module MPP.Methods.EVM.Split implements the MPP.Method behaviour next to MPP.Methods.EVM.Authorization; Authorization keeps rejecting splits (reject_splits/1 stays) and its verification path is untouched", "challenge_method_details/1 carries the allowed splitter contract address, token, chain id, star recipient, platform recipient, feeBps, purchaseRef and the expected total; the payer signs an EIP-3009 ReceiveWithAuthorization typed message with to = splitter and nonce = keccak256(abi.encode(star, feeBps, purchaseRef, challengeHash)), and verify/2 recomputes and enforces that nonce", "verify/2 accepts only a confirmed settlement transaction whose call target is the allowed splitter deployment for that chain and whose splitter settlement event binds payer, total, purchaseRef and challengeHash; it additionally checks the USDC Transfer flows payer→splitter (total), splitter→star (total − fee) and splitter→platform (fee), the fee being floor(total × feeBps / 10000) with fee = 0 tolerated when feeBps = 0 or rounding yields 0", "A bare transferWithAuthorization of the platform share, a bare transfer of the star share, a settlement through a different splitter deployment, and a settlement whose event carries a different purchaseRef or challengeHash are each rejected with a distinct MPP.Errors reason, and a test pins every one of them", "Replay: the same settlement transaction presented twice yields the same receipt (MPP.Replay), never a second one; a second challenge for the same purchaseRef is the server's concern and is documented as such in the method moduledoc", "Live Base Sepolia evidence against a deployed splitter (address recorded in the integration test): one successful split settlement and one relevant rejection (blocklisted or insufficient-balance payer, or wrong nonce), with observed request, response and error semantics pinned in an integration test; missing credentials flunk loudly with exact export lines; mocks and fixtures are derived only after the live run", "The method is documented in the CLAUDE.md module map and in docs/ (typed-data shape, event ABI, verification order); mix ci passes and touched modules stay at or above 95% coverage"]
+out_of_scope = ["The Solidity splitter contract itself and its verification stack (starpatron task 45)", "Changing MPP.Methods.EVM.Authorization to support splits", "Smart-account (ERC-4337) signature verification; the payer is an EOA in this task", "Subscription or pull-payment semantics"]
+touches = ["lib/mpp/methods/evm/", "test/mpp/methods/evm/", "docs/"]
+cross_repo = [{ repo = "starpatron", task_id = 17, relation = "blocks" }, { repo = "starpatron", task_id = 45, relation = "blocked_by" }]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+MPP 0.17.1 cannot express a platform fee on an EIP-3009 payment: `MPP.Methods.EVM.Authorization`
+rejects `splits` outright (`reject_splits/1`) and pins the nonce to `keccak256(challenge.id <> realm)`,
+so two authorizations from one challenge collide on the same nonce (verified against the published
+package source on 2026-09-18). The consuming product (starpatron, ZenHive) decided on 2026-09-18 to
+settle tips and per-item unlocks through an own, immutable splitter contract on Base: one signature,
+atomic 80/20 split, no balances held. This task adds the MPP method that issues such a challenge and
+verifies such a settlement.
+
+Design, agreed with a Codex design session on 2026-09-18 and recorded in starpatron's
+`docs/architecture-decisions.md` (E9): the payer signs `ReceiveWithAuthorization` (not
+`TransferWithAuthorization` — Circle's `_receiveWithAuthorization` enforces `to == msg.sender`, so
+only the splitter can consume it; EIP-3009 security considerations name the front-running case for
+contract integrations). The nonce binds star, feeBps, purchaseRef and the challenge hash, so a
+settlement cannot be redirected. Authority for token semantics is Circle's FiatTokenV2 source
+(https://github.com/circlefin/stablecoin-evm/blob/master/contracts/v2/FiatTokenV2.sol) and
+https://eips.ethereum.org/EIPS/eip-3009; observed Base Sepolia behaviour pins what the docs leave open.
+
+Why a bare transfer event is not enough: a receipt is the server's authority to grant an
+entitlement. Verifying only the star-side transfer lets an attacker pay 20% to the platform and
+present a receipt for 100%. The method verifies the whole payment — allowed deployment, splitter
+event, all three flows — before a receipt exists.
+
+The contract ships from starpatron task 45; until it is deployed on Base Sepolia, build against a
+local Anvil deployment of that contract's artifact and mark the live-evidence criterion as the
+gate that closes the task.
+"""
+created_at = "2026-09-17"
+scored_at = "2026-09-17"
