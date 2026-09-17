@@ -35,8 +35,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   (`…, Basic`) instead of rejecting the preceding `Payment` challenge,
   matching mppx.
 
+## [0.18.0] — 2026-09-17
+
 ### Added
 
+- Challenges support the `header` parameter and `Payment-Authorization`.
+  With `requires_auth: true`, `MPP.Plug` requests payment credentials in the
+  separate header so application authentication can keep `Authorization`.
+  The HTTP client honors the advertised header, and the server rejects
+  ambiguous credentials presented in both headers.
 - `MPP.Methods.Stellar` — Stellar SEP-41 token charge verification
   (`draft-stellar-charge-00`). Pull credentials (`type="transaction"`) carry a
   base64 TransactionEnvelope XDR that the server submits; push credentials

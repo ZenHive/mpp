@@ -1313,7 +1313,7 @@ defmodule MPP.McpTest do
       assert source =~ "export function mcp()"
       assert source =~ "jsonrpc: '2.0'"
       assert source =~ "id: input.id"
-      assert source =~ "code: mcpErrorCode(error)"
+      assert source =~ "code: core_Mcp.errorCode(error)"
       assert source =~ "challenges: [challenge]"
       assert source =~ "[core_Mcp.receiptMetaKey]: mcpReceipt"
 
