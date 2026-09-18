@@ -11,9 +11,9 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (7 of 9 done · 1 in progress)
+**Focus phase:** 12 — Client SDK (8 of 9 done · 0 in progress)
 
-**Last shipped:** Task 108 — Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) on 2026-09-11
+**Last shipped:** Task 81 — Add x402 v2 exact interoperability on 2026-09-18
 
 **Up next:** Task 129 — Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋
 <!-- FOCUS:END -->
@@ -174,7 +174,7 @@
 | Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8?] 🚀 |
 | Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
-| Task 81 | 🔄 | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋 |
+| Task 81 | ✅ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋 |
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->

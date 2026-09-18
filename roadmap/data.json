@@ -3153,7 +3153,7 @@
       "id": "81",
       "phase": 12,
       "bundle": "client-sdk",
-      "status": "in_progress",
+      "status": "done",
       "title": "Add x402 v2 exact interoperability",
       "scores": {
         "d": 9,
@@ -3192,10 +3192,17 @@
         "test/mpp/x402/",
         "test/mpp/client/"
       ],
+      "shipped_in": "ef4b88337721409049e783c2491b6e7302d55774",
       "body": "Add the x402 v2 exact interoperability layer required by the project's explicit SDK-parity goal. Cover the full vertical boundary represented by the current mppx implementation: x402 header/types handling, HTTP transport discovery and credential attachment, EVM exact EIP-3009 client signing, server verification, configurable facilitator settlement, and coexistence with native Payment-auth challenges. Reuse Task 33c's transport-neutral selection policy and Task 40's authorization primitives.\n\nThe official x402 v2 specification, provider-owned contract semantics, and observed live facilitator traffic are authoritative. refs/mppx/src/x402/, refs/mppx/src/client/Transport.ts, and its x402 localnet/e2e tests establish the current SDK compatibility target, not semantic authority. Re-audit those local refs at pickup so the task matches the SDK surface that actually ships then.\n\n2026-09-16 (review, Claude + Codex second opinion): the reuse of Task 40's primitives needs a stated nonce boundary (native: challengeHash nonce; x402: random/extension-bound nonce) before code is shared; MCP is explicitly out of scope. Kept as one vertical task because client and server share lib/mpp/x402/ and the facilitator contract. B 10→9.\n",
       "created_at": "2026-08-02",
       "started_at": "2026-09-18",
+      "done_at": "2026-09-18",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1789721498989-ee0767fa, ef4b88337721409049e783c2491b6e7302d55774).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1789721498989-ee0767fa",
       "cross_repo": []
     },
     {

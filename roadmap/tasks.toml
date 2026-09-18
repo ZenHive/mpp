@@ -2163,7 +2163,7 @@ scored_at = "2026-09-16"
 id = "81"
 phase = 12
 bundle = "client-sdk"
-status = "in_progress"
+status = "done"
 title = "Add x402 v2 exact interoperability"
 scores = { d = 9, b = 9, u = 9 }
 depends_on = [40, "33c"]
@@ -2187,9 +2187,16 @@ The official x402 v2 specification, provider-owned contract semantics, and obser
 
 2026-09-16 (review, Claude + Codex second opinion): the reuse of Task 40's primitives needs a stated nonce boundary (native: challengeHash nonce; x402: random/extension-bound nonce) before code is shared; MCP is explicitly out of scope. Kept as one vertical task because client and server share lib/mpp/x402/ and the facilitator contract. B 10→9.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1789721498989-ee0767fa, ef4b88337721409049e783c2491b6e7302d55774)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1789721498989-ee0767fa"
 created_at = "2026-08-02"
 started_at = "2026-09-18"
 scored_at = "2026-09-16"
+done_at = "2026-09-18"
+shipped_in = "ef4b88337721409049e783c2491b6e7302d55774"
 
 [[task]]
 id = "82"
