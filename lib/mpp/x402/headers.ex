@@ -342,12 +342,7 @@ defmodule MPP.X402.Headers do
     end
   end
 
-  defp evm_network?(@evm_network_prefix <> rest) do
-    case Integer.parse(rest) do
-      {_id, ""} -> true
-      _other -> false
-    end
-  end
+  defp evm_network?(@evm_network_prefix <> rest), do: match?({_id, ""}, Integer.parse(rest))
 
   defp evm_network?(_other), do: false
 

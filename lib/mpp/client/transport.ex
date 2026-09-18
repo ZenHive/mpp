@@ -85,6 +85,18 @@ defmodule MPP.Client.Transport do
     errors: [:no_supported_challenge]
   )
 
+  api(:approve, "Invoke an optional on_payment_required hook after challenge selection.",
+    params: [
+      challenge: [kind: :value, description: "Selected MPP.Challenge"],
+      hook: [kind: :value, description: "Arity-1 boolean function, or nil to skip"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description: "`:ok` or `{:error, :payment_declined}`"
+    },
+    errors: [:payment_declined]
+  )
+
   @doc """
   Pick a supported challenge via `MPP.Client.SelectionPolicy`.
 
@@ -100,6 +112,23 @@ defmodule MPP.Client.Transport do
           {:ok, Challenge.t()} | {:error, :no_supported_challenge}
   def select_challenge(challenges, %MultiProvider{} = multi, opts \\ []) when is_list(challenges) do
     SelectionPolicy.select(challenges, multi, policy_from_opts(opts))
+  end
+
+  @doc """
+  Invoke an optional `on_payment_required` hook after challenge selection.
+
+  `nil` skips approval. The hook must return a boolean; `false` is
+  `{:error, :payment_declined}`.
+  """
+  @spec approve(Challenge.t(), (Challenge.t() -> boolean()) | nil) :: :ok | {:error, :payment_declined}
+  def approve(_challenge, nil), do: :ok
+
+  def approve(%Challenge{} = challenge, hook) when is_function(hook, 1) do
+    case hook.(challenge) do
+      true -> :ok
+      false -> {:error, :payment_declined}
+      other -> raise ArgumentError, "on_payment_required must return a boolean, got: #{inspect(other)}"
+    end
   end
 
   defp policy_from_opts(opts) do

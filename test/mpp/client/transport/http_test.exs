@@ -297,6 +297,27 @@ defmodule MPP.Client.Transport.HTTPTest do
     end
   end
 
+  describe "Transport.approve/2" do
+    test "skips approval when the hook is nil" do
+      assert :ok = Transport.approve(make_challenge("tempo"), nil)
+    end
+
+    test "returns :ok when the hook approves" do
+      assert :ok = Transport.approve(make_challenge("tempo"), fn _challenge -> true end)
+    end
+
+    test "returns payment_declined when the hook denies" do
+      assert {:error, :payment_declined} =
+               Transport.approve(make_challenge("tempo"), fn _challenge -> false end)
+    end
+
+    test "raises when the hook does not return a boolean" do
+      assert_raise ArgumentError, ~r/on_payment_required must return a boolean/, fn ->
+        Transport.approve(make_challenge("tempo"), fn _challenge -> :maybe end)
+      end
+    end
+  end
+
   describe "set_accept_payment/2" do
     test "sets Accept-Payment header from entries" do
       request = %Req.Request{}

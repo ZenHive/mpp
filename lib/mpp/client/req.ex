@@ -23,6 +23,7 @@ defmodule MPP.Client.Req do
   alias MPP.Client.AcceptPolicy
   alias MPP.Client.MultiProvider
   alias MPP.Client.SelectionPolicy
+  alias MPP.Client.Transport
   alias MPP.Client.Transport.HTTP
 
   @default_max_payment_retries 3
@@ -180,7 +181,7 @@ defmodule MPP.Client.Req do
     with :ok <- ensure_same_origin(request),
          {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
-         :ok <- approve(challenge, config.on_payment_required),
+         :ok <- Transport.approve(challenge, config.on_payment_required),
          {:ok, credential} <- MultiProvider.pay(config.provider, challenge) do
       paid =
         request
@@ -227,26 +228,10 @@ defmodule MPP.Client.Req do
   end
 
   defp fetch_challenges(request, response, retries) do
-    url = request_url(request)
-
-    case HTTP.get_challenges(response, url) do
+    case HTTP.get_challenges(response, URI.to_string(request.url)) do
       {:ok, challenges} -> {:ok, challenges}
       {:error, _reason} when retries > 0 -> {:passthrough, response}
       {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp request_url(%Req.Request{url: %URI{} = uri}), do: URI.to_string(uri)
-  defp request_url(%Req.Request{url: url}) when is_binary(url), do: url
-  defp request_url(_request), do: nil
-
-  defp approve(_challenge, nil), do: :ok
-
-  defp approve(challenge, hook) when is_function(hook, 1) do
-    case hook.(challenge) do
-      true -> :ok
-      false -> {:error, :payment_declined}
-      other -> raise ArgumentError, "on_payment_required must return a boolean, got: #{inspect(other)}"
     end
   end
 

@@ -140,7 +140,7 @@ defmodule MPP.Client.MCP do
   defp pay_and_continue(client, request, response, send_fun, hook, payments_made) do
     with {:ok, challenges} <- MCPTransport.get_challenges(response),
          {:ok, challenge} <- Transport.select_challenge(challenges, client.provider, selection: client.selection),
-         :ok <- approve(challenge, hook),
+         :ok <- Transport.approve(challenge, hook),
          {:ok, credential} <- MultiProvider.pay(client.provider, challenge) do
       case request |> MCPTransport.set_credential(credential) |> send_fun.() do
         next when is_map(next) ->
@@ -149,16 +149,6 @@ defmodule MPP.Client.MCP do
         _other ->
           {:error, :malformed_envelope}
       end
-    end
-  end
-
-  defp approve(_challenge, nil), do: :ok
-
-  defp approve(challenge, hook) when is_function(hook, 1) do
-    case hook.(challenge) do
-      true -> :ok
-      false -> {:error, :payment_declined}
-      other -> raise ArgumentError, "on_payment_required must return a boolean, got: #{inspect(other)}"
     end
   end
 

@@ -183,6 +183,101 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
     end
   end
 
+  describe "sign_transfer/2 and recover_authorization/5" do
+    test "signs and recovers a well-formed authorization with a caller-supplied nonce" do
+      assert {:ok, signature} = Authorization.sign_transfer(sign_params(), EVMAuthorization.private_key())
+      {:ok, parsed} = Authorization.parse_payload(%{signed_payload() | "signature" => signature})
+
+      assert {:ok, recovered} =
+               Authorization.recover_authorization(parsed, @token, @chain_id, @name, @version)
+
+      assert Address.equal?(recovered, EVMAuthorization.signer_address())
+    end
+
+    test "accepts string uints for value and the validity window" do
+      params =
+        sign_params(%{
+          value: @amount,
+          valid_after: "0",
+          valid_before: Integer.to_string(System.system_time(:second) + 60)
+        })
+
+      assert {:ok, signature} = Authorization.sign_transfer(params, EVMAuthorization.private_key())
+      assert String.starts_with?(signature, "0x")
+    end
+
+    test "rejects a missing required field" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(Map.delete(sign_params(), :from), EVMAuthorization.private_key())
+
+      assert error.detail =~ "from"
+    end
+
+    test "rejects an invalid chain_id" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(sign_params(%{chain_id: 0}), EVMAuthorization.private_key())
+
+      assert error.detail =~ "chain_id"
+    end
+
+    test "rejects a non-numeric value string" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(sign_params(%{value: "1.5"}), EVMAuthorization.private_key())
+
+      assert error.detail =~ "value"
+    end
+
+    test "rejects a non-integer value" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(sign_params(%{value: :nope}), EVMAuthorization.private_key())
+
+      assert error.detail =~ "value"
+    end
+
+    test "rejects an invalid from address" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(sign_params(%{from: "not-an-address"}), EVMAuthorization.private_key())
+
+      assert error.detail =~ "typed-data"
+    end
+
+    test "rejects a private key that does not recover to from" do
+      assert {:error, %Errors{} = error} =
+               Authorization.sign_transfer(sign_params(%{from: @recipient}), EVMAuthorization.private_key())
+
+      assert error.detail =~ "Unable to sign"
+    end
+
+    test "recover_authorization rejects invalid typed-data fields" do
+      {:ok, parsed} = Authorization.parse_payload(signed_payload())
+
+      assert {:error, %Errors{} = error} =
+               Authorization.recover_authorization(parsed, "not-a-token", @chain_id, @name, @version)
+
+      assert error.detail =~ "typed-data"
+    end
+
+    test "recover_authorization rejects an invalid signature v byte" do
+      {:ok, parsed} = Authorization.parse_payload(signed_payload())
+      parsed = %{parsed | signature: "0x" <> String.duplicate("00", 64) <> "00"}
+
+      assert {:error, %Errors{} = error} =
+               Authorization.recover_authorization(parsed, @token, @chain_id, @name, @version)
+
+      assert error.detail =~ "signature"
+    end
+
+    test "recover_authorization rejects an unrecoverable r/s pair" do
+      {:ok, parsed} = Authorization.parse_payload(signed_payload())
+      parsed = %{parsed | signature: "0x" <> String.duplicate("00", 64) <> "1b"}
+
+      assert {:error, %Errors{} = error} =
+               Authorization.recover_authorization(parsed, @token, @chain_id, @name, @version)
+
+      assert error.detail =~ "signature recovery failed"
+    end
+  end
+
   describe "settle/2" do
     test "rejects splits" do
       charge =
@@ -559,6 +654,30 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       assert error.type =~ "settlement-failed"
       assert error.detail == "FiatTokenV2: authorization is expired"
     end
+
+    test "surfaces a getTransactionCount RPC failure during broadcast" do
+      Req.Test.stub(EVM, fn conn ->
+        {method, id, conn} = read_request(conn)
+
+        case method do
+          "eth_call" -> rpc_json(conn, id, "result", unused_state())
+          "eth_getTransactionCount" -> rpc_json(conn, id, "error", %{"code" => -32_000, "message" => "boom"})
+        end
+      end)
+
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+      assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
+      assert error.detail == "EVM RPC request failed"
+    end
+
+    test "surfaces an RPC transport failure from authorizationState" do
+      Req.Test.stub(EVM, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+      assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
+      assert error.detail == "EVM RPC request failed"
+      refute error.detail =~ "econnrefused"
+    end
   end
 
   defp signed_payload(overrides \\ []) do
@@ -578,6 +697,24 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       )
 
     EVMAuthorization.payload(params)
+  end
+
+  defp sign_params(overrides \\ %{}) do
+    Map.merge(
+      %{
+        currency: @token,
+        name: @name,
+        version: @version,
+        chain_id: @chain_id,
+        from: EVMAuthorization.signer_address(),
+        to: @recipient,
+        value: String.to_integer(@amount),
+        valid_after: 0,
+        valid_before: System.system_time(:second) + 3600,
+        nonce: @spec_example_challenge_hash
+      },
+      overrides
+    )
   end
 
   defp charge(extra \\ %{}) do
