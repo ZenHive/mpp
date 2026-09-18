@@ -65,7 +65,9 @@ defmodule MPP.X402.FacilitatorIntegrationTest do
   end
 
   test "payer is funded for the mandatory successful live settlement observation", context do
-    assert balance(context) >= 1, """
+    funded? = balance(context) >= 1
+
+    assert funded?, """
     Missing Base Sepolia USDC for the required live x402 settlement observation.
     Payer: #{context.payer}
     Token: #{@asset} (chain 84532)
@@ -79,6 +81,15 @@ defmodule MPP.X402.FacilitatorIntegrationTest do
     Run mix test test/mpp/x402/facilitator_integration_test.exs --include integration
     Funding alone does not prove settlement; the successful live observation is still required.
     """
+
+    body = payment(context, 1)
+    assert {:ok, %{status: 200, body: verified}} = post(context, "verify", body)
+    assert verified["isValid"] == true, "live verify rejected a funded exact payment: #{inspect(verified)}"
+
+    assert {:ok, %{status: 200, body: settled}} = post(context, "settle", body)
+    assert settled["success"] == true, "live settle rejected a funded exact payment: #{inspect(settled)}"
+    assert is_binary(settled["transaction"]) and settled["transaction"] != ""
+    assert settled["network"] == @network
   end
 
   defp balance(context) do

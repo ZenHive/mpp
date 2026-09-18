@@ -41,6 +41,8 @@ defmodule MPP.Client.Transport.HTTP do
   alias MPP.Client.Transport
   alias MPP.Credential
   alias MPP.Headers
+  alias MPP.X402
+  alias MPP.X402.Headers, as: X402Headers
 
   api(:payment_required?, "Return true if the HTTP response is a 402 Payment Required.",
     params: [
@@ -98,12 +100,46 @@ defmodule MPP.Client.Transport.HTTP do
 
   @impl Transport
   @spec get_challenges(Req.Response.t()) :: {:ok, [Challenge.t()]} | {:error, term()}
-  def get_challenges(%Req.Response{} = response) do
+  def get_challenges(%Req.Response{} = response), do: get_challenges(response, nil)
+
+  @doc "Parse native Payment challenges and x402 `PAYMENT-REQUIRED` offers together."
+  @spec get_challenges(Req.Response.t(), String.t() | nil) :: {:ok, [Challenge.t()]} | {:error, term()}
+  def get_challenges(%Req.Response{} = response, request_url) do
+    native = native_challenges(response)
+    x402 = x402_challenges(response, request_url)
+    merge_challenges(native, x402)
+  end
+
+  defp native_challenges(response) do
     case Req.Response.get_header(response, "www-authenticate") do
       [] -> {:error, :missing_www_authenticate}
       values -> values |> Enum.join(", ") |> Headers.parse_challenges()
     end
   end
+
+  defp x402_challenges(response, request_url) do
+    case Req.Response.get_header(response, "payment-required") do
+      [] -> {:ok, []}
+      [header | _rest] -> parse_x402_offers(header, request_url)
+    end
+  end
+
+  defp parse_x402_offers(header, request_url) do
+    case X402.challenges_from_header(header, request_url) do
+      {:ok, challenges} -> {:ok, challenges}
+      {:error, _reason} -> {:ok, []}
+    end
+  end
+
+  defp merge_challenges({:ok, native}, {:ok, x402}), do: nonempty(native ++ x402)
+  defp merge_challenges({:error, :missing_www_authenticate}, {:ok, []}), do: {:error, :missing_www_authenticate}
+  defp merge_challenges({:error, :missing_www_authenticate}, {:ok, x402}), do: nonempty(x402)
+  defp merge_challenges({:error, :no_payment_challenges}, {:ok, x402}), do: nonempty(x402)
+  defp merge_challenges({:error, _reason}, {:ok, x402}) when x402 != [], do: {:ok, x402}
+  defp merge_challenges({:error, reason}, _x402), do: {:error, reason}
+
+  defp nonempty([]), do: {:error, :no_payment_challenges}
+  defp nonempty(challenges), do: {:ok, challenges}
 
   api(:set_credential, "Attach a credential to a Req.Request on the challenge's advertised field.",
     params: [
@@ -119,12 +155,28 @@ defmodule MPP.Client.Transport.HTTP do
   @impl Transport
   @spec set_credential(Req.Request.t(), Credential.t()) :: Req.Request.t()
   def set_credential(%Req.Request{} = request, %Credential{} = credential) do
-    header_name = credential.challenge |> Challenge.credential_header() |> String.downcase(:ascii)
-    value = Headers.format_credential(credential)
+    if X402.synthetic?(credential.challenge) do
+      put_x402_signature(request, credential)
+    else
+      header_name = credential.challenge |> Challenge.credential_header() |> String.downcase(:ascii)
+      value = Headers.format_credential(credential)
 
-    request
-    |> clear_stale_payment_headers(header_name)
-    |> Req.Request.put_header(header_name, value)
+      request
+      |> clear_stale_payment_headers(header_name)
+      |> Req.Request.put_header(header_name, value)
+    end
+  end
+
+  defp put_x402_signature(request, credential) do
+    case X402Headers.encode_payment_signature(credential.payload) do
+      {:ok, header} ->
+        request
+        |> Req.Request.delete_header("payment-signature")
+        |> Req.Request.put_header("payment-signature", header)
+
+      {:error, reason} ->
+        raise ArgumentError, "invalid x402 PAYMENT-SIGNATURE payload: #{inspect(reason)}"
+    end
   end
 
   # Never erase ordinary application credentials from Authorization. A stale

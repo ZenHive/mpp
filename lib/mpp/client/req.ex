@@ -71,6 +71,9 @@ defmodule MPP.Client.Req do
     * `:accept_policy` — `MPP.Client.AcceptPolicy.t()` gating header injection
       (default `:always`)
     * `:max_payment_retries` — payment attempts after a 402 (default 3)
+    * `:on_payment_required` — `(MPP.Challenge.t() -> boolean())` invoked after
+      a challenge is selected and before `pay/2`. The hook fires on every
+      payment. `nil` (default) skips approval.
   """
   @spec attach(Req.Request.t(), keyword()) :: Req.Request.t()
   def attach(%Req.Request{} = request, opts) when is_list(opts) do
@@ -98,7 +101,8 @@ defmodule MPP.Client.Req do
       selection: selection_from_opts(opts, accept_payment),
       accept_payment: accept_payment,
       accept_policy: Keyword.get(opts, :accept_policy, AcceptPolicy.default()),
-      max_retries: max_retries
+      max_retries: max_retries,
+      on_payment_required: approval_from_opts(opts)
     }
   end
 
@@ -174,8 +178,9 @@ defmodule MPP.Client.Req do
 
   defp pay_and_retry(request, response, config, retries) do
     with :ok <- ensure_same_origin(request),
-         {:ok, challenges} <- fetch_challenges(response, retries),
+         {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
+         :ok <- approve(challenge, config.on_payment_required),
          {:ok, credential} <- MultiProvider.pay(config.provider, challenge) do
       paid =
         request
@@ -221,11 +226,41 @@ defmodule MPP.Client.Req do
     end
   end
 
-  defp fetch_challenges(response, retries) do
-    case HTTP.get_challenges(response) do
+  defp fetch_challenges(request, response, retries) do
+    url = request_url(request)
+
+    case HTTP.get_challenges(response, url) do
       {:ok, challenges} -> {:ok, challenges}
       {:error, _reason} when retries > 0 -> {:passthrough, response}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp request_url(%Req.Request{url: %URI{} = uri}), do: URI.to_string(uri)
+  defp request_url(%Req.Request{url: url}) when is_binary(url), do: url
+  defp request_url(_request), do: nil
+
+  defp approve(_challenge, nil), do: :ok
+
+  defp approve(challenge, hook) when is_function(hook, 1) do
+    case hook.(challenge) do
+      true -> :ok
+      false -> {:error, :payment_declined}
+      other -> raise ArgumentError, "on_payment_required must return a boolean, got: #{inspect(other)}"
+    end
+  end
+
+  defp approval_from_opts(opts) do
+    case Keyword.get(opts, :on_payment_required) do
+      nil ->
+        nil
+
+      fun when is_function(fun, 1) ->
+        fun
+
+      other ->
+        raise ArgumentError,
+              "MPP.Client.Req.attach/2 :on_payment_required must be an arity-1 function or nil, got: #{inspect(other)}"
     end
   end
 
@@ -240,6 +275,8 @@ defmodule MPP.Client.Req do
   defp error_message(:no_supported_challenge), do: "no configured provider supports the offered payment challenges"
 
   defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
+
+  defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
 
   defp error_message(reason), do: "MPP payment failed: #{inspect(reason)}"
 end

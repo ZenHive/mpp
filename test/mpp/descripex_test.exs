@@ -46,7 +46,8 @@ defmodule MPP.DescripexTest do
     MPP.Client.MultiProvider,
     MPP.Client.SelectionPolicy,
     MPP.Client.Req,
-    MPP.Client.AcceptPolicy
+    MPP.Client.AcceptPolicy,
+    MPP.X402
   ]
 
   describe "api() annotations" do

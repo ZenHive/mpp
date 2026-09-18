@@ -80,6 +80,18 @@ defmodule MPP.Client.PaymentProvider do
   @callback pay(challenge :: Challenge.t(), config :: map()) ::
               {:ok, MPP.Credential.t()} | {:error, term()}
 
+  @doc """
+  Optional challenge-level support check.
+
+  When implemented, `MPP.Client.MultiProvider` and `MPP.Client.SelectionPolicy`
+  use this instead of `supports?/3` so x402 synthetic EVM challenges are not
+  paid as native Payment-auth (and vice versa). Providers that omit the
+  callback keep method+intent matching and never match synthetic x402 offers.
+  """
+  @callback supports_challenge?(challenge :: Challenge.t(), config :: map()) :: boolean()
+
+  @optional_callbacks supports_challenge?: 2
+
   api(:supports?, "Check if a provider module supports the given method and intent.",
     params: [
       module: [kind: :value, description: "Provider module implementing this behaviour"],

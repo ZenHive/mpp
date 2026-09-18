@@ -15,6 +15,7 @@ defmodule MPP.Methods.EVM.Authorization do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
+  alias Cartouche.Signer.Curvy, as: CurvySigner
   alias Cartouche.Typed
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
@@ -27,6 +28,7 @@ defmodule MPP.Methods.EVM.Authorization do
   alias MPP.Methods.Shared
   alias Onchain.ABI
   alias Onchain.Address
+  alias Onchain.PrivateKey
   alias Onchain.RPC
   alias Onchain.Signer
 
@@ -65,6 +67,60 @@ defmodule MPP.Methods.EVM.Authorization do
   @spec challenge_hash(String.t(), String.t()) :: String.t()
   def challenge_hash(id, realm) when is_binary(id) and is_binary(realm) do
     Onchain.Hex.encode(Hash.keccak(id <> realm))
+  end
+
+  @doc """
+  Return the native Payment-auth EIP-3009 nonce contract.
+
+  Native credentials bind `nonce` to `challenge_hash/2`. x402 exact uses a
+  different contract (`MPP.X402.Nonce`) and must not pass through `settle/2`.
+  """
+  @spec nonce_contract() :: :challenge_hash
+  def nonce_contract, do: :challenge_hash
+
+  @doc """
+  Sign an EIP-3009 `TransferWithAuthorization` with a caller-supplied nonce.
+
+  This is the shared Task 40 primitive. Native Payment-auth callers pass
+  `challenge_hash/2`; x402 exact callers pass a random or extension-bound
+  nonce. This function does not enforce either contract — `settle/2` enforces
+  the native challengeHash rule, and `MPP.X402` enforces the x402 rule.
+  """
+  @spec sign_transfer(map(), String.t()) :: {:ok, String.t()} | {:error, Errors.t()}
+  def sign_transfer(params, private_key) when is_map(params) and is_binary(private_key) do
+    with {:ok, parsed} <- parsed_from_sign_params(params),
+         {:ok, name} <- sign_param(params, :name),
+         {:ok, version} <- sign_param(params, :version),
+         {:ok, chain_id} <- sign_chain_id(params),
+         {:ok, currency} <- sign_param(params, :currency),
+         {:ok, typed} <- typed_data(parsed, currency, chain_id, name, version),
+         {:ok, key_bin} <- PrivateKey.decode(private_key),
+         {:ok, from_bin} <- Address.validate(parsed.from),
+         digest = typed |> Typed.encode() |> Hash.keccak(),
+         {:ok, signature} <- CurvySigner.sign_payload(digest, key_bin),
+         signature = Recover.normalize_low_s(signature),
+         {:ok, recid} <- Recover.find_recid_from_digest(digest, signature, from_bin) do
+      {:ok, encode_signature_hex(signature, recid)}
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _other -> {:error, Errors.new(:invalid_payload, "Unable to sign authorization")}
+    end
+  end
+
+  @doc """
+  Recover the EIP-3009 signer for an authorization payload.
+
+  Shared by native `settle/2` verification and x402 exact local checks. Does
+  not apply a nonce contract.
+  """
+  @spec recover_authorization(parsed(), String.t(), pos_integer(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, Errors.t()}
+  def recover_authorization(parsed, currency, chain_id, name, version)
+      when is_map(parsed) and is_binary(currency) and is_integer(chain_id) and chain_id > 0 and is_binary(name) and
+             is_binary(version) do
+    with {:ok, typed} <- typed_data(parsed, currency, chain_id, name, version) do
+      recover_signer(typed, parsed.signature)
+    end
   end
 
   @doc """
@@ -613,4 +669,72 @@ defmodule MPP.Methods.EVM.Authorization do
 
   defp strip_revert_prefix("execution reverted: " <> rest), do: rest
   defp strip_revert_prefix(message), do: message
+
+  defp parsed_from_sign_params(params) do
+    with {:ok, from} <- sign_param(params, :from),
+         {:ok, to} <- sign_param(params, :to),
+         {:ok, nonce} <- sign_param(params, :nonce),
+         {:ok, value} <- sign_uint(params, :value),
+         {:ok, valid_after} <- sign_uint(params, :valid_after),
+         {:ok, valid_before} <- sign_uint(params, :valid_before),
+         {:ok, from} <- Address.normalize(from),
+         {:ok, to} <- Address.normalize(to),
+         {:ok, nonce} <- require_bytes32(%{"nonce" => nonce}, "nonce") do
+      {:ok,
+       %{
+         from: from,
+         to: to,
+         value: Integer.to_string(value),
+         valid_after: valid_after,
+         valid_before: valid_before,
+         nonce: nonce,
+         signature: "0x" <> String.duplicate("00", @signature_bytes)
+       }}
+    else
+      {:error, %Errors{} = error} -> {:error, error}
+      _other -> {:error, Errors.new(:invalid_payload, "Invalid authorization typed-data fields")}
+    end
+  end
+
+  defp sign_param(params, key) do
+    case param(params, key) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, Errors.new(:invalid_payload, "Invalid authorization '#{key}' field")}
+    end
+  end
+
+  defp sign_chain_id(params) do
+    case param(params, :chain_id) do
+      chain_id when is_integer(chain_id) and chain_id > 0 -> {:ok, chain_id}
+      _other -> {:error, Errors.new(:invalid_payload, "Invalid authorization chain_id")}
+    end
+  end
+
+  defp sign_uint(params, key) do
+    case param(params, key) do
+      value when is_integer(value) and value >= 0 ->
+        {:ok, value}
+
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} when int >= 0 -> {:ok, int}
+          _ -> {:error, Errors.new(:invalid_payload, "Invalid authorization '#{key}' field")}
+        end
+
+      _other ->
+        {:error, Errors.new(:invalid_payload, "Invalid authorization '#{key}' field")}
+    end
+  end
+
+  defp param(params, key) do
+    Map.get(params, key) || Map.get(params, Atom.to_string(key))
+  end
+
+  defp encode_signature_hex(signature, recid) do
+    "0x" <>
+      Base.encode16(
+        <<signature.r::unsigned-big-size(256), signature.s::unsigned-big-size(256), recid + 27::8>>,
+        case: :lower
+      )
+  end
 end

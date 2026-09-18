@@ -65,7 +65,8 @@ defmodule MPP do
     * `MPP.Client.PaymentProvider` — Behaviour for client-side payment providers
     * `MPP.Client.MultiProvider` — Multi-provider dispatch (first-match routing)
     * `MPP.Client.Providers.Tempo` — Built-in Tempo charge provider (chain-pinned, optional recipient allowlist, attribution-bound, machine-token route when advertised)
-    * `MPP.Client.Providers.Stripe` — Built-in Stripe charge provider (Shared Payment Tokens)
+    * `MPP.Client.Providers.X402Exact` — x402 v2 exact EVM EIP-3009 client signing
+    * `MPP.X402` — x402 v2 exact HTTP interoperability (headers, discovery, settlement)
     * `MPP.Client.SelectionPolicy` — Transport-neutral challenge selection/ordering
     * `MPP.Client.Req` — Payment-aware Req plugin (402 detect, pay, retry)
     * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, at most two payment attempts)
@@ -116,6 +117,7 @@ defmodule MPP do
       MPP.Client.MultiProvider,
       MPP.Client.SelectionPolicy,
       MPP.Client.Req,
-      MPP.Client.AcceptPolicy
+      MPP.Client.AcceptPolicy,
+      MPP.X402
     ]
 end

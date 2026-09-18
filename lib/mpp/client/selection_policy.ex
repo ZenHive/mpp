@@ -66,7 +66,7 @@ defmodule MPP.Client.SelectionPolicy do
   end
 
   defp supported?(%Challenge{} = challenge, multi) do
-    Challenge.payable?(challenge) and MultiProvider.supports?(multi, challenge.method, challenge.intent)
+    Challenge.payable?(challenge) and MultiProvider.supports_challenge?(multi, challenge)
   end
 
   defp order(challenges, :server_order), do: challenges

@@ -55,6 +55,11 @@ defmodule MPP.Plug do
       `header="Payment-Authorization"` and credentials are read from that
       field only, leaving `Authorization` free for ordinary authentication
       (mppx / mpp-rs `requiresAuth`)
+    * `:x402` — (optional) x402 v2 exact interoperability. A keyword list or
+      map with `:facilitator` and `:accepts` (exact EVM requirements). When
+      set, 402 responses also carry `PAYMENT-REQUIRED`, and a
+      `PAYMENT-SIGNATURE` is verified and settled through the facilitator.
+      Native Payment-auth remains available on the same endpoint.
 
   ## Single-Method Options
 
@@ -98,6 +103,7 @@ defmodule MPP.Plug do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
   alias MPP.Verifier
+  alias MPP.X402.Plug, as: X402Plug
 
   @default_expires_in_seconds 300
 
@@ -138,7 +144,8 @@ defmodule MPP.Plug do
             store: module() | {module(), keyword()} | nil,
             intent: String.t(),
             session_store: SessionStore.store_ref() | nil,
-            requires_auth: boolean()
+            requires_auth: boolean(),
+            x402: X402Plug.t() | nil
           }
 
     @enforce_keys [:secret_key, :realm, :method_entries]
@@ -152,7 +159,8 @@ defmodule MPP.Plug do
       :store,
       intent: "charge",
       session_store: nil,
-      requires_auth: false
+      requires_auth: false,
+      x402: nil
     ]
   end
 
@@ -184,7 +192,8 @@ defmodule MPP.Plug do
       store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve(),
       intent: intent,
       session_store: session_store,
-      requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false))
+      requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false)),
+      x402: X402Plug.configure(Keyword.get(opts, :x402))
     }
   end
 
@@ -399,6 +408,14 @@ defmodule MPP.Plug do
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
   def call(conn, %Config{} = config) do
+    case X402Plug.maybe_settle(conn, config.x402, config.store) do
+      :continue -> native_handshake(conn, config)
+      {:ok, conn} -> conn
+      {:error, %Errors{} = error} -> respond_error(conn, config, error)
+    end
+  end
+
+  defp native_handshake(conn, config) do
     case extract_credential(conn, config) do
       nil ->
         respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
@@ -584,7 +601,9 @@ defmodule MPP.Plug do
             {"www-authenticate", Headers.format_challenge(challenge)}
           end)
 
-        Plug.Conn.prepend_resp_headers(conn, challenge_headers)
+        conn
+        |> Plug.Conn.prepend_resp_headers(challenge_headers)
+        |> X402Plug.put_challenge(config.x402)
       else
         conn
       end

@@ -36,6 +36,10 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       refute Authorization.challenge_hash("other", @realm) == @spec_example_challenge_hash
       refute Authorization.challenge_hash(@challenge_id, "other.example.com") == @spec_example_challenge_hash
     end
+
+    test "nonce_contract/0 is native challenge_hash, distinct from x402" do
+      assert Authorization.nonce_contract() == :challenge_hash
+    end
   end
 
   describe "Sepolia USDC EIP-712 domain" do

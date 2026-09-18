@@ -89,6 +89,27 @@ defmodule MPP.Client.MultiProvider do
     Enum.any?(providers, fn {mod, cfg} -> mod.supports?(method, intent, cfg) end)
   end
 
+  api(:supports_challenge?, "Check if any provider supports this specific challenge.",
+    params: [
+      multi: [kind: :value, description: "MultiProvider struct"],
+      challenge: [kind: :value, description: "Challenge being selected"]
+    ],
+    returns: %{type: :boolean, description: "true if a provider can pay this challenge"}
+  )
+
+  @doc """
+  Check whether any provider can pay `challenge`.
+
+  Providers that implement `c:MPP.Client.PaymentProvider.supports_challenge?/2`
+  are asked at the challenge level so x402 synthetic EVM offers are not treated
+  as native Payment-auth. Other providers keep method+intent matching and never
+  match synthetic x402 challenges.
+  """
+  @spec supports_challenge?(t(), MPP.Challenge.t()) :: boolean()
+  def supports_challenge?(%__MODULE__{providers: providers}, challenge) do
+    Enum.any?(providers, fn {mod, cfg} -> provider_supports_challenge?(mod, cfg, challenge) end)
+  end
+
   api(:pay, "Execute payment by dispatching to the first matching provider.",
     params: [
       multi: [kind: :value, description: "MultiProvider struct"],
@@ -101,21 +122,25 @@ defmodule MPP.Client.MultiProvider do
   @doc """
   Execute payment by dispatching to the first matching provider.
 
-  Iterates through providers in order, delegating to the first whose
-  `supports?/3` returns `true` for the challenge's method and intent.
-
   Returns `{:error, :unsupported_payment_method}` if no provider matches.
   """
   @spec pay(t(), MPP.Challenge.t()) :: {:ok, MPP.Credential.t()} | {:error, term()}
   def pay(%__MODULE__{providers: providers}, challenge) do
-    method = challenge.method
-    intent = challenge.intent
-
     providers
-    |> Enum.find(fn {mod, cfg} -> mod.supports?(method, intent, cfg) end)
+    |> Enum.find(fn {mod, cfg} -> provider_supports_challenge?(mod, cfg, challenge) end)
     |> case do
       {mod, cfg} -> mod.pay(challenge, cfg)
       nil -> {:error, :unsupported_payment_method}
+    end
+  end
+
+  defp provider_supports_challenge?(mod, cfg, challenge) do
+    Code.ensure_loaded(mod)
+
+    if function_exported?(mod, :supports_challenge?, 2) do
+      mod.supports_challenge?(challenge, cfg)
+    else
+      not MPP.X402.synthetic?(challenge) and mod.supports?(challenge.method, challenge.intent, cfg)
     end
   end
 end
