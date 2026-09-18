@@ -3602,7 +3602,7 @@ shipped_in = "eec93c019faf33ac7fdd9811a05bcda74c69eb9e"
 id = "131"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "superseded"
 title = "MPP.Methods.EVM.Split: atomic fee split through a splitter contract"
 scores = { d = 7, b = 8, u = 7 }
 depends_on = [40]

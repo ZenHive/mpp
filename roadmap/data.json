@@ -5528,7 +5528,7 @@
       "id": "131",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "superseded",
       "title": "MPP.Methods.EVM.Split: atomic fee split through a splitter contract",
       "scores": {
         "d": 7,
