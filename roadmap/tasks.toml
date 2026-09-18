@@ -3630,6 +3630,13 @@ settlement cannot be redirected. Authority for token semantics is Circle's FiatT
 (https://github.com/circlefin/stablecoin-evm/blob/master/contracts/v2/FiatTokenV2.sol) and
 https://eips.ethereum.org/EIPS/eip-3009; observed Base Sepolia behaviour pins what the docs leave open.
 
+Superseded 2026-09-18 (same day, starpatron E9 revision): the consumer dropped the own splitter
+contract. Tips and unlocks now settle through an immutable 0xSplits V2 PushSplit per creator on
+Ethereum mainnet, and the payer signs a plain TransferWithAuthorization with `to = split`; the
+existing `MPP.Methods.EVM.Authorization` already enforces `to == charge.recipient` per charge and
+knows Circle USDC on Ethereum 1 and Sepolia 11155111, so no new method is needed. starpatron task 45
+became the split deployment/evidence task and task 17 consumes Authorization directly.
+
 Why a bare transfer event is not enough: a receipt is the server's authority to grant an
 entitlement. Verifying only the star-side transfer lets an attacker pay 20% to the platform and
 present a receipt for 100%. The method verifies the whole payment — allowed deployment, splitter
