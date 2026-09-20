@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+@~/.claude/includes/verification-policy.md
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 <!-- Selective-load floor (Opus 4.8): critical-rules is the eager guardrail floor;
