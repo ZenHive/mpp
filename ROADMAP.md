@@ -124,7 +124,7 @@
 > Cross-SDK gap analysis (2026-04-04) identified missing protocol features in mppx and mpp-rs that our library lacks. These are small, independent modules — all `[P]` parallelizable.
 
 <!-- TASKS:BEGIN phase=9 -->
-> 43 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
+> 44 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-9-protocol-utilities).
 <!-- TASKS:END -->
 
 ---
