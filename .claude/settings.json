@@ -1,14 +1,13 @@
 {
   "extraKnownMarketplaces": {
     "zenhive": {
-      "source": { "source": "github", "repo": "ZenHive/claude-marketplace" }
+      "source": {
+        "source": "github",
+        "repo": "ZenHive/claude-marketplace"
+      }
     }
   },
-  "enabledPlugins": {
-    "elixir@zenhive": true,
-    "elixir-volt@zenhive": true,
-    "elixir-workflows@zenhive": true
-  },
+  "enabledPlugins": {},
   "hooks": {
     "SessionStart": [
       {
