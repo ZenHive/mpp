@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 81 — Add x402 v2 exact interoperability on 2026-09-18
 
-**Up next:** Task 129 — Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋
+**Up next:** Task 132 — Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -63,7 +63,7 @@
 | Task 11 | ✅ | 🎁 **descripex** · Descripex annotations [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
 | Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
-| Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0] 🎯 |
+| Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0?] 🎯 |
 | Task 100 | ✅ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:4/B:6/U:4 → Eff:1.25] 📋 |
 <!-- TASKS:END -->
 
@@ -86,7 +86,7 @@
 |------|--------|-------|
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 | Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
-| Task 85 `[P]` | ✅ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 85 `[P]` | ✅ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -142,8 +142,8 @@
 | Task 30 | ✅ | 🎁 **session** · Channel state and voucher types [D:5/B:9/U:8 → Eff:1.7?] 🚀 |
 | Task 31 | ✅ | 🎁 **session** · Session credential actions [D:5/B:9/U:8 → Eff:1.7?] 🚀 |
 | Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42?] 📋 |
-| Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08] 📋 |
-| Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25] 📋 |
+| Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08?] 📋 |
+| Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25?] 📋 |
 | Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
 | Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
 | Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
@@ -175,7 +175,7 @@
 | Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
 | Task 81 | ✅ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋 |
-| Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17] 📋 |
+| Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17?] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
@@ -193,10 +193,10 @@
 | Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
 | Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58?] 🚀 |
-| Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62] 🚀 |
-| Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88] 🚀 |
-| Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0] 🎯 |
-| Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93] ⚠️ |
+| Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62?] 🚀 |
+| Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
+| Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0?] 🎯 |
+| Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93?] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -211,7 +211,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | Task 21 | ✅ | 🎁 **solana** · Solana charge method [D:6/B:9/U:9 → Eff:1.5?] 🚀 |
-| Task 88 `[P]` | ✅ | 🎁 **additional-methods** · Solana confidential transfer profile [D:8/B:7/U:6 → Eff:0.81] ⚠️ |
+| Task 88 `[P]` | ✅ | 🎁 **additional-methods** · Solana confidential transfer profile [D:8/B:7/U:6 → Eff:0.81?] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -254,6 +254,7 @@
 | Task 129 | ⬜ | 🎁 **additional-methods** · Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 130 | ✅ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 131 | ⛔ | 🎁 **additional-methods** · MPP.Methods.EVM.Split: atomic fee split through a splitter contract [D:7/B:8/U:7 → Eff:1.07] 📋 |
+| Task 132 | ⬜ | 🎁 **additional-methods** · Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25] 🎯 |
 <!-- TASKS:END -->
 
 ---

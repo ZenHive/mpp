@@ -3656,3 +3656,24 @@ gate that closes the task.
 """
 created_at = "2026-09-17"
 scored_at = "2026-09-17"
+
+[[task]]
+id = "132"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Bump locked mint to 1.10.1"
+scores = { d = 2, b = 6, u = 7 }
+acceptance_criteria = ["mix.lock resolves mint to 1.10.1 or newer", "mix deps.get no longer reports mint as VULNERABLE for the published CVE-2026-82672 advisory", "mix deps.audit.gated reports no mint finding", "mix precommit.full still passes on the bumped lock"]
+out_of_scope = ["Re-adjudicating cowlib/gun Hex noise (already decided in AGENTS.md)", "Changing Req or Finch versions unless the mint bump requires it"]
+files_to_modify = ["mix.lock"]
+touches = ["mix.lock"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Cold `mix precommit.full` at 3bf67c5: Hex printed a published advisory against locked mint 1.10.0 (CVE-2026-82672 / GHSA-rj5m-69wp-cxq9). mint 1.10.1 shipped 2026-09-19 as the patch. mix_audit reported no vulnerabilities on this run (advisory-mirror freshness script is absent on the harness node). mint is a transitive runtime dep via req/finch.
+
+Bump the lock to 1.10.1 or newer. Do not ignore the advisory. cowlib/gun Hex lines on deps.get are already adjudicated and out of scope.
+"""
+created_at = "2026-09-20"
+scored_at = "2026-09-20"
