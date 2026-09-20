@@ -241,8 +241,13 @@ defmodule MPP.MixProject do
         # either way, but only a trailing position keeps the log readable.
         "deps.audit.gated"
       ],
+      # Focused dispatch baseline. Reviewers select focused behavior tests
+      # and risk-relevant live/security checks. Full QA is `mix ci` /
+      # `mix precommit.full` — those aliases list their steps independently
+      # so slimming this alias cannot drop a QA check.
       "check.dispatch": [
-        "precommit.full"
+        "format --check-formatted",
+        "compile --warnings-as-errors"
       ],
       "mutation.security": "run test/mutation/security_campaign.exs",
       # Fails when AGENTS.md has drifted from CLAUDE.md. Compares rendered output,

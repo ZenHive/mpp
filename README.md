@@ -523,8 +523,9 @@ when using mpp as a dependency).
 
 ## Project checks
 
-Run `mix deps.get`, then `mix ci` (also available as `mix check.dispatch`).
-Elixir/OTP versions are pinned in `.tool-versions`. The gate runs formatting,
+Run `mix deps.get`, then `mix ci` for the full project gate. `mix check.dispatch`
+is format-check plus compile-with-warnings-as-errors; reviewers add focused tests.
+Elixir/OTP versions are pinned in `.tool-versions`. The full gate runs formatting,
 compilation with warnings as errors, Credo, Doctor, tests with 95% coverage,
 Sobelow, clone and architecture checks, Dialyzer, and dependency auditing.
 Host tooling also checks `AGENTS.md` freshness and advisory-mirror freshness.
