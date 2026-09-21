@@ -2148,7 +2148,7 @@ acceptance_criteria = [
 out_of_scope = ["Re-implementing EIP-3009 primitives (Task 40)", "Re-implementing generic Solana transfer primitives (Task 21)", "Stacks USDCx profile (Task 122)", "Circle Gateway Transfer profile (Task 123)"]
 touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/solana.ex", "test/mpp/methods/usdc_test.exs", "test/mpp/methods/usdc_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.6"
+model = "grok-4.7"
 body = """
 Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.
 
@@ -3372,7 +3372,7 @@ acceptance_criteria = ["MPP.Methods.USDC accepts the Stacks USDCx/SIP-010 direct
 out_of_scope = ["EVM and Solana USDC profiles (Task 80)", "Circle Gateway Transfer profile (its own task)"]
 touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/stacks.ex", "test/mpp/methods/usdc_test.exs", "test/mpp/methods/usdc_integration_test.exs"]
 assignee = "grok"
-model = "grok-4.6"
+model = "grok-4.7"
 body = """
 Split out of Task 80 on 2026-09-16 (review: four live environments in one dispatch cycle is not reviewable as one diff). Stacks is a new chain with no primitives in this repo or its deps, so this profile is its own implement-review-land cycle on top of the `usdc` acceptance surface Task 80 ships for EVM and Solana.
 
@@ -3565,7 +3565,7 @@ acceptance_criteria = ["A test (or mix task folded into `mix precommit.full`) fa
 out_of_scope = ["Grading the prose quality of a module-map description", "Auto-generating the module map; the descriptions are hand-written and stay hand-written", "Changing what `mix agents.check` does", "Coverage thresholds of any kind — Task 127 owns that gate"]
 touches = ["test/mpp/", "CLAUDE.md", "AGENTS.md", "mix.exs"]
 assignee = "cursor"
-model = "cursor-grok-4.6-high"
+model = "grok-4.7-high"
 body = """
 The module map in CLAUDE.md (mirrored into AGENTS.md) drifts silently, and only an audit reading the diff by hand catches it. Two instances in one 15-commit range:
 

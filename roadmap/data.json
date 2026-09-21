@@ -3122,7 +3122,7 @@
         40
       ],
       "assignee": "grok",
-      "model": "grok-4.6",
+      "model": "grok-4.7",
       "acceptance_criteria": [
         "MPP.Methods.USDC implements the `usdc` acceptance surface of draft-usdc-charge-00.md for the direct EVM EIP-3009 profile (draft:289-315) and the direct Solana profile (draft:316-354), reusing Task 40's EIP-3009 primitives and Task 21's Solana integration",
         "USDC-specific native-asset identity (supported asset forms, draft:908-922), token-control (blocklist/pause, draft:923-939), replay (draft:940-990) and receipt (draft:852-905) requirements are enforced for both profiles, and profile exclusivity is tested (draft:258)",
@@ -5135,7 +5135,7 @@
         80
       ],
       "assignee": "grok",
-      "model": "grok-4.6",
+      "model": "grok-4.7",
       "acceptance_criteria": [
         "MPP.Methods.USDC accepts the Stacks USDCx/SIP-010 direct profile of draft-usdc-charge-00.md:355-399 alongside the EVM and Solana profiles delivered by Task 80, with profile exclusivity enforced (a credential for one profile is rejected under another, draft:258)",
         "USDC-specific native-asset identity, token-control (blocklist/pause, draft:923-939), replay and receipt requirements hold for the Stacks leg",
@@ -5464,7 +5464,7 @@
       "markers": [],
       "depends_on": [],
       "assignee": "cursor",
-      "model": "cursor-grok-4.6-high",
+      "model": "grok-4.7-high",
       "acceptance_criteria": [
         "A test (or mix task folded into `mix precommit.full`) fails when a module defined under `lib/` appears in neither the CLAUDE.md '### Module map' fenced block nor the '@moduledoc false internals' paragraph that follows it, naming the missing module(s)",
         "It also fails in the other direction: a name listed in either place that no longer resolves to a module under `lib/` (catches renames and deletions)",
