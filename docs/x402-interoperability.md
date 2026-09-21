@@ -21,19 +21,30 @@ schemes other than `exact`, and Permit2 client signing are out of scope.
 - Shared primitive: `Authorization.sign_transfer/2` signs a caller-supplied nonce
   and does not enforce either contract.
 
-## Live facilitator (2026-09-18)
+## Live facilitator (2026-09-18 rejection, 2026-09-22 settlement)
 
 `https://www.x402.org/facilitator/supported` advertised v2 exact EVM on Base Sepolia
-(`eip155:84532`). Payer `0x898018E18e1Aa5819282EC4D9B784E1aE7eecAC4` had zero
-Base Sepolia USDC. A real EIP-712 signature for `balance + 1` observed:
+(`eip155:84532`). Payer `0x898018E18e1Aa5819282EC4D9B784E1aE7eecAC4`, while it
+held zero Base Sepolia USDC, signed a real EIP-712 authorization for `balance + 1`:
 
 | Endpoint | HTTP | Domain result |
 | --- | --- | --- |
 | `/verify` | 200 | `isValid: false`, `invalidReason: invalid_exact_evm_insufficient_balance` |
 | `/settle` | 200 | `success: false`, `errorReason: invalid_exact_evm_insufficient_balance`, `transaction: ""` |
 
-A successful live settlement remains unobserved until that payer is funded with
-Base Sepolia USDC. Integration tests pin the rejection and flunk loudly when
+After funding the payer with 20 USDC (2026-09-22), the same integration test
+settled a 1-unit authorization through `/verify` (`isValid: true`) and `/settle`
+(`success: true`, `transaction` set). On-chain evidence, Base Sepolia:
+
+| Field | Value |
+| --- | --- |
+| Transaction | `0x408cdc77632380f56ad3e94aeb1faf5f523c69dff46be586f785c3ac97ea5a8e` (block 47132497) |
+| Relayer (`tx.from`) | `0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf` |
+| Call | `transferWithAuthorization` (`0xe3ee160e`, v/r/s variant) |
+| USDC `Transfer` | payer → `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`, value 1 |
+| Payer balance | 20000000 → 19999999 |
+
+Integration tests pin both the rejection and the settlement and flunk loudly when
 funding is missing. Localnet pay/retry/replay does not replace that observation.
 
 ```sh
