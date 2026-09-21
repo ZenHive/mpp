@@ -3661,7 +3661,7 @@ scored_at = "2026-09-17"
 id = "132"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "done"
 title = "Bump locked mint to 1.10.1"
 scores = { d = 2, b = 6, u = 7 }
 acceptance_criteria = ["mix.lock resolves mint to 1.10.1 or newer", "mix deps.get no longer reports mint as VULNERABLE for the published CVE-2026-82672 advisory", "mix deps.audit.gated reports no mint finding", "mix precommit.full still passes on the bumped lock"]
@@ -3675,8 +3675,11 @@ Cold `mix precommit.full` at 3bf67c5: Hex printed a published advisory against l
 
 Bump the lock to 1.10.1 or newer. Do not ignore the advisory. cowlib/gun Hex lines on deps.get are already adjudicated and out of scope.
 """
+implemented = "2026-09-22: mix deps.update mint -> 1.10.1 inline during the post-land review of tasks 81/133; lock resolves mint 1.10.1 (e8e12b1)"
 created_at = "2026-09-20"
 scored_at = "2026-09-20"
+done_at = "2026-09-21"
+shipped_in = "e8e12b1"
 
 [[task]]
 id = "133"
@@ -3701,3 +3704,28 @@ started_at = "2026-09-20"
 scored_at = "2026-09-20"
 done_at = "2026-09-20"
 shipped_in = "311cc458fcff01ab7f144b564c7a37178a005d4f"
+
+[[task]]
+id = "134"
+phase = 5
+bundle = "evm"
+status = "pending"
+title = "Support custom EIP-3009 settlement with a live payment-and-distribution batch example"
+scores = { d = 6, b = 7, u = 6 }
+depends_on = [40]
+acceptance_criteria = ["With no callback configured, existing direct EIP-3009 settlement behavior and credential advertisement remain compatible; with an explicit callback, authorization can be advertised and settled without an MPP-owned private key. Callback/configuration never leaks into a public challenge.", "The callback is invoked only after the existing signature, chain/domain, recipient, amount, challenge nonce, validity and source checks succeed. Invalid credentials never invoke it. MPP retains confirmed-receipt, matching payer/token/recipient/amount and replay verification; a callback success or arbitrary hash alone never grants a receipt. Test error, malformed return, reverted/unconfirmed transaction and unrelated successful transaction paths.", "Document the callback's input/output, trust boundary, submission ownership and retry/concurrency semantics in existing docs. Do not silently fall back to direct submission after a callback error. Repeated/concurrent requests cannot create a second on-chain payment or bypass the existing single-use credential rules; distinguish confirmed payment from distribution completion.", "Before implementation, exercise and record live Sepolia success and relevant rejection using Circle USDC, then add tagged integration tests. A real authorization pays a verified immutable owner-zero PushSplit through an existing batch executor and distributes to its fixed recipients with zero distributor incentive. A separate live case proves a reverting distribution subcall preserves a successful payment when explicitly allowed; a failing payment never produces an MPP receipt. A deterministic invalid distribution input may exercise the failure branch without pretending to reproduce Circle blocklisting. Retry distribution and verify resulting balances. Missing credentials flunk with exact export/setup instructions; mocks and local simulations do not replace these calls.", "Pin invariant identifiers for validation-before-submission, exact payment matching, replay, no fallback submission and optional distribution failure. Cover boundaries with unit/property tests and use official EIP-3009 vectors or provider behavior as an independent oracle. Execute a deliberate negative control and focused authorization/payment mutants; review every survivor. Bind the evidence ledger in the review artifact to the delivery commit, reference SDK revision, chain/block, token/split/executor addresses and runtime-code hashes, plus proxy implementation/configuration where applicable. Do not claim deployed-bytecode audit coverage from an unrelated source audit.", "Raise existing touched critical modules to at least 95% coverage before code changes, keep them at tier, run the live integration and applicable cross-validation tests explicitly, and pass mix ci. Include a runnable consumer-side callback/batch example without production Solidity or JS dependencies."]
+out_of_scope = ["A new MPP payment method or revival of Task 131", "Deploying or implementing new Solidity executor/splitter code; no Echidna/Medusa campaign for unchanged third-party contracts", "A general multicall SDK, batch queue, background distribution service or automatic retry policy", "Tempo batching, Permit2 changes, x402 facilitator implementation (Task 81), USDC profiles (Task 80)", "Starpatron production deployment, entitlement storage or mainnet transactions"]
+touches = ["lib/mpp/methods/evm.ex", "lib/mpp/methods/evm/authorization.ex", "test/mpp/methods/", "test/support/", "README.md", "mix.exs"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Allow a consuming application to choose how a validated EIP-3009 authorization is submitted, including a relayer-owned batch that funds an immutable 0xSplits V2 PushSplit and attempts distribution. Keep the existing direct token submission as the default. Expose an explicit server-only settlement callback with caller-supplied configuration; MPP validates authorization before invoking it and independently verifies its returned transaction reference before issuing a receipt. A callback that submits externally must not require MPP to hold a private key. This is one capability with its integration proof, not a general batch framework or a new payment method.
+
+Evidence at filing: MPP commit 2ab7983862848c011f405fdfa754acfc9cf14f23, lib/mpp/methods/evm/authorization.ex settle/2 and broadcast/5 directly submit to the token; lib/mpp/methods/evm.ex verify/2 checks the returned transaction's Transfer log and replay store. mppx commit c0ce0fecccf29f0dab8457c4356c0a3838af3390, src/evm/server/Charge.ts NativeConfig.settle and SettleAuthorization, provides the SDK compatibility precedent. Re-read these paths at pickup. Task 81 owns x402 facilitator support and Task 80 the USDC method; this task supplies only native EIP-3009 submission extensibility and must coexist with either landing first. Task 131 stays superseded.
+
+Decision: a confirmed full payment to the configured immutable split address is sufficient for the consumer's entitlement. Distribution may fail without invalidating that payment and can be retried independently. The integration example therefore requires the payment subcall to succeed and permits only the distribution subcall to fail; an all-or-nothing batch has different semantics and must not be presented as this example. Validate the split's identity, owner-zero state, recipient allocation and zero distributor incentive in the consumer example, not as hard-coded MPP policy. No checkout402 dependency or assumed audited PushSplit claim.
+
+Authority: live Circle USDC on Ethereum Sepolia, Circle's FiatToken contract source and EIP-3009 establish payment semantics; the actual deployed 0xSplits PushSplit and chosen existing batch executor plus their official source establish batch effects. SDK code is compatibility evidence only. Observe a real success and a relevant real error before implementing; derive mocks afterward. Exact executor/deployment compatibility is unverified at filing: establish it during live discovery, record addresses/code identity, and report an external blocker if no usable testnet deployment can be exercised rather than substituting a mock or writing a new Solidity executor. The named benefit is the user's requested batching capability and the Starpatron PushSplit consumer; D6 includes live batch evidence, B7 enables custom relayers without a new method, U6 reflects the explicit request while separate distribution already works.
+"""
+created_at = "2026-09-18"
+scored_at = "2026-09-18"
