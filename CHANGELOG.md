@@ -10,12 +10,20 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- x402 v2 exact interoperability (Task 81): `MPP.X402` parses `PAYMENT-REQUIRED`
+  offers into synthetic challenges, `MPP.Client.Providers.X402Exact` signs
+  EIP-3009 `PAYMENT-SIGNATURE` credentials with x402 nonce rules, and
+  `MPP.Plug` `:x402` verifies and settles them through a configurable
+  facilitator next to native Payment-auth on the same endpoint
+  (`docs/x402-interoperability.md`).
 - Payment-security mutant `evm-transaction-opt-in-bypassed`: the campaign now
   proves the `type="transaction"` opt-in gate in `MPP.Methods.EVM.Transaction`
   is test-covered.
 
 ### Changed
 
+- Locked `mint` bumped to 1.10.1 (CVE-2026-82672 / GHSA-rj5m-69wp-cxq9;
+  transitive via `req`/`finch`).
 - `mix mpp.cover.critical` replaces `mix mpp.cover.methods` in `mix precommit`.
   The per-module 95% floor now covers the whole money-critical tier
   (`lib/mpp/methods/`, `lib/mpp/session/`, headers, verifier, challenge,
@@ -25,6 +33,11 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Fixed
 
+- `MPP.X402.Plug` hands the facilitator the server-configured requirements
+  the echoed `accepted` matched — including `extra` — instead of the client's
+  copy, and a route-bound credential must echo the advertised `:extensions`
+  (schema and info, minus the client nonce salt) before its nonce is checked,
+  matching mppx `facilitatorPayment` / `containsExtensions`.
 - `MPP.Methods.Tempo.SignatureEnvelope` fails closed on a malformed secp256k1
   proof signature (out-of-range scalar or recovery id) with a verification
   error instead of raising inside request handling.

@@ -59,7 +59,10 @@ defmodule MPP.Plug do
       map with `:facilitator` and `:accepts` (exact EVM requirements). When
       set, 402 responses also carry `PAYMENT-REQUIRED`, and a
       `PAYMENT-SIGNATURE` is verified and settled through the facilitator.
-      Native Payment-auth remains available on the same endpoint.
+      Native Payment-auth remains available on the same endpoint. A settled
+      x402 request passes through with `:x402_settlement` assigned (the
+      facilitator's settlement response) instead of `:mpp_receipt`, and the
+      `PAYMENT-RESPONSE` header is attached on a successful response.
 
   ## Single-Method Options
 

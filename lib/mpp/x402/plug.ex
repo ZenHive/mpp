@@ -5,6 +5,13 @@ defmodule MPP.X402.Plug do
   Verifies `PAYMENT-SIGNATURE`, binds route and body, claims the authorization
   nonce, settles, and attaches `PAYMENT-RESPONSE`. Coexists with native
   Payment-auth on the same `MPP.Plug` endpoint.
+
+  The facilitator always receives the server-configured requirements that the
+  echoed `accepted` matched (including `extra`), never the client's copy —
+  `refs/mppx/src/x402/server/EvmCharge.ts` `facilitatorPayment`. A
+  route-bound credential (`extensions.mppx.info.nonce`) must echo the
+  advertised `:extensions` (schema and info, minus the client nonce salt)
+  before its nonce is recomputed — mppx `containsExtensions`.
   """
 
   alias MPP.BodyDigest
@@ -80,12 +87,13 @@ defmodule MPP.X402.Plug do
 
   defp settle_header(conn, x402, store, header) do
     with {:ok, payload} <- Headers.decode_payment_signature(header),
-         :ok <- bind_route(payload, conn, x402),
+         {:ok, accepted} <- bind_route(payload, conn, x402),
          :ok <- reject_native_nonce(payload, conn, x402),
          :ok <- Replay.claim(store, authorization_nonce(payload)),
-         {:ok, verified} <- Facilitator.verify(x402.facilitator, payload, payload["accepted"]),
+         payload = Map.put(payload, "accepted", accepted),
+         {:ok, verified} <- Facilitator.verify(x402.facilitator, payload, accepted),
          :ok <- require_valid(verified),
-         {:ok, settled} <- Facilitator.settle(x402.facilitator, payload, payload["accepted"]),
+         {:ok, settled} <- Facilitator.settle(x402.facilitator, payload, accepted),
          :ok <- require_success(settled) do
       {:ok, put_settlement(conn, settled)}
     else
@@ -96,25 +104,26 @@ defmodule MPP.X402.Plug do
   end
 
   defp bind_route(payload, conn, x402) do
-    with :ok <- match_accepted(payload["accepted"], x402.accepts),
+    with {:ok, accepted} <- match_accepted(payload["accepted"], x402.accepts),
          :ok <- match_resource(payload, conn, x402),
-         :ok <- match_digest(conn, x402) do
-      match_extension_nonce(payload, conn, x402)
+         :ok <- match_digest(conn, x402),
+         :ok <- match_extensions(payload, x402),
+         :ok <- match_extension_nonce(payload, accepted, conn, x402) do
+      {:ok, accepted}
     end
   end
 
   defp match_accepted(accepted, accepts) do
-    if Enum.any?(accepts, &same_requirements?(&1, accepted)) do
-      :ok
-    else
-      {:error, :requirements_mismatch}
+    case Enum.find(accepts, &same_requirements?(&1, accepted)) do
+      nil -> {:error, :requirements_mismatch}
+      matched -> {:ok, matched}
     end
   end
 
   defp same_requirements?(left, right) do
     left["scheme"] == right["scheme"] and left["network"] == right["network"] and left["amount"] == right["amount"] and
-      left["maxTimeoutSeconds"] == right["maxTimeoutSeconds"] and address_eq?(left["asset"], right["asset"]) and
-      address_eq?(left["payTo"], right["payTo"])
+      left["maxTimeoutSeconds"] == right["maxTimeoutSeconds"] and left["extra"] == right["extra"] and
+      address_eq?(left["asset"], right["asset"]) and address_eq?(left["payTo"], right["payTo"])
   end
 
   defp address_eq?(left, right) do
@@ -160,17 +169,43 @@ defmodule MPP.X402.Plug do
 
   defp match_digest(_conn, _x402), do: :ok
 
-  defp match_extension_nonce(payload, conn, x402) do
+  defp match_extensions(payload, %__MODULE__{extensions: expected}) when is_map(expected) do
+    if route_bound?(payload) and not contains_extensions?(payload["extensions"], expected) do
+      {:error, :extension_mismatch}
+    else
+      :ok
+    end
+  end
+
+  defp match_extensions(_payload, _x402), do: :ok
+
+  defp contains_extensions?(actual, expected) when is_map(actual) do
+    Enum.all?(expected, fn {key, expected_extension} -> same_extension?(actual[key], expected_extension) end)
+  end
+
+  defp contains_extensions?(_actual, _expected), do: false
+
+  defp same_extension?(%{} = actual, %{} = expected) do
+    actual["schema"] == expected["schema"] and
+      strip_client_nonce(actual["info"] || %{}) == (expected["info"] || %{})
+  end
+
+  defp same_extension?(actual, expected), do: actual == expected
+
+  defp strip_client_nonce(%{"nonce" => nonce} = info) when is_binary(nonce), do: Map.delete(info, "nonce")
+  defp strip_client_nonce(info), do: info
+
+  defp match_extension_nonce(payload, accepted, conn, x402) do
     extensions = payload["extensions"]
 
     case Nonce.contract(extensions) do
-      :extension_bound -> assert_extension_nonce(payload, conn, x402, extensions)
+      :extension_bound -> assert_extension_nonce(payload, accepted, conn, x402, extensions)
       :random -> :ok
     end
   end
 
-  defp assert_extension_nonce(payload, conn, x402, extensions) do
-    expected = Nonce.extension_bound(payload["accepted"], %{"url" => resource_url(conn, x402)}, extensions)
+  defp assert_extension_nonce(payload, accepted, conn, x402, extensions) do
+    expected = Nonce.extension_bound(accepted, %{"url" => resource_url(conn, x402)}, extensions)
 
     if String.downcase(authorization_nonce(payload)) == String.downcase(expected) do
       :ok
