@@ -727,16 +727,20 @@ defmodule MPP.HeadersTest do
       assert {:error, :empty_id} = Headers.parse_challenge(header)
     end
 
-    test "rejects an uppercase method (spec 1*LOWERALPHA)" do
+    test "rejects an uppercase method (grammar [a-z][a-z0-9:_-]*)" do
       assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "Stripe"))
     end
 
-    test "rejects a method with a digit" do
-      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "x402"))
+    test "accepts canonical method names (mppx Challenge.ts:380 / mpp-rs #428)" do
+      for method <- ["x402", "tempo-v2", "a:b", "a_b", "a1:b_2-c"] do
+        assert {:ok, %Challenge{method: ^method}} = Headers.parse_challenge(challenge_header(method: method))
+      end
     end
 
-    test "rejects a method with a dash" do
-      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "tempo-v2"))
+    test "rejects a method that does not start with a lowercase letter" do
+      for method <- ["-tempo", ":tempo", "_tempo", "123", "tempo!"] do
+        assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: method)), method
+      end
     end
 
     test "rejects a request that is not base64url-JSON" do
@@ -781,16 +785,37 @@ defmodule MPP.HeadersTest do
   end
 
   describe "property: parse_challenge/1 rejects malformed methods (Task 72)" do
-    property "any method with a non-lowercase-alpha character is rejected as :invalid_method" do
+    property "any method with a character outside [a-z0-9:_-] is rejected as :invalid_method" do
       check all(
-              lower <- StreamData.string(?a..?z, min_length: 0, max_length: 8),
-              bad_char <- StreamData.member_of([?A, ?Z, ?0, ?9, ?-, ?_, ?:]),
-              suffix <- StreamData.string(?a..?z, min_length: 0, max_length: 8)
+              lower <- StreamData.string(?a..?z, min_length: 1, max_length: 8),
+              bad_char <- StreamData.member_of([?A, ?Z, ?!, ?., ?/, ?~, ?+]),
+              suffix <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 0, max_length: 8)
             ) do
-        # Guaranteed non-conformant: at least one non-lowercase-alpha byte present.
+        # Guaranteed non-conformant: at least one byte outside the grammar is present.
         method = lower <> <<bad_char>> <> suffix
         header = Headers.format_challenge(make_challenge(method: method))
         assert {:error, :invalid_method} = Headers.parse_challenge(header)
+      end
+    end
+
+    property "any method starting with a non-letter is rejected even when the rest conforms" do
+      check all(
+              first <- StreamData.member_of([?0, ?9, ?:, ?_, ?-, ?A]),
+              rest <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 0, max_length: 8)
+            ) do
+        header = Headers.format_challenge(make_challenge(method: <<first>> <> rest))
+        assert {:error, :invalid_method} = Headers.parse_challenge(header)
+      end
+    end
+
+    property "any method matching [a-z][a-z0-9:_-]* round-trips through parse_challenge/1" do
+      check all(
+              first <- StreamData.integer(?a..?z),
+              rest <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 0, max_length: 8)
+            ) do
+        method = <<first>> <> rest
+        header = Headers.format_challenge(make_challenge(method: method))
+        assert {:ok, %Challenge{method: ^method}} = Headers.parse_challenge(header)
       end
     end
   end

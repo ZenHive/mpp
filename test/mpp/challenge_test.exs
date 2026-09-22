@@ -227,20 +227,23 @@ defmodule MPP.ChallengeTest do
       assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: ""})
     end
 
-    test "rejects uppercase method (spec 1*LOWERALPHA)" do
+    test "rejects uppercase method (grammar [a-z][a-z0-9:_-]*)" do
       assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "Stripe"})
     end
 
-    test "rejects method with a digit" do
-      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "x402"})
+    # mppx `Challenge.ts:380` and mpp-rs #428 (`is_valid_method_name`) agree on
+    # `[a-z][a-z0-9:_-]*`: digits, hyphens, underscores and colons are valid after
+    # the leading lowercase letter.
+    test "accepts canonical method names with digits, dashes, underscores and colons" do
+      for method <- ["tempo", "x402", "tempo-v2", "mock_b", "a:b", "a1:b_2-c"] do
+        assert :ok = Challenge.validate_fields(%{valid_challenge() | method: method}), method
+      end
     end
 
-    test "rejects method with a dash" do
-      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "tempo-v2"})
-    end
-
-    test "rejects method with an underscore" do
-      assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "mock_b"})
+    test "rejects method names that do not start with a lowercase letter" do
+      for method <- ["123", "-tempo", ":tempo", "_tempo", "*", "tempo!", "Tempo"] do
+        assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: method}), method
+      end
     end
 
     test "rejects request that is not base64url" do

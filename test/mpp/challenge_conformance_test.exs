@@ -118,7 +118,7 @@ defmodule MPP.ChallengeConformanceTest do
   describe "HMAC challenge-ID header slot (SDK layout, insert before opaque)" do
     # Independent HMAC of the SDK input
     # realm|method|intent|request|||Payment-Authorization|
-    # draft-01 appends header after opaque; we follow mppx/mpp-rs.
+    # draft-01 §HMAC-SHA256 Test Vectors (mpp-specs #362) pins this layout.
     test "Payment-Authorization is inserted before the empty opaque slot" do
       challenge =
         Challenge.create(
@@ -134,6 +134,26 @@ defmodule MPP.ChallengeConformanceTest do
 
       assert challenge.id == "S91xi-OFGZPMs-j7GsX0FDpIkmCcZT1P9XyV58WNy_U"
       assert challenge.header == "Payment-Authorization"
+    end
+
+    # realm|method|intent|request|||Payment-Authorization|eyJwaSI6InBpXzEyMyJ9
+    # Third draft-01 vector: header inserted before a present opaque slot.
+    test "Payment-Authorization precedes a present opaque slot (draft-01 vector)" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: b64(~S({"amount":"1000000"})),
+            header: "Payment-Authorization",
+            opaque: b64(~S({"pi":"pi_123"}))
+          ],
+          @secret
+        )
+
+      assert challenge.opaque == "eyJwaSI6InBpXzEyMyJ9"
+      assert challenge.id == "CJ4X1O4aTDmS59hfdhnhBtxIQjWDOf0bcrhsswwMOW8"
     end
 
     test "explicit Authorization is omitted and keeps the 0.16.0 id" do

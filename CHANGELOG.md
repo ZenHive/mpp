@@ -22,6 +22,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- Method identifiers now follow the reference-SDK grammar `[a-z][a-z0-9:_-]*`
+  (mppx `Challenge.deserialize`, mpp-rs #428) instead of the stricter spec
+  ABNF `1*LOWERALPHA`: `MPP.Challenge.valid_method_name?/1`, challenge /
+  credential parsing and the `MPP.Plug.init/1` boot check accept digits,
+  colons, underscores and hyphens after the leading lowercase letter (for
+  example `x402`, `tempo-v2`). Names that do not start with a lowercase letter
+  are still `:invalid_method`.
 - Locked `mint` bumped to 1.10.1 (CVE-2026-82672 / GHSA-rj5m-69wp-cxq9;
   transitive via `req`/`finch`).
 - `mix mpp.cover.critical` replaces `mix mpp.cover.methods` in `mix precommit`.

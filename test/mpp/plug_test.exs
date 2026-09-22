@@ -89,9 +89,10 @@ defmodule MPP.PlugTest do
     @moduledoc false
     use MPP.Method
 
-    # Deliberately outside the spec ABNF `1*LOWERALPHA` to exercise init-time rejection.
+    # Deliberately outside the method-identifier grammar `[a-z][a-z0-9:_-]*`
+    # (uppercase first letter) to exercise init-time rejection.
     @impl MPP.Method
-    def method_name, do: "mock_bad"
+    def method_name, do: "Mock_bad"
 
     @impl MPP.Method
     def verify(_payload, _charge) do
@@ -447,10 +448,10 @@ defmodule MPP.PlugTest do
       end
     end
 
-    test "raises on a method name outside the spec ABNF (1*LOWERALPHA)" do
+    test "raises on a method name outside the method-identifier grammar" do
       # Challenge parsing rejects such names as :invalid_method, so the
       # misconfiguration must surface at boot, not as client parse failures.
-      assert_raise ArgumentError, ~r/1\*LOWERALPHA.*mock_bad/s, fn ->
+      assert_raise ArgumentError, ~r/\[a-z\]\[a-z0-9:_-\]\*.*Mock_bad/s, fn ->
         PaymentPlug.init(
           secret_key: @secret_key,
           realm: "api.test.com",

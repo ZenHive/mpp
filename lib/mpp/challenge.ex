@@ -18,8 +18,9 @@ defmodule MPP.Challenge do
   used as their raw base64url-encoded strings (never re-serialized).
 
   When the optional `header` auth-param is advertised, an extra slot is
-  inserted immediately before `opaque` (mppx / mpp-rs layout). Header-less
-  challenges keep the seven-slot input byte-for-byte. See `compute_id/2`.
+  inserted immediately before `opaque` (draft-01 §HMAC-SHA256 Challenge Binding;
+  mppx / mpp-rs layout). Header-less challenges keep the seven-slot input
+  byte-for-byte. See `compute_id/2`.
 
   ## Fields
 
@@ -136,7 +137,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `1*LOWERALPHA`, request base64url-JSON object, digest `sha-256=…`, expires RFC 3339). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, request base64url-JSON object, digest `sha-256=…`, expires RFC 3339). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -163,33 +164,41 @@ defmodule MPP.Challenge do
   defp validate_id(id) when is_binary(id) and id != "", do: :ok
   defp validate_id(_id), do: {:error, :empty_id}
 
-  # method MUST match `payment-method-id = 1*LOWERALPHA` (spec §"Method Identifier
-  # Format", refs/mpp-specs/specs/core/draft-httpauth-payment-00.md:504-510). Follows
-  # mpp-rs (`chars().all(is_ascii_lowercase)`); mppx's `[a-z][a-z0-9:_-]*` is looser
-  # than the spec ABNF, so the spec breaks the tie toward lowercase-letters-only.
+  # method MUST match the canonical method-identifier grammar shared by both
+  # reference SDKs: `[a-z][a-z0-9:_-]*` (mppx `Challenge.deserialize`,
+  # refs/mppx/src/Challenge.ts:380; mpp-rs `is_valid_method_name`,
+  # refs/mpp-rs/src/protocol/core/headers.rs, aligned in mpp-rs #428). The
+  # spec ABNF (`payment-method-id = 1*LOWERALPHA`,
+  # refs/mpp-specs/specs/core/draft-httpauth-payment-00.md:657) is stricter, but
+  # two independent SDKs agree on the looser grammar and interop with their
+  # challenges is the point — follow the SDKs (same call as the HMAC header slot).
   defp validate_method(method) when is_binary(method) do
     if valid_method_name?(method), do: :ok, else: {:error, :invalid_method}
   end
 
   defp validate_method(_method), do: {:error, :invalid_method}
 
-  # Non-empty, lowercase ASCII letters only (spec ABNF above). Shared with
-  # `MPP.Plug.init/1` so a non-conformant server config fails at boot instead
-  # of emitting challenges no compliant client (including this library's own
-  # parse paths) can parse.
+  # Lowercase ASCII letter first, then lowercase letters, digits, `:`, `_`, `-`.
+  # Shared with `MPP.Plug.init/1` so a non-conformant server config fails at boot
+  # instead of emitting challenges no reference client (including this library's
+  # own parse paths) can parse.
   api(
     :valid_method_name?,
-    "Check whether a string is a valid MPP payment-method name per the spec ABNF `payment-method-id = 1*LOWERALPHA` (non-empty, lowercase ASCII letters only).",
+    "Check whether a string is a valid MPP payment-method name per the reference-SDK grammar `[a-z][a-z0-9:_-]*` (lowercase ASCII letter first; then lowercase letters, digits, colon, underscore, hyphen).",
     params: [
       method: [kind: :value, description: "Candidate payment-method name"]
     ],
-    returns: %{type: :boolean, description: "true when the name conforms to the spec ABNF"}
+    returns: %{type: :boolean, description: "true when the name conforms to the method-identifier grammar"}
   )
 
   @spec valid_method_name?(String.t()) :: boolean()
-  def valid_method_name?(method) when is_binary(method) do
-    method != "" and method |> :binary.bin_to_list() |> Enum.all?(&(&1 in ?a..?z))
+  def valid_method_name?(<<first, rest::binary>>) when first in ?a..?z do
+    rest |> :binary.bin_to_list() |> Enum.all?(&method_name_char?/1)
   end
+
+  def valid_method_name?(method) when is_binary(method), do: false
+
+  defp method_name_char?(char), do: char in ?a..?z or char in ?0..?9 or char in [?:, ?_, ?-]
 
   # request MUST base64url-decode to a valid JSON object (mpp-rs validates JSON via
   # `serde_json::from_slice`; mppx via `PaymentRequest.deserialize` + `z.record`,
@@ -324,10 +333,9 @@ defmodule MPP.Challenge do
   # before `opaque` (mppx `idBindingInput`, refs/mppx/src/Challenge.ts:691-713;
   # mpp-rs `compute_challenge_id_with_header`, refs/mpp-rs/src/protocol/core/challenge.rs:522-538).
   #
-  # Deliberate interoperability exception: draft-httpauth-payment-01.md:380-427
-  # appends `header` *after* `opaque`. Two independent SDKs agree on the insert-
-  # before-opaque layout; interop is the point of the feature. Follow the SDKs.
-  # Tracked as tempoxyz/mpp-specs#357.
+  # draft-httpauth-payment-01 §HMAC-SHA256 Challenge Binding defines the same two
+  # layouts (mpp-specs #362 aligned the spec to the SDKs, closing mpp-specs#357),
+  # with three test vectors pinned in test/mpp/challenge_conformance_test.exs.
   defp compute_id(%__MODULE__{} = challenge, secret_key) do
     slots = [
       challenge.realm,
