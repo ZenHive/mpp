@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 81 — Add x402 v2 exact interoperability on 2026-09-18
 
-**Up next:** Task 135 — Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀
+**Up next:** Task 137 — Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀
 <!-- FOCUS:END -->
 
 ---
@@ -198,6 +198,7 @@
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0?] 🎯 |
 | Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93?] ⚠️ |
+| Task 137 | ⬜ | 🎁 **tempo** · Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 <!-- TASKS:END -->
 
 ---

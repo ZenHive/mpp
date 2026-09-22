@@ -5796,6 +5796,51 @@
       "created_at": "2026-09-22",
       "scored_at": "2026-09-22",
       "cross_repo": []
+    },
+    {
+      "id": "137",
+      "phase": 13,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity)",
+      "scores": {
+        "d": 3,
+        "b": 5,
+        "u": 5
+      },
+      "eff": 1.67,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "grok-4.7-high",
+      "acceptance_criteria": [
+        "A configured static `memo` in Tempo `method_config` is no longer accepted: `MPP.Plug.init/1` / the Tempo method raise at boot with a message naming the removal and the replacement (challenge-bound attribution, which is already the default path). `challenge_method_details/1` never emits `memo`.",
+        "The server verifies the challenge/realm attribution binding on every Tempo charge path (receipt logs, `type=\"transaction\"` calls incl. machine-token routes, fee-payer pre-cosign) with no memo-configured bypass branch left; existing binding tests stay green and a regression proves a static-memo config can no longer disable the binding check.",
+        "`MPP.Client.Providers.Tempo` ignores a server-advertised `memo` method detail and always sends the attribution memo (mppx / mpp-rs client behaviour), with a test against a challenge that still carries `memo`.",
+        "Split-transfer memos, `MPP.Methods.Tempo.SubscriptionTransaction`'s settlement memo and the presenter-identity binding from Task 75 are unchanged. Moduledocs, README and CHANGELOG document the breaking removal; `docs/security-parity.md` moves the 📋 row to ✓.",
+        "Cross-check the removal against refs/mppx (#904) and refs/mpp-rs (#421) at pickup; run the focused Tempo suites plus `mix test.json --include integration` on Moderato for one challenge-bound payment before landing."
+      ],
+      "out_of_scope": [
+        "Changing the attribution memo byte layout",
+        "Split-specific memos",
+        "Any change to non-Tempo methods"
+      ],
+      "touches": [
+        "lib/mpp/methods/tempo.ex",
+        "lib/mpp/methods/tempo/machine_token.ex",
+        "lib/mpp/client/providers/tempo.ex",
+        "test/mpp/methods/tempo_test.exs",
+        "test/mpp/client/providers/tempo_test.exs",
+        "README.md",
+        "CHANGELOG.md",
+        "docs/security-parity.md"
+      ],
+      "body": "Both reference SDKs removed custom primary charge memos in the same week: mppx #904 (`1851f0f`, 2026-09-18, minor) deletes the `memo` charge option and makes `assertChallengeBoundMemo` unconditional in direct verification; mpp-rs #421 (`c29097a`, 2026-09-21, minor, released in v0.13.0) drops `memo` from `TempoMethodDetails` / `TempoChargeExt` and states that clients always generate attribution memos bound to the challenge and realm. Split-specific memos stay in both.\n\nWhy this matters for us now: our server still supports a static `\"memo\"` in Tempo `method_config` (`lib/mpp/methods/tempo.ex`, `validate_memo!/1`, the memo-configured clause of `find_matching_transfer/5`, `check_matched_memo_binding/3`), advertised to clients via `challenge_method_details/1`. Reference clients as of these releases ignore that detail and send a challenge-bound attribution memo, so a static-memo route is unpayable by mppx / mpp-rs clients (its exact-memo match fails). The default no-memo path already enforces the binding (Tasks 75 / 76, published GHSA-34g7-vx6g-82mq closed the replay residual with the dedup store and presenter binding), so this is an interop and simplification change, not an open vulnerability. Our own `MPP.Client.Providers.Tempo` (`payment_memo/3`) also still honours a server `memo`; align it with the SDK clients.\n\nEvidence at filing (re-read at pickup): refs/mppx commit 1851f0f `src/tempo/server/Charge.ts` (unconditional `assertChallengeBoundMemo` / `assertChallengeBoundCallMemo`), refs/mpp-rs commit c29097a `src/protocol/methods/tempo/{charge,method,transfers,types}.rs` and `src/client/tempo/provider.rs`. Found by the 2026-09-22 sdk-delta-watch sweep.\n",
+      "created_at": "2026-09-22",
+      "scored_at": "2026-09-22",
+      "cross_repo": []
     }
   ]
 }
