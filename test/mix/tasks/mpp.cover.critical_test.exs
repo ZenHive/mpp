@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Mpp.Cover.CriticalTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
@@ -149,6 +149,13 @@ defmodule Mix.Tasks.Mpp.Cover.CriticalTest do
   end
 
   describe "run/1" do
+    setup do
+      previous_shell = Mix.shell()
+      Mix.shell(Mix.Shell.IO)
+      on_exit(fn -> Mix.shell(previous_shell) end)
+      :ok
+    end
+
     test "raises with the module name and percentage for a lowered critical module", %{path: path} do
       write_coverage!(path, [
         module("MPP.Methods.Tempo.HostedFeePayer", "lib/mpp/methods/tempo/hosted_fee_payer.ex", 89.74, 70, [
