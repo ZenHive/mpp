@@ -401,10 +401,10 @@ defmodule MPP.Methods.SolanaTest do
       assert details["pushBinding"] == "challengeMemo"
     end
 
-    test "push_memo/1 is a domain-separated SHA-256 of the challenge id" do
+    test "push_memo/1 is a prefixed, domain-separated SHA-256 of the challenge id" do
       memo = Solana.push_memo("challenge-a")
-      assert memo == Base.encode16(:crypto.hash(:sha256, "mpp-solana-push:challenge-a"), case: :lower)
-      assert byte_size(memo) == 64
+      assert memo == "mpp-push:" <> Base.encode16(:crypto.hash(:sha256, "mpp-solana-push:challenge-a"), case: :lower)
+      assert byte_size(memo) == 73
       refute memo == Solana.push_memo("challenge-b")
       refute memo =~ "challenge-a"
     end
@@ -528,6 +528,57 @@ defmodule MPP.Methods.SolanaTest do
       stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
 
       assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+    end
+
+    test "challenge_memo rejects a foreign push memo even when it is the externalId", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      victim_memo = Solana.push_memo("victim")
+
+      charge =
+        put_details(%{charge | external_id: victim_memo}, %{"push" => "challenge_memo", "challenge_id" => "attacker"})
+
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, [victim_memo])
+      stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+
+      assert error.detail =~ "memo"
+    end
+
+    test "challenge_memo treats the reserved prefix case-insensitively", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      memo = "MPP-PUSH:" <> String.duplicate("a", 64)
+
+      charge =
+        put_details(%{charge | external_id: memo}, %{"push" => "challenge_memo", "challenge_id" => "attacker"})
+
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, [memo])
+      stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+
+      assert error.detail =~ "memo"
+    end
+
+    test "validate_config! rejects a split memo in push-memo shape", %{bare: charge, recipient: recipient} do
+      splits = [%{"recipient" => recipient, "amount" => "1", "memo" => Solana.push_memo("victim")}]
+
+      assert_raise ArgumentError, ~r/mpp-push:/, fn ->
+        Solana.validate_config!(Map.put(charge.method_details, "splits", splits))
+      end
+
+      assert :ok =
+               Solana.validate_config!(Map.put(charge.method_details, "splits", [Map.put(hd(splits), "memo", "vendor")]))
+    end
+
+    test "challenge issue rejects a push-shaped externalId under challenge_memo", %{bare: charge} do
+      bound = put_details(%{charge | external_id: Solana.push_memo("victim")}, %{"push" => "challenge_memo"})
+      assert_raise ArgumentError, ~r/externalId/, fn -> Solana.challenge_method_details(bound) end
+
+      unbound = put_details(%{charge | external_id: Solana.push_memo("victim")}, %{"push" => "unbound"})
+      assert %{"credentialTypes" => _} = Solana.challenge_method_details(unbound)
     end
 
     test "through MPP.Plug only the issuing challenge's memo is accepted", %{payer: payer, recipient: recipient} do

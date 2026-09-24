@@ -76,7 +76,10 @@ defmodule MPP.Methods.Solana do
   only the memos a reference client adds — the challenge `externalId` and split
   `memo` values — or `push_memo/1` of the challenge being answered. Any other
   memo is rejected, so a push transaction bound to a different challenge cannot
-  be redeemed through the pull path.
+  be redeemed through the pull path. The `mpp-push:` memo prefix is reserved: a
+  pull memo carrying it must be this challenge's `push_memo/1`, even when it
+  equals the `externalId` or a split memo, and a split memo (at init) or an
+  `externalId` (at challenge issue) carrying it raises `ArgumentError`.
 
   ## Push challenge binding
 
@@ -86,9 +89,9 @@ defmodule MPP.Methods.Solana do
 
       memo = MPP.Methods.Solana.push_memo(challenge.id)
 
-  The memo is a hash of the challenge id, so a confirmed transfer satisfies only
-  the challenge it was created for, and the on-chain memo does not reveal the
-  challenge id itself.
+  The memo is `"mpp-push:"` followed by a hash of the challenge id, so a
+  confirmed transfer satisfies only the challenge it was created for, and the
+  on-chain memo does not reveal the challenge id itself.
 
   ## Credential Payload
 
@@ -140,6 +143,7 @@ defmodule MPP.Methods.Solana do
   @signature_bytes 64
   @push_modes ["challenge_memo", "unbound"]
   @push_memo_domain "mpp-solana-push:"
+  @push_memo_prefix "mpp-push:"
   @default_max_bundle_transactions 8
 
   api(:method_name, "Return the payment method identifier for Solana.")
@@ -178,6 +182,7 @@ defmodule MPP.Methods.Solana do
     validate_store!(config["store"])
     validate_fee_payer!(config)
     Instructions.validate_splits_config!(config["splits"])
+    validate_split_memos!(config["splits"])
     validate_push!(config["push"])
     :ok
   end
@@ -188,14 +193,16 @@ defmodule MPP.Methods.Solana do
     params: [
       challenge_id: [kind: :value, description: "The `id` of the challenge the payment answers"]
     ],
-    returns: %{type: :string, description: "Lowercase hex SHA-256 of the domain-separated challenge id (64 chars)"}
+    returns: %{
+      type: :string,
+      description: ~s{"mpp-push:" followed by the lowercase hex SHA-256 of the domain-separated challenge id (73 chars)}
+    }
   )
 
   @spec push_memo(String.t()) :: String.t()
   def push_memo(challenge_id) when is_binary(challenge_id) do
-    :sha256
-    |> :crypto.hash(@push_memo_domain <> challenge_id)
-    |> Base.encode16(case: :lower)
+    digest = :sha256 |> :crypto.hash(@push_memo_domain <> challenge_id) |> Base.encode16(case: :lower)
+    @push_memo_prefix <> digest
   end
 
   api(:verify, "Verify a Solana credential by checking on-chain settlement.",
@@ -274,6 +281,7 @@ defmodule MPP.Methods.Solana do
     config = charge.method_details || %{}
     fee_payer? = fee_payer_enabled?(config)
     :ok = Confidential.validate_charge!(charge, config)
+    :ok = validate_external_id!(charge, config)
 
     details = %{
       "network" => network(config),
@@ -736,15 +744,47 @@ defmodule MPP.Methods.Solana do
     end
   end
 
-  defp allowed_pull_instruction?({:memo, memo}, allowed), do: memo in allowed
+  # A push-shaped memo is accepted only as this challenge's own push memo, so an
+  # externalId or split memo copied from another challenge's push memo cannot
+  # widen the allowlist.
+  defp allowed_pull_instruction?({:memo, memo}, allowed) do
+    if push_shaped?(memo), do: memo == allowed.push, else: memo in allowed.other
+  end
+
   defp allowed_pull_instruction?(_classified, _allowed), do: true
 
   defp allowed_pull_memos(charge, config) do
     split_memos = for %{"memo" => memo} <- config["splits"] || [], is_binary(memo), do: memo
-    push = if is_binary(config["challenge_id"]), do: [push_memo(config["challenge_id"])], else: []
+    push = if is_binary(config["challenge_id"]), do: push_memo(config["challenge_id"])
     external = if is_binary(charge.external_id), do: [charge.external_id], else: []
-    external ++ split_memos ++ push
+    %{push: push, other: external ++ split_memos}
   end
+
+  defp push_shaped?(memo), do: memo |> String.downcase() |> String.starts_with?(@push_memo_prefix)
+
+  defp validate_split_memos!(splits) when is_list(splits) do
+    Enum.each(splits, fn
+      %{"memo" => memo} when is_binary(memo) ->
+        if push_shaped?(memo) do
+          raise ArgumentError, ~s(MPP.Methods.Solana split memos must not start with the reserved "mpp-push:" prefix)
+        end
+
+      _split ->
+        :ok
+    end)
+  end
+
+  defp validate_split_memos!(_splits), do: :ok
+
+  defp validate_external_id!(%Charge{external_id: external_id}, config) when is_binary(external_id) do
+    if push_mode(config) == "challenge_memo" and push_shaped?(external_id) do
+      raise ArgumentError, ~s(MPP.Methods.Solana externalId must not start with the reserved "mpp-push:" prefix)
+    end
+
+    :ok
+  end
+
+  defp validate_external_id!(_charge, _config), do: :ok
 
   defp maybe_put_push_binding(details, config) do
     if details["credentialTypes"] == ~w(transaction signature) and push_mode(config) == "challenge_memo" do
