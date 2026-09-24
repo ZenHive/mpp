@@ -247,7 +247,7 @@
 | Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service. |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
-| Task 80 | ⬜ | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14] 📋 |
+| Task 80 | 🔄 | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14] 📋 |
 | Task 86 | ✅ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
 | Task 109 | ✅ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
 | Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
