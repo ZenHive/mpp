@@ -112,7 +112,8 @@ defmodule MPP.Methods.SolanaTest do
           "rpc_url" => @rpc_url,
           "network" => "devnet",
           "req_options" => [plug: {Req.Test, Solana}],
-          "store" => false
+          "store" => false,
+          "push" => "unbound"
         }
     }
 
@@ -285,9 +286,181 @@ defmodule MPP.Methods.SolanaTest do
       assert {:ok, json} = Base.url_decode64(challenge.request, padding: false)
       assert {:ok, request} = Jason.decode(json)
       assert request["methodDetails"]["network"] == "devnet"
-      assert request["methodDetails"]["credentialTypes"] == ["transaction", "signature"]
+      assert request["methodDetails"]["credentialTypes"] == ["transaction"]
       assert request["methodDetails"]["feePayer"] == false
       refute Map.has_key?(request["methodDetails"], "rpc_url")
+      refute Map.has_key?(request["methodDetails"], "pushBinding")
+    end
+  end
+
+  describe "push (type=signature) enablement and challenge binding" do
+    setup %{charge: charge} do
+      {:ok, bare: %{charge | method_details: Map.delete(charge.method_details, "push")}}
+    end
+
+    test "push is disabled by default", %{bare: charge, payer: payer, recipient: recipient} do
+      signature = fake_signature()
+      stub_get_transaction(sol_parsed_tx(signature, payer, recipient, @amount))
+
+      assert Solana.challenge_method_details(charge)["credentialTypes"] == ["transaction"]
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.type =~ "invalid-payload"
+      assert error.detail =~ "not enabled"
+    end
+
+    test "push: false keeps push disabled", %{bare: charge} do
+      charge = put_details(charge, %{"push" => false})
+      assert :ok = Solana.validate_config!(charge.method_details)
+      assert Solana.challenge_method_details(charge)["credentialTypes"] == ["transaction"]
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => fake_signature()}, charge)
+
+      assert error.detail =~ "not enabled"
+    end
+
+    test "rejects an unknown push mode at init", %{bare: charge} do
+      assert_raise ArgumentError, ~r/"push" must be/, fn ->
+        Solana.validate_config!(Map.put(charge.method_details, "push", true))
+      end
+    end
+
+    test "accepts both push modes at init", %{bare: charge} do
+      for mode <- ["challenge_memo", "unbound"] do
+        assert :ok = Solana.validate_config!(Map.put(charge.method_details, "push", mode))
+      end
+    end
+
+    test "unbound push advertises signature without a binding marker", %{charge: charge} do
+      details = Solana.challenge_method_details(charge)
+      assert details["credentialTypes"] == ["transaction", "signature"]
+      refute Map.has_key?(details, "pushBinding")
+    end
+
+    test "fee-payer endpoints never advertise push", %{bare: charge, fee_payer_seed: seed} do
+      charge =
+        put_details(charge, %{
+          "push" => "challenge_memo",
+          "fee_payer" => true,
+          "fee_payer_private_key" => Base.encode16(seed, case: :lower)
+        })
+
+      details = Solana.challenge_method_details(charge)
+      assert details["credentialTypes"] == ["transaction"]
+      refute Map.has_key?(details, "pushBinding")
+    end
+
+    test "challenge_memo advertises the binding profile", %{bare: charge} do
+      details = charge |> put_details(%{"push" => "challenge_memo"}) |> Solana.challenge_method_details()
+      assert details["credentialTypes"] == ["transaction", "signature"]
+      assert details["pushBinding"] == "challengeMemo"
+    end
+
+    test "push_memo/1 is a domain-separated SHA-256 of the challenge id" do
+      memo = Solana.push_memo("challenge-a")
+      assert memo == Base.encode16(:crypto.hash(:sha256, "mpp-solana-push:challenge-a"), case: :lower)
+      assert byte_size(memo) == 64
+      refute memo == Solana.push_memo("challenge-b")
+      refute memo =~ "challenge-a"
+    end
+
+    test "challenge_memo accepts a transfer carrying this challenge's memo", %{
+      bare: charge,
+      payer: payer,
+      recipient: recipient
+    } do
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      signature = fake_signature()
+      stub_get_transaction(memo_parsed_tx(signature, payer, recipient, Solana.push_memo("chal-1")))
+
+      assert {:ok, %Receipt{reference: ^signature}} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+    end
+
+    test "challenge_memo rejects a matching transfer made for a different challenge", %{
+      bare: charge,
+      payer: payer,
+      recipient: recipient
+    } do
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "fresh-challenge"})
+      signature = fake_signature()
+      stub_get_transaction(memo_parsed_tx(signature, payer, recipient, Solana.push_memo("victim-challenge")))
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "memo"
+    end
+
+    test "challenge_memo rejects a matching transfer without any memo", %{
+      bare: charge,
+      payer: payer,
+      recipient: recipient
+    } do
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      signature = fake_signature()
+      stub_get_transaction(sol_parsed_tx(signature, payer, recipient, @amount))
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.detail =~ "memo"
+    end
+
+    test "challenge_memo rejects the raw challenge id as memo", %{bare: charge, payer: payer, recipient: recipient} do
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      signature = fake_signature()
+      stub_get_transaction(memo_parsed_tx(signature, payer, recipient, "chal-1"))
+
+      assert {:error, %Errors{}} = Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+    end
+
+    test "challenge_memo does not burn the signature when the memo does not bind", %{
+      bare: charge,
+      payer: payer,
+      recipient: recipient
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"push" => "challenge_memo", "store" => MemoryStore})
+      signature = fake_signature()
+      stub_get_transaction(memo_parsed_tx(signature, payer, recipient, Solana.push_memo("owner")))
+
+      attacker = put_details(charge, %{"challenge_id" => "attacker"})
+      assert {:error, %Errors{}} = Solana.verify(%{"type" => "signature", "signature" => signature}, attacker)
+
+      owner = put_details(charge, %{"challenge_id" => "owner"})
+      assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "signature", "signature" => signature}, owner)
+
+      assert {:error, %Errors{}} = Solana.verify(%{"type" => "signature", "signature" => signature}, owner)
+    end
+
+    test "challenge_memo fails closed without a challenge id", %{bare: charge} do
+      charge = put_details(charge, %{"push" => "challenge_memo"})
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => fake_signature()}, charge)
+
+      assert error.detail =~ "challenge binding"
+    end
+
+    test "through MPP.Plug only the issuing challenge's memo is accepted", %{payer: payer, recipient: recipient} do
+      config = push_plug_config(recipient, 300)
+      other = issue_challenge(push_plug_config(recipient, 600), "/a")
+      owner = issue_challenge(config, "/a")
+      refute owner.id == other.id
+
+      signature = fake_signature()
+      stub_get_transaction(memo_parsed_tx(signature, payer, recipient, Solana.push_memo(owner.id)))
+
+      assert present_signature(config, other, signature).status == 402
+
+      paid = present_signature(config, owner, signature)
+      refute paid.halted
+      assert %Receipt{reference: ^signature} = paid.assigns.mpp_receipt
     end
   end
 
@@ -358,7 +531,8 @@ defmodule MPP.Methods.SolanaTest do
             "decimals" => 6,
             "token_program" => @token_program,
             "req_options" => [plug: {Req.Test, Solana}],
-            "store" => false
+            "store" => false,
+            "push" => "unbound"
           }
       }
 
@@ -1516,7 +1690,8 @@ defmodule MPP.Methods.SolanaTest do
             "rpc_url" => @rpc_url,
             "token_program" => "not-base58",
             "req_options" => [plug: {Req.Test, Solana}],
-            "store" => false
+            "store" => false,
+            "push" => "unbound"
           }
       }
 
@@ -2194,6 +2369,63 @@ defmodule MPP.Methods.SolanaTest do
         "message" => %{"instructions" => [sol_ix(source, destination, lamports)]}
       }
     }
+  end
+
+  defp put_details(charge, extra), do: %{charge | method_details: Map.merge(charge.method_details, extra)}
+
+  defp memo_parsed_tx(signature, source, destination, memo) do
+    signature
+    |> sol_parsed_tx(source, destination, @amount)
+    |> update_in(["transaction", "message", "instructions"], fn instructions ->
+      instructions ++
+        [
+          %{
+            "parsed" => memo,
+            "program" => "spl-memo",
+            "programId" => "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+            "stackHeight" => nil
+          }
+        ]
+    end)
+  end
+
+  defp push_plug_config(recipient, expires_in) do
+    PaymentPlug.init(
+      secret_key: "hmac-secret-for-solana-push-binding",
+      realm: "api.example.com",
+      method: Solana,
+      amount: Integer.to_string(@amount),
+      currency: "sol",
+      recipient: Keys.to_address(recipient),
+      expires_in: expires_in,
+      method_config: %{
+        "rpc_url" => @rpc_url,
+        "network" => "devnet",
+        "req_options" => [plug: {Req.Test, Solana}],
+        "store" => false,
+        "push" => "challenge_memo"
+      }
+    )
+  end
+
+  defp issue_challenge(config, path) do
+    conn = :get |> Plug.Test.conn(path) |> PaymentPlug.call(config)
+    assert conn.status == 402
+    [header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+    {:ok, challenge} = Headers.parse_challenge(header)
+    challenge
+  end
+
+  defp present_signature(config, challenge, signature) do
+    credential = %MPP.Credential{
+      challenge: challenge,
+      payload: %{"type" => "signature", "signature" => signature}
+    }
+
+    :get
+    |> Plug.Test.conn("/a")
+    |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+    |> PaymentPlug.call(config)
   end
 
   defp stub_get_transaction(result) do

@@ -10,9 +10,9 @@ defmodule MPP.Methods.Solana do
     * `type="transaction"` (pull, default) — the client sends signed legacy
       transaction bytes; the server optionally co-signs as fee payer, simulates,
       broadcasts, and waits for confirmation.
-    * `type="signature"` (push) — the client broadcasts the transaction and
-      sends the confirmed signature; the server fetches it via RPC and matches
-      the transfer against the charge.
+    * `type="signature"` (push, opt-in via `"push"`) — the client broadcasts
+      the transaction and sends the confirmed signature; the server fetches it
+      via RPC and matches the transfer against the charge.
     * `type="bundle"` (confidential) — the client sends ordered proof setup,
       Token-2022 confidential transfer, and proof close transactions. The
       server confirms the encrypted amount with its recipient ElGamal key.
@@ -60,6 +60,29 @@ defmodule MPP.Methods.Solana do
       canonical scalar for the recipient confidential token account
     * `"max_bundle_transactions"` — (optional) confidential bundle bound;
       defaults to 8
+    * `"push"` — (optional) enables `type="signature"` credentials. Disabled by
+      default: challenges advertise only `"transaction"` and push credentials
+      are rejected. Values:
+        * `"challenge_memo"` — the confirmed transaction must carry a Memo
+          Program instruction whose text is `push_memo/1` of the challenge id.
+          Challenges advertise `"pushBinding" => "challengeMemo"` so clients
+          know to add it.
+        * `"unbound"` — the `draft-solana-charge-00` base push flow. A confirmed
+          transfer matching the charge terms is accepted for any challenge with
+          those terms, and whoever presents its signature first is served; use
+          it only when the charge terms are unique per challenge.
+
+  ## Push challenge binding
+
+  Under `"push" => "challenge_memo"` the client derives the memo from the
+  challenge it is answering and includes it in the transfer transaction before
+  broadcasting:
+
+      memo = MPP.Methods.Solana.push_memo(challenge.id)
+
+  The memo is a hash of the challenge id, so a confirmed transfer satisfies only
+  the challenge it was created for, and the on-chain memo does not reveal the
+  challenge id itself.
 
   ## Credential Payload
 
@@ -109,6 +132,8 @@ defmodule MPP.Methods.Solana do
   @solana_rpc_error_detail "Solana RPC request failed"
   @zero_amount_detail "Zero-amount challenges are not supported for Solana credentials"
   @signature_bytes 64
+  @push_modes ["challenge_memo", "unbound"]
+  @push_memo_domain "mpp-solana-push:"
   @default_max_bundle_transactions 8
 
   api(:method_name, "Return the payment method identifier for Solana.")
@@ -147,7 +172,24 @@ defmodule MPP.Methods.Solana do
     validate_store!(config["store"])
     validate_fee_payer!(config)
     Instructions.validate_splits_config!(config["splits"])
+    validate_push!(config["push"])
     :ok
+  end
+
+  api(
+    :push_memo,
+    ~s{Return the Memo Program text a push (`type="signature"`) transaction must carry under `"push" => "challenge_memo"`.},
+    params: [
+      challenge_id: [kind: :value, description: "The `id` of the challenge the payment answers"]
+    ],
+    returns: %{type: :string, description: "Lowercase hex SHA-256 of the domain-separated challenge id (64 chars)"}
+  )
+
+  @spec push_memo(String.t()) :: String.t()
+  def push_memo(challenge_id) when is_binary(challenge_id) do
+    :sha256
+    |> :crypto.hash(@push_memo_domain <> challenge_id)
+    |> Base.encode16(case: :lower)
   end
 
   api(:verify, "Verify a Solana credential by checking on-chain settlement.",
@@ -173,8 +215,9 @@ defmodule MPP.Methods.Solana do
 
     with :ok <- reject_zero_amount(charge),
          :ok <- reject_non_bundle_when_confidential(config),
-         :ok <- reject_signature_when_fee_payer(config) do
-      verify_signature_credential(payload, charge, config)
+         :ok <- reject_signature_when_fee_payer(config),
+         {:ok, push_mode} <- require_push_enabled(config) do
+      verify_signature_credential(payload, charge, config, push_mode)
     end
   end
 
@@ -238,19 +281,22 @@ defmodule MPP.Methods.Solana do
     |> maybe_put_fee_payer_key(config, fee_payer?)
     |> maybe_put_splits(config)
     |> maybe_put_confidential(config)
+    |> maybe_put_push_binding(config)
   end
 
   # --- signature (push) ---
 
-  defp verify_signature_credential(payload, charge, config) do
+  defp verify_signature_credential(payload, charge, config, push_mode) do
     store = Store.resolve(config["store"])
 
     with {:ok, signature} <- extract_signature(payload),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Solana"),
          :ok <- require_recipient(charge),
+         {:ok, expected_memo} <- expected_push_memo(push_mode, config),
          :ok <- check_signature_unused(store, signature),
          {:ok, rpc_tx} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Instructions.verify_parsed(rpc_tx, charge, instruction_opts(charge, config)),
+         :ok <- verify_push_memo(rpc_tx, expected_memo),
          :ok <- commit_signature_used(store, signature) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
@@ -601,7 +647,60 @@ defmodule MPP.Methods.Solana do
   defp fee_payer_enabled?(_config), do: false
 
   defp challenge_credential_types(config) do
-    if Confidential.enabled?(config), do: ["bundle"], else: ~w(transaction signature)
+    cond do
+      Confidential.enabled?(config) -> ["bundle"]
+      push_mode(config) != nil and not fee_payer_enabled?(config) -> ~w(transaction signature)
+      true -> ["transaction"]
+    end
+  end
+
+  defp push_mode(%{"push" => mode}) when mode in @push_modes, do: mode
+  defp push_mode(_config), do: nil
+
+  defp validate_push!(nil), do: :ok
+  defp validate_push!(false), do: :ok
+  defp validate_push!(mode) when mode in @push_modes, do: :ok
+
+  defp validate_push!(other) do
+    raise ArgumentError,
+          ~s(MPP.Methods.Solana "push" must be false, "challenge_memo", or "unbound", got: #{inspect(other)})
+  end
+
+  defp require_push_enabled(config) do
+    case push_mode(config) do
+      nil -> {:error, Errors.new(:invalid_payload, ~s(type="signature" credentials are not enabled for this endpoint))}
+      mode -> {:ok, mode}
+    end
+  end
+
+  defp expected_push_memo("unbound", _config), do: {:ok, nil}
+
+  defp expected_push_memo("challenge_memo", %{"challenge_id" => challenge_id})
+       when is_binary(challenge_id) and challenge_id != "" do
+    {:ok, push_memo(challenge_id)}
+  end
+
+  defp expected_push_memo("challenge_memo", _config) do
+    {:error, Errors.new(:verification_failed, "Push verification missing challenge binding")}
+  end
+
+  defp verify_push_memo(_rpc_tx, nil), do: :ok
+
+  defp verify_push_memo(rpc_tx, expected_memo) do
+    with {:ok, classified} <- Instructions.classify_parsed(rpc_tx),
+         true <- Enum.any?(classified, &(&1 == {:memo, expected_memo})) do
+      :ok
+    else
+      _ -> {:error, Errors.new(:verification_failed, "Transaction memo does not bind this challenge")}
+    end
+  end
+
+  defp maybe_put_push_binding(details, config) do
+    if details["credentialTypes"] == ~w(transaction signature) and push_mode(config) == "challenge_memo" do
+      Map.put(details, "pushBinding", "challengeMemo")
+    else
+      details
+    end
   end
 
   defp reject_non_bundle_when_confidential(config) do

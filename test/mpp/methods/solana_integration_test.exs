@@ -124,6 +124,26 @@ defmodule MPP.Methods.SolanaIntegrationTest do
     assert error.detail =~ "No matching transfer"
   end
 
+  test "challenge_memo push accepts a confirmed transfer carrying the challenge memo", context do
+    {recipient, _} = Keys.generate_keypair()
+    charge = memo_bound_charge(context, recipient, "live-challenge-owner")
+    signature = send_with_memo!(context, recipient, Solana.push_memo("live-challenge-owner"))
+
+    assert {:ok, %Receipt{reference: ^signature}} =
+             Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+  end
+
+  test "challenge_memo push rejects a confirmed transfer bound to another challenge", context do
+    {recipient, _} = Keys.generate_keypair()
+    charge = memo_bound_charge(context, recipient, "live-challenge-other")
+    signature = send_with_memo!(context, recipient, Solana.push_memo("live-challenge-owner"))
+
+    assert {:error, %MPP.Errors{} = error} =
+             Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+    assert error.detail =~ "memo"
+  end
+
   test "pull mode co-signs as fee payer", context do
     {recipient, _} = Keys.generate_keypair()
     fund_fee_payer!(context)
@@ -188,9 +208,37 @@ defmodule MPP.Methods.SolanaIntegrationTest do
       | method_details: %{
           "rpc_url" => context.rpc_url,
           "network" => "devnet",
-          "store" => false
+          "store" => false,
+          "push" => "unbound"
         }
     }
+  end
+
+  defp memo_bound_charge(context, recipient, challenge_id) do
+    charge = sol_charge(context, recipient)
+
+    %{
+      charge
+      | method_details: Map.merge(charge.method_details, %{"push" => "challenge_memo", "challenge_id" => challenge_id})
+    }
+  end
+
+  defp send_with_memo!(context, recipient, memo) do
+    {:ok, %{blockhash: blockhash}} = RPC.get_latest_blockhash(context.rpc_opts)
+    {:ok, memo_program} = Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+
+    ixs = [
+      SystemProgram.transfer(context.payer, recipient, @lamports),
+      %Transaction.Instruction{program_id: memo_program, accounts: [], data: memo}
+    ]
+
+    message = Transaction.build_message(context.payer, ixs, blockhash)
+    tx = Transaction.sign(message, [context.payer_seed])
+
+    {:ok, signature} =
+      RPC.send_and_confirm(tx, Keyword.put(context.rpc_opts, :timeout, @confirmation_timeout_ms))
+
+    signature
   end
 
   defp put_fee_payer(charge, context) do
