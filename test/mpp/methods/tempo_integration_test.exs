@@ -24,11 +24,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.FaucetWallet
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoAccessKey
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
-  alias Onchain.Tempo.Faucet
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @moduletag :integration
@@ -41,7 +41,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
   # Deterministic testnet-only recipient key (no value on mainnet) — used only
   # to derive a stable recipient address. Sender and fee-payer wallets are
-  # minted fresh per test via `Onchain.Tempo.Faucet.fresh_funded_wallet/1`.
+  # minted fresh per test via `MPP.Test.FaucetWallet.tempo!/1`.
   #
   # NOT an Anvil/Hardhat well-known key: Moderato blocklists the standard test
   # EOAs (e.g. Anvil acct #1, 0x70997970…), redirecting TIP-20 transfers to a
@@ -90,7 +90,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
     # Mint a fresh, funded fixture wallet used only to seed the shared
     # `tx_hash` and `memo_tx_hash` fixtures below. Fresh per suite run → nonce
     # starts at 0, no persistent address to collide with other runs.
-    fixture_wallet = fresh_wallet!(rpc_url)
+    fixture_wallet = FaucetWallet.tempo!(rpc_url)
 
     # Seed tx 1: pathUSD transfer from fixture wallet → recipient (nonce 0).
     # Use the 0x76 Tempo transaction builder (TIP-20 `transfer` call) — the path
@@ -161,7 +161,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
     } do
       challenge = request_challenge!(config)
       refute get_in(challenge_request(challenge), ["methodDetails", "memo"])
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
 
       assert {:ok, credential} =
                TempoProvider.pay(challenge, %{
@@ -207,7 +207,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert challenge.intent == "charge"
       assert challenge.realm == @realm
 
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       tx_hash = broadcast_bound_transfer!(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       # Step 2: Build credential with tx hash + echoed challenge
@@ -257,7 +257,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       # First request: 402 → credential → success
       challenge1 = request_challenge!(config_with_store)
-      sender1 = fresh_wallet!(rpc_url)
+      sender1 = FaucetWallet.tempo!(rpc_url)
       tx_hash = broadcast_bound_transfer!(sender1, recipient_address, @transfer_amount, rpc_url, challenge1)
 
       credential1 = %Credential{
@@ -375,7 +375,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert {:ok, request_map} = Jason.decode(request_json)
       assert request_map["methodDetails"]["presenterBinding"] == true
 
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       tx_hash = broadcast_bound_transfer!(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       digest =
@@ -426,7 +426,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
         })
 
       challenge = request_challenge!(config)
-      attacker = fresh_wallet!(rpc_url)
+      attacker = FaucetWallet.tempo!(rpc_url)
 
       digest =
         Proof.hash(%{
@@ -481,7 +481,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       memo_config =
@@ -601,7 +601,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       # Build optimistic config — same as standard but with wait_for_confirmation: false
       optimistic_config =
         MPP.Plug.init(
@@ -664,7 +664,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       # Use an absurdly large amount that the sender cannot cover.
       # The eth_simulateV1 pre-broadcast simulation should detect the revert and
       # return verification-failed WITHOUT broadcasting.
@@ -706,7 +706,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       impossible_amount = 999_999_999_999_999
 
       optimistic_config =
@@ -762,7 +762,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       # Step 1: Get a 402 challenge
       challenge = request_challenge!(config)
       assert challenge.method == "tempo"
@@ -805,7 +805,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       config: config,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       # Build tx transferring to a different address than the challenge expects
       wrong_recipient = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
@@ -830,7 +830,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       # Build tx with a different amount than the challenge expects
       wrong_amount = @transfer_amount + 1
 
@@ -854,7 +854,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
@@ -885,7 +885,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       dead_config =
@@ -917,7 +917,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
@@ -956,7 +956,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       config = tempo_config(recipient_address, rpc_url, %{"store" => false})
       challenge = request_challenge!(config)
       {:ok, canonical_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
@@ -979,7 +979,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       fee_payer_config =
@@ -1038,7 +1038,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       fee_payer_config =
@@ -1121,7 +1121,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
@@ -1176,7 +1176,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
@@ -1260,7 +1260,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       config = fee_payer_config(recipient_address, rpc_url, fee_payer_key_hex)
 
@@ -1290,7 +1290,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       start_supervised!(TempoMemoryStore)
@@ -1345,7 +1345,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
 
       start_supervised!(TempoMemoryStore)
@@ -1420,7 +1420,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       }
 
       config = tempo_config(recipient_address, rpc_url, method_config)
-      first_sender = fresh_wallet!(rpc_url)
+      first_sender = FaucetWallet.tempo!(rpc_url)
       first_challenge = request_challenge!(config)
 
       {:ok, first_tx} =
@@ -1441,7 +1441,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       assert %Receipt{} = first_receipt = first_conn.assigns[:mpp_receipt]
 
-      second_sender = fresh_wallet!(rpc_url)
+      second_sender = FaucetWallet.tempo!(rpc_url)
       second_challenge = request_challenge!(config)
 
       {:ok, second_tx} =
@@ -1472,7 +1472,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       reconcile_config =
         tempo_config(recipient_address, rpc_url, Map.put(method_config, "sponsor_budget_reconcile", true))
 
-      third_sender = fresh_wallet!(rpc_url)
+      third_sender = FaucetWallet.tempo!(rpc_url)
       third_challenge = request_challenge!(reconcile_config)
 
       {:ok, third_tx} =
@@ -1504,7 +1504,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
       config =
@@ -1746,27 +1746,6 @@ defmodule MPP.Methods.TempoIntegrationTest do
     )
   end
 
-  # Mints a fresh, funded wallet on Moderato via onchain_tempo's Faucet helper.
-  # Returns %{private_key: <32 bytes>, address_hex: "0x...", address_bin: <20 bytes>}.
-  # Flunks loudly if the faucet is unavailable so "0 failures / 0 tests run" can't hide.
-  defp fresh_wallet!(rpc_url) do
-    case Faucet.fresh_funded_wallet(rpc_url: rpc_url) do
-      {:ok, wallet} ->
-        wallet
-
-      {:error, msg} ->
-        flunk("""
-        Tempo Moderato faucet failed to fund a fresh test wallet.
-
-        Error: #{msg}
-        RPC URL: #{rpc_url}
-
-        The Tempo Moderato testnet faucet may be down or rate-limited.
-        Set TEMPO_RPC_URL to override: export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
-        """)
-    end
-  end
-
   # Reads the pathUSD balance of `address_hex` via `eth_call balanceOf`.
   defp fee_token_balance!(address_hex, rpc_url) do
     {:ok, address_bin} = Onchain.Address.validate(address_hex)
@@ -1781,7 +1760,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   # Mints a fresh, funded wallet and returns its private key as lowercase hex
   # (the format `MPP.Methods.Tempo`'s `fee_payer_private_key` method_config expects).
   defp fresh_fee_payer_hex!(rpc_url) do
-    wallet = fresh_wallet!(rpc_url)
+    wallet = FaucetWallet.tempo!(rpc_url)
     Base.encode16(wallet.private_key, case: :lower)
   end
 
@@ -1861,7 +1840,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   describe "proof credentials (zero-amount auth)" do
     @tag :integration
     test "verifies wallet-bound proof credential without on-chain settlement", %{rpc_url: rpc_url} do
-      wallet = fresh_wallet!(rpc_url)
+      wallet = FaucetWallet.tempo!(rpc_url)
       {:ok, address} = Onchain.Signer.address_from_key(wallet.private_key)
       challenge_id = "integration-proof-#{System.unique_integer([:positive])}"
       realm = @realm
@@ -1897,7 +1876,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     @tag :integration
     test "verifies proof signed by an authorized access key for the root source", %{rpc_url: rpc_url} do
-      root = fresh_wallet!(rpc_url)
+      root = FaucetWallet.tempo!(rpc_url)
 
       %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
         TempoAccessKey.authorize!(root.private_key, rpc_url: rpc_url, chain_id: @chain_id)
@@ -1936,7 +1915,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
     @tag :integration
     test "rejects proof signed by a revoked access key for the root source", %{rpc_url: rpc_url} do
-      root = fresh_wallet!(rpc_url)
+      root = FaucetWallet.tempo!(rpc_url)
 
       %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
         TempoAccessKey.authorize_and_revoke!(root.private_key, rpc_url: rpc_url, chain_id: @chain_id)
@@ -1984,7 +1963,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
 
       config =
         MPP.Plug.init(
@@ -2039,7 +2018,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
 
       config =
         MPP.Plug.init(
@@ -2079,7 +2058,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       rpc_url: rpc_url,
       recipient: recipient_address
     } do
-      sender = fresh_wallet!(rpc_url)
+      sender = FaucetWallet.tempo!(rpc_url)
       fee_payer_key_hex = fresh_fee_payer_hex!(rpc_url)
       rogue_token = "0x1111111111111111111111111111111111111111"
 

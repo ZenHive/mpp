@@ -59,6 +59,9 @@ defmodule MPP.MixProject do
       {:ex_unit_json, "~> 0.6.0", only: [:dev, :test], runtime: false},
       {:dialyzer_json, "~> 0.2.0", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test]},
+      # Testnet funding for integration tests. Test-only so it stays out of the
+      # published package (hex rejects non-Hex prod deps; `only: :test` is not one).
+      {:faucet_ex, "~> 0.1", only: :test},
       # Independent OpenAPI 3.1 decoder used by discovery tests. 3.22.3+
       # admits decimal 3, which the rest of the lock already carries.
       {:open_api_spex, "~> 3.22.3", only: [:dev, :test], runtime: false},

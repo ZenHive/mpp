@@ -13,6 +13,7 @@ defmodule MPP.Methods.XRPLIntegrationTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.XRPL
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.FaucetWallet
 
   @moduletag :integration
   @moduletag timeout: 180_000
@@ -35,8 +36,8 @@ defmodule MPP.Methods.XRPLIntegrationTest do
     end
 
     assert %{"info" => %{"network_id" => 1}} = rpc!(url, "server_info", %{})
-    payer = funded_wallet!()
-    recipient = funded_wallet!()
+    payer = FaucetWallet.xrpl!(url)
+    recipient = FaucetWallet.xrpl!(url)
     {:ok, url: url, payer: payer, recipient: recipient}
   end
 
@@ -91,7 +92,7 @@ defmodule MPP.Methods.XRPLIntegrationTest do
 
     test "#{type}: rejects a real signed payment to a different destination", context do
       charge = charge(context)
-      wrong = funded_wallet!()
+      wrong = FaucetWallet.xrpl!(context.url)
       tx = Map.put(payment(context, charge), "Destination", wrong["address"])
       signed = sign!(context, tx)
       payload = credential!(context, @credential_type, signed)
@@ -266,7 +267,7 @@ defmodule MPP.Methods.XRPLIntegrationTest do
   end
 
   defp sign!(context, tx) do
-    info = account!(context.url, context.payer["address"], System.monotonic_time(:millisecond) + 30_000)
+    info = ledger_account!(context.url, context.payer["address"])
     ledger = rpc!(context.url, "ledger_current", %{})
 
     tx =
@@ -279,22 +280,10 @@ defmodule MPP.Methods.XRPLIntegrationTest do
     js!(%{"seed" => context.payer["seed"], "tx" => tx})
   end
 
-  defp account!(url, address, deadline) do
-    result = rpc!(url, "account_info", %{"account" => address, "ledger_index" => "validated"})
-
-    case result do
-      %{"account_data" => %{"Sequence" => sequence}} when is_integer(sequence) ->
+  defp ledger_account!(url, address) do
+    case rpc!(url, "account_info", %{"account" => address, "ledger_index" => "validated"}) do
+      %{"account_data" => %{"Sequence" => sequence}} = result when is_integer(sequence) ->
         result
-
-      %{"error" => "actNotFound"} ->
-        assert System.monotonic_time(:millisecond) < deadline, "Faucet account did not reach a validated ledger"
-
-        receive do
-        after
-          1000 -> :ok
-        end
-
-        account!(url, address, deadline)
 
       other ->
         flunk("XRPL account_info failed: #{inspect(other)}")
@@ -323,20 +312,6 @@ defmodule MPP.Methods.XRPLIntegrationTest do
 
       poll!(url, hash, deadline)
     end
-  end
-
-  defp funded_wallet! do
-    wallet = js!(%{})
-
-    assert {:ok, %{status: 200, body: body}} =
-             Req.post("https://faucet.altnet.rippletest.net/accounts",
-               json: %{"destination" => wallet["address"]},
-               retry: false,
-               receive_timeout: 60_000
-             )
-
-    assert body["account"]["address"] == wallet["address"]
-    wallet
   end
 
   defp js!(input) do

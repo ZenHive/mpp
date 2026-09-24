@@ -14,7 +14,7 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
   alias MPP.Headers
   alias MPP.Methods.Tempo
   alias MPP.Methods.Tempo.MachineToken
-  alias Onchain.Tempo.Faucet
+  alias MPP.Test.FaucetWallet
   alias Onchain.Tempo.Transaction
 
   @moduletag :integration
@@ -32,7 +32,7 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
   setup_all do
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
     ping_moderato!(rpc_url)
-    recipient = fresh_wallet!(rpc_url)
+    recipient = FaucetWallet.tempo!(rpc_url)
 
     {:ok, rpc_url: rpc_url, recipient: recipient.address_hex}
   end
@@ -46,7 +46,7 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
     assert challenge_request(challenge)["methodDetails"]["machineTokenEnabled"] == true
     refute get_in(challenge_request(challenge), ["methodDetails", "memo"])
 
-    sender = fresh_wallet!(rpc_url)
+    sender = FaucetWallet.tempo!(rpc_url)
 
     assert {:ok, credential} =
              TempoProvider.pay(challenge, %{
@@ -178,24 +178,6 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
         Error: #{Exception.message(exception)}
 
         export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
-        """)
-    end
-  end
-
-  defp fresh_wallet!(rpc_url) do
-    case Faucet.fresh_funded_wallet(rpc_url: rpc_url) do
-      {:ok, wallet} ->
-        wallet
-
-      {:error, msg} ->
-        flunk("""
-        Tempo Moderato faucet failed to fund a fresh test wallet.
-
-        Error: #{msg}
-        RPC URL: #{rpc_url}
-
-        The Tempo Moderato testnet faucet may be down or rate-limited.
-        Set TEMPO_RPC_URL to override: export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
         """)
     end
   end

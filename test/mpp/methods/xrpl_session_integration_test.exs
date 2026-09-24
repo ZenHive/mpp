@@ -15,6 +15,7 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
   alias MPP.Session.Store
+  alias MPP.Test.FaucetWallet
 
   @moduletag :integration
   @moduletag timeout: 180_000
@@ -37,8 +38,8 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
     end
 
     assert %{"info" => %{"network_id" => 1}} = rpc!(url, "server_info", %{})
-    payer = funded_wallet!()
-    recipient = funded_wallet!()
+    payer = FaucetWallet.xrpl!(url)
+    recipient = FaucetWallet.xrpl!(url)
     {:ok, url: url, payer: payer, recipient: recipient}
   end
 
@@ -289,7 +290,7 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
   end
 
   defp sign!(context, tx) do
-    info = account!(context.url, context.payer["address"], System.monotonic_time(:millisecond) + 30_000)
+    info = ledger_account!(context.url, context.payer["address"])
     ledger = rpc!(context.url, "ledger_current", %{})
 
     tx =
@@ -303,40 +304,14 @@ defmodule MPP.Methods.XRPL.SessionIntegrationTest do
     Map.put(signed, "Sequence", tx["Sequence"])
   end
 
-  defp account!(url, address, deadline) do
-    result = rpc!(url, "account_info", %{"account" => address, "ledger_index" => "validated"})
-
-    case result do
-      %{"account_data" => %{"Sequence" => sequence}} when is_integer(sequence) ->
+  defp ledger_account!(url, address) do
+    case rpc!(url, "account_info", %{"account" => address, "ledger_index" => "validated"}) do
+      %{"account_data" => %{"Sequence" => sequence}} = result when is_integer(sequence) ->
         result
-
-      %{"error" => "actNotFound"} ->
-        assert System.monotonic_time(:millisecond) < deadline, "Faucet account did not reach a validated ledger"
-
-        receive do
-        after
-          1000 -> :ok
-        end
-
-        account!(url, address, deadline)
 
       other ->
         flunk("XRPL account_info failed: #{inspect(other)}")
     end
-  end
-
-  defp funded_wallet! do
-    wallet = js!(%{})
-
-    assert {:ok, %{status: 200, body: body}} =
-             Req.post("https://faucet.altnet.rippletest.net/accounts",
-               json: %{"destination" => wallet["address"]},
-               retry: false,
-               receive_timeout: 60_000
-             )
-
-    assert body["account"]["address"] == wallet["address"]
-    wallet
   end
 
   defp js!(input) do

@@ -30,7 +30,6 @@ defmodule MPP.Methods.SolanaIntegrationTest do
   # fails with InsufficientFundsForRent, so every recipient gets at least that.
   @lamports 1_000_000
   @fee_payer_lamports 2_000_000
-  @airdrop_lamports 1_000_000_000
   @confirmation_timeout_ms 30_000
   @token_2022_program "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 
@@ -56,7 +55,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
     {payer, ^seed} = Keys.from_seed(seed)
     rpc_opts = [solana_node: rpc_url, commitment: :confirmed, preflight_commitment: :confirmed]
 
-    ensure_funded!(payer, rpc_opts)
+    Faucet.ensure_min_balance!(Faucet.Source.Solana, Keys.to_address(payer), @lamports * 10 + 1, rpc_url: rpc_url)
 
     {recipient, _} = Keys.generate_keypair()
     {fee_payer, fee_payer_seed} = Keys.generate_keypair()
@@ -371,53 +370,6 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
       {:error, reason} ->
         flunk("Failed to fund fee-payer account for pull-mode co-sign: #{inspect(reason)}")
-    end
-  end
-
-  defp ensure_funded!(payer, rpc_opts) do
-    case RPC.get_balance(payer, rpc_opts) do
-      {:ok, balance} when is_integer(balance) and balance > @lamports * 10 ->
-        :ok
-
-      {:ok, _low} ->
-        request_airdrop_or_flunk!(payer, rpc_opts)
-
-      {:error, reason} ->
-        flunk("Solana getBalance failed: #{inspect(reason)}")
-    end
-  end
-
-  defp request_airdrop_or_flunk!(payer, rpc_opts) do
-    case RPC.request_airdrop(payer, @airdrop_lamports, rpc_opts) do
-      {:ok, signature} ->
-        wait_for_airdrop!(payer, rpc_opts, signature)
-
-      {:error, reason} ->
-        flunk("""
-        Payer account #{Keys.to_address(payer)} is unfunded and requestAirdrop failed:
-          #{inspect(reason)}
-
-        Fund it at https://faucet.solana.com and retry.
-        """)
-    end
-  end
-
-  defp wait_for_airdrop!(payer, rpc_opts, _airdrop_signature) do
-    1..20
-    |> Enum.reduce_while(:error, fn _i, _acc ->
-      Process.sleep(1_500)
-
-      case RPC.get_balance(payer, rpc_opts) do
-        {:ok, balance} when is_integer(balance) and balance > 0 -> {:halt, :ok}
-        _other -> {:cont, :error}
-      end
-    end)
-    |> case do
-      :ok ->
-        :ok
-
-      :error ->
-        flunk("Airdrop submitted but payer #{Keys.to_address(payer)} still has zero balance")
     end
   end
 

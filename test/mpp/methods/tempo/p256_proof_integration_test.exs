@@ -7,7 +7,6 @@ defmodule MPP.Methods.Tempo.P256ProofIntegrationTest do
   alias MPP.Receipt
   alias Onchain.Address
   alias Onchain.Contract
-  alias Onchain.Tempo.Faucet
 
   @moduletag :integration
   @signature_verifier "0x5165300000000000000000000000000000000000"
@@ -20,7 +19,7 @@ defmodule MPP.Methods.Tempo.P256ProofIntegrationTest do
     test "Moderato P-256 proofs with prehash=#{prehash}, envelope=#{version} reject tampered and unrelated keys" do
       rpc_url = System.get_env("TEMPO_RPC_URL") || "https://rpc.moderato.tempo.xyz"
       opts = [rpc_url: rpc_url]
-      assert {:ok, root} = Faucet.fresh_funded_wallet(opts)
+      root = MPP.Test.FaucetWallet.tempo!(rpc_url)
       challenge_id = "p256-proof-#{System.unique_integer([:positive])}"
       params = %{account: root.address_hex, chain_id: 42_431, challenge_id: challenge_id, realm: "p256.example"}
       digest = Proof.hash(params)

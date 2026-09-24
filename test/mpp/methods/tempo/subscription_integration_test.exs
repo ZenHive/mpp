@@ -14,9 +14,9 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   alias MPP.Receipt
   alias MPP.Subscription.ETSStore
   alias MPP.Subscription.Store
+  alias MPP.Test.FaucetWallet
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Signer
-  alias Onchain.Tempo.Faucet
 
   @moduletag :integration
 
@@ -32,8 +32,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   test "activates a root-authorized access key and settles the first period on Moderato" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
-    payer = fresh_wallet!(rpc_url)
-    sponsor = fresh_wallet!(rpc_url)
+    payer = FaucetWallet.tempo!(rpc_url)
+    sponsor = FaucetWallet.tempo!(rpc_url)
     {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
     {store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, recipient)
@@ -79,8 +79,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   test "holds the activation claim on Moderato when the confirmed transfer misses the recipient" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
-    payer = fresh_wallet!(rpc_url)
-    sponsor = fresh_wallet!(rpc_url)
+    payer = FaucetWallet.tempo!(rpc_url)
+    sponsor = FaucetWallet.tempo!(rpc_url)
     {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
     {_store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, recipient)
@@ -102,8 +102,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   test "retries activation on Moderato after a forced reverted first-period settlement" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
-    payer = fresh_wallet!(rpc_url)
-    sponsor = fresh_wallet!(rpc_url)
+    payer = FaucetWallet.tempo!(rpc_url)
+    sponsor = FaucetWallet.tempo!(rpc_url)
     {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
     {_store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, recipient)
@@ -181,27 +181,6 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     end
   end
 
-  defp fresh_wallet!(rpc_url) do
-    case Faucet.fresh_funded_wallet(rpc_url: rpc_url) do
-      {:ok, wallet} ->
-        wallet
-
-      {:error, reason} ->
-        flunk("""
-        Tempo Moderato failed to fund a fresh subscription payer.
-
-        Error: #{reason}
-        RPC URL: #{rpc_url}
-
-        Override the endpoint with:
-          export TEMPO_RPC_URL="https://rpc.moderato.tempo.xyz"
-
-        Tempo testnet connection details:
-          https://docs.tempo.xyz/quickstart/connection-details#testnet
-        """)
-    end
-  end
-
   defp subscription_config(access_key_private_key, rpc_url, sponsor) do
     store_name = :"#{__MODULE__}.#{System.unique_integer([:positive])}"
     start_supervised!(ETSStore.child_spec(name: store_name))
@@ -245,8 +224,8 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
   defp activate_overdue_subscription! do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
-    payer = fresh_wallet!(rpc_url)
-    sponsor = fresh_wallet!(rpc_url)
+    payer = FaucetWallet.tempo!(rpc_url)
+    sponsor = FaucetWallet.tempo!(rpc_url)
     {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
     {store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
     subscription = subscription(config, recipient)
