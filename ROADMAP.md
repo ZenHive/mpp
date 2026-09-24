@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 140 — Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) on 2026-09-24
 
-**Up next:** Task 142 — Document shipped x402 API and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯
+**Up next:** Task 142 — Document shipped x402, USDC and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -263,7 +263,7 @@
 | Task 135 | ✅ | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀 |
 | Task 136 | ⬜ | 🎁 **additional-methods** · Make full QA freshness checks executable in isolated worktrees [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 141 | ⬜ | 🎁 **additional-methods** · Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67] 🚀 |
-| Task 142 | ⬜ | 🎁 **additional-methods** · Document shipped x402 API and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯 |
+| Task 142 | ⬜ | 🎁 **additional-methods** · Document shipped x402, USDC and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯 |
 | Task 143 | ⬜ | 🎁 **additional-methods** · Adjudicate the pending private security inbox reports [D:5/B:5/U:5 → Eff:1.0] 📋 |
 <!-- TASKS:END -->
 

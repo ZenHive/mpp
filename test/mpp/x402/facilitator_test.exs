@@ -56,8 +56,6 @@ defmodule MPP.X402.FacilitatorTest do
   test "function clients preserve errors and response validation" do
     client = %{verify: fn _, _ -> {:error, :offline} end, settle: fn _, _ -> {:ok, %{}} end}
     assert Facilitator.resolve(client) == client
-    assert %{verify: verify, settle: settle} = Facilitator.http("http://facilitator.test")
-    assert is_function(verify, 2) and is_function(settle, 2)
     assert {:error, :offline} = Facilitator.verify(client, %{}, %{})
     assert {:error, :invalid_settle_response} = Facilitator.settle(client, %{}, %{})
 

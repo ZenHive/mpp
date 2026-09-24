@@ -24,6 +24,14 @@ defmodule MPP.Methods.USDC.Binding do
   @spec profile_types() :: [String.t()]
   def profile_types, do: @profile_types
 
+  @doc "Require a recipient for either direct USDC profile."
+  @spec require_recipient(Charge.t()) :: :ok | {:error, Errors.t()}
+  def require_recipient(%Charge{recipient: recipient}) when is_binary(recipient) and recipient != "", do: :ok
+
+  def require_recipient(_charge) do
+    {:error, Errors.new(:verification_failed, "USDC charge requires a recipient")}
+  end
+
   @doc "Require a positive base-unit amount with no leading zeros."
   @spec positive_amount(Charge.t()) :: :ok | {:error, Errors.t()}
   def positive_amount(%Charge{amount: amount}) when is_binary(amount) do

@@ -343,6 +343,28 @@ defmodule MPP.Methods.USDCTest do
   end
 
   describe "solana verification" do
+    test "rejects unsupported localnet configuration at boot" do
+      assert_raise ArgumentError, ~r/network to be mainnet or devnet/, fn ->
+        USDC.validate_config!(solana_server_config(@solana_rpc, %{"network" => "localnet"}))
+      end
+    end
+
+    test "rejects out-of-range program and account indexes before RPC" do
+      {payer, seed} = keypair()
+      {recipient, _} = keypair()
+      charge = %{solana_charge() | recipient: Keys.to_address(recipient)}
+      payload = encoded_transfer(payer, seed, recipient)
+      {:ok, tx} = payload["transaction"] |> Base.decode64!() |> Transaction.deserialize()
+      [transfer] = tx.message.instructions
+
+      for instruction <- [%{transfer | program_id_index: 255}, %{transfer | accounts: [255 | tl(transfer.accounts)]}] do
+        modified = %{tx | message: %{tx.message | instructions: [instruction]}}
+        payload = %{"type" => "transaction", "transaction" => Base.encode64(Transaction.serialize(modified))}
+        assert {:error, error} = USDC.verify(payload, charge)
+        assert error.detail == "Solana transaction account index is out of range"
+      end
+    end
+
     test "advertises the legacy devnet profile" do
       config =
         MPP.Plug.init(

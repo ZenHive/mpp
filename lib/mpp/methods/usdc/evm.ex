@@ -94,7 +94,7 @@ defmodule MPP.Methods.USDC.EVM do
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- require_recipient(charge),
+    with :ok <- Binding.require_recipient(charge),
          {:ok, chain_id} <- require_chain(config),
          {:ok, profile} <- profile_object(config),
          :ok <- profile_chain(profile, chain_id),
@@ -111,12 +111,6 @@ defmodule MPP.Methods.USDC.EVM do
          {:ok, hash} <- settle(parsed, charge, chain_id, domain, rpc_opts) do
       {:ok, Binding.receipt(charge, name(), hash, "eip155:#{chain_id}")}
     end
-  end
-
-  defp require_recipient(%Charge{recipient: recipient}) when is_binary(recipient) and recipient != "", do: :ok
-
-  defp require_recipient(_charge) do
-    {:error, Errors.new(:verification_failed, "USDC charge requires a recipient")}
   end
 
   defp require_chain(config) do

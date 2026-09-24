@@ -3772,7 +3772,7 @@ acceptance_criteria = ["Provide a reproducible project-owned command or document
 touches = ["mix.exs", "test/mix/", "README.md", "CLAUDE.md", "AGENTS.md"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Full QA at 9e73dbe completed other checks but printed skips for the missing claude-marketplace sync-agents-md.sh and onchain-stack advisory-freshness.sh under the developer home. Therefore QA is incomplete under the audit contract. The prior 3bf67c5 audit recorded the same skips as passed; no pending repair task covers the cause, and completed Task 133 only separates dispatch scope. Make these proofs available without controlling operator services or silently weakening them. Keep advisory freshness tied to the mirror used by mix_audit. Evidence: .audit/9e73dbe.md. Reconfirmed at integrated f7c324c30e69fc6149450b7c754551869f3765fa: after cold dependency bootstrap, mix precommit.full exited 0 with 2308 passing tests, 96.36% coverage and clean analyzers, but both freshness scripts again skipped. QA remains incomplete; recurrence evidence and exact missing paths are recorded in .audit/f7c324c.md. Reconfirmed at 750acbe288d165621f63ef2f74855616569154fa: both freshness checks skipped again after the remaining full-QA steps were run independently following suite failure; see .audit/750acbe.md."
+body = "Full QA at 9e73dbe completed other checks but printed skips for the missing claude-marketplace sync-agents-md.sh and onchain-stack advisory-freshness.sh under the developer home. Therefore QA is incomplete under the audit contract. The prior 3bf67c5 audit recorded the same skips as passed; no pending repair task covers the cause, and completed Task 133 only separates dispatch scope. Make these proofs available without controlling operator services or silently weakening them. Keep advisory freshness tied to the mirror used by mix_audit. Evidence: .audit/9e73dbe.md. Reconfirmed at integrated f7c324c30e69fc6149450b7c754551869f3765fa: after cold dependency bootstrap, mix precommit.full exited 0 with 2308 passing tests, 96.36% coverage and clean analyzers, but both freshness scripts again skipped. QA remains incomplete; recurrence evidence and exact missing paths are recorded in .audit/f7c324c.md. Reconfirmed at 750acbe288d165621f63ef2f74855616569154fa: both freshness checks skipped again after the remaining full-QA steps were run independently following suite failure; see .audit/750acbe.md. Reconfirmed at integrated 1df67f67e955238eba3829901b3bd69e7f43db40: both freshness scripts remain unavailable and skipped. Other checks were collected independently after the suite failure. See .audit/1df67f6.md."
 created_at = "2026-09-22"
 scored_at = "2026-09-22"
 
@@ -3888,7 +3888,7 @@ acceptance_criteria = ["Reproduce the fingerprint_mismatch in test/mutation/secu
 touches = ["test/mutation/", "test/mpp/"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Full QA at 750acbe288d165621f63ef2f74855616569154fa failed its ledger validation with fingerprint_mismatch; automatic retry confirmed it. SecurityMutations.fingerprint/1 hashes mutation definitions and complete source/test inputs, and the landed range changed those inputs. Tasks 82 and 93 delivered the campaign and scheduling, but no pending task owns this evidence refresh. Reconcile current evidence rather than certifying an unrun campaign. See .audit/750acbe.md. D3 reflects campaign execution and review, B5 restores a failing payment-security regression check, U5 reflects the observed full-QA failure."
+body = "Full QA at 750acbe288d165621f63ef2f74855616569154fa failed its ledger validation with fingerprint_mismatch; automatic retry confirmed it. SecurityMutations.fingerprint/1 hashes mutation definitions and complete source/test inputs, and the landed range changed those inputs. Tasks 82 and 93 delivered the campaign and scheduling, but no pending task owns this evidence refresh. Reconcile current evidence rather than certifying an unrun campaign. See .audit/750acbe.md. D3 reflects campaign execution and review, B5 restores a failing payment-security regression check, U5 reflects the observed full-QA failure. Reconfirmed at integrated 1df67f67e955238eba3829901b3bd69e7f43db40: 2364 tests passed, one fingerprint_mismatch failed and was confirmed by the automatic retry; aggregate coverage was 97.68%. No ledger hash or validation was changed. See .audit/1df67f6.md."
 created_at = "2026-09-24"
 scored_at = "2026-09-24"
 
@@ -3897,13 +3897,13 @@ id = "142"
 phase = 16
 bundle = "additional-methods"
 status = "pending"
-title = "Document shipped x402 API and critical-coverage changes in release notes"
+title = "Document shipped x402, USDC and critical-coverage changes in release notes"
 scores = { d = 1, b = 2, u = 3 }
-acceptance_criteria = ["CHANGELOG names the removal of MPP.X402.challenges_from_header/2 in favor of /1, explains differing query/redirect resource URLs, and distinguishes retained server-side binding.", "The money-critical coverage entry includes lib/mpp/x402/ and lib/mpp/x402.ex. Validate the text against the shipped code."]
+acceptance_criteria = ["CHANGELOG names the removal of MPP.X402.challenges_from_header/2 in favor of /1, explains differing query/redirect resource URLs, and distinguishes retained server-side binding.", "The money-critical coverage entry includes lib/mpp/x402/ and lib/mpp/x402.ex. Validate the text against the shipped code.", "Document the shipped USDC direct EVM/Solana profiles, the expected_nonce option on Authorization.settle/3, and recipient associated-token-account creation; describe supported networks and retain existing scope exclusions."]
 touches = ["CHANGELOG.md"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Task 140 explicitly required a changelog entry for its API choice, but none landed; Task 135 also expanded the critical coverage tier beyond the existing changelog description. The post-merge audit must leave CHANGELOG untouched, so this concrete docs repair is filed separately. See .audit/750acbe.md. D1 is a text-only correction; B2 and U3 reflect accurate migration guidance for a removed public arity."
+body = "Task 140 explicitly required a changelog entry for its API choice, but none landed; Task 135 also expanded the critical coverage tier beyond the existing changelog description. The post-merge audit must leave CHANGELOG untouched, so this concrete docs repair is filed separately. See .audit/750acbe.md. D1 is a text-only correction; B2 and U3 reflect accurate migration guidance for a removed public arity. Audit at 1df67f6 also found no release-note entry for the shipped MPP.Methods.USDC EVM/Solana direct profiles, Authorization.settle/3 expected_nonce option, or recipient associated-token-account creation. Add those shipped API/behavior notes to this same release-note repair. See .audit/1df67f6.md."
 created_at = "2026-09-24"
 scored_at = "2026-09-24"
 

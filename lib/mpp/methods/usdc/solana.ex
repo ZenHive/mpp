@@ -30,7 +30,7 @@ defmodule MPP.Methods.USDC.Solana do
 
   @token_program "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
   @token_program_key ~B58[TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA]
-  @networks ~w(mainnet devnet localnet)
+  @networks ~w(mainnet devnet)
   @transfer_checked 12
   @mint_decimals_offset 44
   @token_owner_offset 32
@@ -72,7 +72,7 @@ defmodule MPP.Methods.USDC.Solana do
 
       config["network"] not in @networks ->
         raise ArgumentError,
-              "MPP.Methods.USDC solana profile requires method_config network to be mainnet, devnet, or localnet"
+              "MPP.Methods.USDC solana profile requires method_config network to be mainnet or devnet"
 
       config["fee_payer"] == true and not present?(config["fee_payer_private_key"]) ->
         raise ArgumentError, "MPP.Methods.USDC solana profile requires fee_payer_private_key when fee_payer is true"
@@ -113,7 +113,7 @@ defmodule MPP.Methods.USDC.Solana do
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- require_recipient(charge),
+    with :ok <- Binding.require_recipient(charge),
          {:ok, profile} <- profile_object(config),
          :ok <- profile_fields(profile, config, charge),
          {:ok, bytes, _tx, transfer} <- transaction(payload, charge),
@@ -129,12 +129,6 @@ defmodule MPP.Methods.USDC.Solana do
   defp present?(value) when is_binary(value) and value != "", do: true
   defp present?(_value), do: false
 
-  defp require_recipient(%Charge{recipient: recipient}) when is_binary(recipient) and recipient != "", do: :ok
-
-  defp require_recipient(_charge) do
-    {:error, Errors.new(:verification_failed, "USDC charge requires a recipient")}
-  end
-
   defp profile_object(config) do
     case config["solana"] do
       profile when is_map(profile) -> {:ok, profile}
@@ -145,7 +139,7 @@ defmodule MPP.Methods.USDC.Solana do
   defp profile_fields(profile, config, charge) do
     cond do
       profile["network"] not in @networks ->
-        {:error, Errors.new(:invalid_payload, "USDC solana network must be mainnet, devnet, or localnet")}
+        {:error, Errors.new(:invalid_payload, "USDC solana network must be mainnet or devnet")}
 
       is_binary(config["network"]) and config["network"] != profile["network"] ->
         {:error, Errors.new(:verification_failed, "USDC solana network does not match method config")}
@@ -229,6 +223,8 @@ defmodule MPP.Methods.USDC.Solana do
   end
 
   defp allow_instructions(%Transaction{message: %{account_keys: keys, instructions: instructions}}, charge) do
+    keys = keys |> Enum.with_index() |> Map.new(fn {key, index} -> {index, key} end)
+
     instructions
     |> Enum.reduce_while({:ok, []}, fn ix, {:ok, transfers} ->
       case classify(ix, keys, charge) do
@@ -241,8 +237,8 @@ defmodule MPP.Methods.USDC.Solana do
   end
 
   defp classify(%CompiledInstruction{} = ix, keys, charge) do
-    program = Enum.at(keys, ix.program_id_index)
-    accounts = Enum.map(ix.accounts, &Enum.at(keys, &1))
+    program = Map.get(keys, ix.program_id_index)
+    accounts = Enum.map(ix.accounts, &Map.get(keys, &1))
 
     cond do
       program == nil or Enum.any?(accounts, &is_nil/1) ->
@@ -447,7 +443,6 @@ defmodule MPP.Methods.USDC.Solana do
     Replay.with_claims(store, replay_keys(charge, digest), fn ->
       case SolanaMethod.verify(payload, solana_charge(charge, config, profile)) do
         {:ok, %Receipt{reference: reference}} when is_binary(reference) -> {:ok, reference}
-        {:ok, _receipt} -> {:error, Errors.new(:verification_failed, "Solana settlement did not return a signature")}
         {:error, %Errors{}} = error -> error
       end
     end)
