@@ -537,6 +537,22 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
       live = stripe_get!(stripe_secret_key, "/subscriptions?customer=#{customer_id}&limit=#{@stripe_list_limit}")
       assert [%{"id" => ^stripe_subscription_id, "status" => "active"}] = live["data"]
+
+      {:ok, intent} = MPP.Intents.Subscription.from_request(challenge_request(challenge))
+      intent = %{intent | method_details: subscription_method_config(stripe_secret_key, store)}
+
+      assert {:ok, %{status: :active, subscription_id: subscription_id, tagged_subscriptions: tagged}} =
+               StripeSubscription.inspect_activation(intent, payment_method_id)
+
+      assert subscription_id == activation.subscription_id
+
+      assert [%{id: ^stripe_subscription_id, status: "active", customer: ^customer_id, challenge_id: challenge_id}] =
+               tagged
+
+      assert challenge_id == challenge.id
+
+      assert {:error, %{detail: "Stripe subscription activation does not need reconciliation"}} =
+               StripeSubscription.resolve_activation(intent, payment_method_id, :release)
     end
 
     test "voids a live unpaid renewal after its canonical period closes", %{
