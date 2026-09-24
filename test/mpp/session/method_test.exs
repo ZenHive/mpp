@@ -21,7 +21,9 @@ defmodule MPP.Session.MethodTest do
       "escrow_contract" => "0x4d50500000000000000000000000000000000000",
       "chain_id" => 42_431,
       "authorized_signer" => "0x1111111111111111111111111111111111111111",
-      "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end
+      "verify_open" => fn _payload, _opts ->
+        {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
+      end
     }
 
     assert :ok = DemoSessionMethod.validate_config!(config)

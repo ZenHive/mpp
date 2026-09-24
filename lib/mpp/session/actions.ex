@@ -19,17 +19,18 @@ defmodule MPP.Session.Actions do
   the escrow's current channel state, or `{:error, %MPP.Errors{}}`:
 
       {:ok, %{
-        deposit: non_neg_integer(),      # required: total escrowed deposit
-        settled: non_neg_integer(),      # default 0, at most deposit
-        close_requested: boolean(),      # default false
-        finalized: boolean(),            # default false
+        deposit: non_neg_integer(),      # total escrowed deposit
+        settled: non_neg_integer(),      # paid out of the escrow, at most deposit
+        close_requested: boolean(),      # a close is pending on-chain
+        finalized: boolean(),            # the channel is closed on-chain
         payer: String.t(),               # open only, optional
         authorized_signer: String.t()    # open only, optional
       }}
 
-  A zero deposit is rejected as an unfunded channel; `close_requested` or
-  `finalized` reject the action as a closed channel. Any other shape is a
-  verification failure. The payload's `additionalDeposit` and any configured
+  `deposit`, `settled`, `close_requested`, and `finalized` are all required;
+  a result missing any of them, or of any other shape, is a verification
+  failure. A zero deposit is rejected as an unfunded channel;
+  `close_requested` or `finalized` reject the action as a closed channel. The payload's `additionalDeposit` and any configured
   or suggested deposit are never trusted as the ceiling.
 
   Settled funds were already paid out of the escrow for earlier vouchers. At
@@ -341,9 +342,8 @@ defmodule MPP.Session.Actions do
 
   # Normalizes a funding verifier result into the confirmed escrow state,
   # rejecting unfunded, closing, and finalized channels.
-  defp escrow_state({:ok, %{deposit: deposit} = state} = result, action) when is_integer(deposit) and deposit >= 0 do
-    state = state |> Map.put_new(:settled, 0) |> Map.put_new(:close_requested, false) |> Map.put_new(:finalized, false)
-
+  # Every state key is required: an omitted flag must not read as "open".
+  defp escrow_state({:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result, action) do
     if well_formed_escrow?(state), do: escrow_status(state), else: escrow_failure(result, action)
   end
 
@@ -354,7 +354,8 @@ defmodule MPP.Session.Actions do
     do: {:error, Errors.new(:verification_failed, "#{action} funding verification failed: #{inspect(result)}")}
 
   defp well_formed_escrow?(%{deposit: deposit, settled: settled} = state) do
-    is_integer(settled) and settled >= 0 and settled <= deposit and is_boolean(state.close_requested) and
+    is_integer(deposit) and is_integer(settled) and settled >= 0 and settled <= deposit and
+      is_boolean(state.close_requested) and
       is_boolean(state.finalized)
   end
 

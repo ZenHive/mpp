@@ -315,7 +315,9 @@ defmodule MPP.VerifierTest do
           charge: session,
           method_config: %{
             "session_store" => {ETSStore, [name: store_name]},
-            "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
+            "verify_open" => fn _payload, _opts ->
+              {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
+            end,
             "payer" => "0x1111111111111111111111111111111111111111",
             "token" => "0x3333333333333333333333333333333333333333",
             "escrowContract" => escrow,

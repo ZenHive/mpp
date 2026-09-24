@@ -1693,14 +1693,22 @@ defmodule MPP.PlugTest do
           suggested_deposit: "1000",
           session_store: {ETSStore, [name: store_name]},
           method_config: %{
-            "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
+            "verify_open" => fn _payload, _opts ->
+              {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
+            end,
             "payer" => @session_payer,
             "token" => @session_token,
             "escrowContract" => @session_escrow,
             "chainId" => 42_431,
             "authorizedSigner" => SessionSigning.signer_address(),
             "verify_top_up" => fn payload, channel, _opts ->
-              {:ok, %{deposit: channel.deposit + payload.additional_deposit}}
+              {:ok,
+               %{
+                 deposit: channel.deposit + payload.additional_deposit,
+                 settled: 0,
+                 close_requested: false,
+                 finalized: false
+               }}
             end
           },
           store: false

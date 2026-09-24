@@ -330,6 +330,33 @@ defmodule MPP.Methods.XRPL.SessionTest do
              )
   end
 
+  test "open counts the ledger balance as settled", context do
+    stub(context, @hash, balance: "100000")
+
+    assert {:ok, open} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "200000", "signature" => @voucher_sig},
+               context.session
+             )
+
+    assert open.extensions["acceptedCumulative"] == "200000"
+    assert {:ok, channel} = Store.get(context.store, @channel_id)
+    assert {channel.settled, channel.spent, channel.cumulative_amount} == {100_000, 200_000, 200_000}
+  end
+
+  test "open rejects a channel whose source requested a close", context do
+    stub(context, @hash, expiration: 1_000_000)
+
+    assert {:error, %Errors{status: 410, detail: detail}} =
+             XRPLSession.verify(
+               %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
+               context.session
+             )
+
+    assert detail =~ "pending close request"
+    assert :not_found = Store.get(context.store, @channel_id)
+  end
+
   test "rejects a replayed claim at the ledger balance and a broken create receipt", context do
     stub(context, @hash, balance: "100000")
 

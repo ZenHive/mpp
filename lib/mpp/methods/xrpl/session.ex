@@ -119,7 +119,7 @@ defmodule MPP.Methods.XRPL.Session do
         action: :open,
         channel_id: channel_id,
         amount: amount,
-        deposit: deposit(channel),
+        escrow: escrow(channel),
         config: config,
         session: session,
         signature: signature,
@@ -141,7 +141,7 @@ defmodule MPP.Methods.XRPL.Session do
         action: action,
         channel_id: channel_id,
         amount: amount,
-        deposit: deposit(channel),
+        escrow: escrow(channel),
         config: config,
         session: session,
         signature: signature,
@@ -327,7 +327,7 @@ defmodule MPP.Methods.XRPL.Session do
     [
       store: store(params.config),
       # XRPL opens confirm the channel on the ledger before reaching Actions.
-      verify_open: fn _payload, _opts -> {:ok, %{deposit: params.deposit}} end,
+      verify_open: fn _payload, _opts -> {:ok, params.escrow} end,
       payer: payer(params.config),
       recipient: params.session.recipient,
       token: "XRP",
@@ -467,9 +467,13 @@ defmodule MPP.Methods.XRPL.Session do
     amount
   end
 
-  defp deposit(node) do
-    {:ok, amount} = drops(node["Amount"])
-    amount
+  # PayChannel `Balance` is XRP already paid out of the channel. `Expiration`
+  # is absent until the source requests a close (PaymentChannelClaim tfClose
+  # sets it), and a deleted channel is rejected as not found before this.
+  defp escrow(node) do
+    {:ok, deposit} = drops(node["Amount"])
+    {:ok, settled} = drops(node["Balance"])
+    %{deposit: deposit, settled: settled, close_requested: Map.has_key?(node, "Expiration"), finalized: false}
   end
 
   defp min_settle_delay(config), do: Map.get(config, "min_settle_delay", @default_settle_delay)

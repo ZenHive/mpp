@@ -67,7 +67,7 @@ defmodule MPP.Session.ActionsTest do
       assert voucher_receipt.extensions["acceptedCumulative"] == "250"
       assert voucher_receipt.extensions["spent"] == "20"
 
-      top_up_opts = Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:ok, %{deposit: 1_400}} end)
+      top_up_opts = Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:ok, state(%{deposit: 1_400})} end)
       assert {:ok, top_up_receipt} = Actions.dispatch(top_up_payload(400), top_up_opts)
       assert top_up_receipt.extensions["action"] == "topUp"
       assert {:ok, topped} = Store.get(store, @channel_id)
@@ -263,7 +263,7 @@ defmodule MPP.Session.ActionsTest do
 
       verifier = fn payload, channel, _opts ->
         send(test_pid, {:verified, payload.additional_deposit, channel.deposit})
-        {:ok, %{deposit: 1_200}}
+        {:ok, state(%{deposit: 1_200})}
       end
 
       assert {:ok, _} = Actions.dispatch(top_up_payload(1_000_000), Keyword.put(opts, :verify_top_up, verifier))
@@ -275,7 +275,7 @@ defmodule MPP.Session.ActionsTest do
 
     test "rejects a verified deposit that did not increase", %{opts: opts, store: store} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
-      opts = Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:ok, %{deposit: 1_000}} end)
+      opts = Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:ok, state(%{deposit: 1_000})} end)
 
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(top_up_payload(400), opts)
       assert detail =~ "did not increase"
@@ -292,7 +292,13 @@ defmodule MPP.Session.ActionsTest do
                  Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:error, reverted} end)
                )
 
-      for result <- [:ok, {:ok, 1_400}, {:ok, %{deposit: "1400"}}, {:ok, %{deposit: -1}}, {:error, :rpc_down}] do
+      for result <- [
+            :ok,
+            {:ok, 1_400},
+            {:ok, state(%{deposit: "1400"})},
+            {:ok, state(%{deposit: -1})},
+            {:error, :rpc_down}
+          ] do
         assert {:error, %Errors{detail: detail}} =
                  Actions.dispatch(
                    top_up_payload(400),
@@ -310,7 +316,7 @@ defmodule MPP.Session.ActionsTest do
 
       closing = fn _payload, channel, _opts ->
         {:ok, _} = Store.update(store, channel.channel_id, fn %Channel{} = current -> Channel.close(current) end)
-        {:ok, %{deposit: 2_000}}
+        {:ok, state(%{deposit: 2_000})}
       end
 
       assert {:error, %Errors{status: 410}} =
@@ -321,7 +327,7 @@ defmodule MPP.Session.ActionsTest do
 
       deleting = fn _payload, channel, _opts ->
         :ok = Store.delete(store, channel.channel_id)
-        {:ok, %{deposit: 2_000}}
+        {:ok, state(%{deposit: 2_000})}
       end
 
       assert {:error, %Errors{} = error} =
@@ -355,7 +361,7 @@ defmodule MPP.Session.ActionsTest do
             "escrowContract" => @tip1034_escrow,
             "chainId" => 42_431,
             "authorizedSigner" => @signer,
-            "verify_top_up" => fn _payload, _channel, _opts -> {:ok, %{deposit: 1_500}} end
+            "verify_top_up" => fn _payload, _channel, _opts -> {:ok, state(%{deposit: 1_500})} end
           }
         )
 
@@ -733,7 +739,7 @@ defmodule MPP.Session.ActionsTest do
 
       verify = fn %Payload{} = payload, _opts ->
         send(test_pid, {:verified, payload.channel_id, payload.transaction})
-        {:ok, %{deposit: 300}}
+        {:ok, state(%{deposit: 300})}
       end
 
       assert {:ok, _} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
@@ -755,7 +761,13 @@ defmodule MPP.Session.ActionsTest do
       assert {:error, ^rejection} =
                Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, fn _, _ -> {:error, rejection} end))
 
-      for result <- [{:ok, 1_000}, {:ok, %{deposit: -1}}, {:ok, %{deposit: "1000"}}, :ok, {:error, :timeout}] do
+      for result <- [
+            {:ok, 1_000},
+            {:ok, state(%{deposit: -1})},
+            {:ok, state(%{deposit: "1000"})},
+            :ok,
+            {:error, :timeout}
+          ] do
         opts = Keyword.put(opts, :verify_open, fn _, _ -> result end)
         assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
         assert detail =~ "open funding verification failed"
@@ -784,7 +796,7 @@ defmodule MPP.Session.ActionsTest do
         verify = fn _payload, _opts ->
           raced = Channel.new!(channel_id: @channel_id, payer: @payer, recipient: @recipient, token: @token, deposit: 7)
           :ok = Store.put(store, %{raced | status: status})
-          {:ok, %{deposit: 1_000}}
+          {:ok, state(%{deposit: 1_000})}
         end
 
         assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
@@ -795,7 +807,7 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "a verified payer must match the configured payer", %{opts: opts, store: store} do
-      verify = fn _, _ -> {:ok, %{deposit: 1_000, payer: @recipient}} end
+      verify = fn _, _ -> {:ok, state(%{deposit: 1_000, payer: @recipient})} end
 
       assert {:error, %Errors{detail: detail}} =
                Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
@@ -805,7 +817,7 @@ defmodule MPP.Session.ActionsTest do
       unconfigured =
         opts
         |> Keyword.delete(:payer)
-        |> Keyword.put(:verify_open, fn _, _ -> {:ok, %{deposit: 1_000, payer: @payer}} end)
+        |> Keyword.put(:verify_open, fn _, _ -> {:ok, state(%{deposit: 1_000, payer: @payer})} end)
 
       assert {:ok, _} = Actions.dispatch(open_payload(50), unconfigured)
       assert {:ok, %Channel{payer: @payer}} = Store.get(store, @channel_id)
@@ -813,7 +825,7 @@ defmodule MPP.Session.ActionsTest do
 
     test "a verified signer becomes the channel signer and must agree with a descriptor", %{opts: opts, store: store} do
       other = SessionSigning.other_signer_address()
-      verify = fn _, _ -> {:ok, %{deposit: 1_000, authorized_signer: other}} end
+      verify = fn _, _ -> {:ok, state(%{deposit: 1_000, authorized_signer: other})} end
       opts = Keyword.put(opts, :verify_open, verify)
 
       # Signed by the configured key, but the escrow names another signer.
@@ -832,7 +844,8 @@ defmodule MPP.Session.ActionsTest do
 
   describe "zero signer resolution" do
     test "a zero verified signer resolves to the payer", %{opts: opts, store: store} do
-      verify = fn _payload, _opts -> {:ok, %{deposit: 1_000, payer: @signer, authorized_signer: @zero_address}} end
+      verified = state(%{deposit: 1_000, payer: @signer, authorized_signer: @zero_address})
+      verify = fn _payload, _opts -> {:ok, verified} end
       opts = opts |> Keyword.put(:payer, @signer) |> Keyword.put(:verify_open, verify)
 
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
@@ -842,7 +855,7 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "a zero verified signer never falls back to a non-payer key", %{opts: opts, store: store} do
-      verify = fn _payload, _opts -> {:ok, %{deposit: 1_000, authorized_signer: @zero_address}} end
+      verify = fn _payload, _opts -> {:ok, state(%{deposit: 1_000, authorized_signer: @zero_address})} end
 
       assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
       assert String.contains?(error.type, "invalid-signature")
@@ -851,7 +864,7 @@ defmodule MPP.Session.ActionsTest do
 
     test "a zero verified signer agrees with a descriptor whose signer is the payer", %{opts: opts} do
       {channel_id, descriptor} = bound_descriptor(@zero_address, %{"payer" => @signer})
-      verify = fn _payload, _opts -> {:ok, %{deposit: 1_000, authorized_signer: @zero_address}} end
+      verify = fn _payload, _opts -> {:ok, state(%{deposit: 1_000, authorized_signer: @zero_address})} end
       opts = opts |> Keyword.put(:payer, @signer) |> Keyword.put(:verify_open, verify)
 
       assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
@@ -872,10 +885,10 @@ defmodule MPP.Session.ActionsTest do
   describe "escrow channel state" do
     test "open rejects unfunded, closing, and finalized channels", %{opts: opts, store: store} do
       for {state, status, detail} <- [
-            {%{deposit: 0}, 410, "not funded on-chain"},
-            {%{deposit: 1_000, close_requested: true}, 410, "pending close request"},
-            {%{deposit: 1_000, finalized: true}, 410, "finalized on-chain"},
-            {%{deposit: 1_000, close_requested: true, finalized: true}, 410, "finalized on-chain"}
+            {state(%{deposit: 0}), 410, "not funded on-chain"},
+            {state(%{deposit: 1_000, close_requested: true}), 410, "pending close request"},
+            {state(%{deposit: 1_000, finalized: true}), 410, "finalized on-chain"},
+            {state(%{deposit: 1_000, close_requested: true, finalized: true}), 410, "finalized on-chain"}
           ] do
         opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state} end)
         assert {:error, %Errors{status: ^status} = error} = Actions.dispatch(open_payload(50), opts)
@@ -887,7 +900,7 @@ defmodule MPP.Session.ActionsTest do
     test "topUp rejects closing and finalized channels", %{opts: opts, store: store} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
 
-      for state <- [%{deposit: 2_000, close_requested: true}, %{deposit: 2_000, finalized: true}] do
+      for state <- [state(%{deposit: 2_000, close_requested: true}), state(%{deposit: 2_000, finalized: true})] do
         opts = Keyword.put(opts, :verify_top_up, fn _, _, _ -> {:ok, state} end)
         assert {:error, %Errors{status: 410}} = Actions.dispatch(top_up_payload(400), opts)
       end
@@ -898,11 +911,11 @@ defmodule MPP.Session.ActionsTest do
     test "rejects malformed settled and close flags", %{opts: opts} do
       malformed = fn deposit ->
         [
-          %{deposit: deposit, settled: deposit + 1},
-          %{deposit: deposit, settled: -1},
-          %{deposit: deposit, settled: "5"},
-          %{deposit: deposit, close_requested: "no"},
-          %{deposit: deposit, finalized: nil}
+          state(%{deposit: deposit, settled: deposit + 1}),
+          state(%{deposit: deposit, settled: -1}),
+          state(%{deposit: deposit, settled: "5"}),
+          state(%{deposit: deposit, close_requested: "no"}),
+          state(%{deposit: deposit, finalized: nil})
         ]
       end
 
@@ -921,8 +934,31 @@ defmodule MPP.Session.ActionsTest do
       end
     end
 
+    test "rejects a result that omits any channel state key", %{opts: opts, store: store} do
+      complete = state(%{deposit: 1_000})
+
+      for key <- [:deposit, :settled, :close_requested, :finalized] do
+        result = {:ok, Map.delete(complete, key)}
+        opts = Keyword.put(opts, :verify_open, fn _, _ -> result end)
+        assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
+        assert detail =~ "open funding verification failed"
+        assert :not_found = Store.get(store, @channel_id)
+      end
+
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      for key <- [:deposit, :settled, :close_requested, :finalized] do
+        result = {:ok, Map.delete(state(%{deposit: 2_000}), key)}
+        opts = Keyword.put(opts, :verify_top_up, fn _, _, _ -> result end)
+        assert {:error, %Errors{detail: detail}} = Actions.dispatch(top_up_payload(400), opts)
+        assert detail =~ "topUp funding verification failed"
+      end
+
+      assert {:ok, %Channel{deposit: 1_000}} = Store.get(store, @channel_id)
+    end
+
     test "open counts settled funds as already spent", %{opts: opts, store: store} do
-      opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, %{deposit: 1_000, settled: 40}} end)
+      opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state(%{deposit: 1_000, settled: 40})} end)
 
       assert {:ok, receipt} = Actions.dispatch(open_payload(50), opts)
       assert receipt.extensions["acceptedCumulative"] == "50"
@@ -936,7 +972,7 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "open rejects a voucher below the settled amount", %{opts: opts, store: store} do
-      opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, %{deposit: 1_000, settled: 60}} end)
+      opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state(%{deposit: 1_000, settled: 60})} end)
 
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
       assert detail =~ "below on-chain settled"
@@ -944,11 +980,11 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "open requires the request to fit in unsettled funds", %{opts: opts, store: store} do
-      short_deposit = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, %{deposit: 100, settled: 95}} end)
+      short_deposit = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state(%{deposit: 100, settled: 95})} end)
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(100), short_deposit)
       assert detail =~ "deposit is less than request amount"
 
-      short_voucher = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, %{deposit: 1_000, settled: 45}} end)
+      short_voucher = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state(%{deposit: 1_000, settled: 45})} end)
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), short_voucher)
       assert detail =~ "voucher amount is less than request amount"
       assert :not_found = Store.get(store, @channel_id)
@@ -958,10 +994,10 @@ defmodule MPP.Session.ActionsTest do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
 
       top_up = fn state -> Keyword.put(opts, :verify_top_up, fn _, _, _ -> {:ok, state} end) end
-      assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(%{deposit: 1_500, settled: 30}))
+      assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(state(%{deposit: 1_500, settled: 30})))
       assert {:ok, %Channel{settled: 30, spent: 30, cumulative_amount: 50}} = Store.get(store, @channel_id)
 
-      assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(%{deposit: 2_000, settled: 20}))
+      assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(state(%{deposit: 2_000, settled: 20})))
       assert {:ok, %Channel{deposit: 2_000, settled: 30, spent: 30}} = Store.get(store, @channel_id)
     end
   end
@@ -1084,7 +1120,9 @@ defmodule MPP.Session.ActionsTest do
     }
   end
 
-  defp funded(deposit), do: fn _payload, _opts -> {:ok, %{deposit: deposit}} end
+  defp funded(deposit), do: fn _payload, _opts -> {:ok, state(%{deposit: deposit})} end
+
+  defp state(fields), do: Map.merge(%{settled: 0, close_requested: false, finalized: false}, fields)
 
   defp bound_descriptor(signer, overrides \\ %{}) do
     descriptor =
