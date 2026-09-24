@@ -3795,7 +3795,7 @@ scored_at = "2026-09-22"
 id = "138"
 phase = 1
 bundle = "testnet-funding"
-status = "in_progress"
+status = "done"
 title = "Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex"
 scores = { d = 3, b = 5, u = 7 }
 acceptance_criteria = ['`mix.exs` declares `{:faucet_ex, "~> 0.1", only: :test}`; `mix hex.build` output contains no "excluded from the package" line.', "No test file defines its own `fresh_wallet!`, `ensure_funded!`, `wait_for_airdrop!`, `funded_wallet!` or `account!` funding helper any more; the nine definitions found on 2026-09-23 across `test/mpp/methods/tempo_integration_test.exs`, `tempo/subscription_integration_test.exs`, `client/providers/tempo_machine_token_integration_test.exs`, `solana_integration_test.exs`, `xrpl_integration_test.exs` and `xrpl_session_integration_test.exs` are gone.", "Wallet funding goes through `Faucet.ensure_min_balance!/4` with `Faucet.Source.Tempo`, `Faucet.Source.Solana` and `Faucet.Source.XRPL`; a missing `TEMPO_RPC_URL` fails loudly with the faucet_ex error message, never a skip.", "`mix test.json --include integration` for each of the six files passes against the live testnets (Moderato, Solana devnet, XRPL altnet); the run output is cited in the PR.", "`mix precommit` stays green (credo nesting and ex_dna in particular — the helpers were the clone source)."]
@@ -3809,9 +3809,16 @@ Move the tests onto it and delete the local helpers. Where a test needs a wallet
 
 Premise (read, not run): option names in the local helpers (`:rpc_url`, `:timeout`, `:interval`, `:fee_token`) match faucet_ex's, so the change is mechanical; confirm the current tree before relying on it.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1790239440660-d1450572, 991cff27e43fa514c3d0a78d4ef41cd7d104bdb7)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1790239440660-d1450572"
 created_at = "2026-09-23"
 started_at = "2026-09-24"
 scored_at = "2026-09-23"
+done_at = "2026-09-24"
+shipped_in = "991cff27e43fa514c3d0a78d4ef41cd7d104bdb7"
 
 [[task]]
 id = "139"

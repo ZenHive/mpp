@@ -5860,7 +5860,7 @@
       "id": "138",
       "phase": 1,
       "bundle": "testnet-funding",
-      "status": "in_progress",
+      "status": "done",
       "title": "Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex",
       "scores": {
         "d": 3,
@@ -5885,10 +5885,17 @@
         "Changing what the tests assert about payments — only how wallets get funded.",
         "The p256 / passkey wallet construction inlined next to `fresh_wallet!` in the Tempo tests: keep it in a single `test/support` helper if it must move, but it is not faucet work."
       ],
+      "shipped_in": "991cff27e43fa514c3d0a78d4ef41cd7d104bdb7",
       "body": "On 2026-09-23 the funding code in this repo's integration tests was consolidated into the standalone `faucet_ex` library (`~/_DATA/code/faucet_ex`): three copies of a Moderato `tempo_fundAddress` + fee-token-poll helper, a Solana `requestAirdrop` + `getBalance` poll, and an XRPL altnet faucet POST + `account_info` poll. faucet_ex exposes them as `Faucet.Source.Tempo`, `Faucet.Source.Solana`, `Faucet.Source.XRPL` behind one loop, `Faucet.ensure_min_balance!/4` (balance → request with `:deficit` → confirm → re-read, request budget, per-address `:global.trans` lock so parallel test modules do not double-fund). `Faucet.EVM.fresh_funded_wallet/3` replaces the Tempo `fresh_wallet!` shape (`%{private_key, address_hex, address_bin}`).\n\nMove the tests onto it and delete the local helpers. Where a test needs a wallet object rather than a bare address, keep a thin `test/support` adapter that calls faucet_ex — one, not one per file. Keep every test's payment assertions untouched; this task changes only how the wallet becomes funded.\n\nPremise (read, not run): option names in the local helpers (`:rpc_url`, `:timeout`, `:interval`, `:fee_token`) match faucet_ex's, so the change is mechanical; confirm the current tree before relying on it.\n",
       "created_at": "2026-09-23",
       "started_at": "2026-09-24",
+      "done_at": "2026-09-24",
       "scored_at": "2026-09-23",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1790239440660-d1450572, 991cff27e43fa514c3d0a78d4ef41cd7d104bdb7).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1790239440660-d1450572",
       "cross_repo": []
     },
     {
