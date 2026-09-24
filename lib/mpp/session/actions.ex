@@ -13,6 +13,15 @@ defmodule MPP.Session.Actions do
   channel deposit (or `{:error, %MPP.Errors{}}`). The channel ceiling becomes
   that total; the payload's `additionalDeposit` is never trusted. Without a
   verifier every `topUp` is rejected.
+
+  The voucher signer is fixed at `open` and stored on the channel. It is the
+  descriptor's `authorizedSigner` (the payer when that is the zero address)
+  once the descriptor hashes to `channelId` under the configured
+  `escrow_contract` and `chain_id`; otherwise the configured
+  `:authorized_signer`, falling back to the payer. A descriptor's payee and
+  token must match the configured recipient and token. A credential's
+  top-level `authorizedSigner` must equal that signer. Vouchers and closes are
+  verified against the stored signer only.
   """
 
   alias MPP.Errors
@@ -22,6 +31,7 @@ defmodule MPP.Session.Actions do
   alias MPP.Session.Payload
   alias MPP.Session.Store
   alias MPP.Session.Voucher
+  alias Onchain.Address
 
   @type opts :: keyword()
 
@@ -50,8 +60,8 @@ defmodule MPP.Session.Actions do
   defp handle_open(payload, opts) do
     with {:ok, deposit} <- fetch_open_deposit(payload, opts),
          :ok <- ensure_covers_request(payload.cumulative_amount, deposit, request_amount(opts)),
-         :ok <- maybe_verify_signature(payload, opts),
-         {:ok, identity} <- fetch_open_identity(payload, opts) do
+         {:ok, identity} <- fetch_open_identity(payload, opts),
+         :ok <- maybe_verify_signature(payload, identity.authorized_signer, opts) do
       update_channel(payload, opts, fn
         :not_found ->
           open_channel(payload, identity, deposit, opts)
@@ -66,7 +76,7 @@ defmodule MPP.Session.Actions do
   end
 
   defp handle_top_up(payload, opts) do
-    with {:ok, current} <- fetch_top_up_channel(payload, opts),
+    with {:ok, current} <- fetch_live_channel(payload, opts),
          :ok <- require_positive_top_up(payload),
          {:ok, deposit} <- verify_top_up(payload, current, opts) do
       update_channel(payload, opts, fn
@@ -82,7 +92,7 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp fetch_top_up_channel(payload, opts) do
+  defp fetch_live_channel(payload, opts) do
     case Store.get(store(opts), payload.channel_id) do
       {:ok, %Channel{status: :closed}} -> {:error, Errors.new(:channel_closed, "channel is closed")}
       {:ok, %Channel{} = channel} -> {:ok, channel}
@@ -115,32 +125,46 @@ defmodule MPP.Session.Actions do
   end
 
   defp handle_voucher(payload, opts) do
-    with :ok <- maybe_verify_signature(payload, opts) do
-      update_channel(payload, opts, fn
-        :not_found ->
-          {:error, Errors.new(:channel_not_found, "channel not found")}
-
-        %Channel{status: :closed} ->
-          {:error, Errors.new(:channel_closed, "channel is closed")}
-
-        %Channel{} = channel ->
-          accept_voucher(channel, payload, opts)
-      end)
-    end
+    with_channel_signer(payload, opts, &accept_voucher/3)
   end
 
   defp handle_close(payload, opts) do
-    with :ok <- maybe_verify_signature(payload, opts) do
-      update_channel(payload, opts, fn
-        :not_found ->
-          {:error, Errors.new(:channel_not_found, "channel not found")}
+    with_channel_signer(payload, opts, &close_channel/3)
+  end
 
-        %Channel{status: :closed} ->
-          {:error, Errors.new(:channel_closed, "channel is closed")}
+  # Voucher and close signatures are checked against the signer recorded on
+  # the channel at open, never against a signer named by the credential. The
+  # check runs inside the atomic update so it sees the same channel it mutates.
+  defp with_channel_signer(payload, opts, apply_fun) do
+    update_channel(payload, opts, fn
+      :not_found ->
+        {:error, Errors.new(:channel_not_found, "channel not found")}
 
-        %Channel{} = channel ->
-          close_channel(channel, payload, opts)
-      end)
+      %Channel{status: :closed} ->
+        {:error, Errors.new(:channel_closed, "channel is closed")}
+
+      %Channel{} = channel ->
+        signer = channel_signer(channel, opts)
+
+        with :ok <- ensure_same_descriptor(payload, signer, opts),
+             :ok <- maybe_verify_signature(payload, signer, opts) do
+          apply_fun.(channel, payload, opts)
+        end
+    end)
+  end
+
+  defp channel_signer(%Channel{authorized_signer: signer}, _opts) when is_binary(signer), do: signer
+  defp channel_signer(%Channel{}, opts), do: Keyword.get(opts, :authorized_signer)
+
+  defp ensure_same_descriptor(%Payload{descriptor: nil}, _signer, _opts), do: :ok
+
+  defp ensure_same_descriptor(%Payload{descriptor: descriptor} = payload, signer, opts) do
+    with :ok <- ensure_descriptor_binds_channel(payload, opts) do
+      if same_address?(descriptor_signer(descriptor), signer) do
+        :ok
+      else
+        {:error, Errors.new(:signer_mismatch, "descriptor signer does not match the channel")}
+      end
     end
   end
 
@@ -151,6 +175,7 @@ defmodule MPP.Session.Actions do
              payer: identity.payer,
              recipient: identity.recipient,
              token: identity.token,
+             authorized_signer: identity.authorized_signer,
              deposit: deposit,
              cumulative_amount: payload.cumulative_amount,
              proof: settlement_proof(payload, opts)
@@ -263,31 +288,82 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp fetch_open_identity(payload, opts) do
-    payer = identity_value(payload, opts, :payer, :payer)
-    recipient = identity_value(payload, opts, :payee, :recipient)
-    token = identity_value(payload, opts, :token, :token)
+  # Server configuration is authoritative for recipient and token. A
+  # descriptor is only honored once it hashes to the channelId under the
+  # server's escrow and chain, and it must agree with configured identity.
+  defp fetch_open_identity(%Payload{descriptor: nil} = payload, opts) do
+    payer = Keyword.get(opts, :payer)
+    signer = Keyword.get(opts, :authorized_signer) || payer
 
-    if is_binary(payer) and is_binary(recipient) and is_binary(token) do
-      {:ok, %{payer: payer, recipient: recipient, token: token}}
-    else
-      {:error, Errors.new(:invalid_payload, "payer, recipient, and token required to open a channel")}
+    build_open_identity(payload, payer, Keyword.get(opts, :recipient), Keyword.get(opts, :token), signer)
+  end
+
+  defp fetch_open_identity(%Payload{descriptor: descriptor} = payload, opts) do
+    with :ok <- ensure_descriptor_binds_channel(payload, opts),
+         {:ok, payer} <- configured_or_descriptor(opts, :payer, descriptor.payer),
+         {:ok, recipient} <- configured_or_descriptor(opts, :recipient, descriptor.payee),
+         {:ok, token} <- configured_or_descriptor(opts, :token, descriptor.token) do
+      build_open_identity(payload, payer, recipient, token, descriptor_signer(descriptor))
     end
   end
 
-  defp identity_value(%Payload{descriptor: %{payer: payer}}, opts, :payer, :payer) do
-    payer || Keyword.get(opts, :payer)
+  defp build_open_identity(payload, payer, recipient, token, signer) do
+    cond do
+      not (is_binary(payer) and is_binary(recipient) and is_binary(token)) ->
+        {:error, Errors.new(:invalid_payload, "payer, recipient, and token required to open a channel")}
+
+      is_binary(payload.authorized_signer) and not same_address?(payload.authorized_signer, signer) ->
+        {:error, Errors.new(:signer_mismatch, "authorizedSigner does not match the channel signer")}
+
+      true ->
+        {:ok, %{payer: payer, recipient: recipient, token: token, authorized_signer: signer}}
+    end
   end
 
-  defp identity_value(%Payload{descriptor: %{payee: payee}}, opts, :payee, :recipient) do
-    payee || Keyword.get(opts, :recipient)
+  defp configured_or_descriptor(opts, key, descriptor_value) do
+    case Keyword.get(opts, key) do
+      nil ->
+        {:ok, descriptor_value}
+
+      configured ->
+        if same_address?(configured, descriptor_value) do
+          {:ok, configured}
+        else
+          {:error, Errors.new(:invalid_payload, "channel descriptor #{key} does not match server configuration")}
+        end
+    end
   end
 
-  defp identity_value(%Payload{descriptor: %{token: token}}, opts, :token, :token) do
-    token || Keyword.get(opts, :token)
+  defp ensure_descriptor_binds_channel(%Payload{descriptor: descriptor, channel_id: channel_id}, opts) do
+    params =
+      Map.merge(descriptor, %{
+        escrow_contract: Keyword.get(opts, :escrow_contract),
+        chain_id: Keyword.get(opts, :chain_id)
+      })
+
+    case Channel.compute_id(params) do
+      {:ok, ^channel_id} ->
+        :ok
+
+      {:ok, _other} ->
+        {:error, Errors.new(:invalid_payload, "channel descriptor does not match channelId")}
+
+      {:error, _reason} ->
+        {:error,
+         Errors.new(
+           :invalid_payload,
+           "channel descriptor cannot be verified: escrow_contract and chain_id must be configured"
+         )}
+    end
   end
 
-  defp identity_value(_payload, opts, _descriptor_key, opt_key), do: Keyword.get(opts, opt_key)
+  # TIP-1034: a zero authorizedSigner delegates signing to the payer.
+  defp descriptor_signer(%{authorized_signer: signer, payer: payer}) do
+    if Address.zero?(signer), do: payer, else: signer
+  end
+
+  defp same_address?(a, b) when is_binary(a) and is_binary(b), do: a == b or Address.equal?(a, b)
+  defp same_address?(_a, _b), do: false
 
   defp ensure_covers_request(_cumulative, _deposit, 0), do: :ok
 
@@ -304,20 +380,20 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp maybe_verify_signature(payload, opts) do
+  # Custom verifiers receive the channel's resolved signer as :authorized_signer.
+  defp maybe_verify_signature(payload, signer, opts) do
     case Keyword.get(opts, :verify_signature, :default) do
       :already_verified -> :ok
-      fun when is_function(fun, 2) -> fun.(payload, opts)
-      :default -> verify_presented_signature(payload, opts)
+      fun when is_function(fun, 2) -> fun.(payload, Keyword.put(opts, :authorized_signer, signer))
+      :default -> verify_presented_signature(payload, signer, opts)
     end
   end
 
-  defp verify_presented_signature(%Payload{signature: nil}, _opts), do: :ok
+  defp verify_presented_signature(%Payload{signature: nil}, _signer, _opts), do: :ok
 
-  defp verify_presented_signature(%Payload{} = payload, opts) do
+  defp verify_presented_signature(%Payload{} = payload, signer, opts) do
     escrow = Keyword.get(opts, :escrow_contract)
     chain_id = Keyword.get(opts, :chain_id)
-    signer = signature_signer(payload, opts)
 
     # Fail closed: a presented signature must be verifiable. Missing EIP-712
     # domain config (escrow_contract / chain_id / authorized_signer) is a
@@ -358,12 +434,6 @@ defmodule MPP.Session.Actions do
         {:error, Errors.new(:invalid_signature, "invalid voucher signature")}
     end
   end
-
-  defp signature_signer(%Payload{authorized_signer: signer}, _opts) when is_binary(signer), do: signer
-
-  defp signature_signer(%Payload{descriptor: %{authorized_signer: signer}}, _opts) when is_binary(signer), do: signer
-
-  defp signature_signer(_payload, opts), do: Keyword.get(opts, :authorized_signer)
 
   defp receipt(%Channel{} = channel, opts) do
     Receipt.new(

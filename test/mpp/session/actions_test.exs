@@ -21,6 +21,7 @@ defmodule MPP.Session.ActionsTest do
   @tip1034_escrow "0x4d50500000000000000000000000000000000000"
   @tip1034_signature "0x543a3c0d8484f2f0e2a6f190c87e07803cf96b9abdd6d15337455469c003861f40ef9cbf9411ef324692c1bfbc384efee9fd0476d1cd46743afcd6c82638b3b11b"
   @tip1034_amount 50
+  @zero_address "0x0000000000000000000000000000000000000000"
 
   defmodule FailingStore do
     @moduledoc false
@@ -413,14 +414,17 @@ defmodule MPP.Session.ActionsTest do
         "authorizedSigner" => @signer
       }
 
-      assert {:ok, _} =
+      # A top-level authorizedSigner never selects the verification key.
+      assert {:error, %Errors{} = mismatch} =
                Actions.dispatch(open_with_payload_signer, Keyword.delete(signed_opts, :authorized_signer))
+
+      assert String.contains?(mismatch.type, "signer-mismatch")
     end
 
     test "fails closed when a signature is presented without a complete EIP-712 domain", %{opts: opts} do
       payload = Map.put(open_payload(100), "signature", @signature)
 
-      for missing <- [:escrow_contract, :chain_id, :authorized_signer] do
+      for missing <- [:escrow_contract, :chain_id] do
         domain_opts =
           opts
           |> Keyword.put(:escrow_contract, @tip1034_escrow)
@@ -432,6 +436,140 @@ defmodule MPP.Session.ActionsTest do
         assert String.contains?(error.type, "invalid-signature")
         assert error.detail =~ "must all be configured"
       end
+    end
+  end
+
+  describe "channel signer binding" do
+    test "the other test key verifies when the server authorizes it", %{opts: opts} do
+      opts = Keyword.put(opts, :authorized_signer, SessionSigning.other_signer_address())
+      payload = Map.put(open_payload(50), "signature", other_voucher("open", @channel_id, 50)["signature"])
+      assert {:ok, _} = Actions.dispatch(payload, opts)
+    end
+
+    test "open rejects a credential-named signer that differs from the channel signer", %{opts: opts} do
+      payload =
+        50
+        |> open_payload()
+        |> Map.put("signature", other_voucher("open", @channel_id, 50)["signature"])
+        |> Map.put("authorizedSigner", SessionSigning.other_signer_address())
+
+      assert {:error, %Errors{} = error} = Actions.dispatch(payload, opts)
+      assert String.contains?(error.type, "signer-mismatch")
+    end
+
+    test "voucher and close verify against the signer stored at open, not server config", %{opts: opts, store: store} do
+      {channel_id, descriptor} = bound_descriptor(@signer)
+      assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+
+      # A later server config naming another key does not re-key an open channel.
+      rekeyed = Keyword.put(opts, :authorized_signer, SessionSigning.other_signer_address())
+      assert {:error, %Errors{} = error} = Actions.dispatch(other_voucher("voucher", channel_id, 80), rekeyed)
+      assert String.contains?(error.type, "invalid-signature")
+
+      voucher = %{"action" => "voucher", "channelId" => channel_id, "cumulativeAmount" => "80"}
+      assert {:ok, _} = Actions.dispatch(Map.put(voucher, "signature", sign(channel_id, 80)), rekeyed)
+
+      assert {:error, %Errors{}} = Actions.dispatch(other_voucher("close", channel_id, 80), rekeyed)
+      assert {:ok, channel} = Store.get(store, channel_id)
+      assert channel.status == :active
+    end
+
+    test "voucher and close reject a descriptor naming a different signer", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      {_other_id, other_descriptor} = bound_descriptor(SessionSigning.other_signer_address())
+
+      for action <- ["voucher", "close"] do
+        payload = Map.put(other_voucher(action, @channel_id, 80), "descriptor", other_descriptor)
+        assert {:error, %Errors{} = error} = Actions.dispatch(payload, opts)
+        assert error.detail =~ "descriptor does not match channelId"
+      end
+
+      {channel_id, descriptor} = bound_descriptor(@signer, %{"salt" => "0x" <> String.duplicate("02", 32)})
+      assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+
+      # Same channel-bound descriptor shape, but claiming a zero signer (payer) instead.
+      assert {:error, %Errors{}} =
+               Actions.dispatch(
+                 Map.put(other_voucher("voucher", channel_id, 80), "descriptor", %{
+                   descriptor
+                   | "authorizedSigner" => @zero_address
+                 }),
+                 opts
+               )
+
+      assert {:ok, channel} = Store.get(store, channel_id)
+      assert channel.cumulative_amount == 50
+    end
+
+    test "a voucher carrying the channel's own descriptor still verifies", %{opts: opts} do
+      {channel_id, descriptor} = bound_descriptor(@signer)
+      assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+
+      voucher = %{
+        "action" => "voucher",
+        "channelId" => channel_id,
+        "cumulativeAmount" => "80",
+        "signature" => sign(channel_id, 80),
+        "descriptor" => descriptor
+      }
+
+      assert {:ok, _} = Actions.dispatch(voucher, opts)
+    end
+
+    test "open rejects a descriptor that does not hash to the channelId", %{opts: opts} do
+      {_channel_id, descriptor} = bound_descriptor(SessionSigning.other_signer_address())
+      payload = Map.put(other_voucher("open", @channel_id, 50), "descriptor", descriptor)
+      payload = Map.merge(open_payload(50), payload)
+
+      assert {:error, %Errors{} = error} = Actions.dispatch(payload, opts)
+      assert error.detail =~ "descriptor does not match channelId"
+    end
+
+    test "open rejects a descriptor whose payee or token differs from server config", %{opts: opts} do
+      for {key, value} <- [{"payee", @payer}, {"token", @payer}] do
+        {channel_id, descriptor} = bound_descriptor(@signer, %{key => value})
+        assert {:error, %Errors{} = error} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+        assert error.detail =~ "does not match server configuration"
+      end
+    end
+
+    test "open rejects a descriptor when the escrow domain is not configured", %{opts: opts} do
+      {channel_id, descriptor} = bound_descriptor(@signer)
+
+      for missing <- [:escrow_contract, :chain_id] do
+        payload = descriptor_open(channel_id, descriptor, 50)
+        assert {:error, %Errors{} = error} = Actions.dispatch(payload, Keyword.delete(opts, missing))
+        assert error.detail =~ "escrow_contract and chain_id must be configured"
+      end
+    end
+
+    test "a zero descriptor signer delegates signing to the payer", %{opts: opts, store: store} do
+      payer = SessionSigning.signer_address()
+      opts = Keyword.drop(opts, [:payer, :authorized_signer])
+      {channel_id, descriptor} = bound_descriptor(@zero_address, %{"payer" => payer})
+
+      assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+      assert {:ok, channel} = Store.get(store, channel_id)
+      assert channel.authorized_signer == payer
+    end
+
+    test "custom verifiers receive the channel's signer", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      test_pid = self()
+
+      verify = fn _payload, verify_opts ->
+        send(test_pid, {:signer, Keyword.fetch!(verify_opts, :authorized_signer)})
+        :ok
+      end
+
+      opts =
+        opts
+        |> Keyword.put(:authorized_signer, SessionSigning.other_signer_address())
+        |> Keyword.put(:verify_signature, verify)
+
+      assert {:ok, _} = Actions.dispatch(voucher_payload(80), opts)
+      assert_received {:signer, signer}
+      assert signer == String.downcase(@signer)
     end
   end
 
@@ -535,22 +673,17 @@ defmodule MPP.Session.ActionsTest do
       assert receipt.extensions["action"] == "open"
     end
 
-    test "open requires identity and can take it from a descriptor", %{opts: opts} do
-      bare = Keyword.drop(opts, [:payer, :recipient, :token])
+    test "open requires identity and can take it from a channel-bound descriptor", %{opts: opts, store: store} do
+      bare = Keyword.drop(opts, [:payer, :recipient, :token, :authorized_signer])
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), bare)
       assert detail =~ "payer, recipient, and token"
 
-      descriptor = %{
-        "payer" => @payer,
-        "payee" => @recipient,
-        "operator" => "0x0000000000000000000000000000000000000000",
-        "token" => @token,
-        "salt" => "0x0000000000000000000000000000000000000000000000000000000000000001",
-        "authorizedSigner" => @signer,
-        "expiringNonceHash" => "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      }
-
-      assert {:ok, _} = Actions.dispatch(Map.put(open_payload(50), "descriptor", descriptor), bare)
+      {channel_id, descriptor} = bound_descriptor(@signer)
+      assert {:ok, _} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), bare)
+      assert {:ok, channel} = Store.get(store, channel_id)
+      assert channel.payer == @payer
+      assert channel.recipient == @recipient
+      assert channel.authorized_signer == String.downcase(@signer)
     end
 
     test "open deposit must cover the request amount", %{opts: opts} do
@@ -683,6 +816,58 @@ defmodule MPP.Session.ActionsTest do
       "channelId" => @channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
       "signature" => sign(@channel_id, amount)
+    }
+  end
+
+  defp bound_descriptor(signer, overrides \\ %{}) do
+    descriptor =
+      Map.merge(
+        %{
+          "payer" => @payer,
+          "payee" => @recipient,
+          "operator" => @zero_address,
+          "token" => @token,
+          "salt" => "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "authorizedSigner" => signer,
+          "expiringNonceHash" => "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        overrides
+      )
+
+    channel_id =
+      Channel.compute_id!(
+        payer: descriptor["payer"],
+        payee: descriptor["payee"],
+        operator: descriptor["operator"],
+        token: descriptor["token"],
+        salt: descriptor["salt"],
+        authorized_signer: descriptor["authorizedSigner"],
+        expiring_nonce_hash: descriptor["expiringNonceHash"],
+        escrow_contract: @tip1034_escrow,
+        chain_id: 42_431
+      )
+
+    {channel_id, descriptor}
+  end
+
+  defp descriptor_open(channel_id, descriptor, amount) do
+    %{
+      "action" => "open",
+      "type" => "transaction",
+      "channelId" => channel_id,
+      "transaction" => @transaction,
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => sign(channel_id, amount),
+      "descriptor" => descriptor
+    }
+  end
+
+  defp other_voucher(action, channel_id, amount) do
+    %{
+      "action" => action,
+      "channelId" => channel_id,
+      "cumulativeAmount" => Integer.to_string(amount),
+      "signature" => SessionSigning.sign_voucher_as_other(channel_id, amount, @tip1034_escrow, 42_431)
     }
   end
 

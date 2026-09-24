@@ -11,17 +11,36 @@ defmodule MPP.Test.SessionSigning do
 
   @signer_address "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 
+  # Anvil account 1 — a second well-known dev key that test channels do not
+  # authorize unless a test configures it explicitly.
+  @other_private_key Base.decode16!("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", case: :lower)
+
+  @other_signer_address "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+
   @spec signer_address() :: String.t()
   def signer_address, do: @signer_address
+
+  @spec other_signer_address() :: String.t()
+  def other_signer_address, do: @other_signer_address
 
   @doc "EIP-712-sign a session voucher for the given domain with the Anvil-0 key."
   @spec sign_voucher(String.t(), non_neg_integer(), String.t(), non_neg_integer()) :: String.t()
   def sign_voucher(channel_id, cumulative_amount, escrow_contract, chain_id) do
+    sign_voucher_with(@private_key, channel_id, cumulative_amount, escrow_contract, chain_id)
+  end
+
+  @doc "EIP-712-sign a session voucher for the given domain with the Anvil-1 key."
+  @spec sign_voucher_as_other(String.t(), non_neg_integer(), String.t(), non_neg_integer()) :: String.t()
+  def sign_voucher_as_other(channel_id, cumulative_amount, escrow_contract, chain_id) do
+    sign_voucher_with(@other_private_key, channel_id, cumulative_amount, escrow_contract, chain_id)
+  end
+
+  defp sign_voucher_with(private_key, channel_id, cumulative_amount, escrow_contract, chain_id) do
     voucher = struct(Voucher, channel_id: String.downcase(channel_id), cumulative_amount: cumulative_amount)
     digest = Voucher.hash!(voucher, escrow_contract, chain_id)
-    {:ok, signature} = Curvy.sign_payload(digest, @private_key)
+    {:ok, signature} = Curvy.sign_payload(digest, private_key)
     signature = Recover.normalize_low_s(signature)
-    {:ok, address} = Curvy.get_address(@private_key)
+    {:ok, address} = Curvy.get_address(private_key)
     {:ok, recid} = Recover.find_recid_from_digest(digest, signature, address)
 
     "0x" <>

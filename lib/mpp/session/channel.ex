@@ -52,6 +52,7 @@ defmodule MPP.Session.Channel do
           payer: String.t(),
           recipient: String.t(),
           token: String.t(),
+          authorized_signer: String.t() | nil,
           deposit: non_neg_integer(),
           cumulative_amount: non_neg_integer(),
           spent: non_neg_integer(),
@@ -67,6 +68,7 @@ defmodule MPP.Session.Channel do
     :recipient,
     :token,
     :deposit,
+    authorized_signer: nil,
     cumulative_amount: 0,
     spent: 0,
     units: 0,
@@ -87,6 +89,7 @@ defmodule MPP.Session.Channel do
          {:ok, payer} <- normalize_address(Keyword.get(opts, :payer), :payer),
          {:ok, recipient} <- normalize_address(Keyword.get(opts, :recipient), :recipient),
          {:ok, token} <- normalize_address(Keyword.get(opts, :token), :token),
+         {:ok, authorized_signer} <- normalize_optional_address(Keyword.get(opts, :authorized_signer)),
          :ok <- validate_amount(deposit, :deposit),
          :ok <- validate_amount(cumulative_amount, :cumulative_amount),
          :ok <- validate_amount(spent, :spent),
@@ -99,6 +102,7 @@ defmodule MPP.Session.Channel do
          payer: payer,
          recipient: recipient,
          token: token,
+         authorized_signer: authorized_signer,
          deposit: deposit,
          cumulative_amount: cumulative_amount,
          spent: spent,
@@ -296,6 +300,9 @@ defmodule MPP.Session.Channel do
   def action_from_wire("voucher"), do: {:ok, :voucher}
   def action_from_wire("close"), do: {:ok, :close}
   def action_from_wire(_value), do: {:error, :invalid_action}
+
+  defp normalize_optional_address(nil), do: {:ok, nil}
+  defp normalize_optional_address(address), do: normalize_address(address, :authorized_signer)
 
   defp normalize_address("XRP", :token), do: {:ok, "XRP"}
 
