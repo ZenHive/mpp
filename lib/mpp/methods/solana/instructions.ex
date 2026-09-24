@@ -413,13 +413,17 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
-  defp ata_allowed_owners([_primary | splits], opts) do
+  defp ata_allowed_owners([primary | splits], opts) do
     splits
     |> Enum.filter(fn leg ->
       if opts[:fee_payer], do: leg.ata_creation_required?, else: true
     end)
     |> MapSet.new(& &1.recipient)
+    |> maybe_allow_primary(primary, opts)
   end
+
+  defp maybe_allow_primary(owners, primary, %{allow_primary_ata: true}), do: MapSet.put(owners, primary.recipient)
+  defp maybe_allow_primary(owners, _primary, _opts), do: owners
 
   defp reject_fee_payer_source(_classified, %{fee_payer: false}), do: :ok
   defp reject_fee_payer_source(_classified, %{fee_payer_pubkey: nil}), do: :ok

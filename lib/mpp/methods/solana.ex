@@ -651,7 +651,8 @@ defmodule MPP.Methods.Solana do
       max_compute_unit_limit: config["max_compute_unit_limit"],
       max_compute_unit_price: config["max_compute_unit_price"],
       mint: spl_mint(charge),
-      token_program: token_program_key(charge, config)
+      token_program: token_program_key(charge, config),
+      allow_primary_ata: config["allow_primary_ata"] == true
     }
   end
 

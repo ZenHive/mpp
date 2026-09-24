@@ -404,6 +404,20 @@ defmodule MPP.Methods.USDCTest do
       assert error.detail =~ "genesis hash"
     end
 
+    test "settles when the transaction creates the recipient associated token account" do
+      {payer, seed} = keypair()
+      {recipient, _} = keypair()
+      charge = %{solana_charge() | recipient: Keys.to_address(recipient)}
+      payload = encoded_transfer_with_ata(payer, seed, recipient)
+      {:ok, tx} = payload["transaction"] |> Base.decode64!() |> Transaction.deserialize()
+      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      stub_solana_success(payer, recipient, signature, dest_missing: true)
+
+      assert {:ok, %Receipt{} = receipt} = USDC.verify(payload, charge)
+      assert receipt.reference == signature
+      assert receipt.extensions["type"] == "solana"
+    end
+
     test "settles a devnet transfer and rejects the same transaction bytes" do
       start_supervised!(MemoryStore)
       {payer, seed} = keypair()
@@ -1075,6 +1089,17 @@ defmodule MPP.Methods.USDCTest do
     {public, seed}
   end
 
+  defp encoded_transfer_with_ata(payer, seed, recipient) do
+    mint = elem(Cartouche.Base58.decode(@devnet_usdc), 1)
+    {source, _} = ATA.find_address(payer, mint)
+    {dest, _} = ATA.find_address(recipient, mint)
+    create = ATA.create_idempotent(payer, recipient, mint)
+    transfer = TokenProgram.transfer_checked(source, mint, dest, payer, 1, 6)
+    message = Transaction.build_message(payer, [create, transfer], <<1::256>>)
+    tx = Transaction.sign(message, [seed])
+    %{"type" => "transaction", "transaction" => Base.encode64(Transaction.serialize(tx))}
+  end
+
   defp encoded_transfer(payer, seed, recipient, opts \\ []) do
     mint = Keyword.get(opts, :mint, elem(Cartouche.Base58.decode(@devnet_usdc), 1))
     amount = Keyword.get(opts, :amount, 1)
@@ -1102,7 +1127,7 @@ defmodule MPP.Methods.USDCTest do
     end)
   end
 
-  defp stub_solana_success(payer, recipient, signature) do
+  defp stub_solana_success(payer, recipient, signature, opts \\ []) do
     mint = elem(Cartouche.Base58.decode(@devnet_usdc), 1)
     {source, _} = ATA.find_address(payer, mint)
     {dest, _} = ATA.find_address(recipient, mint)
@@ -1118,7 +1143,7 @@ defmodule MPP.Methods.USDCTest do
             @devnet_genesis
 
           "getAccountInfo" ->
-            account_info(hd(request["params"]), payer, recipient, source, dest)
+            account_info(hd(request["params"]), payer, recipient, source, dest, opts)
 
           "simulateTransaction" ->
             %{"err" => nil, "logs" => ["ok"], "unitsConsumed" => 500}
@@ -1137,7 +1162,7 @@ defmodule MPP.Methods.USDCTest do
     end)
   end
 
-  defp account_info(pubkey, payer, recipient, source, dest) do
+  defp account_info(pubkey, payer, recipient, source, dest, opts) do
     value =
       cond do
         pubkey == @devnet_usdc ->
@@ -1145,6 +1170,9 @@ defmodule MPP.Methods.USDCTest do
 
         pubkey == Keys.to_address(source) ->
           account_value(Base.encode64(token_data(payer, 1)), 165)
+
+        pubkey == Keys.to_address(dest) and Keyword.get(opts, :dest_missing, false) ->
+          nil
 
         pubkey == Keys.to_address(dest) ->
           account_value(Base.encode64(token_data(recipient, 1)), 165)

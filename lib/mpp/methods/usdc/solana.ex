@@ -472,6 +472,7 @@ defmodule MPP.Methods.USDC.Solana do
         "network" => profile["network"],
         "req_options" => config["req_options"],
         "rpc_url" => config["rpc_url"],
+        "allow_primary_ata" => true,
         "store" => config["store"],
         "token_program" => @token_program,
         "wait_for_confirmation" => config["wait_for_confirmation"]
