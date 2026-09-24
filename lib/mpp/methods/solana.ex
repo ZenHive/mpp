@@ -329,7 +329,8 @@ defmodule MPP.Methods.Solana do
          {:ok, rpc_tx} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Instructions.verify_parsed(rpc_tx, charge, instruction_opts(charge, config)),
          :ok <- verify_push_memo(rpc_tx, expected_memo),
-         :ok <- commit_signature_used(store, signature) do
+         :ok <- commit_signature_used(store, signature),
+         :ok <- mark_settled(store, signature) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
   end
@@ -403,7 +404,8 @@ defmodule MPP.Methods.Solana do
          {:ok, confirmed} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Confidential.verify_confirmed(confirmed),
          {:ok, current} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
-         :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]) do
+         :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]),
+         :ok <- mark_settled(store, signature) do
       {:ok,
        Receipt.new(
          method: "solana",
@@ -1043,9 +1045,15 @@ defmodule MPP.Methods.Solana do
   defp check_signature_unused(nil, _signature), do: :ok
 
   defp check_signature_unused(store, signature) do
-    case Store.get(store, store_key(signature)) do
+    with :ok <- check_key_unused(store, store_key(signature)) do
+      check_key_unused(store, settled_key(signature))
+    end
+  end
+
+  defp check_key_unused(store, key) do
+    case Store.get(store, key) do
       :not_found -> :ok
-      {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
+      {:ok, _} -> {:error, signature_used_error()}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
@@ -1068,8 +1076,14 @@ defmodule MPP.Methods.Solana do
   # claim is retained on every outcome, because a timeout or transport error may
   # still mean the transaction lands; the challenge id lets that same challenge
   # recover. A store without delete/2 (or update/3) keeps the claim until its
-  # TTL expires. A separate settled key makes the receipt single-use across the
-  # original attempt and any recovery.
+  # TTL expires.
+  #
+  # Receipt single use rests on the settled key, not on this claim: every path
+  # that returns a receipt (pull, pull recovery, push, bundle) must first win
+  # check_and_mark on settled_key/1, and a signature whose settled key exists is
+  # always "already used". A release is also skipped once the settled key
+  # exists (or cannot be read), but that check is not atomic with the delete
+  # and is not what the guarantee relies on.
   defp claim_signature(nil, _signature, _challenge_id), do: {:ok, nil}
 
   defp claim_signature(store, signature, challenge_id) do
@@ -1118,7 +1132,7 @@ defmodule MPP.Methods.Solana do
   defp mark_settled(nil, _signature), do: :ok
 
   defp mark_settled(store, signature) do
-    case Store.check_and_mark(store, @settled_key_prefix <> signature, System.system_time(:millisecond)) do
+    case Store.check_and_mark(store, settled_key(signature), System.system_time(:millisecond)) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, signature_used_error()}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
@@ -1141,9 +1155,15 @@ defmodule MPP.Methods.Solana do
   defp release_signature({nil, _signature, _token}), do: :ok
 
   defp release_signature({store, signature, token}) do
-    case Store.delete(store, store_key(signature), token) do
-      :ok -> :ok
-      {:error, reason} -> Logger.warning("MPP.Methods.Solana: signature reservation release failed: #{inspect(reason)}")
+    case Store.get(store, settled_key(signature)) do
+      :not_found ->
+        delete_reservation(store, signature, token)
+
+      {:ok, _settled} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("MPP.Methods.Solana: settled-key read failed, keeping reservation: #{inspect(reason)}")
     end
   rescue
     # reach:disable-next-line bare_rescue
@@ -1154,7 +1174,15 @@ defmodule MPP.Methods.Solana do
       Logger.warning("MPP.Methods.Solana: signature reservation release exited: #{inspect(reason)}")
   end
 
+  defp delete_reservation(store, signature, token) do
+    case Store.delete(store, store_key(signature), token) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("MPP.Methods.Solana: signature reservation release failed: #{inspect(reason)}")
+    end
+  end
+
   defp store_key(signature), do: @store_key_prefix <> signature
+  defp settled_key(signature), do: @settled_key_prefix <> signature
 
   defp validate_store!(nil), do: :ok
   defp validate_store!(false), do: :ok

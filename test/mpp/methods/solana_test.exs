@@ -56,6 +56,7 @@ defmodule MPP.Methods.SolanaTest do
     end
 
     def keys, do: Agent.get(__MODULE__, &Map.keys/1)
+    def drop(key), do: Agent.update(__MODULE__, &Map.delete(&1, key))
   end
 
   defmodule GetFailStore do
@@ -145,6 +146,24 @@ defmodule MPP.Methods.SolanaTest do
     @impl true
     def check_and_mark("mpp:solana-settled:" <> _signature, _value), do: {:error, :backend_down}
     def check_and_mark(_key, _value), do: :ok
+  end
+
+  defmodule SettledReadFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get("mpp:solana-settled:" <> _signature), do: {:error, :connection_lost}
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: :ok
+    @impl true
+    def delete(key, _expected) do
+      send(self(), {:deleted, key})
+      :ok
+    end
   end
 
   defmodule ExitingDeleteStore do
@@ -1315,6 +1334,94 @@ defmodule MPP.Methods.SolanaTest do
 
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
       assert error.detail =~ "already used"
+    end
+
+    test "a recovered receipt stays single-use after the simulating attempt fails", %{
+      charge: charge,
+      payer: payer,
+      payer_seed: seed,
+      recipient: recipient
+    } do
+      memo = Solana.push_memo("chal-1")
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      charge = %{charge | method_details: Map.delete(charge.method_details, "store")}
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, [memo])
+      signature = pull_signature(tx)
+      parsed = memo_parsed_tx(signature, payer, recipient, memo)
+      payload = %{"type" => "transaction", "transaction" => encoded}
+      test_pid = self()
+
+      Req.Test.stub(Solana, fn conn ->
+        {method, id, conn} = read_request(conn)
+        send(test_pid, {:rpc, method})
+
+        if method == "simulateTransaction" do
+          send(test_pid, {:simulating, self()})
+          receive do: (:go -> :ok)
+          rpc_json(conn, id, "result", %{"err" => "AlreadyProcessed", "logs" => []})
+        else
+          rpc_json(conn, id, "result", Map.fetch!(pull_results(signature, parsed), method))
+        end
+      end)
+
+      simulating_attempt = Task.async(fn -> Solana.verify(payload, charge) end)
+      assert_receive {:simulating, simulating}
+
+      assert {:ok, %Receipt{reference: ^signature}} = Solana.verify(payload, charge)
+
+      send(simulating, :go)
+      assert {:error, %Errors{} = failed} = Task.await(simulating_attempt)
+      assert failed.detail =~ "simulation"
+
+      assert {:error, %Errors{} = push} = Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+      assert push.detail =~ "already used"
+
+      assert {:error, %Errors{} = pull} = Solana.verify(payload, charge)
+      assert pull.detail =~ "already used"
+      refute_received {:rpc, "sendTransaction"}
+    end
+
+    test "a push credential is rejected after a pull receipt even without the reservation", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore})
+      stub_pull_success(signature, parsed)
+
+      assert {:ok, %Receipt{}} = Solana.verify(payload, charge)
+      MemoryStore.drop("mpp:solana:" <> signature)
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.detail =~ "already used"
+    end
+
+    test "a push settle-mark store failure fails closed", %{charge: charge, signature: signature, parsed: parsed} do
+      charge = put_details(charge, %{"store" => SettleFailStore})
+      stub_pull_success(signature, parsed)
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.detail == "Dedup store error"
+    end
+
+    test "a release is skipped when the settled key cannot be read", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      charge = put_details(charge, %{"store" => SettledReadFailStore})
+      stub_simulation_fails_once(signature, parsed)
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "simulation"
+      refute_received {:deleted, _key}
     end
 
     test "a store read failure during recovery fails closed", %{charge: charge, payload: payload} do
