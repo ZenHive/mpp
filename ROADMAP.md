@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 81 — Add x402 v2 exact interoperability on 2026-09-18
 
-**Up next:** Task 138 — Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯
+**Up next:** Task 137 — Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀
 <!-- FOCUS:END -->
 
 ---
@@ -39,7 +39,7 @@
 | Task 103 | ✅ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67] 🎯 |
 | Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33] 📋 |
 | Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 138 | ⬜ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯 |
+| Task 138 | 🔄 | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯 |
 <!-- TASKS:END -->
 
 ---
