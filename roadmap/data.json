@@ -5736,7 +5736,7 @@
       "id": "135",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Include x402 settlement and signing in critical coverage enforcement",
       "scores": {
         "d": 3,
@@ -5764,6 +5764,7 @@
       ],
       "body": "Audit of 9e73dbe found the explicit critical path list excludes x402 despite its payment verification and settlement role. Full QA at that revision reports aggregate 96.36% and a passing critical gate, while MPP.X402.Plug is 77.78%, Facilitator 31.58%, Exact 72.84%, Headers 69.23%, Nonce 91.67%, Replay 83.33%, and MPP.X402 67.44%. Task 127 is done and no pending task covers this missing tier. Preserve live-provider authority for external semantics; this task closes local coverage enforcement and behavior-test gaps, not external-contract verification by mocks. Evidence: .audit/9e73dbe.md.",
       "created_at": "2026-09-22",
+      "started_at": "2026-09-24",
       "scored_at": "2026-09-22",
       "cross_repo": []
     },
