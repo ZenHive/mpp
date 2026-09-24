@@ -102,12 +102,18 @@ defmodule MPP.Client.Transport.HTTP do
   @spec get_challenges(Req.Response.t()) :: {:ok, [Challenge.t()]} | {:error, term()}
   def get_challenges(%Req.Response{} = response), do: get_challenges(response, nil)
 
-  @doc "Parse native Payment challenges and x402 `PAYMENT-REQUIRED` offers together."
+  @doc """
+  Parse native Payment challenges and x402 `PAYMENT-REQUIRED` offers together.
+
+  `request_url` is accepted for existing callers and is not compared to an
+  x402 `resource.url`. `MPP.X402.challenges_from_header/1` no longer takes a
+  request URL (mppx #908): exact equality dropped payable offers when query
+  strings, redirects, proxies, or port rewriting made the URLs differ.
+  `MPP.X402.Plug` still binds the paid resource.
+  """
   @spec get_challenges(Req.Response.t(), String.t() | nil) :: {:ok, [Challenge.t()]} | {:error, term()}
-  def get_challenges(%Req.Response{} = response, request_url) do
-    native = native_challenges(response)
-    x402 = x402_challenges(response, request_url)
-    merge_challenges(native, x402)
+  def get_challenges(%Req.Response{} = response, _request_url) do
+    merge_challenges(native_challenges(response), x402_challenges(response))
   end
 
   defp native_challenges(response) do
@@ -117,15 +123,15 @@ defmodule MPP.Client.Transport.HTTP do
     end
   end
 
-  defp x402_challenges(response, request_url) do
+  defp x402_challenges(response) do
     case Req.Response.get_header(response, "payment-required") do
       [] -> {:ok, []}
-      [header | _rest] -> parse_x402_offers(header, request_url)
+      [header | _rest] -> parse_x402_offers(header)
     end
   end
 
-  defp parse_x402_offers(header, request_url) do
-    case X402.challenges_from_header(header, request_url) do
+  defp parse_x402_offers(header) do
+    case X402.challenges_from_header(header) do
       {:ok, challenges} -> {:ok, challenges}
       {:error, _reason} -> {:ok, []}
     end

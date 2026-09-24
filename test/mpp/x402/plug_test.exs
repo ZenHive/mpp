@@ -301,7 +301,7 @@ defmodule MPP.X402.PlugTest do
     unpaid = :get |> Plug.Test.conn(@url) |> PaymentPlug.call(opts)
     assert unpaid.status == 402
     [required] = Plug.Conn.get_resp_header(unpaid, "payment-required")
-    assert {:ok, [challenge]} = X402.challenges_from_header(required, @url)
+    assert {:ok, [challenge]} = X402.challenges_from_header(required)
     assert {:ok, payload} = Exact.sign(challenge, @config)
     payload
   end

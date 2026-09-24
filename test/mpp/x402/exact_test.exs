@@ -166,7 +166,7 @@ defmodule MPP.X402.ExactTest do
         "accepts" => [@accept]
       })
 
-    assert {:ok, [challenge]} = X402.challenges_from_header(header, "https://api.example.com/resource")
+    assert {:ok, [challenge]} = X402.challenges_from_header(header)
     challenge
   end
 end

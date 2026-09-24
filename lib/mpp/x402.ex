@@ -6,6 +6,13 @@ defmodule MPP.X402 do
   and live facilitator traffic. `refs/mppx/src/x402` is the SDK compatibility
   target (`scheme` `"exact"` only; `refs/mppx/src/x402/Types.ts`).
 
+  `challenges_from_header/1` does not take a request URL and does not require
+  `resource.url` to equal the response URL. mppx #908 (0.11.0) dropped that
+  client check: query strings, redirects, proxies, and port rewriting made the
+  two URLs differ, and the exact match turned a payable offer into a silent
+  miss. Binding the paid resource stays on `MPP.X402.Plug`
+  (`:resource_mismatch` when the echoed credential resource does not match).
+
   Out of scope: MCP, x402 v1 (`X-PAYMENT`), non-EVM CAIP-2 families, schemes
   other than `exact`, and Permit2 client signing.
   """
@@ -65,10 +72,14 @@ defmodule MPP.X402 do
 
   def synthetic?(_other), do: false
 
-  api(:challenges_from_header, "Parse PAYMENT-REQUIRED into synthetic MPP challenges.",
+  api(
+    :challenges_from_header,
+    "Parse PAYMENT-REQUIRED into synthetic challenges. No request_url argument: " <>
+      "resource.url is not matched to the response URL, because that equality " <>
+      "dropped payable offers when query strings, redirects, proxies, or port " <>
+      "rewriting made the URLs differ (mppx #908). MPP.X402.Plug still binds the paid resource.",
     params: [
-      header: [kind: :value, description: "Base64 JSON PAYMENT-REQUIRED value"],
-      request_url: [kind: :value, description: "Optional request URL that must match resource.url"]
+      header: [kind: :value, description: "Base64 JSON PAYMENT-REQUIRED value"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, challenges}` or `{:error, reason}`"}
   )
@@ -77,15 +88,17 @@ defmodule MPP.X402 do
   Parse a `PAYMENT-REQUIRED` header into synthetic `MPP.Challenge` structs.
 
   Unsupported accepts (non-`exact`, non-EVM, Permit2) are dropped. An empty
-  remainder is `{:ok, []}`. When `request_url` is present it must match
-  `resource.url`.
+  remainder is `{:ok, []}`. There is no `request_url` argument: `resource.url`
+  is not compared to the response URL. That equality check dropped payable
+  offers when query strings, redirects, proxies, or port rewriting made the
+  two URLs differ (mppx #908). `MPP.X402.Plug` still rejects a credential
+  whose echoed resource does not match the server-bound URL.
   """
-  @spec challenges_from_header(String.t(), String.t() | nil) ::
-          {:ok, [Challenge.t()]} | {:error, atom()}
-  def challenges_from_header(header, request_url \\ nil) when is_binary(header) do
-    with {:ok, envelope} <- Headers.decode_payment_required_envelope(header),
-         :ok <- match_resource_url(envelope["resource"], request_url) do
-      {:ok, challenges_from_envelope(envelope)}
+  @spec challenges_from_header(String.t()) :: {:ok, [Challenge.t()]} | {:error, atom()}
+  def challenges_from_header(header) when is_binary(header) do
+    case Headers.decode_payment_required_envelope(header) do
+      {:ok, envelope} -> {:ok, challenges_from_envelope(envelope)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -136,14 +149,6 @@ defmodule MPP.X402 do
       :skip -> []
     end
   end
-
-  defp match_resource_url(_resource, nil), do: :ok
-
-  defp match_resource_url(%{"url" => url}, request_url) when is_binary(url) and is_binary(request_url) do
-    if url == request_url, do: :ok, else: {:error, :resource_mismatch}
-  end
-
-  defp match_resource_url(_resource, _request_url), do: {:error, :resource_mismatch}
 
   defp accept_to_challenge(raw, envelope, index) when is_map(raw) do
     case accepted_challenge(raw, envelope, index) do

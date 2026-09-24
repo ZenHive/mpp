@@ -9,6 +9,8 @@ defmodule MPP.Client.Transport.HTTPTest do
   alias MPP.Client.Transport.HTTP
   alias MPP.Credential
   alias MPP.Headers
+  alias MPP.X402
+  alias MPP.X402.Headers, as: X402Headers
 
   @secret_key "test-secret-key"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
@@ -49,6 +51,39 @@ defmodule MPP.Client.Transport.HTTPTest do
 
   defp response_with_challenges(values) when is_list(values) do
     Req.Response.new(status: 402, headers: %{"www-authenticate" => values})
+  end
+
+  # mppx src/client/Transport.test.ts @ 4dc37a8. resource.url need not equal response.url.
+  @x402_resource_response_pairs [
+    {"https://api.example.com/x402", ""},
+    {"https://api.example.com/x402", "http://api.example.com/x402"},
+    {"https://api.example.com/x402", "https://other.example.com/x402"},
+    {"https://api.example.com/x402", "https://api.example.com:8443/x402"},
+    {"https://api.example.com/x402", "https://api.example.com/other"},
+    {"https://api.example.com/x402", "https://api.example.com/x402"},
+    {"https://api.example.com/x402", "https://api.example.com/x402?summary=hello"},
+    {"https://api.example.com/x402?summary=hello", "https://api.example.com/x402?summary=world"},
+    {"https://api.example.com/x402?summary=hello#details", "https://api.example.com/x402"}
+  ]
+
+  defp x402_required_response(resource_url) do
+    {:ok, header} =
+      X402Headers.encode_payment_required(%{
+        "x402Version" => 2,
+        "resource" => %{"url" => resource_url},
+        "accepts" => [
+          %{
+            "scheme" => "exact",
+            "network" => "eip155:84532",
+            "amount" => "10000",
+            "asset" => "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo" => "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "maxTimeoutSeconds" => 60
+          }
+        ]
+      })
+
+    Req.Response.new(status: 402, headers: %{"payment-required" => [header]})
   end
 
   # -- payment_required?/1 --------------------------------------------------------
@@ -125,6 +160,25 @@ defmodule MPP.Client.Transport.HTTPTest do
       response = Req.Response.new(status: 402)
 
       assert {:error, :missing_www_authenticate} = HTTP.get_challenges(response)
+    end
+  end
+
+  describe "get_challenges/2 x402 resource URL" do
+    test "keeps one synthetic challenge for each mppx resource/response URL pair" do
+      assert [_, _, _, _, _, _, _, _, _] = @x402_resource_response_pairs
+
+      for {resource_url, response_url} <- @x402_resource_response_pairs do
+        response = x402_required_response(resource_url)
+        label = "resource #{resource_url} response #{inspect(response_url)}"
+
+        assert {:ok, [challenge]} = HTTP.get_challenges(response, response_url),
+               "expected one challenge for #{label}"
+
+        assert X402.synthetic?(challenge), "expected a synthetic x402 challenge for #{label}"
+        assert challenge.realm == "api.example.com"
+        assert challenge.method == "evm"
+        assert {:ok, %{"resource" => %{"url" => ^resource_url}}} = X402.exact_request(challenge)
+      end
     end
   end
 

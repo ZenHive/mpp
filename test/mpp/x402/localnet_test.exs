@@ -122,7 +122,7 @@ defmodule MPP.X402.LocalnetTest do
   test "native challengeHash nonce is rejected on the x402 path", %{opts: opts} do
     {:ok, %Req.Response{status: 402} = unpaid} = Req.get(Req.new(plug: endpoint(opts)), url: @url)
     [required] = Req.Response.get_header(unpaid, "payment-required")
-    assert {:ok, [challenge]} = MPP.X402.challenges_from_header(required, @url)
+    assert {:ok, [challenge]} = MPP.X402.challenges_from_header(required)
     native_nonce = MPP.Methods.EVM.Authorization.challenge_hash(challenge.id, challenge.realm)
 
     payload = %{
