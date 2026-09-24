@@ -35,6 +35,16 @@ defmodule MPP.Test.ActivationClaimSpyStore do
     if opts[:test_pid] && String.starts_with?(id, "stripe-activation:"),
       do: send(opts[:test_pid], {:activation_claim, id})
 
+    pause_update? = Keyword.get(opts, :pause_update, fn _id -> false end)
+
+    if pause_update?.(id) do
+      send(opts[:test_pid], {:update_paused, self()})
+
+      receive do
+        :resume -> :ok
+      end
+    end
+
     fail_update? = Keyword.get(opts, :fail_update, fn _id -> false end)
     if fail_update?.(id), do: {:error, :unavailable}, else: ETSStore.update(id, fun, opts)
   end
@@ -1643,6 +1653,56 @@ defmodule MPP.Methods.StripeTest do
                Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_other"))
     end
 
+    test "a superseded attempt does not cancel a subscription adopted before its cleanup" do
+      state = subscription_stub_state([])
+      {arm, pause?} = pause_nth_armed_update(2)
+      {worker, worker_pid} = start_held_activation(state, pause_update: pause?)
+
+      # The worker loses finalization, then pauses right before its cleanup write.
+      arm.()
+      send(worker_pid, :continue)
+      assert_receive {:update_paused, cleanup_pid}, 5_000
+
+      assert {:ok, %Receipt{extensions: %{"stripeSubscription" => "sub_test"}} = adopted} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_slow"))
+
+      send(cleanup_pid, :resume)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation is already in progress for this payment method"}} =
+               Task.await(worker)
+
+      refute_received {:stripe_request, "DELETE", _path, _params, _headers}
+      assert ledger_status(state.ledger, "sub_test") == "active"
+      assert {:ok, ^adopted} = Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_slow"))
+      assert {:ok, %{status: :active, cancelling: []}} = inspect_activation()
+    end
+
+    test "a subscription whose cleanup started is never adopted" do
+      state = subscription_stub_state([])
+      {worker, worker_pid} = start_held_activation(state, [], block_cancel: true)
+
+      send(worker_pid, :continue)
+      assert_receive {:cancel_blocked, cancel_pid}, 5_000
+
+      assert {:error, %Errors{detail: "Stripe subscription activation could not be reconciled with Stripe"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_slow"))
+
+      assert {:ok, %{status: :needs_reconciliation, cancelling: ["sub_test"]}} = inspect_activation()
+
+      assert {:error, %Errors{detail: "Stripe Subscription is being canceled by its activation"}} =
+               resolve_activation({:adopt, "sub_test"})
+
+      send(cancel_pid, :continue)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation is already in progress for this payment method"}} =
+               Task.await(worker)
+
+      assert ledger_status(state.ledger, "sub_test") == "canceled"
+
+      assert {:ok, %Record{method_state: %{status: :released, cancelling: ["sub_test"]}}} =
+               resolve_activation(:release)
+    end
+
     test "rejects malformed renewal events, payment proofs, and activation-period replays" do
       assert {:error, %Errors{type: type}} = StripeSubscription.process_invoice(nil, nil, nil)
       assert type =~ "invalid-payload"
@@ -2902,6 +2962,90 @@ defmodule MPP.Methods.StripeTest do
   defp fail_nth_update(match?, n) do
     counter = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: make_ref()))
     fn id -> match?.(id) and Agent.get_and_update(counter, &{&1 + 1 == n, &1 + 1}) end
+  end
+
+  # Pauses the nth claim update counted after `arm.()` is called.
+  defp pause_nth_armed_update(n) do
+    counter = start_supervised!(Supervisor.child_spec({Agent, fn -> nil end}, id: make_ref()))
+    arm = fn -> Agent.update(counter, fn _count -> 0 end) end
+
+    pause? = fn id ->
+      activation_claim?(id) and
+        Agent.get_and_update(counter, fn
+          nil -> {false, nil}
+          count -> {count + 1 == n, count + 1}
+        end)
+    end
+
+    {arm, pause?}
+  end
+
+  # The ch_slow worker blocks after Stripe committed its subscription; invoice
+  # reads fail while `invoice_down` is set; `block_cancel` holds every DELETE.
+  defp stub_interleaved_activation(state, invoice_down, opts) do
+    test_pid = self()
+
+    Req.Test.stub(Stripe, fn conn ->
+      {params, conn} = capture_stripe_request(conn, test_pid)
+
+      case interleaved_step(conn, params, invoice_down, opts) do
+        :block_creation ->
+          stripe_subscription = commit_subscription(state, params)
+          send(test_pid, {:activation_blocked, self()})
+
+          receive do
+            :continue -> Req.Test.json(conn, stripe_subscription)
+          end
+
+        :invoice_down ->
+          conn |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => %{"type" => "api_error"}})
+
+        :block_cancel ->
+          send(test_pid, {:cancel_blocked, self()})
+
+          receive do
+            :continue -> stub_subscription_response(conn, params, state)
+          end
+
+        :default ->
+          stub_subscription_response(conn, params, state)
+      end
+    end)
+  end
+
+  defp interleaved_step(
+         %{method: "POST", request_path: "/v1/subscriptions"},
+         %{"metadata[mpp_challenge_id]" => "ch_slow"},
+         _invoice_down,
+         _opts
+       ), do: :block_creation
+
+  defp interleaved_step(%{method: "GET", request_path: "/v1/invoices/" <> _id}, _params, invoice_down, _opts),
+    do: if(Agent.get(invoice_down, & &1), do: :invoice_down, else: :default)
+
+  defp interleaved_step(%{method: "DELETE"}, _params, _invoice_down, opts),
+    do: if(Keyword.get(opts, :block_cancel, false), do: :block_cancel, else: :default)
+
+  defp interleaved_step(_conn, _params, _invoice_down, _opts), do: :default
+
+  # Runs the ch_slow worker until Stripe committed its subscription, then lets
+  # one reconciliation hold the expired claim without adopting anything.
+  defp start_held_activation(state, spy_opts, stub_opts \\ []) do
+    invoice_down = start_supervised!(Supervisor.child_spec({Agent, fn -> true end}, id: make_ref()))
+    stub_interleaved_activation(state, invoice_down, stub_opts)
+
+    worker_subscription = spy_subscription("ch_slow", [test_pid: self()] ++ spy_opts)
+    worker = Task.async(fn -> Stripe.verify(%{"paymentMethod" => "pm_input"}, worker_subscription) end)
+
+    assert_receive {:activation_blocked, worker_pid}, 5_000
+    assert_received {:activation_claim, claim_id}
+    age_activation_claim(claim_id)
+
+    assert {:error, %Errors{detail: "Stripe subscription activation could not be reconciled with Stripe"}} =
+             Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_first_reconcile"))
+
+    Agent.update(invoice_down, fn _down -> false end)
+    {worker, worker_pid}
   end
 
   defp age_activation_claim(claim_id, seconds \\ 901) do

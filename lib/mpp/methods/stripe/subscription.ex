@@ -34,6 +34,12 @@ defmodule MPP.Methods.Stripe.Subscription do
   Resolve such a claim with `inspect_activation/2` and `resolve_activation/3`.
   An activation cancels only the Subscription it created itself, and only when
   it lost its claim or that Subscription definitively failed validation.
+  Before that cancel it records the Subscription on the claim as `cancelling`
+  in the same compare-and-set store write that adoption uses, so a cancel and
+  an adoption of one Subscription never both happen: adoption refuses a
+  Subscription marked `cancelling`, and the cancel is skipped once the claim
+  names it as adopted. A cancel that cannot record its mark leaves the
+  Subscription to the operator instead.
   """
 
   alias MPP.Errors
@@ -346,19 +352,55 @@ defmodule MPP.Methods.Stripe.Subscription do
   end
 
   # Only the attempt that created a subscription ever cancels it on Stripe, and
-  # its claim reopens only once Stripe confirms the cancellation.
+  # its claim reopens only once Stripe confirms the cancellation. The cancel is
+  # fenced by marking the subscription on the claim first: the mark and every
+  # adoption are compare-and-set writes of the same claim record, so either the
+  # adoption lands first and the mark sees it (no cancel), or the mark lands
+  # first and no adoption of that subscription can follow.
   defp abandon_subscription(stripe_subscription, customer_id, secret_key, config, attempt) do
-    cond do
-      adopted_by_reconciliation?(attempt, stripe_subscription) -> :ok
-      cancel_confirmed?(stripe_subscription, secret_key, config) -> release_activation_claim(attempt)
-      true -> hold_activation_claim(attempt, customer_id)
+    case mark_cancelling(attempt, stripe_subscription, customer_id) do
+      :adopted ->
+        :ok
+
+      :marked ->
+        if cancel_confirmed?(stripe_subscription, secret_key, config),
+          do: release_activation_claim(attempt),
+          else: hold_activation_claim(attempt, customer_id)
+
+      :unfenced ->
+        hold_activation_claim(attempt, customer_id)
     end
   end
 
-  defp adopted_by_reconciliation?(attempt, %{"id" => stripe_id}) when is_binary(stripe_id),
-    do: claim_adopted?(attempt, subscription_id(attempt.challenge_id, stripe_id))
+  defp mark_cancelling(attempt, %{"id" => stripe_id}, customer_id) when is_binary(stripe_id) do
+    adopted_id = subscription_id(attempt.challenge_id, stripe_id)
 
-  defp adopted_by_reconciliation?(_attempt, _stripe_subscription), do: false
+    result =
+      Store.update(attempt.store, attempt.claim_id, fn
+        %Record{method: @activation_claim_method, method_state: %{subscription_id: ^adopted_id}} ->
+          {:error, :activation_adopted}
+
+        %Record{method: @activation_claim_method, method_state: %{customers: customers} = state} = claim ->
+          marks = Enum.uniq(cancelling_marks(state) ++ [stripe_id])
+          customers = Enum.uniq(customers ++ [customer_id])
+          {:ok, %{claim | method_state: Map.merge(state, %{cancelling: marks, customers: customers})}}
+
+        _other ->
+          {:error, :activation_claim_lost}
+      end)
+
+    case result do
+      {:ok, _claim} -> :marked
+      {:error, :activation_adopted} -> :adopted
+      {:error, _reason} -> :unfenced
+    end
+  end
+
+  defp mark_cancelling(_attempt, _stripe_subscription, _customer_id), do: :unfenced
+
+  defp cancelling_marks(state), do: Map.get(state, :cancelling, [])
+
+  defp marked_for_cancel?(%Record{method_state: state}, stripe_id), do: stripe_id in cancelling_marks(state)
 
   defp claim_adopted?(attempt, subscription_id) do
     generation = attempt.generation
@@ -484,6 +526,7 @@ defmodule MPP.Methods.Stripe.Subscription do
   defp take_activation_claim(current, context) do
     generation = 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
     claim = activation_claim(context, generation, watched_customers(current))
+    claim = put_in(claim.method_state[:cancelling], carried_marks(current))
 
     with {:ok, _claim} <- replace_activation_claim(context, current, claim) do
       {:ok,
@@ -496,6 +539,9 @@ defmodule MPP.Methods.Stripe.Subscription do
   # sees any subscription an earlier generation created.
   defp watched_customers(%Record{method_state: %{customers: customers}}) when is_list(customers), do: customers
   defp watched_customers(_claim), do: []
+
+  defp carried_marks(%Record{method_state: state}) when is_map(state), do: cancelling_marks(state)
+  defp carried_marks(_claim), do: []
 
   defp replace_activation_claim(context, expected, claim) do
     result =
@@ -529,10 +575,13 @@ defmodule MPP.Methods.Stripe.Subscription do
     end
   end
 
+  # A subscription its creator started cancelling is never adopted.
   defp adopt_or_hold(current, stripe_subscription, context) do
-    case adoptable_activation(stripe_subscription, context) do
-      {:ok, adoptable} -> adopt_activation(current, adoptable, context)
-      :error -> hold_for_operator(current, context)
+    with false <- marked_for_cancel?(current, stripe_subscription["id"]),
+         {:ok, adoptable} <- adoptable_activation(stripe_subscription, context) do
+      adopt_activation(current, adoptable, context)
+    else
+      _marked_or_invalid -> hold_for_operator(current, context)
     end
   end
 
@@ -631,6 +680,12 @@ defmodule MPP.Methods.Stripe.Subscription do
   end
 
   defp adopt_claim(current, {record, generation, challenge_id}, context) do
+    if marked_for_cancel?(current, record.method_state.stripe_subscription_id),
+      do: {:error, Errors.new(:verification_failed, "Stripe Subscription is being canceled by its activation")},
+      else: replace_with_adoption(current, {record, generation, challenge_id}, context)
+  end
+
+  defp replace_with_adoption(current, {record, generation, challenge_id}, context) do
     adopted = %{
       current
       | method_state: %{
@@ -783,6 +838,7 @@ defmodule MPP.Methods.Stripe.Subscription do
          claimed_at: state[:claimed_at],
          lease_expired: lease_expired?(state, context.now),
          subscription_id: state[:subscription_id],
+         cancelling: cancelling_marks(state),
          tagged_subscriptions: Enum.map(live, &tagged_subscription_summary/1)
        }}
     end
