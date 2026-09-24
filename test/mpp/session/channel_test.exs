@@ -162,6 +162,36 @@ defmodule MPP.Session.ChannelTest do
       assert {:error, :insufficient_balance} = Channel.apply_spend(spent, 121)
     end
 
+    test "apply_verified_deposit raises spent and cumulative to settled without double counting" do
+      {:ok, channel} = channel_opts() |> Channel.new!() |> Channel.apply_voucher(200)
+      {:ok, channel} = Channel.apply_spend(channel, 50)
+
+      assert {:ok, topped} = Channel.apply_verified_deposit(channel, 1_000_100, 120)
+      assert {topped.settled, topped.spent, topped.cumulative_amount} == {120, 120, 200}
+      assert Channel.available_balance(topped) == 80
+
+      # Settled never decreases, and an already-counted settlement is not re-added.
+      assert {:ok, again} = Channel.apply_verified_deposit(topped, 1_000_200, 60)
+      assert {again.settled, again.spent, again.cumulative_amount} == {120, 120, 200}
+
+      assert {:ok, beyond} = Channel.apply_verified_deposit(again, 1_000_300, 250)
+      assert {beyond.settled, beyond.spent, beyond.cumulative_amount} == {250, 250, 250}
+
+      assert {:error, {:invalid_amount, :settled}} = Channel.apply_verified_deposit(channel, 1_000_100, 1_000_101)
+      assert {:error, {:invalid_amount, :settled}} = Channel.apply_verified_deposit(channel, 1_000_100, -1)
+    end
+
+    test "new/1 records settled funds and requires them to be spent" do
+      channel = Channel.new!(Keyword.merge(channel_opts(), cumulative_amount: 90, spent: 40, settled: 40))
+      assert channel.settled == 40
+      assert Channel.new!(channel_opts()).settled == 0
+
+      assert {:error, :settled_exceeds_spent} =
+               Channel.new(Keyword.merge(channel_opts(), cumulative_amount: 90, spent: 30, settled: 40))
+
+      assert {:error, {:invalid_amount, :settled}} = Channel.new(Keyword.put(channel_opts(), :settled, -1))
+    end
+
     test "rejects balance mutations on a closed channel" do
       {:ok, closed} = channel_opts() |> Channel.new!() |> Channel.activate() |> elem(1) |> Channel.close()
 

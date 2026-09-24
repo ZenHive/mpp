@@ -56,6 +56,7 @@ defmodule MPP.Session.Channel do
           deposit: non_neg_integer(),
           cumulative_amount: non_neg_integer(),
           spent: non_neg_integer(),
+          settled: non_neg_integer(),
           units: non_neg_integer(),
           status: status(),
           proof: proof() | nil
@@ -71,6 +72,7 @@ defmodule MPP.Session.Channel do
     authorized_signer: nil,
     cumulative_amount: 0,
     spent: 0,
+    settled: 0,
     units: 0,
     status: :open,
     proof: nil
@@ -82,6 +84,7 @@ defmodule MPP.Session.Channel do
     deposit = Keyword.get(opts, :deposit)
     cumulative_amount = Keyword.get(opts, :cumulative_amount, 0)
     spent = Keyword.get(opts, :spent, 0)
+    settled = Keyword.get(opts, :settled, 0)
     units = Keyword.get(opts, :units, 0)
     proof = Keyword.get(opts, :proof)
 
@@ -93,6 +96,8 @@ defmodule MPP.Session.Channel do
          :ok <- validate_amount(deposit, :deposit),
          :ok <- validate_amount(cumulative_amount, :cumulative_amount),
          :ok <- validate_amount(spent, :spent),
+         :ok <- validate_amount(settled, :settled),
+         :ok <- validate_settled(settled, spent),
          :ok <- validate_amount(units, :units),
          :ok <- validate_balance(deposit, cumulative_amount, spent),
          {:ok, proof} <- normalize_proof(proof, cumulative_amount) do
@@ -106,6 +111,7 @@ defmodule MPP.Session.Channel do
          deposit: deposit,
          cumulative_amount: cumulative_amount,
          spent: spent,
+         settled: settled,
          units: units,
          proof: proof
        }}
@@ -177,19 +183,39 @@ defmodule MPP.Session.Channel do
   Replace the channel deposit with a verified on-chain total deposit.
 
   `deposit` is the escrow's confirmed total after a top-up, never a
-  client-claimed increment, and must exceed the current deposit.
+  client-claimed increment, and must exceed the current deposit. `settled`
+  is the escrow's confirmed settled amount. Settled funds were paid out of
+  accepted vouchers, so `spent` and `cumulative_amount` are raised to at
+  least `settled` (never increased by it): they already count what was
+  settled.
   """
-  @spec apply_verified_deposit(t(), pos_integer()) :: {:ok, t()} | {:error, term()}
-  def apply_verified_deposit(%__MODULE__{status: :closed}, _deposit),
+  @spec apply_verified_deposit(t(), pos_integer(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_verified_deposit(channel, deposit, settled \\ 0)
+
+  def apply_verified_deposit(%__MODULE__{status: :closed}, _deposit, _settled),
     do: {:error, {:invalid_transition, :closed, :active}}
 
-  def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit)
-      when is_integer(deposit) and deposit > current do
-    {:ok, %{channel | deposit: deposit}}
+  def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit, settled)
+      when is_integer(deposit) and deposit > current and is_integer(settled) and settled >= 0 and settled <= deposit do
+    settled = max(settled, channel.settled)
+
+    {:ok,
+     %{
+       channel
+       | deposit: deposit,
+         settled: settled,
+         spent: max(channel.spent, settled),
+         cumulative_amount: max(channel.cumulative_amount, settled)
+     }}
   end
 
-  def apply_verified_deposit(%__MODULE__{}, deposit) when is_integer(deposit), do: {:error, :deposit_not_increased}
-  def apply_verified_deposit(_channel, _deposit), do: {:error, {:invalid_amount, :deposit}}
+  def apply_verified_deposit(%__MODULE__{deposit: current}, deposit, _settled)
+      when is_integer(deposit) and deposit <= current, do: {:error, :deposit_not_increased}
+
+  def apply_verified_deposit(%__MODULE__{}, deposit, _settled) when is_integer(deposit),
+    do: {:error, {:invalid_amount, :settled}}
+
+  def apply_verified_deposit(_channel, _deposit, _settled), do: {:error, {:invalid_amount, :deposit}}
 
   @doc "Deduct a per-request spend from the authorized voucher balance."
   @spec apply_spend(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
@@ -357,6 +383,9 @@ defmodule MPP.Session.Channel do
     do: {:error, :cumulative_amount_exceeds_deposit}
 
   defp validate_balance(_deposit, _cumulative_amount, _spent), do: {:error, :spent_exceeds_cumulative}
+
+  defp validate_settled(settled, spent) when settled <= spent, do: :ok
+  defp validate_settled(_settled, _spent), do: {:error, :settled_exceeds_spent}
 
   defp validate_chain_id(chain_id) when is_integer(chain_id) and chain_id >= 0 and chain_id <= @max_chain_id, do: :ok
 

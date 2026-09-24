@@ -1699,7 +1699,9 @@ defmodule MPP.PlugTest do
             "escrowContract" => @session_escrow,
             "chainId" => 42_431,
             "authorizedSigner" => SessionSigning.signer_address(),
-            "verify_top_up" => fn payload, channel, _opts -> {:ok, channel.deposit + payload.additional_deposit} end
+            "verify_top_up" => fn payload, channel, _opts ->
+              {:ok, %{deposit: channel.deposit + payload.additional_deposit}}
+            end
           },
           store: false
         )

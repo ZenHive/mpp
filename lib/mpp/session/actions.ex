@@ -6,30 +6,48 @@ defmodule MPP.Session.Actions do
   and `close`. Each handler updates per-channel deposit / voucher /
   spend balances through `MPP.Session.Store`.
 
-  `open` requires a funding verifier, passed as the `:verify_open` option or
-  the server-only `"verify_open"` method-config key. It is called as
-  `verify.(payload, opts)`, must confirm the open transaction and the escrow
-  channel on-chain, and returns `{:ok, %{deposit: deposit}}` with the
-  confirmed channel deposit, optionally adding the on-chain `:payer` and
-  `:authorized_signer` (or `{:error, %MPP.Errors{}}`). The channel ceiling is
-  that deposit; no configured or suggested deposit substitutes for it. A
-  verified payer must match the configured payer, and a verified signer
-  becomes the channel signer (a descriptor must agree with it). Without a
-  verifier every `open` is rejected.
+  `open` and `topUp` require funding verifiers, passed as the `:verify_open` /
+  `:verify_top_up` options or the server-only `"verify_open"` /
+  `"verify_top_up"` method-config keys. `open` calls `verify.(payload, opts)`
+  and `topUp` calls `verify.(payload, channel, opts)`. Without a verifier the
+  action is rejected.
 
-  `topUp` requires a funding verifier, passed as the `:verify_top_up` option
-  or the server-only `"verify_top_up"` method-config key. It is called as
-  `verify.(payload, channel, opts)`, must confirm the top-up transaction
-  on-chain, and returns `{:ok, total_deposit}` with the escrow's confirmed
-  channel deposit (or `{:error, %MPP.Errors{}}`). The channel ceiling becomes
-  that total; the payload's `additionalDeposit` is never trusted. Without a
-  verifier every `topUp` is rejected.
+  A verifier MUST confirm on-chain, at the finality the server requires, that
+  the credential's transaction succeeded, that it targets the configured
+  `escrow_contract` on the configured `chain_id`, and that it funds the
+  credential's `channelId` with the configured payee and token. It returns
+  the escrow's current channel state, or `{:error, %MPP.Errors{}}`:
 
-  The voucher signer is fixed at `open` and stored on the channel. It is the
-  descriptor's `authorizedSigner` (the payer when that is the zero address)
-  once the descriptor hashes to `channelId` under the configured
-  `escrow_contract` and `chain_id`; otherwise the configured
-  `:authorized_signer`, falling back to the payer. A descriptor's payee and
+      {:ok, %{
+        deposit: non_neg_integer(),      # required: total escrowed deposit
+        settled: non_neg_integer(),      # default 0, at most deposit
+        close_requested: boolean(),      # default false
+        finalized: boolean(),            # default false
+        payer: String.t(),               # open only, optional
+        authorized_signer: String.t()    # open only, optional
+      }}
+
+  A zero deposit is rejected as an unfunded channel; `close_requested` or
+  `finalized` reject the action as a closed channel. Any other shape is a
+  verification failure. The payload's `additionalDeposit` and any configured
+  or suggested deposit are never trusted as the ceiling.
+
+  Settled funds were already paid out of the escrow for earlier vouchers. At
+  `open` the voucher's `cumulativeAmount` must lie between `settled` and
+  `deposit`, the channel records `settled` as already spent, and only
+  `cumulativeAmount - settled` counts toward the request. At `topUp` the
+  deposit must increase, `settled` never decreases, and spent and cumulative
+  are raised to it, so settled funds are never counted twice.
+
+  At `open` a verified payer must match the configured payer, and a verified
+  signer becomes the channel signer (a descriptor must agree with it).
+
+  The voucher signer is fixed at `open` and stored on the channel. A zero
+  signer address, from any source, means the payer signs. The signer is the
+  descriptor's `authorizedSigner` once the descriptor hashes to `channelId`
+  under the configured `escrow_contract` and `chain_id`; otherwise the
+  verified signer, then the configured `:authorized_signer`, falling back to
+  the payer. A descriptor's payee and
   token must match the configured recipient and token. A credential's
   top-level `authorizedSigner` must equal that signer. Vouchers and closes are
   verified against the stored signer only.
@@ -71,14 +89,19 @@ defmodule MPP.Session.Actions do
   defp handle_open(payload, opts) do
     with :ok <- ensure_channel_absent(payload, opts),
          {:ok, verified} <- verify_open(payload, opts),
-         {:ok, deposit} <- open_deposit(payload, verified),
-         :ok <- ensure_covers_request(payload.cumulative_amount, deposit, request_amount(opts)),
+         :ok <- ensure_open_within_escrow(payload, verified),
+         :ok <-
+           ensure_covers_request(
+             payload.cumulative_amount - verified.settled,
+             verified.deposit - verified.settled,
+             request_amount(opts)
+           ),
          {:ok, identity_opts} <- apply_verified_identity(opts, verified),
          {:ok, identity} <- fetch_open_identity(payload, identity_opts),
          :ok <- maybe_verify_signature(payload, identity.authorized_signer, opts) do
       update_channel(payload, opts, fn
         :not_found ->
-          open_channel(payload, identity, deposit, opts)
+          open_channel(payload, identity, verified, opts)
 
         %Channel{status: :closed} ->
           {:error, Errors.new(:channel_closed, "channel is closed")}
@@ -92,7 +115,7 @@ defmodule MPP.Session.Actions do
   defp handle_top_up(payload, opts) do
     with {:ok, current} <- fetch_live_channel(payload, opts),
          :ok <- require_positive_top_up(payload),
-         {:ok, deposit} <- verify_top_up(payload, current, opts) do
+         {:ok, verified} <- verify_top_up(payload, current, opts) do
       update_channel(payload, opts, fn
         :not_found ->
           {:error, Errors.new(:channel_not_found, "channel not found")}
@@ -101,7 +124,7 @@ defmodule MPP.Session.Actions do
           {:error, Errors.new(:channel_closed, "channel is closed")}
 
         %Channel{} = channel ->
-          Channel.apply_verified_deposit(channel, deposit)
+          Channel.apply_verified_deposit(channel, verified.deposit, verified.settled)
       end)
     end
   end
@@ -123,11 +146,7 @@ defmodule MPP.Session.Actions do
   defp verify_top_up(payload, channel, opts) do
     case Keyword.get(opts, :verify_top_up) do
       fun when is_function(fun, 3) ->
-        case fun.(payload, channel, opts) do
-          {:ok, deposit} when is_integer(deposit) and deposit >= 0 -> {:ok, deposit}
-          {:error, %Errors{} = error} -> {:error, error}
-          other -> {:error, Errors.new(:verification_failed, "topUp funding verification failed: #{inspect(other)}")}
-        end
+        payload |> fun.(channel, opts) |> escrow_state("topUp")
 
       _ ->
         {:error,
@@ -167,8 +186,10 @@ defmodule MPP.Session.Actions do
     end)
   end
 
-  defp channel_signer(%Channel{authorized_signer: signer}, _opts) when is_binary(signer), do: signer
-  defp channel_signer(%Channel{}, opts), do: Keyword.get(opts, :authorized_signer)
+  defp channel_signer(%Channel{authorized_signer: signer, payer: payer}, _opts) when is_binary(signer),
+    do: resolve_signer(signer, payer)
+
+  defp channel_signer(%Channel{payer: payer}, opts), do: resolve_signer(Keyword.get(opts, :authorized_signer), payer)
 
   defp ensure_same_descriptor(%Payload{descriptor: nil}, _signer, _opts), do: :ok
 
@@ -182,7 +203,9 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp open_channel(payload, identity, deposit, opts) do
+  # Already-settled funds were paid from accepted vouchers, so they start as
+  # spent rather than as spendable balance.
+  defp open_channel(payload, identity, verified, opts) do
     with {:ok, channel} <-
            Channel.new(
              channel_id: payload.channel_id,
@@ -190,7 +213,9 @@ defmodule MPP.Session.Actions do
              recipient: identity.recipient,
              token: identity.token,
              authorized_signer: identity.authorized_signer,
-             deposit: deposit,
+             deposit: verified.deposit,
+             settled: verified.settled,
+             spent: verified.settled,
              cumulative_amount: payload.cumulative_amount,
              proof: settlement_proof(payload, opts)
            ),
@@ -303,11 +328,7 @@ defmodule MPP.Session.Actions do
   defp verify_open(payload, opts) do
     case Keyword.get(opts, :verify_open) do
       fun when is_function(fun, 2) ->
-        case fun.(payload, opts) do
-          {:ok, %{deposit: deposit} = verified} when is_integer(deposit) and deposit >= 0 -> {:ok, verified}
-          {:error, %Errors{} = error} -> {:error, error}
-          other -> {:error, Errors.new(:verification_failed, "open funding verification failed: #{inspect(other)}")}
-        end
+        payload |> fun.(opts) |> escrow_state("open")
 
       _ ->
         {:error,
@@ -318,10 +339,45 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp open_deposit(payload, %{deposit: deposit}) when deposit >= payload.cumulative_amount, do: {:ok, deposit}
+  # Normalizes a funding verifier result into the confirmed escrow state,
+  # rejecting unfunded, closing, and finalized channels.
+  defp escrow_state({:ok, %{deposit: deposit} = state} = result, action) when is_integer(deposit) and deposit >= 0 do
+    state = state |> Map.put_new(:settled, 0) |> Map.put_new(:close_requested, false) |> Map.put_new(:finalized, false)
 
-  defp open_deposit(_payload, _verified),
-    do: {:error, Errors.new(:amount_exceeds_deposit, "voucher amount exceeds open deposit")}
+    if well_formed_escrow?(state), do: escrow_status(state), else: escrow_failure(result, action)
+  end
+
+  defp escrow_state({:error, %Errors{} = error}, _action), do: {:error, error}
+  defp escrow_state(other, action), do: escrow_failure(other, action)
+
+  defp escrow_failure(result, action),
+    do: {:error, Errors.new(:verification_failed, "#{action} funding verification failed: #{inspect(result)}")}
+
+  defp well_formed_escrow?(%{deposit: deposit, settled: settled} = state) do
+    is_integer(settled) and settled >= 0 and settled <= deposit and is_boolean(state.close_requested) and
+      is_boolean(state.finalized)
+  end
+
+  defp escrow_status(%{finalized: true}), do: {:error, Errors.new(:channel_closed, "channel is finalized on-chain")}
+
+  defp escrow_status(%{close_requested: true}),
+    do: {:error, Errors.new(:channel_closed, "channel has a pending close request")}
+
+  defp escrow_status(%{deposit: 0}), do: {:error, Errors.new(:channel_not_found, "channel not funded on-chain")}
+  defp escrow_status(state), do: {:ok, state}
+
+  defp ensure_open_within_escrow(payload, %{deposit: deposit, settled: settled}) do
+    cond do
+      payload.cumulative_amount > deposit ->
+        {:error, Errors.new(:amount_exceeds_deposit, "voucher amount exceeds open deposit")}
+
+      payload.cumulative_amount < settled ->
+        {:error, Errors.new(:verification_failed, "voucher cumulativeAmount is below on-chain settled amount")}
+
+      true ->
+        :ok
+    end
+  end
 
   defp apply_verified_identity(opts, verified) do
     with {:ok, opts} <- put_verified(opts, :payer, Map.get(verified, :payer)) do
@@ -350,7 +406,10 @@ defmodule MPP.Session.Actions do
   # server's escrow and chain, and it must agree with configured identity.
   defp fetch_open_identity(%Payload{descriptor: nil} = payload, opts) do
     payer = Keyword.get(opts, :payer)
-    signer = Keyword.get(opts, :verified_signer) || Keyword.get(opts, :authorized_signer) || payer
+
+    signer =
+      resolve_signer(Keyword.get(opts, :verified_signer), payer) ||
+        resolve_signer(Keyword.get(opts, :authorized_signer), payer) || payer
 
     build_open_identity(payload, payer, Keyword.get(opts, :recipient), Keyword.get(opts, :token), signer)
   end
@@ -360,13 +419,13 @@ defmodule MPP.Session.Actions do
          {:ok, payer} <- configured_or_descriptor(opts, :payer, descriptor.payer),
          {:ok, recipient} <- configured_or_descriptor(opts, :recipient, descriptor.payee),
          {:ok, token} <- configured_or_descriptor(opts, :token, descriptor.token),
-         :ok <- ensure_verified_signer(opts, descriptor_signer(descriptor)) do
+         :ok <- ensure_verified_signer(opts, payer, descriptor_signer(descriptor)) do
       build_open_identity(payload, payer, recipient, token, descriptor_signer(descriptor))
     end
   end
 
-  defp ensure_verified_signer(opts, signer) do
-    case Keyword.get(opts, :verified_signer) do
+  defp ensure_verified_signer(opts, payer, signer) do
+    case resolve_signer(Keyword.get(opts, :verified_signer), payer) do
       nil ->
         :ok
 
@@ -382,7 +441,8 @@ defmodule MPP.Session.Actions do
       not (is_binary(payer) and is_binary(recipient) and is_binary(token)) ->
         {:error, Errors.new(:invalid_payload, "payer, recipient, and token required to open a channel")}
 
-      is_binary(payload.authorized_signer) and not same_address?(payload.authorized_signer, signer) ->
+      is_binary(payload.authorized_signer) and
+          not same_address?(resolve_signer(payload.authorized_signer, payer), signer) ->
         {:error, Errors.new(:signer_mismatch, "authorizedSigner does not match the channel signer")}
 
       true ->
@@ -427,8 +487,13 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  # TIP-1034: a zero authorizedSigner delegates signing to the payer.
-  defp descriptor_signer(%{authorized_signer: signer, payer: payer}) do
+  # TIP-1034: a zero authorizedSigner delegates signing to the payer, whether it
+  # comes from a descriptor, the funding verifier, or server configuration.
+  defp descriptor_signer(%{authorized_signer: signer, payer: payer}), do: resolve_signer(signer, payer)
+
+  defp resolve_signer(nil, _payer), do: nil
+
+  defp resolve_signer(signer, payer) do
     if Address.zero?(signer), do: payer, else: signer
   end
 
