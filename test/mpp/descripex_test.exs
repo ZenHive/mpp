@@ -12,6 +12,7 @@ defmodule MPP.DescripexTest do
   alias MPP.Methods.Stellar
   alias MPP.Methods.Stripe
   alias MPP.Methods.Tempo
+  alias MPP.Methods.USDC
   alias MPP.Methods.XRPL
 
   @annotated_modules [
@@ -28,6 +29,7 @@ defmodule MPP.DescripexTest do
     Tempo,
     EVM,
     Solana,
+    USDC,
     Stellar,
     XRPL,
     NearIntents,

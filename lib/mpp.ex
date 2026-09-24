@@ -37,6 +37,7 @@ defmodule MPP do
     * `MPP.Methods.Tempo.Subscription` — Tempo access-key subscription activation and renewal
     * `MPP.Methods.EVM` — Generic EVM on-chain payment verification (any EVM chain)
     * `MPP.Methods.Solana` — Solana native SOL and SPL token charge verification
+    * `MPP.Methods.USDC` — Circle USDC direct charge (EVM EIP-3009 and Solana SPL)
     * `MPP.Methods.Stellar` — Stellar SEP-41 token charge verification (pull transaction + push hash)
     * `MPP.Methods.XRPL` — XRPL native XRP, issued currency and MPT charge verification
     * `MPP.Methods.XRPL.Session` — XRPL payment-channel session verification (open / voucher / close)
@@ -99,6 +100,7 @@ defmodule MPP do
       MPP.Methods.Tempo,
       MPP.Methods.EVM,
       MPP.Methods.Solana,
+      MPP.Methods.USDC,
       MPP.Methods.Stellar,
       MPP.Methods.XRPL,
       MPP.Methods.NearIntents,

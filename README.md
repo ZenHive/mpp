@@ -137,6 +137,33 @@ end
 
 Currency is `"sol"` for native SOL (amount in lamports) or a base58 mint address for SPL tokens. Pull mode (`type="transaction"`) sends signed transaction bytes for the server to broadcast; push mode (`type="signature"`) sends a confirmed signature. Set `"fee_payer" => true` with `"fee_payer_private_key"` to co-sign as fee payer. Optional `"splits"` (at most 8) add extra payment legs. Set `"confidential" => true` (Token-2022 mints only) to require the confidential transfer profile: the client submits a `type="bundle"` credential whose final transaction carries the single Token-2022 confidential `Transfer`/`TransferWithFee`, and the server confirms the amount by decrypting the recipient pending-balance delta with `"recipient_elgamal_secret_key"`.
 
+### USDC (Circle native USDC)
+
+`MPP.Methods.USDC` is the `usdc` charge method from `draft-usdc-charge-00`.
+`"profile"` selects the direct leg. EVM settles EIP-3009 through
+`MPP.Methods.EVM.Authorization` and binds the nonce to the USDC challenge,
+not the generic EVM `challengeHash`. Solana settles a legacy SPL
+`transferChecked` through `MPP.Methods.Solana`. `currency` must be the
+Circle-published USDC address or mint for that chain.
+
+```elixir
+pipeline :paid_usdc do
+  plug MPP.Plug,
+    secret_key: "your-hmac-secret",
+    realm: "api.example.com",
+    method: MPP.Methods.USDC,
+    amount: "1000000",
+    currency: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    recipient: "0xrecipient",
+    method_config: %{
+      "profile" => "evm",
+      "rpc_url" => "https://ethereum-sepolia-rpc.publicnode.com",
+      "chain_id" => 11_155_111,
+      "private_key" => "0x..."
+    }
+end
+```
+
 ### Stellar (SEP-41 tokens)
 
 `MPP.Methods.Stellar` verifies one-time SEP-41 token transfers on Stellar.

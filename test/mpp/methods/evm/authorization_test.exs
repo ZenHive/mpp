@@ -308,6 +308,26 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       assert error.detail =~ "challengeHash"
     end
 
+    test "accepts a caller-supplied expected nonce instead of challengeHash" do
+      nonce = "0x" <> String.duplicate("22", 32)
+      payload = signed_payload(nonce: nonce)
+      stub_settle_success()
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+
+      assert {:ok, @tx_hash} = Authorization.settle(payload, charge, expected_nonce: nonce)
+      assert {:error, %Errors{} = error} = Authorization.settle(payload, charge)
+      assert error.detail =~ "challengeHash"
+    end
+
+    test "rejects an expected nonce that is not the signed nonce" do
+      payload = signed_payload()
+      other = "0x" <> String.duplicate("33", 32)
+      charge = charge(%{"private_key" => EVMAuthorization.private_key()})
+
+      assert {:error, %Errors{} = error} = Authorization.settle(payload, charge, expected_nonce: other)
+      assert error.detail =~ "bound challenge"
+    end
+
     test "rejects an expired validity window without RPC" do
       payload = signed_payload(valid_before: 1)
       assert {:error, %Errors{} = error} = Authorization.settle(payload, charge())

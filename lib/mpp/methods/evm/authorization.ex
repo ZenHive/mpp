@@ -4,13 +4,15 @@ defmodule MPP.Methods.EVM.Authorization do
 
   The client signs an off-chain EIP-712 `TransferWithAuthorization` message.
   The server submits it to the token contract and pays gas. The EIP-3009
-  `nonce` is the Payment-auth `challengeHash`:
+  `nonce` for native Payment-auth is the `challengeHash`:
 
       keccak256(challenge.id <> challenge.realm)
 
   matching `draft-evm-charge-00.md` § Authorization Payload and
-  `refs/mppx/src/evm/Types.ts` `challengeHash`. Circle FiatTokenV2 enforces
-  nonce uniqueness on-chain (`authorizationState`).
+  `refs/mppx/src/evm/Types.ts` `challengeHash`. `settle/2` enforces that
+  contract. `settle/3` accepts `:expected_nonce` for a caller such as
+  `MPP.Methods.USDC` whose profile binds a different nonce. Circle
+  FiatTokenV2 enforces nonce uniqueness on-chain (`authorizationState`).
   """
 
   alias Cartouche.Hash
@@ -154,9 +156,13 @@ defmodule MPP.Methods.EVM.Authorization do
 
   @doc """
   Validate, recover, and settle an EIP-3009 authorization; return the tx hash.
+
+  Pass `expected_nonce: nonce` in `opts` to replace the native `challengeHash`
+  check. The caller must supply the nonce its own profile requires.
   """
   @spec settle(map(), Charge.t()) :: {:ok, String.t()} | {:error, Errors.t()}
-  def settle(payload, %Charge{} = charge) do
+  @spec settle(map(), Charge.t(), keyword()) :: {:ok, String.t()} | {:error, Errors.t()}
+  def settle(payload, %Charge{} = charge, opts \\ []) when is_list(opts) do
     config = charge.method_details || %{}
 
     with {:ok, parsed} <- parse_payload(payload),
@@ -165,7 +171,7 @@ defmodule MPP.Methods.EVM.Authorization do
          {:ok, domain} <- require_domain(charge),
          :ok <- match_recipient(parsed, charge),
          :ok <- match_amount(parsed, charge),
-         :ok <- match_nonce(parsed, config),
+         :ok <- match_nonce(parsed, config, opts),
          :ok <- check_validity_window(parsed),
          :ok <- verify_signature(parsed, charge, domain),
          :ok <- match_source(parsed, config),
@@ -280,13 +286,36 @@ defmodule MPP.Methods.EVM.Authorization do
     end
   end
 
-  defp match_nonce(%{nonce: nonce}, config) do
-    with {:ok, expected} <- expected_challenge_hash(config) do
+  defp match_nonce(%{nonce: nonce}, config, opts) do
+    with {:ok, expected} <- expected_nonce(config, opts) do
       if String.downcase(nonce) == String.downcase(expected) do
         :ok
       else
-        {:error, Errors.new(:verification_failed, "Authorization nonce does not match challengeHash")}
+        {:error, Errors.new(:verification_failed, nonce_mismatch_detail(opts))}
       end
+    end
+  end
+
+  defp expected_nonce(config, opts) do
+    case Keyword.fetch(opts, :expected_nonce) do
+      :error -> expected_challenge_hash(config)
+      {:ok, nonce} when is_binary(nonce) -> normalize_expected_nonce(nonce)
+      {:ok, _nonce} -> {:error, Errors.new(:verification_failed, "Invalid expected authorization nonce")}
+    end
+  end
+
+  defp normalize_expected_nonce(nonce) do
+    case require_bytes32(%{"nonce" => nonce}, "nonce") do
+      {:ok, normalized} -> {:ok, normalized}
+      {:error, %Errors{}} -> {:error, Errors.new(:verification_failed, "Invalid expected authorization nonce")}
+    end
+  end
+
+  defp nonce_mismatch_detail(opts) do
+    if Keyword.has_key?(opts, :expected_nonce) do
+      "Authorization nonce does not match the bound challenge"
+    else
+      "Authorization nonce does not match challengeHash"
     end
   end
 
