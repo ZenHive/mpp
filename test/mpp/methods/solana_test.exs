@@ -94,6 +94,48 @@ defmodule MPP.Methods.SolanaTest do
     def check_and_mark(_key, _value), do: {:error, :unexpected_store_error}
   end
 
+  defmodule ErrorDeleteStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: :ok
+    @impl true
+    def delete(_key, _expected), do: {:error, :backend_down}
+  end
+
+  defmodule RaisingDeleteStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: :ok
+    @impl true
+    def delete(_key, _expected), do: raise("backend crashed")
+  end
+
+  defmodule ExitingDeleteStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: :ok
+    @impl true
+    def delete(_key, _expected), do: exit(:backend_gone)
+  end
+
   setup do
     {payer, payer_seed} = Keys.generate_keypair()
     {recipient, _} = Keys.generate_keypair()
@@ -967,6 +1009,150 @@ defmodule MPP.Methods.SolanaTest do
                Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
 
       assert MemoryStore.keys() == []
+    end
+  end
+
+  describe "verify/2 — pull signature reservation" do
+    setup %{payer: payer, payer_seed: seed, recipient: recipient} do
+      message = Transaction.build_message(payer, [SystemProgram.transfer(payer, recipient, @amount)], @blockhash)
+      tx = Transaction.sign(message, [seed])
+      signature = Cartouche.Base58.encode(hd(tx.signatures))
+
+      {:ok,
+       payload: %{"type" => "transaction", "transaction" => Base.encode64(Transaction.serialize(tx))},
+       signature: signature,
+       parsed: sol_parsed_tx(signature, payer, recipient, @amount)}
+    end
+
+    test "concurrent presentations of the same bytes under different challenges: exactly one proceeds", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      test_pid = self()
+
+      Req.Test.stub(Solana, fn conn ->
+        {method, id, conn} = read_request(conn)
+        send(test_pid, {:rpc, method, self()})
+
+        if method == "simulateTransaction" do
+          receive do: (:go -> :ok)
+        end
+
+        rpc_json(conn, id, "result", Map.fetch!(pull_results(signature, parsed), method))
+      end)
+
+      first = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+      second = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-b"})
+
+      task = Task.async(fn -> Solana.verify(payload, first) end)
+      assert_receive {:rpc, "simulateTransaction", simulating}
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, second)
+      assert error.detail =~ "already used"
+
+      send(simulating, :go)
+      assert {:ok, %Receipt{reference: ^signature}} = Task.await(task)
+      assert_received {:rpc, "sendTransaction", _pid}
+      refute_received {:rpc, "sendTransaction", _pid}
+      refute_received {:rpc, "simulateTransaction", _pid}
+    end
+
+    test "a reservation store error fails closed before simulation", %{charge: charge, payload: payload} do
+      charge = put_details(charge, %{"store" => AtomicFailStore})
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail == "Dedup store error"
+    end
+
+    test "a signature reserved by an in-flight pull is refused as a push credential", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore})
+      stub_pull_success(signature, parsed)
+
+      assert {:ok, %Receipt{}} = Solana.verify(payload, charge)
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert error.detail =~ "already used"
+    end
+
+    test "a simulation failure releases the reservation so the same bytes can retry", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      charge = %{charge | method_details: Map.delete(charge.method_details, "store")}
+      stub_simulation_fails_once(signature, parsed)
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "simulation"
+      assert {:ok, %Receipt{reference: ^signature}} = Solana.verify(payload, charge)
+      assert {:error, %Errors{} = replay} = Solana.verify(payload, charge)
+      assert replay.detail =~ "already used"
+    end
+
+    test "a store without delete/2 keeps the reservation after a simulation failure", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore})
+      stub_simulation_fails_once(signature, parsed)
+
+      assert {:error, %Errors{}} = Solana.verify(payload, charge)
+      assert MemoryStore.keys() == ["mpp:solana:" <> signature]
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "a failed broadcast keeps the reservation because the transaction may still land", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      charge = %{charge | method_details: Map.delete(charge.method_details, "store")}
+
+      Req.Test.stub(Solana, fn conn ->
+        {method, id, conn} = read_request(conn)
+
+        if method == "sendTransaction" do
+          rpc_json(conn, id, "error", %{"code" => -32_002, "message" => "node unhealthy"})
+        else
+          rpc_json(conn, id, "result", Map.fetch!(pull_results(signature, parsed), method))
+        end
+      end)
+
+      assert {:error, %Errors{}} = Solana.verify(payload, charge)
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    for store <- [ErrorDeleteStore, RaisingDeleteStore, ExitingDeleteStore] do
+      test "a #{inspect(store)} release fault keeps the simulation error", %{
+        charge: charge,
+        payload: payload,
+        signature: signature,
+        parsed: parsed
+      } do
+        charge = put_details(charge, %{"store" => unquote(store)})
+        stub_simulation_fails_once(signature, parsed)
+
+        assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+        assert error.detail =~ "simulation"
+      end
     end
   end
 
@@ -2512,6 +2698,32 @@ defmodule MPP.Methods.SolanaTest do
 
   defp rpc_json(conn, id, key, value) do
     Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, key => value})
+  end
+
+  defp pull_results(signature, parsed) do
+    %{
+      "simulateTransaction" => %{"err" => nil, "logs" => ["ok"], "unitsConsumed" => 500},
+      "sendTransaction" => signature,
+      "getSignatureStatuses" => [
+        %{"slot" => 1, "confirmations" => 1, "err" => nil, "confirmationStatus" => "confirmed"}
+      ],
+      "getTransaction" => parsed
+    }
+  end
+
+  defp stub_simulation_fails_once(signature, parsed) do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    Req.Test.stub(Solana, fn conn ->
+      {method, id, conn} = read_request(conn)
+      results = pull_results(signature, parsed)
+
+      if method == "simulateTransaction" and Agent.get_and_update(calls, &{&1, &1 + 1}) == 0 do
+        rpc_json(conn, id, "result", %{"err" => %{"InstructionError" => [0, "Custom"]}, "logs" => []})
+      else
+        rpc_json(conn, id, "result", Map.fetch!(results, method))
+      end
+    end)
   end
 
   defp rpc_dispatch(conn, results_by_method) do

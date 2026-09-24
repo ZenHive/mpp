@@ -322,11 +322,10 @@ defmodule MPP.Methods.Solana do
          :ok <- verify_pull_memos(tx, charge, config),
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, signature} <- transaction_signature(tx),
-         :ok <- check_signature_unused(store, signature),
-         :ok <- simulate_transaction(tx, rpc_url, config),
+         {:ok, token} <- reserve_signature(store, signature),
+         :ok <- simulate_reserved(tx, rpc_url, config, {store, signature, token}),
          {:ok, signature} <- broadcast_transaction(tx, rpc_url, config, wait?),
-         :ok <- maybe_verify_confirmed(signature, charge, config, rpc_url, wait?),
-         :ok <- commit_signature_used(store, signature) do
+         :ok <- maybe_verify_confirmed(signature, charge, config, rpc_url, wait?) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
   end
@@ -955,6 +954,52 @@ defmodule MPP.Methods.Solana do
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
+  end
+
+  # Pull-path single use: the signature is claimed atomically before simulate
+  # and broadcast, holding a random attempt token. Only a failure that cannot
+  # have broadcast (simulation) releases the claim, by compare-and-delete on
+  # that token so a late release never drops a later attempt's claim. Once
+  # sendTransaction is issued the claim is retained on every outcome, because
+  # a timeout or transport error may still mean the transaction lands. A store
+  # without delete/2 (or update/3) keeps the claim until its TTL expires.
+  defp reserve_signature(nil, _signature), do: {:ok, nil}
+
+  defp reserve_signature(store, signature) do
+    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+
+    case Store.check_and_mark(store, store_key(signature), token) do
+      :ok -> {:ok, token}
+      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+    end
+  end
+
+  defp simulate_reserved(tx, rpc_url, config, reservation) do
+    case simulate_transaction(tx, rpc_url, config) do
+      :ok ->
+        :ok
+
+      {:error, _error} = failure ->
+        release_signature(reservation)
+        failure
+    end
+  end
+
+  defp release_signature({nil, _signature, _token}), do: :ok
+
+  defp release_signature({store, signature, token}) do
+    case Store.delete(store, store_key(signature), token) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("MPP.Methods.Solana: signature reservation release failed: #{inspect(reason)}")
+    end
+  rescue
+    # reach:disable-next-line bare_rescue
+    exception ->
+      Logger.warning("MPP.Methods.Solana: signature reservation release raised: #{Exception.message(exception)}")
+  catch
+    :exit, reason ->
+      Logger.warning("MPP.Methods.Solana: signature reservation release exited: #{inspect(reason)}")
   end
 
   defp store_key(signature), do: @store_key_prefix <> signature
