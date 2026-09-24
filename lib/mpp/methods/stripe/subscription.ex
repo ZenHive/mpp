@@ -7,6 +7,12 @@ defmodule MPP.Methods.Stripe.Subscription do
   `draft-stripe-subscription-00`: one Customer, one recurring Price, one
   quantity-one Subscription, and synchronously paid invoices mapped onto
   locally persisted canonical periods.
+
+  A PaymentMethod holds at most one live activation per plan (amount,
+  currency, cadence, description, `externalId`, metadata, and network).
+  Activating the same plan again under a different challenge is rejected
+  until the earlier subscription's cancellation has taken effect; use
+  distinct `externalId` values for plans that may legitimately coexist.
   """
 
   alias MPP.Errors
@@ -34,6 +40,9 @@ defmodule MPP.Methods.Stripe.Subscription do
   @renewal_invoice_error "Stripe renewal invoice does not match the subscription"
   @lifecycle_event_error "Stripe subscription lifecycle event does not match the subscription"
   @subscription_store_error "Stripe subscription store unavailable"
+  @activation_claim_method "stripe_activation"
+  # Bounds how long a crashed activation can block the same payment method and plan.
+  @activation_claim_ttl_seconds 900
 
   @doc "Validate Stripe subscription configuration at Plug initialization."
   @spec validate_config!(map()) :: :ok
@@ -75,7 +84,19 @@ defmodule MPP.Methods.Stripe.Subscription do
          {:ok, payment_method_input, customer_input} <- parse_payload(payload),
          {:ok, payment_method} <- retrieve_payment_method(payment_method_input, secret_key, config),
          :ok <- validate_payment_method(payment_method, payment_method_types(config)),
-         {:ok, customer} <- resolve_customer(customer_input, payment_method, subscription, secret_key, config),
+         {:ok, claim} <- claim_activation(subscription, payment_method, challenge_id, config) do
+      subscription
+      |> activate(payment_method, customer_input, secret_key, config, challenge_id)
+      |> finalize_activation_claim(claim, config)
+    end
+  end
+
+  def verify(_payload, %Subscription{}) do
+    {:error, Errors.new(:invalid_payload, "Stripe subscription credential payload must be an object")}
+  end
+
+  defp activate(subscription, payment_method, customer_input, secret_key, config, challenge_id) do
+    with {:ok, customer} <- resolve_customer(customer_input, payment_method, subscription, secret_key, config),
          {:ok, payment_method} <- attach_payment_method(payment_method, customer, subscription, secret_key, config),
          {:ok, product} <- create_product(subscription, customer, payment_method, secret_key, config),
          :ok <- validate_product(product),
@@ -94,10 +115,6 @@ defmodule MPP.Methods.Stripe.Subscription do
         challenge_id
       )
     end
-  end
-
-  def verify(_payload, %Subscription{}) do
-    {:error, Errors.new(:invalid_payload, "Stripe subscription credential payload must be an object")}
   end
 
   @doc "Validate and durably record a paid Stripe renewal invoice."
@@ -239,6 +256,162 @@ defmodule MPP.Methods.Stripe.Subscription do
       _invalid ->
         :ok
     end
+  end
+
+  defp claim_activation(subscription, payment_method, challenge_id, config) do
+    subscription_store = store(config)
+    claim_id = activation_claim_id(subscription, payment_method["id"], config)
+    now = DateTime.utc_now()
+
+    with {:ok, current} <- get_activation_claim(subscription_store, claim_id),
+         {:ok, :take} <- activation_claim_decision(current, challenge_id, now, subscription_store) do
+      claim = activation_claim(claim_id, subscription, challenge_id, now)
+
+      case Store.update(subscription_store, claim_id, &replace_activation_claim(&1, current, claim)) do
+        {:ok, _claim} -> {:ok, {:claimed, claim_id, challenge_id}}
+        {:error, %Errors{} = error} -> {:error, error}
+        {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      end
+    end
+  end
+
+  defp get_activation_claim(subscription_store, claim_id) do
+    case Store.get(subscription_store, claim_id) do
+      {:ok, %Record{} = claim} -> {:ok, claim}
+      :not_found -> {:ok, :not_found}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+    end
+  end
+
+  defp activation_claim_decision(:not_found, _challenge_id, _now, _store), do: {:ok, :take}
+
+  defp activation_claim_decision(
+         %Record{method: @activation_claim_method, method_state: %{challenge_id: challenge_id}},
+         challenge_id,
+         _now,
+         _store
+       ), do: {:ok, :reuse}
+
+  defp activation_claim_decision(
+         %Record{method: @activation_claim_method, method_state: %{status: :released}},
+         _challenge_id,
+         _now,
+         _store
+       ), do: {:ok, :take}
+
+  defp activation_claim_decision(
+         %Record{method: @activation_claim_method, method_state: %{status: :pending, claimed_at: claimed_at}},
+         _challenge_id,
+         now,
+         _store
+       ) do
+    if DateTime.diff(now, claimed_at, :second) >= @activation_claim_ttl_seconds,
+      do: {:ok, :take},
+      else: {:error, activation_in_progress()}
+  end
+
+  defp activation_claim_decision(
+         %Record{method: @activation_claim_method, method_state: %{status: :active, subscription_id: subscription_id}},
+         _challenge_id,
+         now,
+         subscription_store
+       ) do
+    case Store.get(subscription_store, subscription_id) do
+      :not_found -> {:ok, :take}
+      {:ok, %Record{} = record} -> reclaim_ended(record, now)
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+    end
+  end
+
+  defp activation_claim_decision(_claim, _challenge_id, _now, _store), do: {:error, activation_conflict()}
+
+  defp reclaim_ended(record, now) do
+    if subscription_ended?(record, now), do: {:ok, :take}, else: {:error, already_active()}
+  end
+
+  defp subscription_ended?(%Record{cancellation_effective_at: nil}, _now), do: false
+
+  defp subscription_ended?(%Record{cancellation_effective_at: %DateTime{} = effective_at}, now),
+    do: DateTime.compare(effective_at, now) != :gt
+
+  defp replace_activation_claim(current, expected, claim) do
+    if activation_claim_token(current) == activation_claim_token(expected),
+      do: {:ok, claim},
+      else: {:error, activation_in_progress()}
+  end
+
+  defp activation_claim_token(:not_found), do: :not_found
+
+  defp activation_claim_token(%Record{method_state: state}),
+    do: {state[:status], state[:challenge_id], state[:subscription_id]}
+
+  defp finalize_activation_claim(result, :reuse, _config), do: result
+
+  defp finalize_activation_claim({:ok, %Receipt{} = receipt} = ok, {:claimed, claim_id, challenge_id}, config) do
+    _ =
+      update_activation_claim(config, claim_id, challenge_id, fn state ->
+        %{state | status: :active, subscription_id: receipt.subscription_id}
+      end)
+
+    ok
+  end
+
+  defp finalize_activation_claim({:error, _reason} = error, {:claimed, claim_id, challenge_id}, config) do
+    _ = update_activation_claim(config, claim_id, challenge_id, &%{&1 | status: :released})
+    error
+  end
+
+  defp update_activation_claim(config, claim_id, challenge_id, transform) do
+    Store.update(store(config), claim_id, fn
+      %Record{method: @activation_claim_method, method_state: %{challenge_id: ^challenge_id} = state} = claim ->
+        {:ok, %{claim | method_state: transform.(state)}}
+
+      _other ->
+        {:error, :activation_claim_lost}
+    end)
+  end
+
+  defp activation_claim(claim_id, subscription, challenge_id, now) do
+    %Record{
+      subscription_id: claim_id,
+      method: @activation_claim_method,
+      subscription: %{subscription | method_details: public_method_details(subscription.method_details)},
+      method_state: %{status: :pending, challenge_id: challenge_id, claimed_at: now, subscription_id: nil},
+      billing_anchor: now,
+      reference: challenge_id,
+      timestamp: DateTime.to_iso8601(now)
+    }
+  end
+
+  # One live activation per payment method and plan: the key deliberately omits
+  # the challenge so a fresh challenge cannot mint a second Stripe subscription.
+  defp activation_claim_id(subscription, payment_method_id, config) do
+    fingerprint = %{
+      "amount" => subscription.amount,
+      "currency" => subscription.currency,
+      "description" => subscription.description,
+      "externalId" => subscription.external_id,
+      "metadata" => config["metadata"] || %{},
+      "networkId" => config["network_id"],
+      "paymentMethod" => payment_method_id,
+      "periodCount" => subscription.period_count,
+      "periodUnit" => Atom.to_string(subscription.period_unit)
+    }
+
+    digest =
+      :sha256
+      |> :crypto.hash(JCS.canonicalize(fingerprint))
+      |> Base.url_encode64(padding: false)
+
+    "stripe-activation:" <> digest
+  end
+
+  defp activation_in_progress do
+    Errors.new(:verification_failed, "Stripe subscription activation is already in progress for this payment method")
+  end
+
+  defp already_active do
+    Errors.new(:verification_failed, "Stripe subscription is already active for this payment method")
   end
 
   defp validate_profile!(subscription) do
