@@ -3765,7 +3765,7 @@ acceptance_criteria = ["Provide a reproducible project-owned command or document
 touches = ["mix.exs", "test/mix/", "README.md", "CLAUDE.md", "AGENTS.md"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Full QA at 9e73dbe completed other checks but printed skips for the missing claude-marketplace sync-agents-md.sh and onchain-stack advisory-freshness.sh under the developer home. Therefore QA is incomplete under the audit contract. The prior 3bf67c5 audit recorded the same skips as passed; no pending repair task covers the cause, and completed Task 133 only separates dispatch scope. Make these proofs available without controlling operator services or silently weakening them. Keep advisory freshness tied to the mirror used by mix_audit. Evidence: .audit/9e73dbe.md. Reconfirmed at integrated f7c324c30e69fc6149450b7c754551869f3765fa: after cold dependency bootstrap, mix precommit.full exited 0 with 2308 passing tests, 96.36% coverage and clean analyzers, but both freshness scripts again skipped. QA remains incomplete; recurrence evidence and exact missing paths are recorded in .audit/f7c324c.md."
+body = "Full QA at 9e73dbe completed other checks but printed skips for the missing claude-marketplace sync-agents-md.sh and onchain-stack advisory-freshness.sh under the developer home. Therefore QA is incomplete under the audit contract. The prior 3bf67c5 audit recorded the same skips as passed; no pending repair task covers the cause, and completed Task 133 only separates dispatch scope. Make these proofs available without controlling operator services or silently weakening them. Keep advisory freshness tied to the mirror used by mix_audit. Evidence: .audit/9e73dbe.md. Reconfirmed at integrated f7c324c30e69fc6149450b7c754551869f3765fa: after cold dependency bootstrap, mix precommit.full exited 0 with 2308 passing tests, 96.36% coverage and clean analyzers, but both freshness scripts again skipped. QA remains incomplete; recurrence evidence and exact missing paths are recorded in .audit/f7c324c.md. Reconfirmed at 750acbe288d165621f63ef2f74855616569154fa: both freshness checks skipped again after the remaining full-QA steps were run independently following suite failure; see .audit/750acbe.md."
 created_at = "2026-09-22"
 scored_at = "2026-09-22"
 
@@ -3849,6 +3849,8 @@ assignee = "grok"
 model = "grok-4.7"
 body = """
 mppx #908 (commit 4dc37a8, released in mppx 0.11.0) removed the client-side check that an x402 `PAYMENT-REQUIRED` envelope's `resource.url` must equal the response URL (refs/mppx `src/client/internal/protocols/X402.ts`, the two deleted lines). Exact matching broke payable offers whenever query strings, redirects, proxies or port rewriting made the two URLs differ. Our client still does the exact match: `lib/mpp/x402.ex:140-146` `match_resource_url/2`, called from `lib/mpp/client/transport/http.ex:128`. There, a mismatch turns into `{:ok, []}`, so the x402 offer disappears without any error and the client reports `:no_payment_challenges`. This is an interop gap, not a security one: the server still binds the paid resource (`MPP.X402.Plug`). Found by the 2026-09-24 sdk-delta-watch sweep.
+
+Post-merge audit at 750acbe found Task 135 had added test/mpp/x402_test.exs with two calls to the removed arity. The audit migrates those obsolete assertions to checking resource preservation through the supported one-argument API; focused x402 tests verify the repair. Original full QA remains failed; evidence is in .audit/750acbe.md.
 """
 implemented = "Landed by grok via merge-train; reviewer-approved (run run-1790239439239-3a915a47, f9bf5b7028b6d754379e6ff28d94692b242628e1)."
 delivered_by = "grok"
@@ -3860,6 +3862,51 @@ started_at = "2026-09-24"
 scored_at = "2026-09-24"
 done_at = "2026-09-24"
 shipped_in = "f9bf5b7028b6d754379e6ff28d94692b242628e1"
+
+[[task]]
+id = "141"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Refresh payment-security mutation evidence after integrated source changes"
+scores = { d = 3, b = 5, u = 5 }
+acceptance_criteria = ["Reproduce the fingerprint_mismatch in test/mutation/security_campaign_test.exs on the integrated source and identify which fingerprint inputs changed.", "Run the executable payment-security mutation campaign against the current source, inspect all outcomes and repair any surviving mutants or invalid replacements through normal implementation and independent review.", "Update the ledger only with observed campaign results; do not merely replace the hash or weaken validation. The focused ledger test passes and the report records the campaign command, revision and outcomes."]
+touches = ["test/mutation/", "test/mpp/"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Full QA at 750acbe288d165621f63ef2f74855616569154fa failed its ledger validation with fingerprint_mismatch; automatic retry confirmed it. SecurityMutations.fingerprint/1 hashes mutation definitions and complete source/test inputs, and the landed range changed those inputs. Tasks 82 and 93 delivered the campaign and scheduling, but no pending task owns this evidence refresh. Reconcile current evidence rather than certifying an unrun campaign. See .audit/750acbe.md. D3 reflects campaign execution and review, B5 restores a failing payment-security regression check, U5 reflects the observed full-QA failure."
+created_at = "2026-09-24"
+scored_at = "2026-09-24"
+
+[[task]]
+id = "142"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Document shipped x402 API and critical-coverage changes in release notes"
+scores = { d = 1, b = 2, u = 3 }
+acceptance_criteria = ["CHANGELOG names the removal of MPP.X402.challenges_from_header/2 in favor of /1, explains differing query/redirect resource URLs, and distinguishes retained server-side binding.", "The money-critical coverage entry includes lib/mpp/x402/ and lib/mpp/x402.ex. Validate the text against the shipped code."]
+touches = ["CHANGELOG.md"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Task 140 explicitly required a changelog entry for its API choice, but none landed; Task 135 also expanded the critical coverage tier beyond the existing changelog description. The post-merge audit must leave CHANGELOG untouched, so this concrete docs repair is filed separately. See .audit/750acbe.md. D1 is a text-only correction; B2 and U3 reflect accurate migration guidance for a removed public arity."
+created_at = "2026-09-24"
+scored_at = "2026-09-24"
+
+[[task]]
+id = "143"
+phase = 16
+bundle = "additional-methods"
+status = "pending"
+title = "Adjudicate the pending private security inbox reports"
+scores = { d = 5, b = 5, u = 5 }
+acceptance_criteria = ["Read the repository Security → Advisories inbox and privately adjudicate the three reports in triage observed on 2026-09-24 against the affected releases and current source.", "Keep all report identities, mechanisms, reproduction evidence and dispositions in private advisories until disclosure is authorized. Public artifacts contain only generic status/counts.", "For each confirmed report, arrange a scoped repair with meaningful regression and applicable live-provider evidence, independent review, release and coordinated advisory publication; record why any rejected report does not apply privately."]
+touches = ["lib/mpp/", "test/mpp/", "docs/security-parity.md"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "The audit's authenticated private advisory query found three unadjudicated reports, with no matching pending roadmap owner. This task owns private adjudication and repair coordination, not a finding that the reports are proven. The public security ledger was updated to show only the pending count. See the private repository inbox for all details. D5 reflects investigation across the reported surfaces; B5 and U5 reflect the concrete pending reports, without an unverified severity claim."
+created_at = "2026-09-24"
+scored_at = "2026-09-24"
 
 [bundles.testnet-funding]
 phase = 1

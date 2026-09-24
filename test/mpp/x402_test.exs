@@ -29,8 +29,7 @@ defmodule MPP.X402Test do
     assert X402.synthetic?(challenge)
     assert {:ok, request} = X402.exact_request(challenge)
     assert request["extensions"] == envelope["extensions"]
-    assert {:error, :resource_mismatch} = X402.challenges_from_header(encode(envelope), "/other")
-    assert {:error, :resource_mismatch} = X402.challenges_from_header(encode(envelope), 1)
+    assert request["resource"] == envelope["resource"]
     assert {:error, :invalid_base64} = X402.challenges_from_header("!")
   end
 
