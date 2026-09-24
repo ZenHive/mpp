@@ -122,6 +122,31 @@ defmodule MPP.Methods.SolanaTest do
     def delete(_key, _expected), do: raise("backend crashed")
   end
 
+  defmodule ReservedGetFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: {:error, :connection_lost}
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark(_key, _value), do: {:error, :already_exists}
+  end
+
+  defmodule SettleFailStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl true
+    def get(_key), do: :not_found
+    @impl true
+    def put(_key, _value), do: :ok
+    @impl true
+    def check_and_mark("mpp:solana-settled:" <> _signature, _value), do: {:error, :backend_down}
+    def check_and_mark(_key, _value), do: :ok
+  end
+
   defmodule ExitingDeleteStore do
     @moduledoc false
     @behaviour Store
@@ -569,8 +594,8 @@ defmodule MPP.Methods.SolanaTest do
         Solana.validate_config!(Map.put(charge.method_details, "splits", splits))
       end
 
-      assert :ok =
-               Solana.validate_config!(Map.put(charge.method_details, "splits", [Map.put(hd(splits), "memo", "vendor")]))
+      plain = [Map.put(hd(splits), "memo", "vendor"), Map.delete(hd(splits), "memo")]
+      assert :ok = Solana.validate_config!(Map.put(charge.method_details, "splits", plain))
     end
 
     test "challenge issue rejects a push-shaped externalId under challenge_memo", %{bare: charge} do
@@ -1189,6 +1214,127 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{}} = Solana.verify(payload, charge)
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
       assert error.detail =~ "already used"
+    end
+
+    test "a confirmation failure after broadcast is recovered by the same challenge without re-broadcast", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+      calls = stub_get_transaction_script(signature, parsed, [:error, nil])
+
+      assert {:error, %Errors{}} = Solana.verify(payload, charge)
+
+      assert {:error, %Errors{} = pending} = Solana.verify(payload, charge)
+      assert pending.detail =~ "not found"
+
+      assert {:ok, %Receipt{reference: ^signature}} = Solana.verify(payload, charge)
+      assert Agent.get(calls, &Map.get(&1, "sendTransaction")) == 1
+
+      assert {:error, %Errors{} = replay} = Solana.verify(payload, charge)
+      assert replay.detail =~ "already used"
+    end
+
+    test "a reservation made for another challenge is not recoverable", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      calls = stub_get_transaction_script(signature, parsed, [:error])
+      owner = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+      other = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-b"})
+
+      assert {:error, %Errors{}} = Solana.verify(payload, owner)
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, other)
+      assert error.detail =~ "already used"
+      assert Agent.get(calls, &Map.get(&1, "getTransaction")) == 1
+    end
+
+    test "the original attempt and a concurrent recovery serve the payment once", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+      test_pid = self()
+      {:ok, fetches} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(Solana, fn conn ->
+        {method, id, conn} = read_request(conn)
+
+        if method == "getTransaction" and Agent.get_and_update(fetches, &{&1, &1 + 1}) == 0 do
+          send(test_pid, {:confirming, self()})
+          receive do: (:go -> :ok)
+        end
+
+        rpc_json(conn, id, "result", Map.fetch!(pull_results(signature, parsed), method))
+      end)
+
+      original = Task.async(fn -> Solana.verify(payload, charge) end)
+      assert_receive {:confirming, confirming}
+
+      assert {:ok, %Receipt{reference: ^signature}} = Solana.verify(payload, charge)
+
+      send(confirming, :go)
+      assert {:error, %Errors{} = error} = Task.await(original)
+      assert error.detail =~ "already used"
+    end
+
+    test "a push-marked signature is not recoverable through the pull path", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      start_supervised!(MemoryStore)
+      charge = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+      stub_pull_success(signature, parsed)
+
+      assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "a reservation value without a challenge binding is not recoverable", %{
+      charge: charge,
+      payload: payload,
+      signature: signature
+    } do
+      start_supervised!(MemoryStore)
+      :ok = MemoryStore.put("mpp:solana:" <> signature, "legacy-token")
+      charge = put_details(charge, %{"store" => MemoryStore, "challenge_id" => "challenge-a"})
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail =~ "already used"
+    end
+
+    test "a store read failure during recovery fails closed", %{charge: charge, payload: payload} do
+      charge = put_details(charge, %{"store" => ReservedGetFailStore, "challenge_id" => "challenge-a"})
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail == "Dedup store error"
+    end
+
+    test "a settle-mark store failure fails closed", %{
+      charge: charge,
+      payload: payload,
+      signature: signature,
+      parsed: parsed
+    } do
+      charge = put_details(charge, %{"store" => SettleFailStore})
+      stub_pull_success(signature, parsed)
+
+      assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
+      assert error.detail == "Dedup store error"
     end
 
     for store <- [ErrorDeleteStore, RaisingDeleteStore, ExitingDeleteStore] do
@@ -2760,6 +2906,25 @@ defmodule MPP.Methods.SolanaTest do
       ],
       "getTransaction" => parsed
     }
+  end
+
+  # getTransaction answers each call from `script` in turn (`:error` is a
+  # JSON-RPC error, `nil` is "not found"), then the parsed transaction.
+  defp stub_get_transaction_script(signature, parsed, script) do
+    {:ok, calls} = Agent.start_link(fn -> %{} end)
+
+    Req.Test.stub(Solana, fn conn ->
+      {method, id, conn} = read_request(conn)
+      call = Agent.get_and_update(calls, &{Map.get(&1, method, 0), Map.update(&1, method, 1, fn n -> n + 1 end)})
+
+      case {method, Enum.at(script, call, :parsed)} do
+        {"getTransaction", :error} -> rpc_json(conn, id, "error", %{"code" => -32_000, "message" => "boom"})
+        {"getTransaction", nil} -> rpc_json(conn, id, "result", nil)
+        _other -> rpc_json(conn, id, "result", Map.fetch!(pull_results(signature, parsed), method))
+      end
+    end)
+
+    calls
   end
 
   defp stub_simulation_fails_once(signature, parsed) do

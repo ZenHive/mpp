@@ -93,6 +93,23 @@ defmodule MPP.Methods.Solana do
   confirmed transfer satisfies only the challenge it was created for, and the
   on-chain memo does not reveal the challenge id itself.
 
+  ## Pull retries and single use
+
+  With a store, a pull transaction's signature is reserved before it is
+  simulated and broadcast. A simulation failure releases the reservation
+  through the store's compare-and-delete (`delete/2`, or `update/3`); a store
+  that exports neither keeps it until its TTL expires, so the same signed bytes
+  cannot be retried and the client must sign a new transaction. Once
+  `sendTransaction` has been issued the reservation is kept whatever happens
+  next. Presenting the same transaction again for the same challenge then
+  re-checks the confirmed transaction without re-broadcasting it and returns the
+  receipt, so a payment that landed while confirmation failed can still be
+  redeemed while the challenge is valid. Any other challenge is rejected, and a
+  settled signature is served once.
+
+  A confidential `"bundle"` has no such recovery: its amount is proved by the
+  recipient balance delta around settlement, which cannot be re-measured later.
+
   ## Credential Payload
 
     * `"type" => "transaction"`, `"transaction" => "<base64>"` — signed legacy
@@ -137,6 +154,7 @@ defmodule MPP.Methods.Solana do
   @max_tx_bytes 1232
   @empty_signature <<0::512>>
   @store_key_prefix "mpp:solana:"
+  @settled_key_prefix "mpp:solana-settled:"
   @dedup_store_error_detail "Dedup store error"
   @solana_rpc_error_detail "Solana RPC request failed"
   @zero_amount_detail "Zero-amount challenges are not supported for Solana credentials"
@@ -330,11 +348,37 @@ defmodule MPP.Methods.Solana do
          :ok <- verify_pull_memos(tx, charge, config),
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, signature} <- transaction_signature(tx),
-         {:ok, token} <- reserve_signature(store, signature),
-         :ok <- simulate_reserved(tx, rpc_url, config, {store, signature, token}),
-         {:ok, signature} <- broadcast_transaction(tx, rpc_url, config, wait?),
-         :ok <- maybe_verify_confirmed(signature, charge, config, rpc_url, wait?) do
+         {:ok, signature} <- settle_pull(tx, signature, charge, config, {store, rpc_url, wait?}),
+         :ok <- mark_settled(store, signature) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
+    end
+  end
+
+  defp settle_pull(tx, signature, charge, config, {store, rpc_url, wait?}) do
+    case claim_signature(store, signature, config["challenge_id"]) do
+      {:ok, token} ->
+        with :ok <- simulate_reserved(tx, rpc_url, config, {store, signature, token}),
+             {:ok, signature} <- broadcast_transaction(tx, rpc_url, config, wait?),
+             :ok <- maybe_verify_confirmed(signature, charge, config, rpc_url, wait?) do
+          {:ok, signature}
+        end
+
+      {:error, :already_exists} ->
+        recover_pull(store, signature, charge, config, rpc_url)
+
+      {:error, _error} = failure ->
+        failure
+    end
+  end
+
+  # The signature was already reserved. When that reservation was made for this
+  # same challenge, the earlier attempt may have broadcast before failing, so
+  # the confirmed transaction is checked again (never re-broadcast).
+  defp recover_pull(store, signature, charge, config, rpc_url) do
+    with :ok <- require_reserved_for(store, signature, config["challenge_id"]),
+         {:ok, rpc_tx} <- fetch_transaction(signature, rpc_url, config),
+         :ok <- Instructions.verify_parsed(rpc_tx, charge, instruction_opts(charge, config)) do
+      {:ok, signature}
     end
   end
 
@@ -1016,24 +1060,72 @@ defmodule MPP.Methods.Solana do
     end
   end
 
-  # Pull-path single use: the signature is claimed atomically before simulate
-  # and broadcast, holding a random attempt token. Only a failure that cannot
-  # have broadcast (simulation) releases the claim, by compare-and-delete on
-  # that token so a late release never drops a later attempt's claim. Once
-  # sendTransaction is issued the claim is retained on every outcome, because
-  # a timeout or transport error may still mean the transaction lands. A store
-  # without delete/2 (or update/3) keeps the claim until its TTL expires.
-  defp reserve_signature(nil, _signature), do: {:ok, nil}
+  # Pull/bundle single use: the signature is claimed atomically before simulate
+  # and broadcast. The stored value is "<random attempt token>:<challenge id>"
+  # (empty id when unbound); the whole value is the compare-and-delete token, so
+  # a late release never drops a later attempt's claim. Only a failure that
+  # cannot have broadcast releases the claim. Once sendTransaction is issued the
+  # claim is retained on every outcome, because a timeout or transport error may
+  # still mean the transaction lands; the challenge id lets that same challenge
+  # recover. A store without delete/2 (or update/3) keeps the claim until its
+  # TTL expires. A separate settled key makes the receipt single-use across the
+  # original attempt and any recovery.
+  defp claim_signature(nil, _signature, _challenge_id), do: {:ok, nil}
 
-  defp reserve_signature(store, signature) do
-    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+  defp claim_signature(store, signature, challenge_id) do
+    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower) <> ":" <> challenge_binding(challenge_id)
 
     case Store.check_and_mark(store, store_key(signature), token) do
       :ok -> {:ok, token}
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
+      {:error, :already_exists} -> {:error, :already_exists}
       {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
     end
   end
+
+  defp reserve_signature(store, signature) do
+    case claim_signature(store, signature, nil) do
+      {:error, :already_exists} -> {:error, signature_used_error()}
+      result -> result
+    end
+  end
+
+  defp challenge_binding(challenge_id) when is_binary(challenge_id), do: challenge_id
+  defp challenge_binding(_challenge_id), do: ""
+
+  defp require_reserved_for(store, signature, challenge_id) when is_binary(challenge_id) and challenge_id != "" do
+    case Store.get(store, store_key(signature)) do
+      {:ok, value} when is_binary(value) ->
+        if reserved_binding(value) == challenge_id, do: :ok, else: {:error, signature_used_error()}
+
+      {:error, reason} ->
+        Logger.warning("MPP.Methods.Solana: dedup store read failed: #{inspect(reason)}")
+        {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+
+      _other ->
+        {:error, signature_used_error()}
+    end
+  end
+
+  defp require_reserved_for(_store, _signature, _challenge_id), do: {:error, signature_used_error()}
+
+  defp reserved_binding(value) do
+    case String.split(value, ":", parts: 2) do
+      [_token, binding] -> binding
+      _other -> nil
+    end
+  end
+
+  defp mark_settled(nil, _signature), do: :ok
+
+  defp mark_settled(store, signature) do
+    case Store.check_and_mark(store, @settled_key_prefix <> signature, System.system_time(:millisecond)) do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, signature_used_error()}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+    end
+  end
+
+  defp signature_used_error, do: Errors.new(:verification_failed, "Transaction signature already used")
 
   defp simulate_reserved(tx, rpc_url, config, reservation) do
     release_on_error(simulate_transaction(tx, rpc_url, config), reservation)
