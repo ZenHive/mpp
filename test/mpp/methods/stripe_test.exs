@@ -32,8 +32,11 @@ defmodule MPP.Test.ActivationClaimSpyStore do
 
   @spec update(String.t(), MPP.Subscription.Store.update_fun(), keyword()) :: term()
   def update(id, fun, opts) do
-    if String.starts_with?(id, "stripe-activation:"), do: send(Keyword.fetch!(opts, :test_pid), {:activation_claim, id})
-    ETSStore.update(id, fun, opts)
+    if opts[:test_pid] && String.starts_with?(id, "stripe-activation:"),
+      do: send(opts[:test_pid], {:activation_claim, id})
+
+    fail_update? = Keyword.get(opts, :fail_update, fn _id -> false end)
+    if fail_update?.(id), do: {:error, :unavailable}, else: ETSStore.update(id, fun, opts)
   end
 
   @spec delete(String.t(), keyword()) :: :ok | {:error, term()}
@@ -914,23 +917,38 @@ defmodule MPP.Methods.StripeTest do
       assert map_size(retried.payments) == 2
     end
 
-    test "returns the persisted activation on retry and rejects conflicting durable state" do
+    test "returns the persisted activation on a same-challenge retry without calling Stripe again" do
       stub_subscription_flow()
       subscription = stripe_subscription()
       assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+      flush_stripe_requests()
 
-      stub_subscription_flow()
       assert {:ok, ^first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+    end
+
+    test "keeps the claim closed when a paid activation conflicts with durable state" do
+      ledger = stub_subscription_flow()
+      assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
 
       assert {:ok, _changed} =
                Store.update(subscription_store(), first.subscription_id, fn record ->
                  {:ok, put_in(record.method_state.price_id, "price_other")}
                end)
 
-      stub_subscription_flow()
+      # Same challenge and Stripe Subscription id, so the same durable record id.
+      other_plan = stripe_subscription(external_id: "plan_other")
+      flush_stripe_requests()
 
-      assert {:error, %Errors{detail: "Stripe subscription activation conflicts with durable state"}} =
-               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+      for challenge_id <- ["ch_subscription", "ch_fresh"] do
+        assert {:error, %Errors{detail: "Stripe subscription activation conflicts with durable state"}} =
+                 Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(other_plan, challenge_id))
+      end
+
+      assert_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+      refute_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+      refute_received {:stripe_request, "DELETE", _path, _params, _headers}
+      assert ledger_status(ledger, "sub_test") == "active"
     end
 
     test "a fresh challenge cannot activate a second subscription for the same payment method and plan" do
@@ -953,20 +971,170 @@ defmodule MPP.Methods.StripeTest do
       assert other_plan.subscription_id != first.subscription_id
     end
 
-    test "a failed activation releases the payment method for a later challenge" do
+    test "a definitive activation failure releases the payment method for a later challenge" do
+      for {failure, detail} <- [
+            {:requires_action, "Stripe subscription first invoice requires customer action"},
+            {:invalid_request, "Stripe subscription activation failed"}
+          ] do
+        stub_subscription_flow(subscription_error: failure)
+        subscription = stripe_subscription(external_id: "plan_#{failure}")
+        assert {:error, %Errors{detail: ^detail}} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+
+        stub_subscription_flow()
+        flush_stripe_requests()
+
+        assert {:ok, %Receipt{}} =
+                 Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(subscription, "ch_retry"))
+
+        refute_received {:stripe_request, "GET", "/v1/subscriptions", _params, _headers}
+      end
+    end
+
+    test "a same-challenge retry after a failed activation holds the payment method" do
       stub_subscription_flow(subscription_error: :requires_action)
 
       assert {:error, %Errors{detail: "Stripe subscription first invoice requires customer action"}} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
 
       stub_subscription_flow()
+      assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+      flush_stripe_requests()
 
-      assert {:ok, %Receipt{}} =
-               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_retry"))
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_fresh"))
+
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+      assert {:ok, ^first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+    end
+
+    test "an activation whose Stripe outcome is unknown stays blocked until reconciled" do
+      ledger = stub_subscription_flow(subscription_error: :lost_response)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert_received {:stripe_request, "POST", "/v1/subscriptions", params, _headers}
+      assert "stripe-activation:" <> _digest = params["metadata[mpp_activation_claim]"]
+      assert is_binary(params["metadata[mpp_activation_generation]"])
+      assert ledger_status(ledger, "sub_test") == "active"
+
+      stub_subscription_flow(ledger: ledger, list_has_more: true)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation could not be reconciled with Stripe"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_fresh"))
+
+      stub_subscription_flow(ledger: ledger)
+      flush_stripe_requests()
+
+      assert {:ok, %Receipt{extensions: %{"stripeSubscription" => "sub_test"}} = adopted} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert_received {:stripe_request, "GET", "/v1/subscriptions", %{}, _headers}
+      assert {:ok, %Record{method: "stripe"}} = Store.get(subscription_store(), adopted.subscription_id)
+
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_fresh"))
+
+      assert {:ok, ^adopted} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+      refute_received {:stripe_request, "DELETE", _path, _params, _headers}
+    end
+
+    test "reconciliation adopts one tagged subscription and cancels every other tagged one" do
+      ledger = stub_subscription_flow(subscription_error: :lost_response)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      tagged = Agent.get(ledger, &Map.fetch!(&1, "sub_test"))
+
+      Agent.update(ledger, fn subscriptions ->
+        subscriptions
+        |> Map.put("sub_dup", %{tagged | "id" => "sub_dup", "latest_invoice" => "in_dup"})
+        |> Map.put("sub_bad", Map.delete(%{tagged | "id" => "sub_bad"}, "items"))
+        |> Map.put("sub_foreign", %{tagged | "id" => "sub_foreign", "metadata" => %{}})
+      end)
+
+      stub_subscription_flow(ledger: ledger)
+      flush_stripe_requests()
+
+      assert {:ok, %Receipt{extensions: %{"stripeSubscription" => adopted}}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      [surplus] = ["sub_dup", "sub_test"] -- [adopted]
+      assert ledger_status(ledger, adopted) == "active"
+      assert ledger_status(ledger, surplus) == "canceled"
+      assert ledger_status(ledger, "sub_bad") == "canceled"
+      assert ledger_status(ledger, "sub_foreign") == "active"
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+      refute_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_foreign", _params, _headers}
+    end
+
+    test "keeps the claim closed until an abandoned subscription is confirmed canceled" do
+      invalid_invoice = &put_in(&1, ["amount_paid"], 4999)
+      ledger = stub_subscription_flow(invoice_transform: invalid_invoice, cancel_error: true)
+
+      assert {:error, %Errors{detail: "Stripe first invoice does not match the subscription request"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_test", %{}, _headers}
+      assert_received {:stripe_request, "GET", "/v1/subscriptions/sub_test", %{}, _headers}
+      assert ledger_status(ledger, "sub_test") == "active"
+      flush_stripe_requests()
+
+      assert {:error, %Errors{detail: "Stripe subscription activation could not be reconciled with Stripe"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_fresh"))
+
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+
+      stub_subscription_flow(ledger: ledger, invoice_transform: invalid_invoice)
+
+      assert {:error, %Errors{detail: "Stripe first invoice does not match the subscription request"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_fresh"))
+
+      assert_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_test", %{}, _headers}
+      assert_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+      assert ledger_status(ledger, "sub_test") == "canceled"
+    end
+
+    test "a failed durable write after payment stays reconcilable instead of reopening" do
+      stub_subscription_flow()
+      fail_update = fail_nth_update(&(not activation_claim?(&1)), 1)
+      subscription = &spy_subscription(&1, fail_update: fail_update)
+
+      assert {:error, %Errors{detail: "Stripe subscription store unavailable"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+
+      refute_received {:stripe_request, "DELETE", _path, _params, _headers}
+      flush_stripe_requests()
+
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_fresh"))
+
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+
+      assert {:ok, %Receipt{} = receipt} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+
+      assert {:ok, %Record{method: "stripe"}} = Store.get(subscription_store(), receipt.subscription_id)
+    end
+
+    test "an attempt that cannot finalize its claim cancels its own subscription" do
+      ledger = stub_subscription_flow()
+      fail_update = fail_nth_update(&activation_claim?/1, 3)
+      subscription = &spy_subscription(&1, fail_update: fail_update)
+
+      assert {:error, %Errors{detail: "Stripe subscription store unavailable"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+
+      assert_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_test", %{}, _headers}
+      assert ledger_status(ledger, "sub_test") == "canceled"
+
+      assert {:ok, %Receipt{}} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_retry"))
     end
 
     test "a payment method can activate again only after its subscription has ended" do
-      stub_subscription_flow()
+      ledger = stub_subscription_flow()
       assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
 
       assert {:ok, _scheduled} =
@@ -986,6 +1154,16 @@ defmodule MPP.Methods.StripeTest do
                Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_next"))
 
       assert second.subscription_id != first.subscription_id
+
+      # A lost durable record is restored from the still-live Stripe Subscription.
+      assert :ok = Store.delete(subscription_store(), second.subscription_id)
+
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, with_challenge(stripe_subscription(), "ch_after_delete"))
+
+      assert {:ok, %Record{}} = Store.get(subscription_store(), second.subscription_id)
+
+      cancel_in_ledger(ledger, "sub_test")
       assert :ok = Store.delete(subscription_store(), second.subscription_id)
 
       assert {:ok, %Receipt{}} =
@@ -1003,10 +1181,21 @@ defmodule MPP.Methods.StripeTest do
         timestamp: "2023-11-14T22:13:20Z"
       }
 
+      active_claim = %{
+        foreign
+        | method: "stripe_activation",
+          method_state: %{status: :active, challenge_id: "ch_other", subscription_id: "foreign"}
+      }
+
+      malformed_claim = %{active_claim | method_state: %{status: :unknown}}
+      conflict = "Stripe subscription activation conflicts with durable state"
+
       cases = [
         {[get: {:error, :down}, update: {:error, :down}], "Stripe subscription store unavailable"},
         {[get: :not_found, update: {:error, :down}], "Stripe subscription store unavailable"},
-        {[get: {:ok, foreign}, update: {:error, :down}], "Stripe subscription activation conflicts with durable state"}
+        {[get: {:ok, foreign}, update: {:error, :down}], conflict},
+        {[get: {:ok, active_claim}, update: {:error, :down}], conflict},
+        {[get: {:ok, malformed_claim}, update: {:error, :down}], conflict}
       ]
 
       for {store_opts, detail} <- cases do
@@ -1023,48 +1212,96 @@ defmodule MPP.Methods.StripeTest do
       end
     end
 
-    test "serializes concurrent activations and recovers an abandoned claim" do
+    test "serializes concurrent activations and adopts a stale attempt's paid subscription" do
       test_pid = self()
-      {SubscriptionStore, store_opts} = subscription_store()
-      spy_store = {MPP.Test.ActivationClaimSpyStore, Keyword.put(store_opts, :test_pid, test_pid)}
       state = subscription_stub_state([])
-
-      subscription = fn challenge_id ->
-        stripe_subscription()
-        |> with_challenge(challenge_id)
-        |> put_in([Access.key!(:method_details), "subscription_store"], spy_store)
-      end
 
       Req.Test.stub(Stripe, fn conn ->
         {params, conn} = capture_stripe_request(conn, test_pid)
 
-        if conn.request_path == "/v1/subscriptions" and params["metadata[mpp_challenge_id]"] == "ch_slow" do
+        if conn.method == "POST" and conn.request_path == "/v1/subscriptions" do
+          stripe_subscription = commit_subscription(state, params)
           send(test_pid, {:activation_blocked, self()})
 
           receive do
-            :continue -> :ok
+            :continue -> Req.Test.json(conn, stripe_subscription)
           end
+        else
+          stub_subscription_response(conn, params, state)
         end
-
-        stub_subscription_response(conn, params, state)
       end)
 
-      slow = Task.async(fn -> Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_slow")) end)
+      slow_subscription = spy_subscription("ch_slow", test_pid: test_pid)
+      slow = Task.async(fn -> Stripe.verify(%{"paymentMethod" => "pm_input"}, slow_subscription) end)
+
       assert_receive {:activation_blocked, slow_pid}, 5_000
       assert_received {:activation_claim, claim_id}
 
       assert {:error, %Errors{detail: "Stripe subscription activation is already in progress for this payment method"}} =
-               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_concurrent"))
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_concurrent"))
 
-      assert {:ok, _aged} =
-               Store.update(subscription_store(), claim_id, fn claim ->
-                 {:ok, put_in(claim.method_state.claimed_at, DateTime.shift(DateTime.utc_now(), second: -901))}
-               end)
+      age_activation_claim(claim_id)
 
-      assert {:ok, %Receipt{}} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_recovered"))
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_recovered"))
 
       send(slow_pid, :continue)
-      assert {:ok, %Receipt{}} = Task.await(slow)
+      assert {:ok, %Receipt{extensions: %{"stripeSubscription" => "sub_test"}} = slow_receipt} = Task.await(slow)
+      assert {:ok, ^slow_receipt} = Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_slow"))
+
+      assert_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+      refute_received {:stripe_request, "POST", "/v1/subscriptions", _params, _headers}
+      refute_received {:stripe_request, "DELETE", _path, _params, _headers}
+      assert ledger_status(state.ledger, "sub_test") == "active"
+    end
+
+    test "a superseded attempt cancels its own subscription instead of recording it" do
+      test_pid = self()
+
+      state =
+        subscription_stub_state(
+          subscription_id_for: fn params ->
+            if params["metadata[mpp_challenge_id]"] == "ch_slow", do: "sub_slow", else: "sub_test"
+          end
+        )
+
+      Req.Test.stub(Stripe, fn conn ->
+        {params, conn} = capture_stripe_request(conn, test_pid)
+
+        if conn.method == "POST" and conn.request_path == "/v1/subscriptions" and
+             params["metadata[mpp_challenge_id]"] == "ch_slow" do
+          send(test_pid, {:activation_blocked, self()})
+
+          receive do
+            :continue -> Req.Test.json(conn, commit_subscription(state, params))
+          end
+        else
+          stub_subscription_response(conn, params, state)
+        end
+      end)
+
+      slow_subscription = spy_subscription("ch_slow", test_pid: test_pid)
+      slow = Task.async(fn -> Stripe.verify(%{"paymentMethod" => "pm_input"}, slow_subscription) end)
+
+      assert_receive {:activation_blocked, slow_pid}, 5_000
+      assert_received {:activation_claim, claim_id}
+      age_activation_claim(claim_id)
+
+      assert {:ok, %Receipt{} = recovered} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_recovered"))
+
+      send(slow_pid, :continue)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation is already in progress for this payment method"}} =
+               Task.await(slow)
+
+      assert_received {:stripe_request, "DELETE", "/v1/subscriptions/sub_slow", %{}, _headers}
+      assert ledger_status(state.ledger, "sub_slow") == "canceled"
+      assert ledger_status(state.ledger, "sub_test") == "active"
+      assert {:ok, ^recovered} = Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_recovered"))
+
+      assert {:error, %Errors{detail: "Stripe subscription is already active for this payment method"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_other"))
     end
 
     test "rejects malformed renewal events, payment proofs, and activation-period replays" do
@@ -2308,6 +2545,32 @@ defmodule MPP.Methods.StripeTest do
     put_in(subscription, [Access.key!(:method_details), "challenge_id"], challenge_id)
   end
 
+  defp spy_subscription(challenge_id, spy_opts \\ []) do
+    {SubscriptionStore, store_opts} = subscription_store()
+
+    stripe_subscription()
+    |> with_challenge(challenge_id)
+    |> put_in(
+      [Access.key!(:method_details), "subscription_store"],
+      {MPP.Test.ActivationClaimSpyStore, Keyword.merge(store_opts, spy_opts)}
+    )
+  end
+
+  defp activation_claim?(id), do: String.starts_with?(id, "stripe-activation:")
+
+  # Fails only the nth store update whose id satisfies `match?`.
+  defp fail_nth_update(match?, n) do
+    counter = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: make_ref()))
+    fn id -> match?.(id) and Agent.get_and_update(counter, &{&1 + 1 == n, &1 + 1}) end
+  end
+
+  defp age_activation_claim(claim_id) do
+    assert {:ok, _aged} =
+             Store.update(subscription_store(), claim_id, fn claim ->
+               {:ok, put_in(claim.method_state.claimed_at, DateTime.shift(DateTime.utc_now(), second: -901))}
+             end)
+  end
+
   defp flush_stripe_requests do
     receive do
       {:stripe_request, _method, _path, _params, _headers} -> flush_stripe_requests()
@@ -2324,13 +2587,26 @@ defmodule MPP.Methods.StripeTest do
       {params, conn} = capture_stripe_request(conn, test_pid)
       stub_subscription_response(conn, params, state)
     end)
+
+    state.ledger
   end
 
+  # The ledger stands in for Stripe's Subscription objects so listing,
+  # retrieval, and cancellation observe what earlier creations committed.
   defp subscription_stub_state(opts) do
+    ledger =
+      Keyword.get_lazy(opts, :ledger, fn ->
+        start_supervised!(Supervisor.child_spec({Agent, fn -> %{} end}, id: make_ref()))
+      end)
+
     %{
+      ledger: ledger,
       payment_customer: Keyword.get(opts, :payment_customer),
       payment_type: Keyword.get(opts, :payment_type, "card"),
       subscription_error: Keyword.get(opts, :subscription_error),
+      cancel_error: Keyword.get(opts, :cancel_error, false),
+      list_has_more: Keyword.get(opts, :list_has_more, false),
+      subscription_id_for: Keyword.get(opts, :subscription_id_for, fn _params -> "sub_test" end),
       payment_method_transform: Keyword.get(opts, :payment_method_transform, &Function.identity/1),
       customer_transform: Keyword.get(opts, :customer_transform, &Function.identity/1),
       attach_transform: Keyword.get(opts, :attach_transform, &Function.identity/1),
@@ -2356,13 +2632,33 @@ defmodule MPP.Methods.StripeTest do
         customer = %{"id" => "cus_test", "object" => "customer", "deleted" => false}
         Req.Test.json(conn, state.customer_transform.(customer))
 
-      "/v1/invoices/in_test" ->
-        Req.Test.json(conn, state.invoice_transform.(stripe_invoice_fixture()))
+      "/v1/invoices/in_" <> suffix ->
+        Req.Test.json(conn, state.invoice_transform.(stripe_invoice_fixture("sub_" <> suffix)))
+
+      "/v1/subscriptions" ->
+        %{"customer" => customer_id} = URI.decode_query(conn.query_string)
+
+        live =
+          state.ledger
+          |> Agent.get(&Map.values/1)
+          |> Enum.filter(&(&1["customer"] == customer_id and &1["status"] != "canceled"))
+
+        Req.Test.json(conn, %{"object" => "list", "data" => live, "has_more" => state.list_has_more})
+
+      "/v1/subscriptions/" <> id ->
+        case Agent.get(state.ledger, &Map.get(&1, id)) do
+          nil -> conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{"error" => %{"type" => "invalid_request_error"}})
+          stripe_subscription -> Req.Test.json(conn, stripe_subscription)
+        end
     end
   end
 
-  defp stub_subscription_response(%{method: "DELETE", request_path: "/v1/subscriptions/sub_test"} = conn, _params, _state) do
-    Req.Test.json(conn, %{"id" => "sub_test", "status" => "canceled"})
+  defp stub_subscription_response(%{method: "DELETE", request_path: "/v1/subscriptions/" <> id} = conn, _params, state) do
+    if state.cancel_error do
+      conn |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => %{"type" => "api_error"}})
+    else
+      Req.Test.json(conn, cancel_in_ledger(state.ledger, id))
+    end
   end
 
   defp stub_subscription_response(%{method: "POST", request_path: path} = conn, params, state) do
@@ -2383,11 +2679,11 @@ defmodule MPP.Methods.StripeTest do
         Req.Test.json(conn, state.price_transform.(stripe_price_fixture()))
 
       "/v1/subscriptions" ->
-        stub_subscription_creation(conn, state)
+        stub_subscription_creation(conn, params, state)
     end
   end
 
-  defp stub_subscription_creation(conn, %{subscription_error: :requires_action}) do
+  defp stub_subscription_creation(conn, _params, %{subscription_error: :requires_action}) do
     conn
     |> Plug.Conn.put_status(402)
     |> Req.Test.json(%{
@@ -2398,19 +2694,57 @@ defmodule MPP.Methods.StripeTest do
     })
   end
 
-  defp stub_subscription_creation(conn, %{subscription_error: :api_error}) do
+  defp stub_subscription_creation(conn, _params, %{subscription_error: :invalid_request}) do
+    conn
+    |> Plug.Conn.put_status(400)
+    |> Req.Test.json(%{"error" => %{"type" => "invalid_request_error"}})
+  end
+
+  defp stub_subscription_creation(conn, _params, %{subscription_error: :api_error}) do
     conn
     |> Plug.Conn.put_status(500)
     |> Req.Test.json(%{"error" => %{"type" => "api_error"}})
   end
 
-  defp stub_subscription_creation(conn, %{subscription_error: :invalid_response}) do
+  defp stub_subscription_creation(conn, _params, %{subscription_error: :invalid_response}) do
     Req.Test.json(conn, [])
   end
 
-  defp stub_subscription_creation(conn, state) do
-    Req.Test.json(conn, state.subscription_transform.(stripe_subscription_fixture()))
+  defp stub_subscription_creation(conn, params, %{subscription_error: :lost_response} = state) do
+    commit_subscription(state, params)
+    Req.Test.transport_error(conn, :timeout)
   end
+
+  defp stub_subscription_creation(conn, params, state) do
+    Req.Test.json(conn, commit_subscription(state, params))
+  end
+
+  defp commit_subscription(state, params) do
+    metadata =
+      for {"metadata[" <> key, value} <- params, into: %{}, do: {String.trim_trailing(key, "]"), value}
+
+    stripe_subscription =
+      params
+      |> state.subscription_id_for.()
+      |> stripe_subscription_fixture()
+      |> Map.merge(%{"customer" => params["customer"], "metadata" => metadata})
+      |> state.subscription_transform.()
+
+    if is_binary(stripe_subscription["id"]) do
+      Agent.update(state.ledger, &Map.put(&1, stripe_subscription["id"], stripe_subscription))
+    end
+
+    stripe_subscription
+  end
+
+  defp cancel_in_ledger(ledger, id) do
+    Agent.get_and_update(ledger, fn subscriptions ->
+      canceled = subscriptions |> Map.get(id, %{"id" => id}) |> Map.put("status", "canceled")
+      {canceled, Map.put(subscriptions, id, canceled)}
+    end)
+  end
+
+  defp ledger_status(ledger, id), do: Agent.get(ledger, &get_in(&1, [id, "status"]))
 
   defp capture_stripe_request(conn, test_pid) do
     {params, conn} =
@@ -2440,14 +2774,16 @@ defmodule MPP.Methods.StripeTest do
     }
   end
 
-  defp stripe_subscription_fixture do
+  defp stripe_subscription_fixture(id) do
+    "sub_" <> suffix = id
+
     %{
-      "id" => "sub_test",
+      "id" => id,
       "status" => "active",
       "customer" => "cus_test",
       "default_payment_method" => "pm_test",
       "collection_method" => "charge_automatically",
-      "latest_invoice" => "in_test",
+      "latest_invoice" => "in_" <> suffix,
       "automatic_tax" => %{"enabled" => false},
       "cancel_at" => nil,
       "cancel_at_period_end" => false,
@@ -2459,7 +2795,7 @@ defmodule MPP.Methods.StripeTest do
       "items" => %{
         "data" => [
           %{
-            "subscription" => "sub_test",
+            "subscription" => id,
             "quantity" => 1,
             "discounts" => [],
             "price" => %{"id" => "price_test"},
@@ -2471,9 +2807,11 @@ defmodule MPP.Methods.StripeTest do
     }
   end
 
-  defp stripe_invoice_fixture do
+  defp stripe_invoice_fixture(subscription_id \\ "sub_test") do
+    "sub_" <> suffix = subscription_id
+
     %{
-      "id" => "in_test",
+      "id" => "in_" <> suffix,
       "status" => "paid",
       "customer" => "cus_test",
       "currency" => "usd",
@@ -2491,7 +2829,7 @@ defmodule MPP.Methods.StripeTest do
       "automatic_tax" => %{"enabled" => false},
       "parent" => %{
         "type" => "subscription_details",
-        "subscription_details" => %{"subscription" => "sub_test"}
+        "subscription_details" => %{"subscription" => subscription_id}
       },
       "lines" => %{
         "data" => [
@@ -2506,7 +2844,7 @@ defmodule MPP.Methods.StripeTest do
             "pricing" => %{"type" => "price_details", "price_details" => %{"price" => "price_test"}},
             "parent" => %{
               "type" => "subscription_item_details",
-              "subscription_item_details" => %{"subscription" => "sub_test", "proration" => false}
+              "subscription_item_details" => %{"subscription" => subscription_id, "proration" => false}
             }
           }
         ]

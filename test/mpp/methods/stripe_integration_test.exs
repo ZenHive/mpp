@@ -482,6 +482,63 @@ defmodule MPP.Methods.StripeIntegrationTest do
       assert {:ok, ^revoked} = Store.get(store, activation.subscription_id)
     end
 
+    test "reconciles a lost activation record from the live claim-tagged subscription", %{
+      stripe_secret_key: stripe_secret_key
+    } do
+      customer_id = create_test_customer!(stripe_secret_key, "reconcile")
+      payment_method_id = attach_test_payment_method!(stripe_secret_key, customer_id, "pm_card_visa")
+      store = start_subscription_store!()
+      config = subscription_plug_config(stripe_secret_key, store)
+      conn_402 = request_challenge_conn(config)
+      [challenge_header] = Plug.Conn.get_resp_header(conn_402, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(challenge_header)
+      on_exit(fn -> archive_test_products!(stripe_secret_key, challenge.id) end)
+      on_exit(fn -> delete_test_customer!(stripe_secret_key, customer_id) end)
+      payload = %{"paymentMethod" => payment_method_id, "customer" => customer_id}
+
+      conn_200 =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header(
+          "authorization",
+          Headers.format_credential(%Credential{challenge: challenge, payload: payload})
+        )
+        |> MPP.Plug.call(config)
+
+      assert %Receipt{} = activation = conn_200.assigns[:mpp_receipt]
+      stripe_subscription_id = activation.extensions["stripeSubscription"]
+      stripe_subscription = stripe_get!(stripe_secret_key, "/subscriptions/#{stripe_subscription_id}")
+      assert %{"mpp_activation_claim" => "stripe-activation:" <> _digest} = stripe_subscription["metadata"]
+      assert is_binary(stripe_subscription["metadata"]["mpp_activation_generation"])
+
+      assert {:ok, recorded} = Store.get(store, activation.subscription_id)
+      assert :ok = Store.delete(store, activation.subscription_id)
+
+      fresh_402 = request_challenge_conn(config)
+      [fresh_header] = Plug.Conn.get_resp_header(fresh_402, "www-authenticate")
+      {:ok, fresh_challenge} = Headers.parse_challenge(fresh_header)
+      refute fresh_challenge.id == challenge.id
+
+      conn_replay =
+        :get
+        |> Plug.Test.conn("/api/subscription")
+        |> Plug.Conn.put_req_header(
+          "authorization",
+          Headers.format_credential(%Credential{challenge: fresh_challenge, payload: payload})
+        )
+        |> MPP.Plug.call(config)
+
+      assert conn_replay.status == 402
+
+      assert Jason.decode!(conn_replay.resp_body)["detail"] ==
+               "Stripe subscription is already active for this payment method"
+
+      assert {:ok, ^recorded} = Store.get(store, activation.subscription_id)
+
+      live = stripe_get!(stripe_secret_key, "/subscriptions?customer=#{customer_id}&limit=#{@stripe_list_limit}")
+      assert [%{"id" => ^stripe_subscription_id, "status" => "active"}] = live["data"]
+    end
+
     test "voids a live unpaid renewal after its canonical period closes", %{
       stripe_secret_key: stripe_secret_key
     } do
