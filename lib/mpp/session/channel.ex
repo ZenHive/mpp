@@ -169,15 +169,23 @@ defmodule MPP.Session.Channel do
 
   def apply_voucher(_channel, _amount, _proof), do: {:error, {:invalid_amount, :cumulative_amount}}
 
-  @doc "Increase the channel deposit by a positive additional amount."
-  @spec apply_top_up(t(), pos_integer()) :: {:ok, t()} | {:error, term()}
-  def apply_top_up(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+  @doc """
+  Replace the channel deposit with a verified on-chain total deposit.
 
-  def apply_top_up(%__MODULE__{} = channel, amount) when is_integer(amount) and amount > 0 do
-    {:ok, %{channel | deposit: channel.deposit + amount}}
+  `deposit` is the escrow's confirmed total after a top-up, never a
+  client-claimed increment, and must exceed the current deposit.
+  """
+  @spec apply_verified_deposit(t(), pos_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_verified_deposit(%__MODULE__{status: :closed}, _deposit),
+    do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit)
+      when is_integer(deposit) and deposit > current do
+    {:ok, %{channel | deposit: deposit}}
   end
 
-  def apply_top_up(_channel, _amount), do: {:error, {:invalid_amount, :additional_deposit}}
+  def apply_verified_deposit(%__MODULE__{}, deposit) when is_integer(deposit), do: {:error, :deposit_not_increased}
+  def apply_verified_deposit(_channel, _deposit), do: {:error, {:invalid_amount, :deposit}}
 
   @doc "Deduct a per-request spend from the authorized voucher balance."
   @spec apply_spend(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}

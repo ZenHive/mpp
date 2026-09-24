@@ -5,6 +5,14 @@ defmodule MPP.Session.Actions do
   Dispatches on `credential.payload.action` to `open`, `voucher`, `top_up`,
   and `close`. Each handler updates per-channel deposit / voucher /
   spend balances through `MPP.Session.Store`.
+
+  `topUp` requires a funding verifier, passed as the `:verify_top_up` option
+  or the server-only `"verify_top_up"` method-config key. It is called as
+  `verify.(payload, channel, opts)`, must confirm the top-up transaction
+  on-chain, and returns `{:ok, total_deposit}` with the escrow's confirmed
+  channel deposit (or `{:error, %MPP.Errors{}}`). The channel ceiling becomes
+  that total; the payload's `additionalDeposit` is never trusted. Without a
+  verifier every `topUp` is rejected.
   """
 
   alias MPP.Errors
@@ -58,16 +66,52 @@ defmodule MPP.Session.Actions do
   end
 
   defp handle_top_up(payload, opts) do
-    update_channel(payload, opts, fn
-      :not_found ->
-        {:error, Errors.new(:channel_not_found, "channel not found")}
+    with {:ok, current} <- fetch_top_up_channel(payload, opts),
+         :ok <- require_positive_top_up(payload),
+         {:ok, deposit} <- verify_top_up(payload, current, opts) do
+      update_channel(payload, opts, fn
+        :not_found ->
+          {:error, Errors.new(:channel_not_found, "channel not found")}
 
-      %Channel{status: :closed} ->
-        {:error, Errors.new(:channel_closed, "channel is closed")}
+        %Channel{status: :closed} ->
+          {:error, Errors.new(:channel_closed, "channel is closed")}
 
-      %Channel{} = channel ->
-        Channel.apply_top_up(channel, payload.additional_deposit)
-    end)
+        %Channel{} = channel ->
+          Channel.apply_verified_deposit(channel, deposit)
+      end)
+    end
+  end
+
+  defp fetch_top_up_channel(payload, opts) do
+    case Store.get(store(opts), payload.channel_id) do
+      {:ok, %Channel{status: :closed}} -> {:error, Errors.new(:channel_closed, "channel is closed")}
+      {:ok, %Channel{} = channel} -> {:ok, channel}
+      :not_found -> {:error, Errors.new(:channel_not_found, "channel not found")}
+      {:error, reason} -> {:error, store_error(reason)}
+    end
+  end
+
+  defp require_positive_top_up(%Payload{additional_deposit: amount}) when is_integer(amount) and amount > 0, do: :ok
+  defp require_positive_top_up(_payload), do: {:error, store_error({:invalid_amount, :additional_deposit})}
+
+  # The claimed additionalDeposit is never trusted: the deposit ceiling only
+  # moves to the escrow total the configured verifier confirms on-chain.
+  defp verify_top_up(payload, channel, opts) do
+    case Keyword.get(opts, :verify_top_up) do
+      fun when is_function(fun, 3) ->
+        case fun.(payload, channel, opts) do
+          {:ok, deposit} when is_integer(deposit) and deposit >= 0 -> {:ok, deposit}
+          {:error, %Errors{} = error} -> {:error, error}
+          other -> {:error, Errors.new(:verification_failed, "topUp funding verification failed: #{inspect(other)}")}
+        end
+
+      _ ->
+        {:error,
+         Errors.new(
+           :verification_failed,
+           "topUp requires a configured funding verifier (verify_top_up) that confirms the escrow deposit on-chain"
+         )}
+    end
   end
 
   defp handle_voucher(payload, opts) do
@@ -191,6 +235,9 @@ defmodule MPP.Session.Actions do
   defp store_error(%Errors{} = error), do: error
   defp store_error(:insufficient_balance), do: Errors.new(:insufficient_balance, "insufficient channel balance")
   defp store_error(:amount_exceeds_deposit), do: Errors.new(:amount_exceeds_deposit, "amount exceeds channel deposit")
+
+  defp store_error(:deposit_not_increased),
+    do: Errors.new(:verification_failed, "channel deposit did not increase after topUp")
 
   defp store_error({:invalid_transition, status, _to}) do
     Errors.new(:invalid_payload, "invalid channel transition from #{status}")
@@ -346,7 +393,8 @@ defmodule MPP.Session.Actions do
       authorized_signer: Map.get(details, "authorizedSigner") || Map.get(details, "authorized_signer"),
       min_voucher_delta: Map.get(details, "minVoucherDelta") || Map.get(details, "min_voucher_delta", 1),
       request_amount: Map.get(details, "request_amount", session.amount),
-      method_name: Map.get(details, "method", "session")
+      method_name: Map.get(details, "method", "session"),
+      verify_top_up: Map.get(details, "verify_top_up")
     ]
   end
 

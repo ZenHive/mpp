@@ -147,10 +147,12 @@ defmodule MPP.Session.ChannelTest do
       assert raised.proof == higher
     end
 
-    test "apply_top_up increases deposit and apply_spend consumes authorized balance" do
+    test "apply_verified_deposit raises the ceiling to the verified total and apply_spend consumes authorized balance" do
       {:ok, channel} = channel_opts() |> Channel.new!() |> Channel.apply_voucher(200)
 
-      assert {:ok, topped} = Channel.apply_top_up(channel, 50)
+      assert {:error, :deposit_not_increased} = Channel.apply_verified_deposit(channel, channel.deposit)
+      assert {:error, :deposit_not_increased} = Channel.apply_verified_deposit(channel, channel.deposit - 1)
+      assert {:ok, topped} = Channel.apply_verified_deposit(channel, 1_000_050)
       assert topped.deposit == 1_000_050
 
       assert {:ok, spent} = Channel.apply_spend(topped, 80)
@@ -164,7 +166,7 @@ defmodule MPP.Session.ChannelTest do
       {:ok, closed} = channel_opts() |> Channel.new!() |> Channel.activate() |> elem(1) |> Channel.close()
 
       assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_voucher(closed, 1)
-      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_top_up(closed, 1)
+      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_verified_deposit(closed, 10_000_000)
       assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_spend(closed, 1)
     end
 
@@ -172,7 +174,7 @@ defmodule MPP.Session.ChannelTest do
       channel = Channel.new!(channel_opts())
 
       assert {:error, {:invalid_amount, :cumulative_amount}} = Channel.apply_voucher(channel, "1")
-      assert {:error, {:invalid_amount, :additional_deposit}} = Channel.apply_top_up(channel, 0)
+      assert {:error, {:invalid_amount, :deposit}} = Channel.apply_verified_deposit(channel, "2000000")
       assert {:error, {:invalid_amount, :spent}} = Channel.apply_spend(channel, -1)
       assert {:ok, ^channel} = Channel.apply_spend(channel, 0)
     end
