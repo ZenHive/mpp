@@ -5880,6 +5880,90 @@
       "created_at": "2026-09-23",
       "scored_at": "2026-09-23",
       "cross_repo": []
+    },
+    {
+      "id": "139",
+      "phase": 13,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity)",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 6
+      },
+      "eff": 1.5,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "`MPP.Methods.Tempo.MachineToken` holds both deployments per chain: the current machineUSD token/swapper (matches refs/mpp-rs `src/protocol/methods/tempo/machine_token.rs:127-135`) and MACH token `0x20c000000000000000000000f37de3740ADec032` with swapper `0xF72E5107c32C655ffA7539a3C8e97B7C3cE16A3F` (mainnet) / `0xd05f8EdFBB54Da0d765C9fE9b2B3f7d2E3a8C466` (Moderato), per refs/mppx `src/tempo/internal/defaults.ts:24-35`. Which deployments the server accepts is decided from live chain behavior at pickup, not from either SDK alone; the delivery states which it found.",
+        "With `machine_token_enabled`, the server accepts a charge settled through either deployment's canonical `[approve, swapTo]` route (hash receipts and `type=\"transaction\"` calls): the swapper is a trusted settlement `from` only when the receipt's transaction sender equals the expected payer (refs/mppx `src/tempo/server/Charge.ts` `isValidTransferSender`), and the challenge-bound attribution memo check is unchanged.",
+        "Configuring a machine-token address (either deployment) as the charge `currency` raises at boot with a message pointing at `machine_token_enabled` (refs/mppx server Charge.ts `isMachineToken` guard).",
+        "`MPP.Client.Providers.Tempo` picks the route a current mppx client would build for the same challenge, and still pays through the machineUSD route when a server only accepts that one.",
+        "One live Moderato success through the MACH route and one relevant live rejection are pinned as `:integration` tests; missing credentials flunk with the exact `export` lines. Non-machine-token TIP-20 verification is unchanged."
+      ],
+      "out_of_scope": [
+        "Machine-token session settlement (mppx keeps MACH out of session config; see refs/mppx src/tempo/server/Methods.ts createSessionMethod)",
+        "Accepting MACH as an advertised charge currency",
+        "Moving calldata/event parsing into onchain_tempo"
+      ],
+      "touches": [
+        "lib/mpp/methods/tempo.ex",
+        "lib/mpp/methods/tempo/machine_token.ex",
+        "lib/mpp/client/providers/tempo.ex",
+        "test/mpp/methods/tempo_test.exs",
+        "test/mpp/methods/tempo/machine_token_test.exs",
+        "test/mpp/client/providers/tempo_test.exs",
+        "test/mpp/client/providers/tempo_machine_token_integration_test.exs",
+        "CHANGELOG.md"
+      ],
+      "body": "mppx 0.11.0 (#902, commit ba6f7a2, 2026-09-22) re-added machine-token charge funding against a new MACH deployment: token `0x20c0…f37de3740ADec032` on both chains, swapper `0xF72E…6A3F` (mainnet) and `0xd05f…C466` (Moderato). Before that, mppx moved addresses in #800 and removed machine-token payments in #839. mpp-rs has not followed: its `machine_token.rs:127-135` still carries the machineUSD token/swapper pair that our `lib/mpp/methods/tempo/machine_token.ex:33-36` pins (shipped in Task 84). The two reference SDKs therefore disagree on which contracts a machine-token charge goes through.\n\nOn 2026-09-24 `eth_getCode` returned bytecode for both swappers on Moderato and on mainnet, and the TIP-20 marker `0xef` for both tokens, so both deployments are live. A merchant running our server with `machine_token_enabled` rejects a payment from an mppx 0.11 client, because the MACH swapper is not a trusted settlement sender for us. The payment fails closed; nothing can be exploited. The client never gets the resource.\n\nThe decision to make at pickup: accept both deployments (the recommended default: mpp-rs clients keep working and mppx clients start working), or only MACH if live evidence shows the machineUSD swapper is being retired. Say in the delivery which one you chose and on what evidence. Swapper bytecode differs in size between the two deployments (≈16 KB vs ≈5 KB), so read the verified MACH swapper source or a live `swapTo` receipt before assuming the `swapTo(address,uint256,address,address,bytes32)` selector and event shape carry over. Found by the 2026-09-24 sdk-delta-watch sweep.\n",
+      "created_at": "2026-09-24",
+      "scored_at": "2026-09-24",
+      "cross_repo": []
+    },
+    {
+      "id": "140",
+      "phase": 12,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity)",
+      "scores": {
+        "d": 2,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 2.0,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-4.7",
+      "acceptance_criteria": [
+        "`MPP.Client.Transport.HTTP.get_challenges/2` no longer drops x402 `PAYMENT-REQUIRED` offers whose `resource.url` differs from the request URL; the nine resource/response URL pairs in refs/mppx `src/client/Transport.test.ts` (commit 4dc37a8: empty response URL, scheme/host/port/path differences, differing query strings, fragments) each yield one synthetic challenge in a ported test.",
+        "`MPP.X402.challenges_from_header/2` either loses its `request_url` argument or keeps it as an explicit opt-in that the transport never passes. Moduledoc, `api()` description and CHANGELOG say which, and why.",
+        "Server-side resource binding in `MPP.X402.Plug` (`:resource_mismatch` on the echoed credential resource) is unchanged, and its existing tests stay green."
+      ],
+      "out_of_scope": [
+        "Server-side x402 resource validation",
+        "Native Payment-auth challenge parsing"
+      ],
+      "touches": [
+        "lib/mpp/x402.ex",
+        "lib/mpp/client/transport/http.ex",
+        "test/mpp/x402/exact_test.exs",
+        "test/mpp/client/transport/http_test.exs",
+        "CHANGELOG.md"
+      ],
+      "body": "mppx #908 (commit 4dc37a8, released in mppx 0.11.0) removed the client-side check that an x402 `PAYMENT-REQUIRED` envelope's `resource.url` must equal the response URL (refs/mppx `src/client/internal/protocols/X402.ts`, the two deleted lines). Exact matching broke payable offers whenever query strings, redirects, proxies or port rewriting made the two URLs differ. Our client still does the exact match: `lib/mpp/x402.ex:140-146` `match_resource_url/2`, called from `lib/mpp/client/transport/http.ex:128`. There, a mismatch turns into `{:ok, []}`, so the x402 offer disappears without any error and the client reports `:no_payment_challenges`. This is an interop gap, not a security one: the server still binds the paid resource (`MPP.X402.Plug`). Found by the 2026-09-24 sdk-delta-watch sweep.\n",
+      "created_at": "2026-09-24",
+      "scored_at": "2026-09-24",
+      "cross_repo": []
     }
   ]
 }
