@@ -276,6 +276,92 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
     end
   end
 
+  describe "bundle signature reservation" do
+    setup context do
+      transactions = signed_bundle(context)
+
+      {:ok,
+       payload: %{
+         "type" => "bundle",
+         "transactions" => Enum.map(transactions, &(&1 |> Transaction.serialize() |> Base.encode64()))
+       },
+       signature: Cartouche.Base58.encode(hd(List.last(transactions).signatures)),
+       default_store: default_store_charge(context.charge)}
+    end
+
+    test "concurrent presentations of the same bundle: exactly one settles", context do
+      test_pid = self()
+
+      stub_bundle(context.signature, fn
+        "getAccountInfo", 1 ->
+          send(test_pid, {:snapshot, self()})
+          receive do: (:go -> :ok)
+          {:result, zero_account()}
+
+        method, call ->
+          default_bundle_result(method, call)
+      end)
+
+      task = Task.async(fn -> Solana.verify(context.payload, context.default_store) end)
+      assert_receive {:snapshot, snapshotting}
+
+      assert {:error, %Errors{} = error} = Solana.verify(context.payload, context.default_store)
+      assert error.detail =~ "already used"
+
+      send(snapshotting, :go)
+      assert {:ok, %MPP.Receipt{reference: reference}} = Task.await(task)
+      assert reference == context.signature
+    end
+
+    test "a failed pre-settlement snapshot releases the reservation", context do
+      stub_bundle(context.signature, fn
+        "getAccountInfo", 1 -> {:error, %{"code" => -32_005, "message" => "node behind"}}
+        "getAccountInfo", call -> default_bundle_result("getAccountInfo", call - 1)
+        method, call -> default_bundle_result(method, call)
+      end)
+
+      assert {:error, %Errors{}} = Solana.verify(context.payload, context.default_store)
+      assert {:ok, %MPP.Receipt{}} = Solana.verify(context.payload, context.default_store)
+      assert {:error, %Errors{} = replay} = Solana.verify(context.payload, context.default_store)
+      assert replay.detail =~ "already used"
+    end
+
+    test "a simulation failure before any broadcast releases the reservation", context do
+      stub_bundle(context.signature, fn
+        "simulateTransaction", 1 -> {:result, %{"err" => "AccountNotFound", "logs" => [], "unitsConsumed" => 0}}
+        "getAccountInfo", call -> default_bundle_result("getAccountInfo", call - 1)
+        method, call -> default_bundle_result(method, call)
+      end)
+
+      assert {:error, %Errors{} = error} = Solana.verify(context.payload, context.default_store)
+      assert error.detail =~ "simulation rejected"
+      assert {:ok, %MPP.Receipt{}} = Solana.verify(context.payload, context.default_store)
+    end
+
+    test "a simulation failure after an earlier bundle broadcast keeps the reservation", context do
+      stub_bundle(context.signature, fn
+        "simulateTransaction", 2 -> {:result, %{"err" => "AccountNotFound", "logs" => [], "unitsConsumed" => 0}}
+        method, call -> default_bundle_result(method, call)
+      end)
+
+      assert {:error, %Errors{} = error} = Solana.verify(context.payload, context.default_store)
+      assert error.detail =~ "simulation rejected"
+      assert {:error, %Errors{} = replay} = Solana.verify(context.payload, context.default_store)
+      assert replay.detail =~ "already used"
+    end
+
+    test "a failed broadcast keeps the reservation because the bundle may still land", context do
+      stub_bundle(context.signature, fn
+        "sendTransaction", 1 -> {:error, %{"code" => -32_002, "message" => "node unhealthy"}}
+        method, call -> default_bundle_result(method, call)
+      end)
+
+      assert {:error, %Errors{}} = Solana.verify(context.payload, context.default_store)
+      assert {:error, %Errors{} = replay} = Solana.verify(context.payload, context.default_store)
+      assert replay.detail =~ "already used"
+    end
+  end
+
   describe "verify_bundle/3" do
     test "accepts ordered proof setup, transfer, and close transactions", context do
       transactions = valid_bundle(context)
@@ -732,6 +818,66 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
           end),
         data: compiled.data
       }
+    end)
+  end
+
+  defp default_store_charge(charge) do
+    details =
+      charge.method_details
+      |> Map.delete("store")
+      |> Map.put("req_options", plug: {Req.Test, __MODULE__})
+
+    %{charge | method_details: details}
+  end
+
+  defp zero_account, do: account_rpc_value(@identity <> @identity, @identity <> @identity)
+
+  # First snapshot of an attempt is the zero balance, the post-settlement one
+  # carries the decryptable 65539 delta.
+  defp default_bundle_result("getAccountInfo", call) when rem(call, 2) == 1, do: {:result, zero_account()}
+  defp default_bundle_result("getAccountInfo", _call), do: {:result, account_rpc_value(@low_ciphertext, @high_ciphertext)}
+
+  defp default_bundle_result("simulateTransaction", _call),
+    do: {:result, %{"err" => nil, "logs" => [], "unitsConsumed" => 1}}
+
+  defp default_bundle_result(method, _call) when method in ["sendTransaction", "getTransaction"], do: :default
+
+  defp default_bundle_result("getSignatureStatuses", _call) do
+    {:result, [%{"slot" => 1, "confirmations" => 1, "err" => nil, "confirmationStatus" => "confirmed"}]}
+  end
+
+  defp stub_bundle(signature, script) do
+    counters = :counters.new(8, [])
+
+    slots = %{
+      "getAccountInfo" => 1,
+      "simulateTransaction" => 2,
+      "sendTransaction" => 3,
+      "getSignatureStatuses" => 4,
+      "getTransaction" => 5
+    }
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {method, id, conn} = read_rpc(conn)
+      slot = Map.fetch!(slots, method)
+      :counters.add(counters, slot, 1)
+
+      outcome =
+        case {method, script.(method, :counters.get(counters, slot))} do
+          {"sendTransaction", :default} ->
+            {:result, signature}
+
+          {"getTransaction", :default} ->
+            {:result, %{"meta" => %{"err" => nil}, "transaction" => %{"signatures" => [signature]}}}
+
+          {_method, outcome} ->
+            outcome
+        end
+
+      case outcome do
+        {:result, result} -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
+        {:error, error} -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => id, "error" => error})
+      end
     end)
   end
 

@@ -343,14 +343,15 @@ defmodule MPP.Methods.Solana do
          :ok <- Confidential.verify_bundle(transactions, charge, max_transactions, instruction_opts(charge, config)),
          {:ok, transactions} <- cosign_bundle(transactions, config),
          {:ok, signature} <- transactions |> List.last() |> transaction_signature(),
-         :ok <- check_signature_unused(store, signature),
-         {:ok, previous} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
-         {:ok, ^signature} <- settle_bundle(transactions, rpc_url, config),
+         {:ok, token} <- reserve_signature(store, signature),
+         reservation = {store, signature, token},
+         snapshot = Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
+         {:ok, previous} <- release_on_error(snapshot, reservation),
+         {:ok, ^signature} <- settle_reserved_bundle(transactions, rpc_url, config, reservation),
          {:ok, confirmed} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Confidential.verify_confirmed(confirmed),
          {:ok, current} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
-         :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]),
-         :ok <- commit_signature_used(store, signature) do
+         :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]) do
       {:ok,
        Receipt.new(
          method: "solana",
@@ -403,16 +404,35 @@ defmodule MPP.Methods.Solana do
     end
   end
 
+  # The reservation is released only when settlement failed before the first
+  # sendTransaction; once any bundle transaction may have been broadcast it is
+  # kept, because the bundle is no longer replayable as a whole.
+  defp settle_reserved_bundle(transactions, rpc_url, config, reservation) do
+    case settle_bundle(transactions, rpc_url, config) do
+      {:ok, signature} ->
+        {:ok, signature}
+
+      {:not_broadcast, failure} ->
+        release_signature(reservation)
+        failure
+
+      {:broadcast_attempted, failure} ->
+        failure
+    end
+  end
+
   defp settle_bundle(transactions, rpc_url, config) do
-    Enum.reduce_while(transactions, {:ok, nil}, fn transaction, {:ok, _last_signature} ->
-      with :ok <- simulate_transaction(transaction, rpc_url, config),
-           {:ok, signature} <- broadcast_transaction(transaction, rpc_url, config, true) do
-        {:cont, {:ok, signature}}
-      else
-        {:error, _error} = failure -> {:halt, failure}
+    Enum.reduce_while(transactions, {:ok, nil}, fn transaction, {:ok, last_signature} ->
+      case simulate_transaction(transaction, rpc_url, config) do
+        :ok -> transaction |> broadcast_transaction(rpc_url, config, true) |> continue_bundle()
+        {:error, _error} = failure when is_nil(last_signature) -> {:halt, {:not_broadcast, failure}}
+        {:error, _error} = failure -> {:halt, {:broadcast_attempted, failure}}
       end
     end)
   end
+
+  defp continue_bundle({:ok, signature}), do: {:cont, {:ok, signature}}
+  defp continue_bundle({:error, _error} = failure), do: {:halt, {:broadcast_attempted, failure}}
 
   defp extract_transaction(%{"transaction" => encoded}) when is_binary(encoded) do
     with {:ok, bytes} <- decode_base64_tx(encoded),
@@ -976,15 +996,15 @@ defmodule MPP.Methods.Solana do
   end
 
   defp simulate_reserved(tx, rpc_url, config, reservation) do
-    case simulate_transaction(tx, rpc_url, config) do
-      :ok ->
-        :ok
-
-      {:error, _error} = failure ->
-        release_signature(reservation)
-        failure
-    end
+    release_on_error(simulate_transaction(tx, rpc_url, config), reservation)
   end
+
+  defp release_on_error({:error, _error} = failure, reservation) do
+    release_signature(reservation)
+    failure
+  end
+
+  defp release_on_error(result, _reservation), do: result
 
   defp release_signature({nil, _signature, _token}), do: :ok
 
