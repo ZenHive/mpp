@@ -3111,7 +3111,7 @@
       "id": "80",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "in_progress",
+      "status": "done",
       "title": "USDC charge method: EVM and Solana direct profiles",
       "scores": {
         "d": 7,
@@ -3149,10 +3149,17 @@
         "test/mpp/methods/usdc_test.exs",
         "test/mpp/methods/usdc_integration_test.exs"
       ],
+      "shipped_in": "58a2c7f201a8e4c574ac9058c1481d080dfac1fb",
       "body": "Implement the Circle-authored `usdc` payment method per `refs/mpp-specs/specs/methods/usdc/draft-usdc-charge-00.md`, including every network/profile normatively covered at pickup. The current v00 surface spans EVM, Solana, Stacks USDCx, and Circle Gateway. Circle's official docs/contracts and live Gateway sandbox establish USDC identity and Gateway semantics; the provider-owned EVM, Solana, and Stacks contracts/specifications plus observed test-network behavior establish each chain leg. MPP SDK implementations are compatibility evidence, not the semantic authority.\n\nBoundary with Tasks 40 and 21: Task 40 implements EIP-3009 `transferWithAuthorization` inside MPP.Methods.EVM and Task 21 implements generic Solana payment mechanics. This task implements the distinct first-class `usdc` acceptance surface on top of those primitives and adds the Stacks USDCx and Gateway profiles. Reuse the prerequisite primitives rather than duplicating them.\n\n2026-09-16 (review, Claude + Codex second opinion): split. Four live environments, a new chain (Stacks) and an off-chain settlement API (Gateway) in one dispatch cycle cannot be reviewed as one diff, and 10/10/10 distinguished nothing. This task keeps the two profiles that sit on existing primitives; Task 122 (Stacks) and Task 123 (Gateway) depend on it. D 10→7, B 10→8, U 10→8.\n",
       "created_at": "2026-08-02",
       "started_at": "2026-09-24",
+      "done_at": "2026-09-24",
       "scored_at": "2026-09-16",
+      "implemented": "Landed by grok via merge-train; reviewer-approved (run run-1790239443298-bea27b56, 58a2c7f201a8e4c574ac9058c1481d080dfac1fb).",
+      "delivered_by": "grok",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1790239443298-bea27b56",
       "cross_repo": []
     },
     {

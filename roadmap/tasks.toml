@@ -2134,7 +2134,7 @@ shipped_in = "adc7773e5ae1d0fef034f5ad9c6a88290fbe53b7"
 id = "80"
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "done"
 title = "USDC charge method: EVM and Solana direct profiles"
 scores = { d = 7, b = 8, u = 8 }
 depends_on = [21, 40]
@@ -2156,9 +2156,16 @@ Boundary with Tasks 40 and 21: Task 40 implements EIP-3009 `transferWithAuthoriz
 
 2026-09-16 (review, Claude + Codex second opinion): split. Four live environments, a new chain (Stacks) and an off-chain settlement API (Gateway) in one dispatch cycle cannot be reviewed as one diff, and 10/10/10 distinguished nothing. This task keeps the two profiles that sit on existing primitives; Task 122 (Stacks) and Task 123 (Gateway) depend on it. D 10→7, B 10→8, U 10→8.
 """
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1790239443298-bea27b56, 58a2c7f201a8e4c574ac9058c1481d080dfac1fb)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1790239443298-bea27b56"
 created_at = "2026-08-02"
 started_at = "2026-09-24"
 scored_at = "2026-09-16"
+done_at = "2026-09-24"
+shipped_in = "58a2c7f201a8e4c574ac9058c1481d080dfac1fb"
 
 [[task]]
 id = "81"
