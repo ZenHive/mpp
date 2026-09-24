@@ -72,6 +72,12 @@ defmodule MPP.Methods.Solana do
           those terms, and whoever presents its signature first is served; use
           it only when the charge terms are unique per challenge.
 
+  Under `"challenge_memo"`, a pull (`type="transaction"`) credential may carry
+  only the memos a reference client adds — the challenge `externalId` and split
+  `memo` values — or `push_memo/1` of the challenge being answered. Any other
+  memo is rejected, so a push transaction bound to a different challenge cannot
+  be redeemed through the pull path.
+
   ## Push challenge binding
 
   Under `"push" => "challenge_memo"` the client derives the memo from the
@@ -313,6 +319,7 @@ defmodule MPP.Methods.Solana do
          :ok <- require_recipient(charge),
          :ok <- verify_signatures(tx, config),
          :ok <- Instructions.verify_compiled(tx, charge, instruction_opts(charge, config)),
+         :ok <- verify_pull_memos(tx, charge, config),
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, signature} <- transaction_signature(tx),
          :ok <- check_signature_unused(store, signature),
@@ -693,6 +700,31 @@ defmodule MPP.Methods.Solana do
     else
       _ -> {:error, Errors.new(:verification_failed, "Transaction memo does not bind this challenge")}
     end
+  end
+
+  defp verify_pull_memos(tx, charge, config) do
+    if push_mode(config) == "challenge_memo" do
+      allowed = allowed_pull_memos(charge, config)
+
+      with {:ok, classified} <- Instructions.classify_compiled(tx),
+           true <- Enum.all?(classified, &allowed_pull_instruction?(&1, allowed)) do
+        :ok
+      else
+        _ -> {:error, Errors.new(:verification_failed, "Transaction memo does not bind this challenge")}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp allowed_pull_instruction?({:memo, memo}, allowed), do: memo in allowed
+  defp allowed_pull_instruction?(_classified, _allowed), do: true
+
+  defp allowed_pull_memos(charge, config) do
+    split_memos = for %{"memo" => memo} <- config["splits"] || [], is_binary(memo), do: memo
+    push = if is_binary(config["challenge_id"]), do: [push_memo(config["challenge_id"])], else: []
+    external = if is_binary(charge.external_id), do: [charge.external_id], else: []
+    external ++ split_memos ++ push
   end
 
   defp maybe_put_push_binding(details, config) do

@@ -447,6 +447,47 @@ defmodule MPP.Methods.SolanaTest do
       assert error.detail =~ "challenge binding"
     end
 
+    test "challenge_memo rejects a pull transaction bound to another challenge", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "attacker"})
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, [Solana.push_memo("victim")])
+      stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
+
+      assert {:error, %Errors{} = error} =
+               Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+
+      assert error.detail =~ "memo"
+    end
+
+    test "challenge_memo rejects a pull transaction with an unexpected memo", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      {_tx, encoded} = memo_pull_tx(payer, seed, recipient, ["order-1"])
+
+      assert {:error, %Errors{}} = Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+    end
+
+    test "challenge_memo accepts pull memos a reference client adds", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+
+      charge =
+        put_details(%{charge | external_id: "order-42"}, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, ["order-42", Solana.push_memo("chal-1")])
+      stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
+
+      assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+    end
+
+    test "challenge_memo accepts a memo-free pull transaction", context do
+      %{bare: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
+      charge = put_details(charge, %{"push" => "challenge_memo", "challenge_id" => "chal-1"})
+      {tx, encoded} = memo_pull_tx(payer, seed, recipient, [])
+      stub_pull_success(pull_signature(tx), sol_parsed_tx(pull_signature(tx), payer, recipient, @amount))
+
+      assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
+    end
+
     test "through MPP.Plug only the issuing challenge's memo is accepted", %{payer: payer, recipient: recipient} do
       config = push_plug_config(recipient, 300)
       other = issue_challenge(push_plug_config(recipient, 600), "/a")
@@ -2407,6 +2448,17 @@ defmodule MPP.Methods.SolanaTest do
       }
     )
   end
+
+  defp memo_pull_tx(payer, seed, recipient, memos) do
+    memo_program = elem(Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), 1)
+    memo_ixs = Enum.map(memos, &%Instruction{program_id: memo_program, accounts: [], data: &1})
+    transfer = SystemProgram.transfer(payer, recipient, @amount)
+    message = Transaction.build_message(payer, [transfer | memo_ixs], @blockhash)
+    tx = Transaction.sign(message, [seed])
+    {tx, Base.encode64(Transaction.serialize(tx))}
+  end
+
+  defp pull_signature(tx), do: Cartouche.Base58.encode(hd(tx.signatures))
 
   defp issue_challenge(config, path) do
     conn = :get |> Plug.Test.conn(path) |> PaymentPlug.call(config)
