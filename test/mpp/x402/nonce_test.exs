@@ -36,4 +36,11 @@ defmodule MPP.X402.NonceTest do
     assert Nonce.contract(extensions) == :extension_bound
     assert Nonce.contract(%{}) == :random
   end
+
+  test "salt preserves unrelated extensions and repairs non-map info" do
+    assert Nonce.with_nonce_salt(%{"other" => %{}}) == %{"other" => %{}}
+    salted = Nonce.with_nonce_salt(%{"mppx" => %{"info" => nil, "schema" => %{}}})
+    assert byte_size(salted["mppx"]["info"]["nonce"]) == 64
+    assert salted["mppx"]["schema"] == %{}
+  end
 end

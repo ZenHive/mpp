@@ -3,6 +3,7 @@ defmodule MPP.X402.PlugTest do
 
   alias MPP.Errors
   alias MPP.Method
+  alias MPP.Methods.EVM.Authorization
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -163,6 +164,137 @@ defmodule MPP.X402.PlugTest do
       assert problem_detail(replayed) =~ "already been settled"
       refute_received {:settle, _payload, _requirements}
     end
+  end
+
+  test "configuration rejects invalid accepts and binding modes" do
+    assert X402.Plug.configure(false) == nil
+
+    for overrides <- [[accepts: []], [accepts: [%{}]], [route_binding: :other]] do
+      assert_raise ArgumentError, fn ->
+        X402.Plug.configure(Keyword.merge([facilitator: facilitator(self()), accepts: [@accept]], overrides))
+      end
+    end
+  end
+
+  test "verification and settlement failures stop the pipeline and retain the replay claim" do
+    for {stage, response, expected} <- [
+          {:verify, {:ok, %{"isValid" => false}}, "verify_failed"},
+          {:verify, {:ok, %{"isValid" => false, "invalidMessage" => "declined"}}, "declined"},
+          {:verify, {:error, {:transport, :offline}}, "transport"},
+          {:settle, {:ok, %{"success" => false, "network" => "eip155:84532", "transaction" => ""}}, "settle_failed"},
+          {:settle, {:error, Errors.new(:verification_failed, "custom failure")}, "custom failure"}
+        ] do
+      opts = plug_opts(self(), store: start_replay_store!())
+      payload = signed_payload(opts)
+      client = Map.put(opts.x402.facilitator, stage, fn _, _ -> response end)
+      opts = %{opts | x402: %{opts.x402 | facilitator: client}}
+      failed = settle(opts, payload)
+      assert failed.status == 402
+      assert problem_detail(failed) =~ expected
+      assert Plug.Conn.get_resp_header(failed, "payment-response") == []
+      assert problem_detail(settle(opts, payload)) =~ "already been settled"
+      refute_received {:settle, _, _}
+    end
+  end
+
+  test "rejects native and altered extension nonces before verification" do
+    opts = plug_opts(self())
+    payload = signed_payload(opts)
+    native = Authorization.challenge_hash("x402:0", "example.com")
+    assert problem_detail(settle(opts, put_in(payload, ["payload", "authorization", "nonce"], native))) =~ "native_nonce"
+
+    bound_opts = plug_opts(self(), extensions: @extensions)
+    bound = signed_payload(bound_opts)
+    altered = put_in(bound, ["payload", "authorization", "nonce"], X402.Nonce.random())
+    assert problem_detail(settle(bound_opts, altered)) =~ "nonce_mismatch"
+    refute_received {:verify, _, _}
+  end
+
+  test "digest binding checks cached and empty request bodies" do
+    opts = plug_opts(self())
+    payload = signed_payload(opts)
+    {:ok, header} = Headers.encode_payment_signature(payload)
+    x402 = %{opts.x402 | digest: MPP.BodyDigest.compute("expected")}
+
+    for body <- ["expected", ""] do
+      conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
+      conn = Plug.Conn.put_private(conn, :raw_body, body)
+      assert {:ok, _} = X402.Plug.maybe_settle(conn, x402, nil)
+    end
+
+    conn = :post |> Plug.Test.conn(@url, "wrong") |> Plug.Conn.put_req_header("payment-signature", header)
+    conn = Plug.Conn.put_private(conn, :raw_body, "wrong")
+    assert {:error, error} = X402.Plug.maybe_settle(conn, x402, nil)
+    assert error.detail =~ "body_digest_mismatch"
+
+    moved = put_in(payload, ["resource", "url"], @url <> "/other")
+    assert problem_detail(settle(%{opts | x402: x402}, moved)) =~ "resource_mismatch"
+  end
+
+  test "resource defaults to request URL and settlement response is limited to successful HTTP responses" do
+    opts = plug_opts(self())
+    opts = %{opts | x402: %{opts.x402 | resource: nil}}
+    payload = opts |> signed_payload() |> Map.delete("resource")
+    {:ok, header} = Headers.encode_payment_signature(payload)
+    conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
+    assert {:ok, conn} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+    conn = Plug.Conn.send_resp(conn, 500, "application failure")
+    assert Plug.Conn.get_resp_header(conn, "payment-response") == []
+  end
+
+  test "disabled configuration leaves the connection unchanged" do
+    conn = Plug.Test.conn(:get, @url)
+    assert X402.Plug.configure(nil) == nil
+    assert X402.Plug.maybe_settle(conn, nil, nil) == :continue
+    assert X402.Plug.put_challenge(conn, nil) == conn
+  end
+
+  test "unencodable challenge and settlement metadata do not emit invalid headers" do
+    opts = plug_opts(self())
+    conn = Plug.Test.conn(:get, @url)
+    invalid = %{opts.x402 | extensions: %{"bad" => <<255>>}}
+    assert X402.Plug.put_challenge(conn, invalid) == conn
+
+    payload = signed_payload(opts)
+
+    client =
+      Map.put(opts.x402.facilitator, :settle, fn _, _ ->
+        {:ok, %{"success" => true, "network" => "eip155:84532", "transaction" => "tx", "extra" => %{"bad" => <<255>>}}}
+      end)
+
+    conn = settle(%{opts | x402: %{opts.x402 | facilitator: client}}, payload)
+    assert conn.status == 200
+    assert conn.assigns.x402_settlement["success"]
+    assert Plug.Conn.get_resp_header(conn, "payment-response") == []
+  end
+
+  test "additional extension info and scalar values must match" do
+    extensions = Map.merge(@extensions, %{"other" => %{"info" => %{"label" => "value"}}, "scalar" => "value"})
+    opts = plug_opts(self(), extensions: extensions)
+    payload = signed_payload(opts)
+    assert settle(opts, payload).status == 200
+
+    tampered = put_in(payload, ["extensions", "scalar"], "other")
+    assert problem_detail(settle(opts, tampered)) =~ "extension_mismatch"
+  end
+
+  test "malformed addresses cannot match a configured accept" do
+    opts = plug_opts(self())
+    payload = signed_payload(opts)
+    tampered = put_in(payload, ["accepted", "asset"], "invalid")
+    assert problem_detail(settle(opts, tampered)) =~ "requirements_mismatch"
+    refute_received {:verify, _, _}
+  end
+
+  test "relative resource URLs use the fallback realm when rejecting native nonces" do
+    opts = plug_opts(self())
+    payload = signed_payload(opts)
+    opts = %{opts | x402: %{opts.x402 | resource: %{"url" => "/relative"}}}
+    payload = put_in(payload, ["resource", "url"], "/relative")
+    native = Authorization.challenge_hash("x402:0", "x402")
+    payload = put_in(payload, ["payload", "authorization", "nonce"], native)
+    assert problem_detail(settle(opts, payload)) =~ "native_nonce"
+    refute_received {:verify, _, _}
   end
 
   defp signed_payload(opts) do

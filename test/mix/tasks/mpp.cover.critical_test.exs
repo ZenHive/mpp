@@ -25,6 +25,9 @@ defmodule Mix.Tasks.Mpp.Cover.CriticalTest do
 
     test "fails a verification-core module below 95%" do
       for {name, file} <- [
+            {"MPP.X402", "lib/mpp/x402.ex"},
+            {"MPP.X402.Exact", "lib/mpp/x402/exact.ex"},
+            {"MPP.X402.Plug", "lib/mpp/x402/plug.ex"},
             {"MPP.Verifier", "lib/mpp/verifier.ex"},
             {"MPP.Challenge", "lib/mpp/challenge.ex"},
             {"MPP.Credential", "lib/mpp/credential.ex"},

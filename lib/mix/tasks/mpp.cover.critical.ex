@@ -6,7 +6,8 @@ defmodule Mix.Tasks.Mpp.Cover.Critical do
   fails if any module in the money-critical tier is below the 95% floor.
 
   The tier is every payment method under `lib/mpp/methods/`, the session
-  channel code under `lib/mpp/session/`, and the verification core every
+  channel code under `lib/mpp/session/`, x402 settlement and signing under
+  `lib/mpp/x402/` and `lib/mpp/x402.ex`, and the verification core every
   method depends on (headers, verifier, challenge, credential, replay, JCS,
   body digest). Client transports, discovery and the demo stay
   aggregate-gated.
@@ -24,6 +25,8 @@ defmodule Mix.Tasks.Mpp.Cover.Critical do
   @critical_prefixes [
     "lib/mpp/methods/",
     "lib/mpp/session/",
+    "lib/mpp/x402/",
+    "lib/mpp/x402.ex",
     "lib/mpp/headers/",
     "lib/mpp/headers.ex",
     "lib/mpp/verifier.ex",
