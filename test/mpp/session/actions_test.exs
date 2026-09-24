@@ -90,6 +90,7 @@ defmodule MPP.Session.ActionsTest do
           suggested_deposit: "1000",
           method_details: %{
             "session_store" => store,
+            "verify_open" => funded(1_000),
             "payer" => @payer,
             "token" => @token,
             "method" => "mocksession",
@@ -113,6 +114,7 @@ defmodule MPP.Session.ActionsTest do
           suggested_deposit: "1000",
           method_details: %{
             "session_store" => store,
+            "verify_open" => funded(1_000),
             "payer" => @payer,
             "token" => @token,
             "method" => "mocksession",
@@ -346,6 +348,7 @@ defmodule MPP.Session.ActionsTest do
           suggested_deposit: "1000",
           method_details: %{
             "session_store" => store,
+            "verify_open" => funded(1_000),
             "payer" => @payer,
             "token" => @token,
             "escrowContract" => @tip1034_escrow,
@@ -384,7 +387,7 @@ defmodule MPP.Session.ActionsTest do
     test "accepts the mpp-rs TIP-1034 voucher vector and rejects a tampered one", %{opts: opts} do
       signed_opts =
         opts
-        |> Keyword.put(:deposit, @tip1034_amount)
+        |> Keyword.put(:verify_open, funded(@tip1034_amount))
         |> Keyword.put(:escrow_contract, @tip1034_escrow)
         |> Keyword.put(:chain_id, 42_431)
         |> Keyword.put(:authorized_signer, @signer)
@@ -687,22 +690,146 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "open deposit must cover the request amount", %{opts: opts} do
-      opts = Keyword.merge(opts, deposit: 50, request_amount: 80)
+      opts = Keyword.merge(opts, verify_open: funded(50), request_amount: 80)
       assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
       assert detail =~ "open deposit is less than request amount"
     end
+  end
 
-    test "missing deposit is invalid_payload", %{opts: opts} do
-      opts = Keyword.delete(opts, :deposit)
-      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
-      assert detail =~ "deposit required"
+  describe "open funding verification" do
+    test "fails closed without a funding verifier, whatever deposit is configured", %{opts: opts, store: store} do
+      opts = opts |> Keyword.delete(:verify_open) |> Keyword.put(:deposit, 1_000_000)
+
+      assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), opts)
+      assert String.contains?(error.type, "verification-failed")
+      assert error.detail =~ "verify_open"
+      assert :not_found = Store.get(store, @channel_id)
     end
 
-    test "rejects a non-numeric deposit", %{opts: opts} do
-      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), Keyword.put(opts, :deposit, :nope))
-      assert detail =~ "deposit required"
+    test "verify/2 ignores suggested_deposit without a verifier", %{store: store} do
+      {:ok, session} =
+        Session.new(
+          amount: "10",
+          currency: @token,
+          recipient: @recipient,
+          suggested_deposit: "1000",
+          method_details: %{
+            "session_store" => store,
+            "payer" => @payer,
+            "escrowContract" => @tip1034_escrow,
+            "chainId" => 42_431,
+            "authorizedSigner" => @signer
+          }
+        )
+
+      assert {:error, %Errors{detail: detail}} = Actions.verify(open_payload(50), session)
+      assert detail =~ "verify_open"
+      assert :not_found = Store.get(store, @channel_id)
     end
 
+    test "sets the channel ceiling to the verified deposit", %{opts: opts, store: store} do
+      test_pid = self()
+
+      verify = fn %Payload{} = payload, _opts ->
+        send(test_pid, {:verified, payload.channel_id, payload.transaction})
+        {:ok, %{deposit: 300}}
+      end
+
+      assert {:ok, _} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
+      assert_received {:verified, @channel_id, @transaction}
+      assert {:ok, %Channel{deposit: 300}} = Store.get(store, @channel_id)
+      assert {:error, %Errors{} = over} = Actions.dispatch(voucher_payload(301), opts)
+      assert String.contains?(over.type, "amount-exceeds-deposit")
+    end
+
+    test "rejects a voucher above the verified deposit", %{opts: opts, store: store} do
+      assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, funded(49)))
+      assert String.contains?(error.type, "amount-exceeds-deposit")
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
+    test "passes verifier errors through and rejects malformed results", %{opts: opts, store: store} do
+      rejection = Errors.new(:verification_failed, "escrow channel not found")
+
+      assert {:error, ^rejection} =
+               Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, fn _, _ -> {:error, rejection} end))
+
+      for result <- [{:ok, 1_000}, {:ok, %{deposit: -1}}, {:ok, %{deposit: "1000"}}, :ok, {:error, :timeout}] do
+        opts = Keyword.put(opts, :verify_open, fn _, _ -> result end)
+        assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
+        assert detail =~ "open funding verification failed"
+      end
+
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
+    test "does not call the verifier for an existing or closed channel", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      never = Keyword.put(opts, :verify_open, fn _, _ -> flunk("verifier called") end)
+      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), never)
+      assert detail =~ "already exists"
+
+      assert {:ok, _} = Actions.dispatch(close_payload(50), opts)
+      assert {:error, %Errors{} = closed} = Actions.dispatch(open_payload(50), never)
+      assert String.contains?(closed.type, "channel-finalized")
+
+      failing = Keyword.put(never, :store, FailingStore)
+      assert {:error, %Errors{detail: store_detail}} = Actions.dispatch(open_payload(50), failing)
+      assert store_detail =~ "session store"
+    end
+
+    test "an open that loses a race during verification does not overwrite the channel", %{opts: opts, store: store} do
+      for status <- [:active, :closed] do
+        verify = fn _payload, _opts ->
+          raced = Channel.new!(channel_id: @channel_id, payer: @payer, recipient: @recipient, token: @token, deposit: 7)
+          :ok = Store.put(store, %{raced | status: status})
+          {:ok, %{deposit: 1_000}}
+        end
+
+        assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
+        assert error.detail =~ ~r/already exists|closed/
+        assert {:ok, %Channel{deposit: 7}} = Store.get(store, @channel_id)
+        :ok = Store.delete(store, @channel_id)
+      end
+    end
+
+    test "a verified payer must match the configured payer", %{opts: opts, store: store} do
+      verify = fn _, _ -> {:ok, %{deposit: 1_000, payer: @recipient}} end
+
+      assert {:error, %Errors{detail: detail}} =
+               Actions.dispatch(open_payload(50), Keyword.put(opts, :verify_open, verify))
+
+      assert detail =~ "verified channel payer"
+
+      unconfigured =
+        opts
+        |> Keyword.delete(:payer)
+        |> Keyword.put(:verify_open, fn _, _ -> {:ok, %{deposit: 1_000, payer: @payer}} end)
+
+      assert {:ok, _} = Actions.dispatch(open_payload(50), unconfigured)
+      assert {:ok, %Channel{payer: @payer}} = Store.get(store, @channel_id)
+    end
+
+    test "a verified signer becomes the channel signer and must agree with a descriptor", %{opts: opts, store: store} do
+      other = SessionSigning.other_signer_address()
+      verify = fn _, _ -> {:ok, %{deposit: 1_000, authorized_signer: other}} end
+      opts = Keyword.put(opts, :verify_open, verify)
+
+      # Signed by the configured key, but the escrow names another signer.
+      assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), opts)
+      assert String.contains?(error.type, "invalid-signature")
+
+      payload = Map.put(open_payload(50), "signature", other_voucher("open", @channel_id, 50)["signature"])
+      assert {:ok, _} = Actions.dispatch(payload, opts)
+      assert {:ok, %Channel{authorized_signer: ^other}} = Store.get(store, @channel_id)
+
+      {channel_id, descriptor} = bound_descriptor(@signer)
+      assert {:error, %Errors{} = mismatch} = Actions.dispatch(descriptor_open(channel_id, descriptor, 50), opts)
+      assert String.contains?(mismatch.type, "signer-mismatch")
+    end
+  end
+
+  describe "balances" do
     test "rejects a voucher that leaves too little authorized balance to spend", %{opts: opts} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
       opts = Keyword.put(opts, :request_amount, 80)
@@ -710,7 +837,7 @@ defmodule MPP.Session.ActionsTest do
       assert String.contains?(error.type, "insufficient-balance")
     end
 
-    test "verify/2 honors suggested_deposit and extra method_details keys", %{store: store} do
+    test "verify/2 tolerates extra and malformed method_details keys", %{store: store} do
       {:ok, session} =
         Session.new(
           amount: "bad",
@@ -719,6 +846,7 @@ defmodule MPP.Session.ActionsTest do
           suggested_deposit: "500",
           method_details: %{
             "session_store" => store,
+            "verify_open" => funded(1_000),
             "payer" => @payer,
             "token" => @token,
             "minVoucherDelta" => "nope",
@@ -819,6 +947,8 @@ defmodule MPP.Session.ActionsTest do
     }
   end
 
+  defp funded(deposit), do: fn _payload, _opts -> {:ok, %{deposit: deposit}} end
+
   defp bound_descriptor(signer, overrides \\ %{}) do
     descriptor =
       Map.merge(
@@ -878,7 +1008,7 @@ defmodule MPP.Session.ActionsTest do
   defp base_opts(store) do
     [
       store: store,
-      deposit: 1_000,
+      verify_open: funded(1_000),
       payer: @payer,
       recipient: @recipient,
       token: @token,

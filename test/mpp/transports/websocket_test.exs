@@ -303,7 +303,7 @@ defmodule MPP.Transports.WebSocketTest do
         suggested_deposit: "1000",
         session_store: store,
         method_config: %{
-          "deposit" => 1_000,
+          "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
           "payer" => @payer,
           "token" => @token,
           "escrowContract" => @escrow,
@@ -563,7 +563,7 @@ defmodule MPP.Transports.WebSocketTest do
           suggested_deposit: "1000",
           session_store: store,
           method_config: %{
-            "deposit" => 1_000,
+            "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
             "payer" => @payer,
             "token" => @token,
             "escrowContract" => @escrow,
@@ -592,7 +592,11 @@ defmodule MPP.Transports.WebSocketTest do
           recipient: @recipient,
           suggested_deposit: "1000",
           session_store: store,
-          method_config: %{"deposit" => 1_000, "payer" => @payer, "token" => @token},
+          method_config: %{
+            "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
+            "payer" => @payer,
+            "token" => @token
+          },
           store: false,
           generate: ["x"]
         )

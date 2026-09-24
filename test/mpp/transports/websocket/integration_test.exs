@@ -303,7 +303,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
         suggested_deposit: "1000",
         session_store: store,
         method_config: %{
-          "deposit" => 1_000,
+          "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
           "payer" => @payer,
           "token" => @token,
           "escrowContract" => @escrow,

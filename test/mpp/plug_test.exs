@@ -1693,7 +1693,7 @@ defmodule MPP.PlugTest do
           suggested_deposit: "1000",
           session_store: {ETSStore, [name: store_name]},
           method_config: %{
-            "deposit" => 1_000,
+            "verify_open" => fn _payload, _opts -> {:ok, %{deposit: 1_000}} end,
             "payer" => @session_payer,
             "token" => @session_token,
             "escrowContract" => @session_escrow,

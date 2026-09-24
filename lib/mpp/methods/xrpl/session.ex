@@ -326,7 +326,8 @@ defmodule MPP.Methods.XRPL.Session do
 
     [
       store: store(params.config),
-      deposit: params.deposit,
+      # XRPL opens confirm the channel on the ledger before reaching Actions.
+      verify_open: fn _payload, _opts -> {:ok, %{deposit: params.deposit}} end,
       payer: payer(params.config),
       recipient: params.session.recipient,
       token: "XRP",

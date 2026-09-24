@@ -18,12 +18,16 @@ defmodule MPP.Session.Method do
       @impl MPP.Method
       def credential_types, do: ["transaction"]
 
-      @doc "Require the voucher verification domain and signer at method initialization."
+      @doc """
+      Require the voucher verification domain, signer, and open funding
+      verifier (`verify_open`, see `MPP.Session.Actions`) at method initialization.
+      """
       @spec validate_config!(map()) :: :ok
       @impl MPP.Method
       def validate_config!(config) do
         required = ~w(escrow_contract chain_id authorized_signer)
         missing = Enum.filter(required, &is_nil(config[&1]))
+        missing = if is_function(config["verify_open"], 2), do: missing, else: missing ++ ["verify_open"]
 
         if missing != [] do
           raise ArgumentError,
