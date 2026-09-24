@@ -260,7 +260,7 @@
 | Task 130 | ✅ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 131 | ⛔ | 🎁 **additional-methods** · MPP.Methods.EVM.Split: atomic fee split through a splitter contract [D:7/B:8/U:7 → Eff:1.07] 📋 |
 | Task 132 | ✅ | 🎁 **additional-methods** · Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25] 🎯 |
-| Task 135 | 🔄 | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀 |
+| Task 135 | ✅ | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀 |
 | Task 136 | ⬜ | 🎁 **additional-methods** · Make full QA freshness checks executable in isolated worktrees [D:3/B:4/U:4 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 

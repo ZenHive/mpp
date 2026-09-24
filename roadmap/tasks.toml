@@ -3735,7 +3735,7 @@ scored_at = "2026-09-18"
 id = "135"
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "done"
 title = "Include x402 settlement and signing in critical coverage enforcement"
 scores = { d = 3, b = 5, u = 4 }
 acceptance_criteria = ["The critical coverage gate includes lib/mpp/x402/ and lib/mpp/x402.ex, with a regression proving a below-floor x402 module fails.", "Add meaningful missing branch and boundary tests for x402 verification, signing, settlement and replay; raise covered critical modules to the existing 95% floor without weakening thresholds or exclusions.", "Run focused tests and capture per-module coverage; the full QA gate checks x402 using the existing coverage artifact."]
@@ -3743,9 +3743,16 @@ touches = ["lib/mix/tasks/mpp.cover.critical.ex", "test/mix/tasks/mpp.cover.crit
 assignee = "codex"
 model = "gpt-6-astra"
 body = "Audit of 9e73dbe found the explicit critical path list excludes x402 despite its payment verification and settlement role. Full QA at that revision reports aggregate 96.36% and a passing critical gate, while MPP.X402.Plug is 77.78%, Facilitator 31.58%, Exact 72.84%, Headers 69.23%, Nonce 91.67%, Replay 83.33%, and MPP.X402 67.44%. Task 127 is done and no pending task covers this missing tier. Preserve live-provider authority for external semantics; this task closes local coverage enforcement and behavior-test gaps, not external-contract verification by mocks. Evidence: .audit/9e73dbe.md."
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1790239442011-60856876, 426c90076e06151c3866fe6db7d3fed3eeeb3142)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1790239442011-60856876"
 created_at = "2026-09-22"
 started_at = "2026-09-24"
 scored_at = "2026-09-22"
+done_at = "2026-09-24"
+shipped_in = "426c90076e06151c3866fe6db7d3fed3eeeb3142"
 
 [[task]]
 id = "136"
