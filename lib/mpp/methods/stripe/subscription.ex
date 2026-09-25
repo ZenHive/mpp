@@ -605,12 +605,17 @@ defmodule MPP.Methods.Stripe.Subscription do
   end
 
   defp claimed_live_subscriptions(customers, context) do
-    Enum.reduce_while(customers, {:ok, []}, fn customer_id, {:ok, acc} ->
+    customers
+    |> Enum.reduce_while({:ok, []}, fn customer_id, {:ok, acc} ->
       case list_customer_subscriptions(customer_id, context, nil, 1, []) do
-        {:ok, subscriptions} -> {:cont, {:ok, acc ++ Enum.filter(subscriptions, &claimed_live?(&1, context.claim_id))}}
+        {:ok, subscriptions} -> {:cont, {:ok, [Enum.filter(subscriptions, &claimed_live?(&1, context.claim_id)) | acc]}}
         {:error, _reason} = error -> {:halt, error}
       end
     end)
+    |> case do
+      {:ok, per_customer} -> {:ok, per_customer |> Enum.reverse() |> Enum.concat()}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp list_customer_subscriptions(customer_id, context, starting_after, page, acc) when page <= @stripe_list_max_pages do
