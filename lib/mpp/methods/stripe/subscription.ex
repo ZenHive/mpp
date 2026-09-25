@@ -40,6 +40,14 @@ defmodule MPP.Methods.Stripe.Subscription do
   Subscription marked `cancelling`, and the cancel is skipped once the claim
   names it as adopted. A cancel that cannot record its mark leaves the
   Subscription to the operator instead.
+
+  Verifying the activating challenge again returns the existing receipt only
+  for the exact credential payload that activated it (compared by a SHA-256
+  digest of its canonical JSON); any other payload under that challenge is
+  rejected. The receipt path exists so a client whose activation request
+  failed before the transport recorded the credential as used (a lost
+  response, a store error, an activation later adopted by reconciliation) can
+  retry that same credential and receive its receipt.
   """
 
   alias MPP.Errors
@@ -120,7 +128,8 @@ defmodule MPP.Methods.Stripe.Subscription do
          {:ok, payment_method_input, customer_input} <- parse_payload(payload),
          {:ok, payment_method} <- retrieve_payment_method(payment_method_input, secret_key, config),
          :ok <- validate_payment_method(payment_method, payment_method_types(config)),
-         {:ok, claim} <- claim_activation(subscription, payment_method, challenge_id, secret_key, config) do
+         credential = {challenge_id, credential_digest(payload)},
+         {:ok, claim} <- claim_activation(subscription, payment_method, credential, secret_key, config) do
       case claim do
         {:existing, receipt} -> {:ok, receipt}
         {:claimed, attempt} -> activate(subscription, payment_method, customer_input, secret_key, config, attempt)
@@ -440,11 +449,12 @@ defmodule MPP.Methods.Stripe.Subscription do
     "mpp-subscription-cancel-#{Base.url_encode64(digest, padding: false)}"
   end
 
-  defp claim_activation(subscription, payment_method, challenge_id, secret_key, config) do
+  defp claim_activation(subscription, payment_method, {challenge_id, credential}, secret_key, config) do
     context = %{
       store: store(config),
       claim_id: activation_claim_id(subscription, payment_method["id"], config),
       challenge_id: challenge_id,
+      credential: credential,
       subscription: subscription,
       payment_method: payment_method,
       secret_key: secret_key,
@@ -503,7 +513,8 @@ defmodule MPP.Methods.Stripe.Subscription do
       {:ok, %Record{method: "stripe"} = record} ->
         cond do
           subscription_ended?(record, context.now) -> :take
-          state.challenge_id == context.challenge_id -> {:existing, receipt(record, Map.fetch!(record.payments, 0))}
+          activating_credential?(state, context) -> {:existing, receipt(record, Map.fetch!(record.payments, 0))}
+          state.challenge_id == context.challenge_id -> {:error, credential_mismatch()}
           true -> {:error, already_active()}
         end
 
@@ -671,12 +682,37 @@ defmodule MPP.Methods.Stripe.Subscription do
 
   defp adoptable_activation(_stripe_subscription, _context), do: :error
 
-  defp adopt_activation(current, {_record, _generation, challenge_id} = adoptable, context) do
+  defp adopt_activation(current, {_record, generation, challenge_id} = adoptable, context) do
     with {:ok, stored} <- adopt_claim(current, adoptable, context) do
-      if challenge_id == context.challenge_id,
-        do: {:ok, {:existing, receipt(stored, Map.fetch!(stored.payments, 0))}},
-        else: {:error, already_active()}
+      adopted = %{challenge_id: challenge_id, credential: adopted_credential(current, generation)}
+
+      cond do
+        activating_credential?(adopted, context) -> {:ok, {:existing, receipt(stored, Map.fetch!(stored.payments, 0))}}
+        challenge_id == context.challenge_id -> {:error, credential_mismatch()}
+        true -> {:error, already_active()}
+      end
     end
+  end
+
+  # The claim knows the activating credential only of the generation that took
+  # it; a Subscription adopted from any other generation binds no credential.
+  defp adopted_credential(%Record{method_state: %{generation: generation} = state}, generation),
+    do: Map.get(state, :credential)
+
+  defp adopted_credential(_current, _generation), do: nil
+
+  # Same-challenge reuse returns the receipt only to the exact credential
+  # payload that activated, so a transport retry of that credential still
+  # completes while every other payload under the challenge fails closed.
+  defp activating_credential?(%{challenge_id: challenge_id, credential: credential}, context) when is_binary(credential),
+    do: challenge_id == context.challenge_id and credential == context.credential
+
+  defp activating_credential?(_state, _context), do: false
+
+  defp credential_digest(payload) do
+    :sha256
+    |> :crypto.hash(JCS.canonicalize(payload))
+    |> Base.url_encode64(padding: false)
   end
 
   defp adopt_claim(current, {record, generation, challenge_id}, context) do
@@ -688,14 +724,15 @@ defmodule MPP.Methods.Stripe.Subscription do
   defp replace_with_adoption(current, {record, generation, challenge_id}, context) do
     adopted = %{
       current
-      | method_state: %{
-          current.method_state
-          | status: :active,
+      | method_state:
+          Map.merge(current.method_state, %{
+            status: :active,
             generation: generation,
             challenge_id: challenge_id,
+            credential: adopted_credential(current, generation),
             subscription_id: record.subscription_id,
             customers: Enum.uniq(current.method_state.customers ++ [record.method_state.customer_id])
-        }
+          })
     }
 
     with {:ok, _claim} <- replace_activation_claim(context, current, adopted) do
@@ -812,6 +849,7 @@ defmodule MPP.Methods.Stripe.Subscription do
          store: store(config),
          claim_id: activation_claim_id(subscription, payment_method_id, config),
          challenge_id: nil,
+         credential: nil,
          subscription: subscription,
          payment_method: %{"id" => payment_method_id},
          secret_key: secret_key,
@@ -941,6 +979,7 @@ defmodule MPP.Methods.Stripe.Subscription do
       method_state: %{
         status: :pending,
         challenge_id: context.challenge_id,
+        credential: context.credential,
         generation: generation,
         claimed_at: context.now,
         customers: customers,
@@ -983,6 +1022,10 @@ defmodule MPP.Methods.Stripe.Subscription do
 
   defp already_active do
     Errors.new(:verification_failed, "Stripe subscription is already active for this payment method")
+  end
+
+  defp credential_mismatch do
+    Errors.new(:verification_failed, "Payment credential does not match the activation for this challenge")
   end
 
   defp reconciliation_failed do

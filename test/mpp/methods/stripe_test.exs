@@ -981,6 +981,74 @@ defmodule MPP.Methods.StripeTest do
       assert other_plan.subscription_id != first.subscription_id
     end
 
+    test "the activating challenge returns its receipt only to the activating credential" do
+      stub_subscription_flow()
+      assert {:ok, first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+      flush_stripe_requests()
+
+      for variant <- [
+            %{"paymentMethod" => "pm_input", "customer" => "cus_test"},
+            %{"paymentMethod" => "pm_input", "customer" => "cus_other"},
+            %{"paymentMethod" => "pm_input", "customer" => nil}
+          ] do
+        assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+                 Stripe.verify(variant, stripe_subscription())
+      end
+
+      refute_received {:stripe_request, "POST", _path, _params, _headers}
+      assert {:ok, ^first} = Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      # A credential naming a customer is bound the same way.
+      stub_subscription_flow(payment_customer: "cus_test")
+      plan = stripe_subscription(external_id: "plan_with_customer")
+      payload = %{"paymentMethod" => "pm_input", "customer" => "cus_test"}
+      assert {:ok, second} = Stripe.verify(payload, plan)
+
+      assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, plan)
+
+      assert {:ok, ^second} = Stripe.verify(payload, plan)
+    end
+
+    test "an adopted activation returns its receipt only to the activating credential" do
+      stub_subscription_flow(subscription_error: :lost_response)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input", "customer" => "cus_test"}, stripe_subscription())
+
+      assert {:ok, %{status: :active, subscription_id: adopted_id}} = inspect_activation()
+
+      assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input", "customer" => "cus_other"}, stripe_subscription())
+
+      assert {:ok, %Receipt{subscription_id: ^adopted_id}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+    end
+
+    test "a subscription adopted from an earlier generation returns no receipt under a later credential" do
+      stub_subscription_flow(subscription_error: :lost_response)
+
+      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      # A later generation takes the claim while the first subscription is still live.
+      assert {:ok, %{claim_id: claim_id}} = inspect_activation()
+
+      assert {:ok, _retaken} =
+               Store.update(subscription_store(), claim_id, fn claim ->
+                 {:ok, put_in(claim.method_state.generation, "later-generation")}
+               end)
+
+      assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
+               Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+    end
+
     test "a definitive activation failure releases the payment method for a later challenge" do
       for {failure, detail} <- [
             {:requires_action, "Stripe subscription first invoice requires customer action"},
