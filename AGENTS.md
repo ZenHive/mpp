@@ -277,7 +277,7 @@ reviewers via `sync-agents-md.sh`.
 ## 🚨 ADJUDICATED: the cowlib / gun advisories are ALREADY DECIDED — do NOT re-investigate
 
 **Read this before spending a single token on a `VULNERABLE!` line mentioning `gun`,
-`cowlib`, `GHSA-w4f7-4cxr-rv3c`, or `EEF-CVE-2026-4396x`/`-43971`.** This has been
+`cowlib`, `GHSA-w4f7-4cxr-rv3c`, or `EEF-CVE-2026-43966`/`-43969`.** This has been
 adjudicated repeatedly by many sessions — local Claude instances, and every harness
 implementer / reviewer / auditor that ran `mix deps.get` in a fresh worktree. Each one
 found the same unbudgeted alarm and redid the same analysis. **The verdict is below.
@@ -294,18 +294,24 @@ Removing `mix_audit` does **not** silence the `mix deps.get` output — that is 
 every fresh harness worktree runs `deps.get`. That is precisely why every dispatched
 agent sees it.
 
-**The verdict — cowlib 2.19.0 reached only via `gun` as a WebSocket client (the
+**The verdict — cowlib reached only via `gun` as a WebSocket client (the
 `zen_websocket` stack): not reachable.** Evidence is a call-graph fact, not a judgment
 call:
 
 | Advisory | Vulnerable function | Reachability |
 |---|---|---|
-| `EEF-CVE-2026-43971` | `cow_link:link/1` | **0 references** in `deps/gun/src/` |
 | `EEF-CVE-2026-43966` (alias `GHSA-w4f7-4cxr-rv3c`, `CVE-2026-43966`) | `cow_http_struct_hd:escape_string/2` | **0 references** in `deps/gun/src/` |
 | `EEF-CVE-2026-43969` | `cow_cookie:cookie/1` | only from `gun_cookies.erl` — gun's **opt-in** cookie store; `zen_websocket` never sets `cookie_store` (the string `cookie` does not appear in its `lib/`) |
 
-cowlib **2.19.0 is the latest release** — there is no fixed version to upgrade to, so
-reachability is the only available adjudication.
+**`EEF-CVE-2026-43971` (`cow_link:link/1`) is FIXED in cowlib 2.20.0 (2026-09-08)**
+(EEF CNA: affected `>= 2.9.0 < 2.20.0`) and was removed from the global Hex ignore list
+2026-09-24. If it reappears, the repo is on cowlib < 2.20.0: bump it, don't re-ignore it.
+The other two are still reported against cowlib 2.20.0 / gun 2.6.0 (verified 2026-09-24,
+`HEX_HOME=<empty> mix hex.audit` in bourse); no fixed release exists, so reachability is
+the only available adjudication. The 43969 fix is upstream (`177953d` "Preliminary patch",
+"Validate cookie domain/path") but unreleased. Re-check at the next cowlib release.
+`hex.audit` in a repo without cowlib (e.g. harness) warns the two ignores "match no
+advisory" — that is expected, not a sign they're resolved.
 
 **The separate `gun 2.5.0` line is a mirror bug, already reported upstream.** gun's real
 vulnerable range is `< 2.4.0`; gun 2.5.0 is patched. The mirego importer groups by
@@ -324,11 +330,10 @@ argument above has been made for that specific id.
 **What invalidates this verdict — re-adjudicate if any becomes true:** a repo takes
 `cowboy` as a **runtime** (not `only: :test`) dependency; gun's `cookie_store` option is
 enabled anywhere; gun is used as a general HTTP client with caller-supplied header
-values; or a new cowlib advisory appears that is not one of the three ids above.
+values; or a new cowlib advisory appears that is not one of the two ids above.
 
-**Affected repos (13 declare `mix_audit`; 9 carry `gun` in the lock — `bourse_workbench` retired to the code-archive 2026-08-23):** `bourse`,
-`mpp`, `onchain`, `onchain_aave`, `onchain_aerodrome`, `onchain_evm`, `onchain_js`,
-`onchain_tempo`, `zen_websocket`. Suppression is inconsistent across them — most carry
+**Affected repos (cowlib in the lock as of 2026-09-24, all on 2.20.0):** `bourse`, `mpp`,
+`zen_websocket`. The `onchain*` repos no longer lock cowlib. Suppression is inconsistent across them — most carry
 `.mix_audit_ignore`, bourse uses an `--ignore-advisory-ids` alias in
 `mix.exs`. Standardize on `.mix_audit_ignore` when you touch one.
 
@@ -384,7 +389,7 @@ documented false positive — but via the file, not a comment the hook ignores.
 
 OTP-native **implement → review → land** loop for roadmap-driven development. An AI orchestrator drives harness; harness dispatches headless implementer agents into isolated git worktrees, then a **cross-family reviewer AI** gates every deliverable (runs the project's checks itself, fixes inline, writes `.harness/review.json`). Optional auto-landing ff-merges approved work; a post-merge audit agent sweeps hygiene.
 
-**Promoted from** `docs/dogfooding-workflow.md` in the harness repo — that file remains the **incubator runbook** for harness-specific history, driver-script templates, and per-batch run logs. This include is the **portfolio-wide contract**. Version-controlled source: `priv/includes/harness-workflow.md` in the harness repo; install to `~/.claude/includes/harness-workflow.md` via `mix harness.install_includes`.
+**Promoted from** `docs/dogfooding-workflow.md` in the harness repo — that file remains the **incubator runbook** for harness-specific history, driver-script templates, and per-batch run logs. This include is the **portfolio-wide contract**. Version-controlled source: `priv/includes/harness-workflow.md` in the harness repo; propagate with `scripts/sync-harness-skills.sh` (include + marketplace skills; `mix harness.install_includes` covers only the include leg).
 
 ### Relationship to Other Includes (Layered — No Supersession)
 
@@ -397,7 +402,7 @@ OTP-native **implement → review → land** loop for roadmap-driven development
 | `agent-dispatch.md` / cloud-delegation stack | **Linear/Codex/Cursor PR delegation** without a running harness BEAM. Orthogonal path — projects can use cloud delegation *or* harness; harness subsumes the dispatch+review loop when the OTP node is running. |
 | `skills/harness-driver/SKILL.md` (harness repo) | **API surface contract** — MCP tools, `project_eval` patterns, `%LogRecord{}` fields, sharp edges. Load on demand when driving harness; this include covers *workflow*, the skill covers *surfaces*. |
 
-**Adopt per repo:** `@~/.claude/includes/harness-workflow.md` in the project's `CLAUDE.md` (load-on-demand row — not eager; same pattern as `workflow-philosophy.md`).
+**Adopt per repo:** eager `@~/.claude/includes/harness-workflow.md` in the `CLAUDE.md` of every repo that dispatches through harness — its guardrails (Recover, Don't Redo; the duplicate-land trap) fail by non-recognition, so an on-demand load is not equivalent. Repos that never dispatch carry nothing.
 
 ### The Loop
 
@@ -409,7 +414,7 @@ rmap task → implementer AI (worktree) → commit harness/<run-id> → reviewer
                                                               AUDIT (post-merge audit agent, best-effort)
 ```
 
-One run = one supervised `Harness.Run` gen_statem: fork worktree off target `HEAD`, dispatch implementer, commit diff to `harness/<run-id>`, dispatch cross-family reviewer into the same worktree. The reviewer runs the project's `check_command` hint, fixes what it can, writes `.harness/review.json`. **Success = reviewer `approve`** — never implementer exit code or self-report. There is **no mechanical verification gate** in harness; judgment lives in agents.
+One run = one supervised `Harness.Run` gen_statem: fork worktree off `origin/<target>` (local `HEAD` when no `target_branch` is set), dispatch implementer, commit diff to `harness/<run-id>`, dispatch cross-family reviewer into the same worktree. The reviewer runs the project's `check_command` hint, fixes what it can, writes `.harness/review.json`. **Success = reviewer `approve`** — never implementer exit code or self-report. There is **no mechanical verification gate** in harness; judgment lives in agents.
 
 Rejections return tasks to pending for an explicit recovery-aware orchestrator decision. Fix-and-approve is the near-absolute default for the reviewer.
 
@@ -507,7 +512,7 @@ configuration migration, skill propagation and activation.
 
 | `state` / `reason` | Meaning | Action |
 |---|---|---|
-| `:done` / `:approved` | Reviewer AI approved (possibly after inline fixes — check `reviewer_diff_size`). | Deliverable on `harness/<run-id>`. Review diff, integrate (or let auto-lander handle it), `rmap status <id> done`. |
+| `:done` / `:approved` | Reviewer AI approved (possibly after inline fixes — check `reviewer_diff_size`). | Deliverable on `harness/<run-id>`. Under `:auto`/`:pr` the lander writes rmap back — don't double-write; otherwise integrate and `rmap status <id> done`. |
 | `:failed` / `{:review_rejected, report}` | Reviewer rejected (degenerate — near-never by design). | Read `report` and retained-branch evidence; explicitly choose resume, rereview, fresh or defer. |
 | `:failed` / `{:review_stuck, report}` | No verdict: reviewer unavailable, crashed, or missing/malformed `.harness/review.json`. | Read `report`; choose recovery or defer while the environment is repaired. |
 | `:failed` / `{:worktree_failed,_}` `{:agent_spawn_failed,_}` `{:driver_crashed,_}` `{:commit_failed,_}` | Harness-side mechanical failure. | **Harness bug.** File via `rmap new`. |
@@ -556,7 +561,7 @@ The recovery primitives (`reland`/`rereview`/`resume_failed`) read the persisted
 - **Keep write-set fields accurate.** The dispatcher counts declared path intersections; it does not infer paths from the task body. If two tasks really edit the same function, either let write-set serialization sequence them or fold the coupled work into one rmap task (`task-prioritization.md` § "Refine, Don't Duplicate").
 - **One driver BEAM** for all concurrent runs in a wave.
 - **Integration order (manual landing):** smallest/isolated diffs onto target first; rebase siblings; consume the post-merge audit + QA evidence on the integrated revision.
-- **While a wave is in flight:** do not run `rmap status` / `rmap mark` / `rmap new` in parallel sessions against the same checkout — triggers `:checkout_polluted` false-positive.
+- **While a wave is in flight:** avoid `rmap status` / `rmap mark` / `rmap new` in parallel sessions against the same checkout — on runs with the pollution check active (non-isolating adapter or explicit `checkout_pollution_check?: true`) it false-positives `:checkout_polluted`.
 - **Repo-wide invariant tasks run EXCLUSIVE.** A task whose real write-set is "the whole surface" — introduce a repo-wide guard/invariant and convert every violating site (e.g. an AST-scan test over all of `test/`) — cannot be write-set-serialized by declared `touches`: any sibling land that adds a new violating site after the fork reddens the guard at landing time. Dispatch such tasks as a solo wave — nothing lands in parallel — or accept that the orchestrator repairs at landing.
 - **Land-conflict repair is a standard orchestrator move, not an incident.** When the lander blocks on a rebase conflict (reason retains the branch): fork a repair worktree off `origin/<target>`, cherry-pick the run commits, resolve (for additive `tasks.toml` collisions: renumber the branch-side new task to the next free id on origin **and rewrite in-diff string references to it** — CHANGELOG lines, code comments; then `rmap validate && rmap render`), point the retained `harness/<run-id>` branch at the repaired tip, and `dispatch-reland` — the lander keeps push authority and advances rmap itself. **Do not re-run gates on a roadmap/doc-only repair:** the reviewer already graded the code; renumbering tasks, merging doc entries, and re-rendering the roadmap change nothing the gates measure, and a clean disjoint auto-merge of verified code needs no re-grade (same token-economy rule as everywhere else). Re-run a check ONLY when the repair touched code, or when the conflict overlapped a repo-wide invariant the sibling lands could have violated (e.g. a new suite-wide guard vs tests added after the fork — run just that guard, not the stack). Never reset-to-pending (that redoes paid work), never hand-push to the target when a reland can land it.
 
@@ -625,7 +630,7 @@ landed before, or was reset and re-dispatched, already carries `roadmap: task <i
 (shipped …)` in history; without `BASE` the watcher reports `LANDED` before the implementer
 has written a line.
 
-The deadline branch is the other half. A run that fails review or blocks on a land conflict never
+**Silence is not success — the deadline branch is the other half.** A run that fails review or blocks on a land conflict never
 produces a landing commit, so a watcher with no bound waits forever on a wave that is already
 dead; on expiry it must print what did land in the range and name what did not, so the missing
 tasks get reconciled through `dispatch-status` instead of assumed.
@@ -643,12 +648,6 @@ into another AI investigation.
 Poll `dispatch-status <run-id>` only to diagnose a run that the watcher shows as *not*
 landing — a `:failed` verdict, a rebase conflict that retained the branch, a hung
 implementer. Status is for diagnosis; git is for waiting.
-
-**Silence is not success** — a run that fails review or blocks on a land conflict never
-produces a landing commit, so a watcher greping only for `-> done` stays quiet forever.
-Bound every wave watch with a deadline, and when it expires without `WAVE COMPLETE`,
-reconcile the missing tasks through `dispatch-status` / `result_store-list_run_records`
-before assuming anything.
 
 Same root cause as the duplicate-land trap above, seen from the dispatch side: **origin is
 the source of truth for what landed** — not an await return value, not a local
@@ -729,21 +728,9 @@ The two blind classes, both real-correctness, both passing every per-task check:
 - **Reviewer runs the checks.** No mechanical check stack. Correct-but-not-pristine work → reviewer fixes and approves (`reviewer_diff_size` > 0).
 - **Cold dialyzer PLT** belongs to the full post-merge QA budget, not routine reviewer checks.
 - **Nested Claude auth.** `ANTHROPIC_API_KEY` shadows subscription OAuth — scrub per run (`scrub_anthropic_key: true` or `env: %{"ANTHROPIC_API_KEY" => false}`).
-- **Parallel-session rmap mutations** during a run can false-positive `:checkout_polluted` — wait for the wave or use a separate worktree.
+- **Parallel-session rmap mutations** during a run can false-positive `:checkout_polluted` when the pollution check is active (skipped by default for the six isolating adapters) — wait for the wave or use a separate worktree.
 
-### Repo-Specific Detail
-
-| Need | Where |
-|---|---|
-| Harness API surfaces, MCP tool shapes | `skills/harness-driver/SKILL.md` in harness repo |
-| Driver script template, cutover history, run log | `docs/dogfooding-workflow.md` in harness repo |
-| Agent-gate architecture spec | `docs/agent-gate-workflow.md` in harness repo |
-| Cross-checkout consumer setup | `skills/harness-driver/SKILL.md` § "Context A" |
-| D/B/U scoring, task writing | `task-prioritization.md`, `task-writing.md` |
-| Manual session/PR/audit chain | `dev-lifecycle.md`, `worktree-workflow.md` |
-
-
-## Recovery-aware cron decisions
+### Recovery-aware cron decisions
 
 A singleton with no persisted attempts may dispatch directly. Any task with
 history, and every multi-task wave, goes to the orchestrator AI with project/task
@@ -773,45 +760,26 @@ retained Oban job data when absent from the run record. Unknown membership or
 missing fingerprints cannot establish safe recovery identity.
 
 Run records and status/verdict responses expose `dispatch_decision`; durable
-`task_ids` preserves coalesced membership. Deploy migration
-`20260918230000_add_dispatch_decision_to_run_records` before activating this code.
-The driving orchestrator owns runtime activation and installed-skill propagation.
+`task_ids` preserves coalesced membership.
 
 ### Graceful shutdown recovery
 
-Application shutdown settles runs in `Harness.Application.prep_stop/1`, before
-Oban, the endpoint, task supervision or storage stop. Stopping
-`Harness.Run.Supervisor` directly uses the same admission fence. Its shutdown
-child closes admission before the inner DynamicSupervisor terminates run children
-concurrently; the admission process remains alive until settlement finishes.
-Run processes trap supervisor exits and persist `state: :failed` with
-`reason: {:shutdown, interrupted_state}`. Dispatch jobs retain that reason in
-their cancellation error; this is an interrupted attempt, not an operator cancel.
-
-Admission is serialized at the agent-driver boundary, including reviewer
-reprompts/rotation, recovery and the in-run grader. Already-admitted invocations
-have five seconds to deliver their spawn handle; no new invocation is admitted
-after the fence closes. A hung pre-spawn driver is killed and logged. The fence
-child has a seven-second shutdown budget, run children have thirty seconds in
-parallel, and admission teardown has one second: a 38-second run-layer budget,
-below the documented 120-second service stop timeout. This budget does not cover
-transport drain or promise persistence when storage/callbacks exceed the budget;
-OTP reports forced termination. Store errors are logged and spill through the
-existing ResultStore dead-letter/replay path. A spill failure remains a visible
-persistence failure, never a successful write.
-
-Retained branches and worktrees are recovery evidence. After restart, inspect the
-shutdown record and compare its branch with `origin`; use `dispatch-rereview` for
-review-ready commits or `dispatch-resume_failed` for incomplete implementation.
-Both operations validate and pin the retained commit through the ordinary queue.
-A missing branch returns `source_unavailable_or_landed`; shutdown does not invent
-a commit or justify a hand-built `start_run`. If persistence spilled, repair the
-store and replay the spill before using record-based recovery. SIGKILL and power
-loss cannot run these callbacks and carry no graceful-cleanup guarantee.
+A node stop settles in-flight runs as `state: :failed`, `reason: {:shutdown, interrupted_state}` and retains their branches and worktrees. That is an interrupted attempt, not a verdict: after restart, compare the retained branch with `origin`, then `dispatch-rereview` review-ready commits or `dispatch-resume_failed` incomplete work (§ "Recover, Don't Redo"). SIGKILL and power loss carry no such guarantee. Admission fence, timing budgets and spill/replay: `skills/harness-driver/SKILL.md` § "Graceful shutdown recovery".
 
 ### Explicit audit selection
 
 The QA page `/harness/qa` owns the global audit agent/model picker and shows current eligibility and unavailable reasons. `Harness.Audit.Selection.configure(agent_name, model)` atomically persists this pair in SettingsStore; an empty agent selects automatic routing. Explicit selection starts a separate audit session and may reuse the implementation or review adapter. It still requires reviewer eligibility, an installed available adapter and an available explicit model; no fallback changes the saved choice. Automatic routing continues to exclude the run's implementer and reviewer and may produce `no_audit_agent`. QA summaries show the last incomplete reason directly. Changing selection affects new audit sessions and neither changes reviewer trust nor restarts existing jobs.
+
+### Repo-Specific Detail
+
+| Need | Where |
+|---|---|
+| Harness API surfaces, MCP tool shapes | `skills/harness-driver/SKILL.md` in harness repo |
+| Driver script template, cutover history, run log | `docs/dogfooding-workflow.md` in harness repo |
+| Agent-gate architecture spec | `docs/agent-gate-workflow.md` in harness repo |
+| Cross-checkout consumer setup | `skills/harness-driver/SKILL.md` § "Context A" |
+| D/B/U scoring, task writing | `task-prioritization.md`, `task-writing.md` |
+| Manual session/PR/audit chain | `dev-lifecycle.md`, `worktree-workflow.md` |
 
 <!-- @-import: ~/.claude/includes/ethereum-rpc.md -->
 ## Ethereum RPC (Full Archive Node)
