@@ -53,6 +53,13 @@ defmodule MPP.X402.FacilitatorTest do
     Req.Test.verify!()
   end
 
+  test "HTTP client built without options reports a refused connection as a request error" do
+    client = Facilitator.http("http://127.0.0.1:1/")
+
+    assert {:error, {:facilitator_request, %Req.TransportError{reason: :econnrefused}}} =
+             Facilitator.verify(client, %{}, %{})
+  end
+
   test "function clients preserve errors and response validation" do
     client = %{verify: fn _, _ -> {:error, :offline} end, settle: fn _, _ -> {:ok, %{}} end}
     assert Facilitator.resolve(client) == client
