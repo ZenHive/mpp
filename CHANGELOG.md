@@ -8,6 +8,38 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-25
+
+**Security (five coordinated fixes, each disclosed with this release).** Solana push credentials (`type="signature"`) are no longer accepted by default and, when enabled with `"push" => "challenge_memo"`, must carry a memo derived from the issuing challenge; every Solana receipt path claims its transaction signature exactly once (`GHSA-6xg7-3f46-g3g5`). Stripe subscription activation is single-use per payment method and plan across challenges, with durable activation claims reconciled against Stripe state (`GHSA-2g9q-rg79-676x`). The generic session layer raises a channel's deposit only from server-verified escrow state on top-up (`GHSA-25v8-3q3q-3m7j`) and on open (`GHSA-9c4m-cr2r-c3px`), and verifies vouchers only against the signer established when the channel opened (`GHSA-c33f-jwgj-rw53`).
+
+### Breaking
+
+- **Solana push is opt-in.** `MPP.Methods.Solana` rejects `type="signature"`
+  credentials unless `method_config["push"]` is `"challenge_memo"` (the
+  challenge advertises `"pushBinding" => "challengeMemo"` and the payment must
+  carry `MPP.Methods.Solana.push_memo/1` of the challenge id) or `"unbound"`.
+  Any other value raises at init. Under `"challenge_memo"`, pull memos may not
+  use the reserved `mpp-push:` prefix, and a split memo or `externalId` with that
+  prefix is rejected when the challenge is built.
+- **Session methods must verify funding.** `open` and `topUp` require
+  server-only funding verifiers, passed as the `:verify_open` / `:verify_top_up`
+  options or the `"verify_open"` / `"verify_top_up"` method-config keys;
+  `MPP.Session.Method` refuses to initialize without `verify_open`, and a
+  `topUp` without `verify_top_up` fails closed. Both verifiers return
+  `{:ok, %{deposit: d, settled: s, close_requested: bool, finalized: bool}}`
+  (all four keys required; `verify_open` may add `payer` and
+  `authorized_signer`). A missing or malformed result fails closed; a finalized,
+  closing or unfunded channel is rejected. A top-up must strictly raise the
+  verified deposit.
+- **Session signer.** A client-supplied `authorizedSigner` or descriptor no
+  longer overrides the signer bound at open; a zero-address signer resolves to
+  the payer everywhere.
+- **Stripe subscriptions.** One live subscription per payment method and plan.
+  Activation writes carry extra metadata keys (`mpp_activation_claim`,
+  `mpp_activation_generation`) and bounded, non-retried request timeouts. An
+  activation whose outcome cannot be established stays blocked; operators use
+  the new `inspect_activation/2` and `resolve_activation/3`.
+
 ### Added
 
 - x402 v2 exact interoperability (Task 81): `MPP.X402` parses `PAYMENT-REQUIRED`
@@ -16,6 +48,18 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   `MPP.Plug` `:x402` verifies and settles them through a configurable
   facilitator next to native Payment-auth on the same endpoint
   (`docs/x402-interoperability.md`).
+- `MPP.Methods.USDC` — direct Circle USDC charge method (`draft-usdc-charge-00`)
+  with the EVM EIP-3009 profile (`"profile" => "evm"`, any configured
+  `chain_id`) and the Solana legacy-SPL profile (`"profile" => "solana"`,
+  `mainnet` or `devnet`, optional server fee payer). The nested profile object
+  is the advertised `methodDetails`; server config stays out of the challenge.
+  A Solana payment may create the advertised recipient's associated token
+  account.
+- `MPP.Methods.EVM.Authorization.settle/3` accepts `:expected_nonce` to replace
+  the native `challengeHash` nonce for callers with their own nonce rule.
+- `MPP.Methods.Stripe.Subscription.inspect_activation/2` and
+  `resolve_activation/3` — operator view and adopt/release for activations
+  whose outcome could not be established automatically.
 - Payment-security mutant `evm-transaction-opt-in-bypassed`: the campaign now
   proves the `type="transaction"` opt-in gate in `MPP.Methods.EVM.Transaction`
   is test-covered.
@@ -29,12 +73,19 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   colons, underscores and hyphens after the leading lowercase letter (for
   example `x402`, `tempo-v2`). Names that do not start with a lowercase letter
   are still `:invalid_method`.
+- The x402 client no longer compares an offer's `resource.url` with the
+  request URL: `MPP.X402.challenges_from_header/1` takes only the header, and
+  `MPP.Client.Transport.HTTP.get_challenges/2` ignores its URL argument, so
+  offers behind query strings, redirects, proxies or port rewriting stay
+  payable (mppx #908). `MPP.X402.Plug` still rejects a credential whose echoed
+  resource does not match the server-bound URL.
 - Locked `mint` bumped to 1.10.1 (CVE-2026-82672 / GHSA-rj5m-69wp-cxq9;
   transitive via `req`/`finch`).
 - `mix mpp.cover.critical` replaces `mix mpp.cover.methods` in `mix precommit`.
   The per-module 95% floor now covers the whole money-critical tier
-  (`lib/mpp/methods/`, `lib/mpp/session/`, headers, verifier, challenge,
-  credential, replay, JCS, body digest), and the only exemption is a module
+  (`lib/mpp/methods/`, `lib/mpp/session/`, `lib/mpp/x402/`, `lib/mpp/x402.ex`,
+  headers, verifier, challenge, credential, replay, JCS, body digest), and the
+  only exemption is a module
   with at most 10 relevant lines (behaviour-sized) instead of any module with
   at most two uncovered lines.
 

@@ -6033,7 +6033,7 @@
       "id": "142",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "done",
       "title": "Document shipped x402, USDC and critical-coverage changes in release notes",
       "scores": {
         "d": 1,
@@ -6057,14 +6057,16 @@
       ],
       "body": "Task 140 explicitly required a changelog entry for its API choice, but none landed; Task 135 also expanded the critical coverage tier beyond the existing changelog description. The post-merge audit must leave CHANGELOG untouched, so this concrete docs repair is filed separately. See .audit/750acbe.md. D1 is a text-only correction; B2 and U3 reflect accurate migration guidance for a removed public arity. Audit at 1df67f6 also found no release-note entry for the shipped MPP.Methods.USDC EVM/Solana direct profiles, Authorization.settle/3 expected_nonce option, or recipient associated-token-account creation. Add those shipped API/behavior notes to this same release-note repair. See .audit/1df67f6.md.",
       "created_at": "2026-09-24",
+      "done_at": "2026-09-25",
       "scored_at": "2026-09-24",
+      "implemented": "0.19.0 CHANGELOG documents the USDC direct EVM/Solana profiles, Authorization.settle/3 :expected_nonce, recipient ATA creation, the x402 client resource-URL change (challenges_from_header/1; x402 was unreleased so /2 never shipped) and x402 in the critical coverage tier.",
       "cross_repo": []
     },
     {
       "id": "143",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "done",
       "title": "Adjudicate the pending private security inbox reports",
       "scores": {
         "d": 5,
@@ -6090,7 +6092,9 @@
       ],
       "body": "The audit's authenticated private advisory query found three unadjudicated reports, with no matching pending roadmap owner. This task owns private adjudication and repair coordination, not a finding that the reports are proven. The public security ledger was updated to show only the pending count. See the private repository inbox for all details. D5 reflects investigation across the reported surfaces; B5 and U5 reflect the concrete pending reports, without an unverified severity claim.",
       "created_at": "2026-09-24",
+      "done_at": "2026-09-25",
       "scored_at": "2026-09-24",
+      "implemented": "All three inbound reports were adjudicated privately, confirmed and fixed in 0.19.0 together with two related findings; the five advisories are published with that release. Details stay in the advisories.",
       "cross_repo": []
     }
   ]
