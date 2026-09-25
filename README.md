@@ -207,6 +207,12 @@ close redeems it with `PaymentChannelClaim` unless redemption is deferred.
 See [XRPL session](https://github.com/ZenHive/mpp/blob/main/docs/xrpl-session.md) for the destination signing seed and
 deferred-redemption configuration.
 
+Session methods built on `MPP.Session.Method` must verify channel funding on the
+server: `open` and `topUp` take the `:verify_open` / `:verify_top_up` callbacks
+(or the server-only `"verify_open"` / `"verify_top_up"` method-config keys),
+which return the confirmed `%{deposit, settled, close_requested, finalized}`
+state. Without them both actions fail closed. See `MPP.Session.Actions`.
+
 ### NEAR Intents (1Click)
 
 Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_OUTPUT` 1Click quote, then mount the returned amount, origin asset, deposit address, and `method_config` on `MPP.Plug`. The client deposits on the origin chain and retries with `type="hash"`. Verification waits for 1Click `SUCCESS` (and can check EVM origin RPC when `"origin_rpc_url"` is set). A configured `"store"` must implement atomic `MPP.Tempo.Store.update/3`. There is no Intents testnet — live tests use production 1Click plus historical deposits. Optional partner JWT: `"one_click_jwt"` / `NEAR_INTENTS_ONE_CLICK_JWT`.
@@ -235,6 +241,15 @@ plug MPP.Plug,
 ```
 
 **Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`, and should also implement the optional token-checked `delete/2` so a pre-broadcast failure releases only that attempt's reserved slot instead of burning the signed transaction until its TTL expires. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
+
+### x402 interoperability
+
+`MPP.Plug` accepts x402 v2 `exact` payments (EVM EIP-3009) next to native
+Payment-auth on the same endpoint: pass `:x402` with a facilitator URL or client
+and the plug verifies and settles `PAYMENT-SIGNATURE` credentials through it.
+On the client, `MPP.X402` reads `PAYMENT-REQUIRED` offers as challenges and
+`MPP.Client.Providers.X402Exact` signs them. See
+[x402 interoperability](https://github.com/ZenHive/mpp/blob/main/docs/x402-interoperability.md).
 
 ### Multi-Method (Stripe + Tempo)
 
@@ -284,7 +299,7 @@ constrained fixed-price Stripe subscription, verifies its paid first invoice,
 and records the activation durably; `MPP.Methods.Stripe.Subscription.process_invoice/3`
 maps paid renewal cycle invoices onto canonical billing periods with atomic
 event/invoice dedup, and `cancel/2` schedules Stripe cancellation at the end of
-the last paid period. `MPP.Methods.Tempo` activates a scoped access key, settles
+the last paid period. Stripe activation allows one live subscription per payment method and plan; an activation whose Stripe outcome is uncertain stays blocked until an operator uses `inspect_activation/2` and `resolve_activation/3`. `MPP.Methods.Tempo` activates a scoped access key, settles
 the first period, and exposes `MPP.Methods.Tempo.Subscription.authorize/2` for
 later renewals. Both methods use `MPP.Subscription.ETSStore` by default;
 configure a shared `MPP.Subscription.Store` backend when renewals must
@@ -392,6 +407,11 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Transports.JsonRpc` | Bare JSON-RPC transport: root-level `_meta` credential/receipt, `-32042` challenges |
 | `MPP.Transports.JsonRpc.Plug` | Plug adapter for JSON-RPC-over-HTTP payment verification |
 | `MPP.Transports.WebSocket` | WebSocket adapter: handshake `challenge`, session `needVoucher` metering, JSON-RPC `message` frames |
+| `MPP.Methods.USDC` | Direct Circle USDC charge (`draft-usdc-charge-00`): EVM EIP-3009 and Solana SPL profiles |
+| `MPP.X402` | x402 v2 `exact` client interop: `PAYMENT-REQUIRED` offers as challenges |
+| `MPP.X402.Plug` | Server-side x402 settlement through a configurable facilitator (`MPP.Plug` `:x402`) |
+| `MPP.X402.Facilitator` | x402 facilitator client (`/verify`, `/settle`) |
+| `MPP.Client.Providers.X402Exact` | Client provider signing x402 exact EIP-3009 payments |
 | `MPP.Client.PaymentProvider` | Behaviour for client-side payment providers (`supports?/3`, `pay/2`) |
 | `MPP.Client.MultiProvider` | Multi-provider dispatch with first-match routing |
 | `MPP.Client.Providers.Tempo` | Built-in Tempo charge provider — chain-pinned, attribution-bound TIP-20 payments, including machine-token `[approve, swapTo]` when advertised |

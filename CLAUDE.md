@@ -116,6 +116,11 @@ MPP.Methods.EVM.Authorization — EIP-3009 transferWithAuthorization credential 
 MPP.Methods.EVM.Permit2    — Permit2 witness credentials (type="permit2"): challenge-bound off-chain signature, server-submitted, ordered split legs
 MPP.Methods.EVM.Transaction — Client-signed EIP-1559 ERC-20 transfer (type="transaction"): validate against the charge, then server-broadcast
 MPP.Methods.EVM.RPC        — Internal EVM JSON-RPC helpers (chain_id, hash canonicalization, Req opts) shared by the EVM credential paths
+MPP.Methods.USDC           — Direct Circle USDC charge (draft-usdc-charge-00): EVM EIP-3009 + Solana legacy-SPL profiles (Assets, Binding, Profile, Replay, EVM, Solana submodules)
+MPP.X402                   — x402 v2 exact client interop: PAYMENT-REQUIRED offers as synthetic challenges (Exact, Headers, Nonce submodules)
+MPP.X402.Plug              — Server-side x402 exact settlement via configurable facilitator (MPP.Plug :x402)
+MPP.X402.Facilitator       — x402 facilitator client (POST /verify, /settle)
+MPP.Client.Providers.X402Exact — Client provider signing x402 exact EIP-3009 payments
 MPP.Methods.Solana         — Solana native SOL / SPL token charge verification (pull transaction + push signature)
 MPP.Methods.Solana.Instructions — Compiled + jsonParsed instruction classify/match for the Solana method
 MPP.Methods.Solana.Confidential — Internal Token-2022 confidential bundle verification (type="bundle", recipient pending-balance decryption)
@@ -166,7 +171,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, ProofSignature, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, EnvelopeFields, ProofSignature, SignatureEnvelope, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 
