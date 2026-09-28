@@ -163,8 +163,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
   test "verifies p256 and WebAuthn primitive signatures returned by the wallet" do
     subscription = SubscriptionHelpers.subscription()
 
-    for key_type <- [:p256, :web_authn] do
+    for key_type <- [:p256, :p256_prehash, :web_authn] do
       rpc = signed_p256_rpc(subscription, key_type)
+      key_type = if key_type == :p256_prehash, do: :p256, else: key_type
       assert {:ok, authorization} = KeyAuthorization.from_rpc(rpc)
       assert authorization.key_type == key_type
 
@@ -175,6 +176,15 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
                  key_type: key_type,
                  challenge_id: SubscriptionHelpers.challenge_id()
                )
+    end
+  end
+
+  test "rejects a p256 signature whose preHash flag does not match the signed message" do
+    subscription = SubscriptionHelpers.subscription()
+
+    for key_type <- [:p256_wrong_flag, :p256_prehash_wrong_flag] do
+      rpc = signed_p256_rpc(subscription, key_type)
+      assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.from_rpc(rpc)
     end
   end
 
@@ -455,7 +465,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
   defp signed_p256_rpc(subscription, key_type) do
     {_serialized, _authorization, rpc} = SubscriptionHelpers.signed_authorization(subscription)
-    rpc = Map.put(rpc, "keyType", if(key_type == :p256, do: "p256", else: "webAuthn"))
+    rpc = Map.put(rpc, "keyType", if(key_type == :web_authn, do: "webAuthn", else: "p256"))
     authorization = rpc_authorization(rpc)
     digest = authorization |> ExRLP.encode() |> Hash.keccak()
     {public_key, private_key} = :crypto.generate_key(:ecdh, :secp256r1)
@@ -463,15 +473,22 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
     signature =
       case key_type do
-        :p256 -> p256_rpc_signature(digest, private_key, x, y)
+        :p256 -> p256_rpc_signature(digest, false, false, private_key, x, y)
+        :p256_prehash -> p256_rpc_signature(digest, true, true, private_key, x, y)
+        :p256_wrong_flag -> p256_rpc_signature(digest, true, false, private_key, x, y)
+        :p256_prehash_wrong_flag -> p256_rpc_signature(digest, false, true, private_key, x, y)
         :web_authn -> web_authn_rpc_signature(digest, private_key, x, y)
       end
 
     Map.put(rpc, "signature", signature)
   end
 
-  defp p256_rpc_signature(digest, private_key, x, y) do
-    {r, s} = ecdsa_signature(digest, :sha256, private_key)
+  # preHash = false signs the keccak digest itself; true signs SHA256(digest), as mpp-rs does.
+  defp p256_rpc_signature(digest, sign_sha256?, prehash_flag, private_key, x, y) do
+    {r, s} =
+      if sign_sha256?,
+        do: ecdsa_signature(digest, :sha256, private_key),
+        else: ecdsa_signature({:digest, digest}, :sha256, private_key)
 
     %{
       "type" => "p256",
@@ -479,7 +496,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
       "s" => fixed_hex(s),
       "pubKeyX" => hex(x),
       "pubKeyY" => hex(y),
-      "preHash" => false
+      "preHash" => prehash_flag
     }
   end
 

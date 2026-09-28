@@ -8,6 +8,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tempo subscription P-256 key authorizations.** `MPP.Methods.Tempo.KeyAuthorization`
+  now reads the P-256 `preHash` flag as Tempo does: `0` verifies the signature over
+  the authorization digest, nonzero over `SHA256(digest)`. Before, standard
+  (unhashed) P-256 root signatures were rejected and pre-hashed ones always failed.
+
 ## [0.19.0] — 2026-09-25
 
 **Security (five coordinated fixes, each disclosed with this release).** Solana push credentials (`type="signature"`) are no longer accepted by default and, when enabled with `"push" => "challenge_memo"`, must carry a memo derived from the issuing challenge; every Solana receipt path claims its transaction signature exactly once (`GHSA-6xg7-3f46-g3g5`). Stripe subscription activation is single-use per payment method and plan across challenges, with durable activation claims reconciled against Stripe state (`GHSA-2g9q-rg79-676x`). The generic session layer raises a channel's deposit only from server-verified escrow state on top-up (`GHSA-25v8-3q3q-3m7j`) and on open (`GHSA-9c4m-cr2r-c3px`), and verifies vouchers only against the signer established when the channel opened (`GHSA-c33f-jwgj-rw53`).

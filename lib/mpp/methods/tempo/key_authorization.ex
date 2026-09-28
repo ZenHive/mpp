@@ -333,8 +333,10 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
          <<0x01, r::binary-size(32), s::binary-size(32), x::binary-size(32), y::binary-size(32), prehash>>,
          digest
        ) do
-    digest_type = if prehash == 0, do: :sha256, else: :none
-    verify_p256_signature(digest, digest_type, r, s, x, y)
+    # preHash = 0 signs the digest itself; nonzero signs SHA256(digest) (tt_signature.rs,
+    # mpp-rs client/tempo/signing/p256.rs).
+    message = if prehash == 0, do: {:digest, digest}, else: digest
+    verify_p256_signature(message, :sha256, r, s, x, y)
   end
 
   defp verify_web_authn(<<0x02, data::binary>>, digest) when byte_size(data) >= 128 do
