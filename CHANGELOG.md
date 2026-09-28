@@ -14,6 +14,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   now reads the P-256 `preHash` flag as Tempo does: `0` verifies the signature over
   the authorization digest, nonzero over `SHA256(digest)`. Before, standard
   (unhashed) P-256 root signatures were rejected and pre-hashed ones always failed.
+  P-256 and WebAuthn root signatures with a high `s` are rejected, as on-chain.
 
 ## [0.19.0] — 2026-09-25
 

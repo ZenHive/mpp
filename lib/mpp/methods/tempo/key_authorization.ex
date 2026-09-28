@@ -22,6 +22,8 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   @uint64_max 18_446_744_073_709_551_615
   @max_safe_integer 9_007_199_254_740_991
   @web_authn_min_authenticator_size 37
+  # Tempo rejects P-256 and WebAuthn signatures with s > n/2 (tt_signature.rs P256N_HALF).
+  @p256_half_order 0x7FFFFFFF800000007FFFFFFFFFFFFFFFDE737D56D38BCF4279DCE5617E3192A8
 
   @type key_type :: :secp256k1 | :p256 | :web_authn
   @type t :: %__MODULE__{
@@ -357,6 +359,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   end
 
   defp verify_web_authn(_signature, _digest), do: {:error, "keyAuthorization signature is invalid"}
+
+  defp verify_p256_signature(_data, _digest_type, _r, <<s::unsigned-256>>, _x, _y) when s > @p256_half_order,
+    do: {:error, "keyAuthorization signature is invalid"}
 
   defp verify_p256_signature(data, digest_type, r, s, x, y) do
     public_key = <<0x04, x::binary, y::binary>>

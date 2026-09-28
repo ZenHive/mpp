@@ -554,6 +554,40 @@ defmodule MPP.Tempo.CrossValidationTest do
     end
   end
 
+  describe "KeyAuthorization P-256 root signature cross-validation" do
+    setup :start_quickbeam_with_ox_tempo
+
+    # ox signs SHA256(payload) when prehash is true and the payload itself otherwise,
+    # matching tempo tt_signature.rs; Elixir must accept exactly the flag ox wrote.
+    for prehash <- [false, true] do
+      @prehash prehash
+      test "Elixir verifies an ox P-256 root signature with prehash=#{prehash}", %{rt: rt} do
+        subscription = SubscriptionHelpers.subscription()
+        challenge_id = SubscriptionHelpers.challenge_id()
+        {serialized, ox_source} = ox_p256_key_authorization(rt, subscription, challenge_id, @prehash, @prehash)
+
+        assert {:ok, authorization} = KeyAuthorization.deserialize(serialized)
+        assert String.downcase(authorization.source) == String.downcase(ox_source)
+
+        assert :ok =
+                 KeyAuthorization.verify(authorization, subscription,
+                   chain_id: SubscriptionHelpers.chain_id(),
+                   access_key: SubscriptionHelpers.access_address(),
+                   key_type: :secp256k1,
+                   challenge_id: challenge_id
+                 )
+      end
+
+      test "Elixir rejects an ox P-256 root signature whose flag claims prehash=#{!prehash}", %{rt: rt} do
+        subscription = SubscriptionHelpers.subscription()
+        challenge_id = SubscriptionHelpers.challenge_id()
+        {serialized, _source} = ox_p256_key_authorization(rt, subscription, challenge_id, @prehash, !@prehash)
+
+        assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.deserialize(serialized)
+      end
+    end
+  end
+
   describe "regression guards" do
     setup :start_quickbeam_with_ox_tempo
 
@@ -863,6 +897,44 @@ defmodule MPP.Tempo.CrossValidationTest do
   # Decodes a 0x-prefixed hex string to raw bytes.
   defp decode_hex!("0x" <> hex), do: Base.decode16!(hex, case: :mixed)
   defp hex(value), do: "0x" <> Base.encode16(value, case: :lower)
+
+  # ox builds and signs the witness-bound authorization with a P-256 root key: `sign_prehash`
+  # picks the message ox signs, `flag_prehash` the envelope flag it serializes.
+  defp ox_p256_key_authorization(rt, subscription, challenge_id, sign_prehash, flag_prehash) do
+    token = String.downcase(SubscriptionHelpers.token())
+    recipient = String.downcase(SubscriptionHelpers.recipient())
+    witness = challenge_id |> SubscriptionHelpers.challenge_witness() |> hex()
+
+    {:ok, json} =
+      QuickBEAM.eval(rt, """
+        const privateKey = '0x#{SubscriptionHelpers.root_private_key()}';
+        const authorization = OxKeyAuthorization.from({
+          address: '#{SubscriptionHelpers.access_address()}',
+          chainId: #{SubscriptionHelpers.chain_id()}n,
+          expiry: #{expiry_unix(subscription.subscription_expires)},
+          type: 'secp256k1',
+          limits: [{ token: '#{token}', limit: #{subscription.amount}n, period: 86400 }],
+          scopes: [
+            { address: '#{token}', selector: '0xa9059cbb', recipients: ['#{recipient}'] },
+            { address: '#{token}', selector: '0x95777d59', recipients: ['#{recipient}'] }
+          ],
+          witness: '#{witness}'
+        });
+        const payload = OxKeyAuthorization.getSignPayload(authorization);
+        const publicKey = OxP256.getPublicKey({ privateKey });
+        const signature = OxP256.sign({ payload, privateKey, hash: #{sign_prehash}, extraEntropy: false });
+        const envelope = OxSignatureEnvelope.from({ type: 'p256', signature, publicKey, prehash: #{flag_prehash} });
+        JSON.stringify({
+          serialized: OxKeyAuthorization.serialize(OxKeyAuthorization.from(authorization, { signature: envelope })),
+          address: OxAddress.fromPublicKey(publicKey),
+          oxVerifies: OxSignatureEnvelope.verify(envelope, { payload, publicKey })
+        });
+      """)
+
+    %{"serialized" => serialized, "address" => address, "oxVerifies" => ox_verifies} = Jason.decode!(json)
+    assert ox_verifies == (sign_prehash == flag_prehash), "ox disagrees with the fixture: #{json}"
+    {serialized, address}
+  end
 
   defp expiry_unix(value) do
     {:ok, datetime, _offset} = DateTime.from_iso8601(value)

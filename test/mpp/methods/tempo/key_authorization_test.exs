@@ -7,6 +7,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
   @transfer_selector "0xa9059cbb"
   @transfer_with_memo_selector "0x95777d59"
+  @p256_order 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 
   test "deserializes, verifies, and reserializes a normative subscription authorization" do
     subscription = SubscriptionHelpers.subscription()
@@ -184,6 +185,19 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
     for key_type <- [:p256_wrong_flag, :p256_prehash_wrong_flag] do
       rpc = signed_p256_rpc(subscription, key_type)
+      assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.from_rpc(rpc)
+    end
+  end
+
+  test "rejects high-s p256 and WebAuthn signatures as Tempo does" do
+    subscription = SubscriptionHelpers.subscription()
+
+    for key_type <- [:p256, :web_authn] do
+      rpc = signed_p256_rpc(subscription, key_type)
+      low_s = rpc["signature"]["s"] |> String.trim_leading("0x") |> Base.decode16!(case: :lower)
+      high_s = @p256_order - :binary.decode_unsigned(low_s)
+      rpc = put_in(rpc, ["signature", "s"], fixed_hex(high_s))
+
       assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.from_rpc(rpc)
     end
   end
@@ -519,7 +533,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
   defp ecdsa_signature(payload, digest_type, private_key) do
     der = :crypto.sign(:ecdsa, digest_type, payload, [private_key, :secp256r1])
     {:"ECDSA-Sig-Value", r, s} = :public_key.der_decode(:"ECDSA-Sig-Value", der)
-    {r, s}
+    {r, if(s > div(@p256_order, 2), do: @p256_order - s, else: s)}
   end
 
   defp rpc_authorization(rpc) do
