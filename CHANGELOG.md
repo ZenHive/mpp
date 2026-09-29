@@ -8,6 +8,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-09-29
+
 ### Fixed
 
 - **Tempo subscription P-256 key authorizations.** `MPP.Methods.Tempo.KeyAuthorization`
