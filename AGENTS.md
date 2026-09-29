@@ -96,6 +96,31 @@ Overriding the user's discernible intent — deferring, building differently, sk
 - Surface ≠ block: "doing X instead of Y because Z — say if wrong", then proceed. Don't gate on a question.
 - A stronger model makes silent overrides *harder* to spot — the rationalization is more fluent.
 
+## Stack is chosen per idea — never by default
+
+The user is language-agnostic, has no Elixir preference and does not read most code. "The user's repos are Elixir" is never a reason.
+
+**Assume web, desktop and mobile will be wanted** unless the user explicitly rules them out. Never pick a stack that silently forecloses a platform.
+
+Decide in this order:
+1. **Platforms → UI stack.** Multi-platform → TypeScript (React + Expo + Tauri/Electron) or Flutter. Elixir/LiveView only for explicitly web-only.
+2. **Official SDKs.** Use maintained official libraries (ccxt, viem, alloy, go-ethereum, protocol SDKs) in their language. Never port them.
+3. **Known over own.** Product code sits directly on libraries AI agents know from training. Every library the user would own needs explicit approval, with the reason nothing known solves it stated in the task.
+4. **Backend by main workload:**
+   - multi-platform app → TypeScript end to end (chain via viem, exchanges via ccxt)
+   - many long-lived stateful connections → Elixir
+   - standalone integration service / worker with official SDKs in Go → Go
+   - bounded core: EVM simulation (revm), heavy compute, Tauri backend → Rust
+   - research / quant / ML → Python, not as default for long-running services
+   - one backend language per app; a second only for a bounded core
+5. **Maintenance cost.** Every library, package and publish is a permanent obligation.
+
+Existing Elixir apps keep their backend; new clients (mobile/desktop) attach via API (e.g. Ash JSON API) in the UI stack of rule 1. No rewrite without an oracle.
+
+State the stack and the deciding criterion. A Hex publish as "distribution bet" (`portfolio-strategy.md`) is not approval.
+
+Evidence (2026-09 audit): 21 Hex packages, no external dependents, ~99 releases in 90 days; ~62 in `onchain-stack` + `mpp`, which reimplement alloy/revm/viem and the official MPP SDKs. `bourse` (113k LOC) duplicates `ccxt` (official Rust + Go + TS for all 11 venues). LiveView Native is still pre-1.0 (0.4.0-rc.1, 2026-03), Android unfinished, online-only.
+
 ## Never start the Phoenix server
 
 Always already running. Never `mix phx.server`. Assume localhost:4000. To verify behavior, ask the user to check the browser.
