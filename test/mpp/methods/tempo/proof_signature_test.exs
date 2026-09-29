@@ -87,7 +87,7 @@ defmodule MPP.Methods.Tempo.ProofSignatureTest do
 
   test "legacy signer extraction delegates without changing secp256k1 signatures" do
     private = :binary.copy(<<1>>, 32)
-    {:ok, address} = Cartouche.Signer.Curvy.get_address(private)
+    {:ok, address} = Cartouche.Signer.Secp256k1.get_address(private)
     digest = Proof.hash(@params)
     signature = MPP.Test.TempoAccessKey.sign_proof!(digest, private, address)
     assert {:ok, envelope} = ProofSignature.deserialize(signature)

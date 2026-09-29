@@ -85,13 +85,17 @@ defmodule MPP.MixProject do
       # Two-segment like descripex below: nothing consumes mpp, and the
       # committed mix.lock already blocks a silent in-family upgrade — a new
       # minor lands only through a deliberate `mix deps.update` behind `mix ci`.
-      {:onchain, "~> 0.13"},
+      {:onchain, "~> 0.15"},
 
       # Solana RPC, legacy transaction codec, and System/Token/ATA instruction
       # builders used by MPP.Methods.Solana. Already pulled by onchain; declared
       # directly because this method calls Cartouche.Solana.* rather than an
       # onchain wrapper. Two-segment for the same reason as onchain above.
-      {:cartouche, "~> 0.8"},
+      {:cartouche, "~> 0.10"},
+
+      # secp256k1 (RustCrypto k256 NIF) behind cartouche's signer; declared
+      # directly because MPP.Methods.XRPL verifies and signs DER claims with it.
+      {:ex_secp256k1, "~> 0.8"},
 
       # Stellar XDR used by MPP.Methods.Stellar to decode signed envelopes,
       # inspect invokeHostFunction ops, and rebuild sponsored transactions.
@@ -105,7 +109,7 @@ defmodule MPP.MixProject do
       # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
       # simulation (MPP.Methods.Tempo) calls directly. Two-segment for the
       # same reason as onchain above.
-      {:onchain_tempo, "~> 0.9"},
+      {:onchain_tempo, "~> 0.11"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
@@ -166,7 +170,7 @@ defmodule MPP.MixProject do
         :stellar_base,
         :ed25519,
         :hieroglyph,
-        :curvy,
+        :ex_secp256k1,
         :ex_rlp,
         :con_cache
       ],

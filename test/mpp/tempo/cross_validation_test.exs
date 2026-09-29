@@ -34,7 +34,7 @@ defmodule MPP.Tempo.CrossValidationTest do
   # cross_validation` (or `mix test --include cross_validation`) when the
   # toolchain is set up. Mirrors :integration handling.
   alias Cartouche.Hash
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Test.OxTempoBundle
   alias MPP.Test.SubscriptionHelpers
@@ -354,7 +354,7 @@ defmodule MPP.Tempo.CrossValidationTest do
 
       js_tx = js_deserialize!(rt, tx_hex)
 
-      {:ok, sender_bytes} = Curvy.get_address(Base.decode16!(private_key_hex, case: :lower))
+      {:ok, sender_bytes} = Secp256k1.get_address(Base.decode16!(private_key_hex, case: :lower))
       expected_sender = "0x" <> Base.encode16(sender_bytes, case: :lower)
 
       assert String.downcase(js_tx["from"]) == expected_sender,
@@ -386,7 +386,7 @@ defmodule MPP.Tempo.CrossValidationTest do
 
       js_tx = js_deserialize!(rt, cosigned_hex)
 
-      {:ok, sender_bytes} = Curvy.get_address(Base.decode16!(sender_key_hex, case: :lower))
+      {:ok, sender_bytes} = Secp256k1.get_address(Base.decode16!(sender_key_hex, case: :lower))
       expected_sender = "0x" <> Base.encode16(sender_bytes, case: :lower)
 
       assert String.downcase(js_tx["from"]) == expected_sender

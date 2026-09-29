@@ -69,7 +69,7 @@ defmodule MPP.Methods.EVM.Permit2 do
       }
 
       with {:ok, digest} <- digest(payload, charge, spender),
-           {:ok, signature} <- Cartouche.Signer.Curvy.sign_payload(digest, key),
+           {:ok, signature} <- Cartouche.Signer.Secp256k1.sign_payload(digest, key),
            signature = Recover.normalize_low_s(signature),
            {:ok, owner_bin} <- address(owner),
            {:ok, recid} <- Recover.find_recid_from_digest(digest, signature, owner_bin) do
@@ -336,7 +336,7 @@ defmodule MPP.Methods.EVM.Permit2 do
 
   defp recover(digest, signature) do
     with {:ok, <<r::256, s::256, v>>} <- signature_bytes(signature) do
-      sig = %Curvy.Signature{crv: :secp256k1, r: r, s: s, recid: v - 27}
+      sig = %Cartouche.Signature{r: r, s: s, recid: v - 27}
       {:ok, Hex.encode(Recover.recover_eth_from_digest(digest, sig))}
     end
   rescue

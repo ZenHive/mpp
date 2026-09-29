@@ -3,7 +3,7 @@ defmodule MPP.Test.SubscriptionHelpers do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Address
@@ -82,8 +82,8 @@ defmodule MPP.Test.SubscriptionHelpers do
     authorization = authorization_tuple(subscription, opts, challenge_id)
     digest = authorization |> ExRLP.encode() |> Hash.keccak()
     private_key = decode_key!(Keyword.get(opts, :root_private_key, @root_private_key))
-    {:ok, root_address} = Curvy.get_address(private_key)
-    {:ok, signature} = Curvy.sign_payload(digest, private_key)
+    {:ok, root_address} = Secp256k1.get_address(private_key)
+    {:ok, signature} = Secp256k1.sign_payload(digest, private_key)
     signature = Recover.normalize_low_s(signature)
     {:ok, recovery_id} = Recover.find_recid_from_digest(digest, signature, root_address)
 
@@ -261,7 +261,7 @@ defmodule MPP.Test.SubscriptionHelpers do
 
   defp address!(private_key) do
     private_key = decode_key!(private_key)
-    {:ok, address} = Curvy.get_address(private_key)
+    {:ok, address} = Secp256k1.get_address(private_key)
     hex(address)
   end
 

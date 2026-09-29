@@ -149,7 +149,7 @@ defmodule MPP.Methods.Tempo do
   use MPP.Method
   use Descripex, namespace: "/methods"
 
-  alias Curvy.Signature, as: CurvySignature
+  alias Cartouche.Signature
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Hex
@@ -1397,14 +1397,14 @@ defmodule MPP.Methods.Tempo do
        when v in [0, 1, 27, 28] do
     recid = if v >= 27, do: v - 27, else: v
 
-    %CurvySignature{r: r, s: s, recid: recid}
-    |> CurvySignature.normalize()
+    %Signature{r: r, s: s, recid: recid}
+    |> Signature.normalize()
     |> encode_canonical_sender_signature()
   end
 
   defp canonicalize_sender_signature(other), do: other
 
-  defp encode_canonical_sender_signature(%CurvySignature{r: r, s: s, recid: recid}) when recid in 0..3 do
+  defp encode_canonical_sender_signature(%Signature{r: r, s: s, recid: recid}) when recid in 0..3 do
     <<r::unsigned-big-size(256), s::unsigned-big-size(256), recid + 27::8>>
   end
 

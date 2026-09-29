@@ -7,7 +7,7 @@ defmodule MPP.Methods.TempoTest do
 
   import MPP.Test.TempoTestHelpers
 
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
@@ -3400,8 +3400,8 @@ defmodule MPP.Methods.TempoTest do
     test "accepts proof signed by an authorized access key for the root source", %{charge: charge} do
       root_private_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
       access_private_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
-      {:ok, root_address} = Curvy.get_address(root_private_key)
-      {:ok, access_address} = Curvy.get_address(access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
 
       charge =
@@ -3424,8 +3424,8 @@ defmodule MPP.Methods.TempoTest do
     test "rejects proof signed by a revoked access key for the root source", %{charge: charge} do
       root_private_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
       access_private_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
-      {:ok, root_address} = Curvy.get_address(root_private_key)
-      {:ok, access_address} = Curvy.get_address(access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
 
       charge =
@@ -3452,8 +3452,8 @@ defmodule MPP.Methods.TempoTest do
     setup %{charge: charge} do
       wallet_key = Base.decode16!(String.duplicate("01", 32), case: :mixed)
       attacker_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
-      {:ok, wallet_addr} = Curvy.get_address(wallet_key)
-      {:ok, attacker_addr} = Curvy.get_address(attacker_key)
+      {:ok, wallet_addr} = Secp256k1.get_address(wallet_key)
+      {:ok, attacker_addr} = Secp256k1.get_address(attacker_key)
 
       charge = %{
         charge
@@ -3637,7 +3637,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects a presenter signature from a wallet other than the transaction sender",
          %{charge: charge, tx_hex: tx_hex} do
       attacker_key = Base.decode16!(String.duplicate("02", 32), case: :mixed)
-      {:ok, attacker_addr} = Curvy.get_address(attacker_key)
+      {:ok, attacker_addr} = Secp256k1.get_address(attacker_key)
       signature = sign_access_key_proof!(presenter_params(test_sender_address()), attacker_key, attacker_addr)
       stub_active_access_key_metadata!(revoked: true)
 
@@ -3662,13 +3662,13 @@ defmodule MPP.Methods.TempoTest do
 
   defp sign_presenter_by_test_sender!(params) do
     key = test_sender_key()
-    {:ok, addr} = Curvy.get_address(key)
+    {:ok, addr} = Secp256k1.get_address(key)
     sign_access_key_proof!(params, key, addr)
   end
 
   defp sign_access_key_proof!(params, private_key, address) do
     digest = MPP.Methods.Tempo.Proof.hash(params)
-    {:ok, sig} = Curvy.sign_payload(digest, private_key)
+    {:ok, sig} = Secp256k1.sign_payload(digest, private_key)
     sig = Cartouche.Recover.normalize_low_s(sig)
     {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, address)
 

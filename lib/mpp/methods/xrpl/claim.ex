@@ -10,7 +10,7 @@ defmodule MPP.Methods.XRPL.Claim do
   sign the raw message bytes.
   """
 
-  alias Curvy.Signature, as: CurvySignature
+  alias Cartouche.Signature
   alias MPP.Methods.XRPL.RPC
   alias MPP.Session.Channel
 
@@ -66,9 +66,10 @@ defmodule MPP.Methods.XRPL.Claim do
   defp verify_key(message, signature, public_key) when byte_size(public_key) == 33 do
     digest = RPC.sha512_half(message)
 
-    with %CurvySignature{} = parsed <- CurvySignature.parse(signature),
-         true <- parsed.s > 0 and parsed.s <= @half_n,
-         true <- Curvy.verify(signature, digest, public_key, hash: false) do
+    with {:ok, %Signature{r: r, s: s}} <- Signature.from_der(signature),
+         true <- s <= @half_n,
+         {:ok, uncompressed} <- ExSecp256k1.public_key_decompress(public_key),
+         :ok <- ExSecp256k1.verify(digest, <<r::unsigned-256, s::unsigned-256>>, uncompressed) do
       :ok
     else
       _ -> {:error, :invalid_signature}

@@ -2,7 +2,7 @@ defmodule MPP.Test.SessionSigning do
   @moduledoc false
 
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Session.Voucher
 
   # Anvil account 0 — the well-known dev key; its address is the
@@ -38,9 +38,9 @@ defmodule MPP.Test.SessionSigning do
   defp sign_voucher_with(private_key, channel_id, cumulative_amount, escrow_contract, chain_id) do
     voucher = struct(Voucher, channel_id: String.downcase(channel_id), cumulative_amount: cumulative_amount)
     digest = Voucher.hash!(voucher, escrow_contract, chain_id)
-    {:ok, signature} = Curvy.sign_payload(digest, private_key)
+    {:ok, signature} = Secp256k1.sign_payload(digest, private_key)
     signature = Recover.normalize_low_s(signature)
-    {:ok, address} = Curvy.get_address(private_key)
+    {:ok, address} = Secp256k1.get_address(private_key)
     {:ok, recid} = Recover.find_recid_from_digest(digest, signature, address)
 
     "0x" <>

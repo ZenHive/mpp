@@ -11,10 +11,10 @@ defmodule MPP.Session.Voucher do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
+  alias Cartouche.Signature
   alias Cartouche.Typed
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
-  alias Curvy.Signature, as: CurvySignature
   alias MPP.Session.Channel
   alias Onchain.Address
   alias Onchain.Hex
@@ -176,8 +176,7 @@ defmodule MPP.Session.Voucher do
   defp decode_signature(_signature_hex), do: {:error, :invalid_signature}
 
   defp signature_struct(r, s, v) do
-    %CurvySignature{
-      crv: :secp256k1,
+    %Signature{
       r: :binary.decode_unsigned(r),
       s: :binary.decode_unsigned(s),
       recid: v - 27

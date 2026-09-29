@@ -5,7 +5,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.KeyAuthorization
@@ -37,7 +37,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     now = System.os_time(:second)
 
     with {:ok, access_key} <- decode_key(config["subscription_access_key_private_key"]),
-         {:ok, access_key_address} <- Curvy.get_address(access_key),
+         {:ok, access_key_address} <- Secp256k1.get_address(access_key),
          {:ok, source_address} <- Address.validate(source),
          {:ok, token} <- Address.validate(subscription.currency),
          {:ok, recipient} <- Address.validate(subscription.recipient),
@@ -101,7 +101,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     transaction_digest = Hash.keccak(<<@tempo_transaction_type>> <> ExRLP.encode(base_fields))
     access_digest = Hash.keccak(<<@keychain_v2_type, transaction_digest::binary, source_address::binary>>)
 
-    with {:ok, signature} <- Curvy.sign_payload(access_digest, access_key),
+    with {:ok, signature} <- Secp256k1.sign_payload(access_digest, access_key),
          signature = Recover.normalize_low_s(signature),
          {:ok, recovery_id} <- Recover.find_recid_from_digest(access_digest, signature, access_key_address) do
       inner =
@@ -146,9 +146,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
     payload = <<@fee_payer_domain>> <> ExRLP.encode(fee_payer_preimage)
 
-    with {:ok, signature} <- Curvy.sign(payload, private_key),
+    with {:ok, signature} <- Secp256k1.sign(payload, private_key),
          signature = Recover.normalize_low_s(signature),
-         {:ok, fee_payer_address} <- Curvy.get_address(private_key),
+         {:ok, fee_payer_address} <- Secp256k1.get_address(private_key),
          {:ok, recovery_id} <- Recover.find_recid(payload, signature, fee_payer_address) do
       tuple = [encode_uint(recovery_id), encode_uint(signature.r), encode_uint(signature.s)]
 

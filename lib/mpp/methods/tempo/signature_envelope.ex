@@ -4,12 +4,12 @@ defmodule MPP.Methods.Tempo.SignatureEnvelope do
   use Cartouche.Hex
 
   alias Cartouche.Recover
-  alias Curvy.Signature, as: CurvySignature
+  alias Cartouche.Signature
   alias MPP.Hex
 
   @magic_suffix :binary.copy(<<0x77>>, 32)
 
-  @type secp256k1 :: {:secp256k1, CurvySignature.t()}
+  @type secp256k1 :: {:secp256k1, Signature.t()}
   @type keychain :: {:keychain, String.t(), secp256k1() | keychain(), :v1 | :v2}
   @type t :: secp256k1() | keychain()
 
@@ -96,13 +96,12 @@ defmodule MPP.Methods.Tempo.SignatureEnvelope do
 
   defp decode_secp256k1(<<r::unsigned-256, s::unsigned-256, v::8>>)
        when v in 27..30 and r in 1..@max_scalar and s in 1..@max_scalar do
-    {:ok, {:secp256k1, %CurvySignature{crv: :secp256k1, r: r, s: s, recid: v - 27}}}
+    {:ok, {:secp256k1, %Signature{r: r, s: s, recid: v - 27}}}
   end
 
   defp decode_secp256k1(_bytes), do: {:error, "invalid proof signature"}
 
-  defp recover_address(payload, %CurvySignature{recid: recid} = signature)
-       when is_binary(payload) and is_integer(recid) do
+  defp recover_address(payload, %Signature{recid: recid} = signature) when is_binary(payload) and is_integer(recid) do
     addr = Recover.recover_eth_from_digest(payload, signature)
     {:ok, to_hex(addr)}
   rescue

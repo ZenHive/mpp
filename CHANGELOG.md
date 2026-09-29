@@ -8,6 +8,15 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Changed
+
+- **secp256k1 runs on `ex_secp256k1` (RustCrypto k256); `curvy` is gone from the
+  dependency tree.** Requires cartouche `~> 0.10`, onchain `~> 0.15` and
+  onchain_tempo `~> 0.11`. Signatures are `%Cartouche.Signature{}` and signing
+  goes through `Cartouche.Signer.Secp256k1`. XRPL claims verify and sign DER on
+  `ex_secp256k1` directly and now reject non-canonical DER encodings. Packed
+  Ethereum signatures and wire formats are unchanged.
+
 ## [0.19.1] — 2026-09-29
 
 ### Fixed

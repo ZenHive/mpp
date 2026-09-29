@@ -3,7 +3,7 @@ defmodule MPP.Methods.Tempo.ProofTest do
   use Cartouche.Hex
 
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Methods.Tempo.Proof
 
   # Pinned from refs/mppx/src/tempo/Proof.conformance.test.ts (wallet-bound MPP v3).
@@ -63,8 +63,8 @@ defmodule MPP.Methods.Tempo.ProofTest do
     @access_private_key "02" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
 
     test "recovers access key when proof is bound to root account" do
-      {:ok, root_address} = Curvy.get_address(@root_private_key)
-      {:ok, access_address} = Curvy.get_address(@access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(@root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(@access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
 
       params = %{
@@ -85,8 +85,8 @@ defmodule MPP.Methods.Tempo.ProofTest do
     end
 
     test "still recovers signer when claimed source differs (authorization checked later)" do
-      {:ok, root_address} = Curvy.get_address(@root_private_key)
-      {:ok, access_address} = Curvy.get_address(@access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(@root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(@access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
       other_root = "0x000000000000000000000000000000000000bEEF"
       access_hex = "0x" <> Base.encode16(access_address, case: :lower)
@@ -105,8 +105,8 @@ defmodule MPP.Methods.Tempo.ProofTest do
     end
 
     test "recovers access key from keychain v2 envelope when root matches source" do
-      {:ok, root_address} = Curvy.get_address(@root_private_key)
-      {:ok, access_address} = Curvy.get_address(@access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(@root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(@access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
 
       params = %{
@@ -128,8 +128,8 @@ defmodule MPP.Methods.Tempo.ProofTest do
     end
 
     test "rejects keychain envelope when user address does not match source" do
-      {:ok, root_address} = Curvy.get_address(@root_private_key)
-      {:ok, access_address} = Curvy.get_address(@access_private_key)
+      {:ok, root_address} = Secp256k1.get_address(@root_private_key)
+      {:ok, access_address} = Secp256k1.get_address(@access_private_key)
       root_hex = "0x" <> Base.encode16(root_address, case: :lower)
 
       other_root =
@@ -162,7 +162,7 @@ defmodule MPP.Methods.Tempo.ProofTest do
   end
 
   defp sign_proof_digest!(digest, private_key, address) do
-    {:ok, sig} = Curvy.sign_payload(digest, private_key)
+    {:ok, sig} = Secp256k1.sign_payload(digest, private_key)
     sig = Recover.normalize_low_s(sig)
     {:ok, recid} = Recover.find_recid_from_digest(digest, sig, address)
 

@@ -30,9 +30,9 @@ defmodule MPP.Methods.XRPL.ClaimTest do
 
   test "rejects a high-S secp256k1 encoding of an otherwise valid claim" do
     {:ok, der} = Base.decode16(@secp["signature"], case: :mixed)
-    %Curvy.Signature{r: r, s: s} = Curvy.Signature.parse(der)
+    {:ok, %Cartouche.Signature{r: r, s: s}} = Cartouche.Signature.from_der(der)
     n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-    high = Curvy.Signature.to_der(%Curvy.Signature{r: r, s: n - s})
+    high = MPP.Methods.XRPL.Wallet.der(r, n - s)
 
     assert {:error, :invalid_signature} =
              Claim.verify(@secp["channelId"], 100_000, Base.encode16(high), @secp["publicKey"])

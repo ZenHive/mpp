@@ -32,7 +32,7 @@ defmodule MPP.Client.Providers.Tempo do
   use MPP.Client.PaymentProvider
 
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Challenge
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Shared
@@ -265,7 +265,7 @@ defmodule MPP.Client.Providers.Tempo do
       })
 
     with {:ok, address_bytes} <- Address.validate(address),
-         {:ok, signature} <- Curvy.sign_payload(digest, private_key),
+         {:ok, signature} <- Secp256k1.sign_payload(digest, private_key),
          signature = Recover.normalize_low_s(signature),
          {:ok, recovery_id} <- Recover.find_recid_from_digest(digest, signature, address_bytes) do
       raw =

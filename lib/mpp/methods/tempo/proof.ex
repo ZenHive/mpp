@@ -11,10 +11,10 @@ defmodule MPP.Methods.Tempo.Proof do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
+  alias Cartouche.Signature
   alias Cartouche.Typed
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
-  alias Curvy.Signature, as: CurvySignature
   alias MPP.Hex
   alias MPP.Methods.Tempo.ProofSignature
   alias MPP.Methods.Tempo.SignatureEnvelope
@@ -160,15 +160,14 @@ defmodule MPP.Methods.Tempo.Proof do
     end
   end
 
-  @spec decode_signature(String.t()) :: {:ok, CurvySignature.t()} | {:error, String.t()}
+  @spec decode_signature(String.t()) :: {:ok, Signature.t()} | {:error, String.t()}
   defp decode_signature(signature_hex) when is_binary(signature_hex) do
     hex = Hex.strip_0x(signature_hex)
 
     with {:ok, <<r::binary-size(32), s::binary-size(32), _v>> = bytes} <- Base.decode16(hex, case: :mixed),
          true <- byte_size(bytes) == 65 do
       {:ok,
-       %CurvySignature{
-         crv: :secp256k1,
+       %Signature{
          r: :binary.decode_unsigned(r),
          s: :binary.decode_unsigned(s),
          recid: nil
@@ -178,7 +177,7 @@ defmodule MPP.Methods.Tempo.Proof do
     end
   end
 
-  @spec recover_address(<<_::256>>, CurvySignature.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec recover_address(<<_::256>>, Signature.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp recover_address(digest, signature, expected_account) do
     expected = decode_address!(expected_account)
 

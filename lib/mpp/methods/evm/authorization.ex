@@ -17,11 +17,11 @@ defmodule MPP.Methods.EVM.Authorization do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy, as: CurvySigner
+  alias Cartouche.Signature
+  alias Cartouche.Signer.Secp256k1
   alias Cartouche.Typed
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
-  alias Curvy.Signature, as: CurvySignature
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Hex
@@ -99,7 +99,7 @@ defmodule MPP.Methods.EVM.Authorization do
          {:ok, key_bin} <- PrivateKey.decode(private_key),
          {:ok, from_bin} <- Address.validate(parsed.from),
          digest = typed |> Typed.encode() |> Hash.keccak(),
-         {:ok, signature} <- CurvySigner.sign_payload(digest, key_bin),
+         {:ok, signature} <- Secp256k1.sign_payload(digest, key_bin),
          signature = Recover.normalize_low_s(signature),
          {:ok, recid} <- Recover.find_recid_from_digest(digest, signature, from_bin) do
       {:ok, encode_signature_hex(signature, recid)}
@@ -430,8 +430,7 @@ defmodule MPP.Methods.EVM.Authorization do
     with {:ok, <<r::binary-size(32), s::binary-size(32), v>>} <- Base.decode16(hex, case: :mixed),
          true <- v in [27, 28] do
       {:ok,
-       %CurvySignature{
-         crv: :secp256k1,
+       %Signature{
          r: :binary.decode_unsigned(r),
          s: :binary.decode_unsigned(s),
          recid: v - 27

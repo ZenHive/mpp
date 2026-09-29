@@ -2099,7 +2099,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   defp sign_proof_payload!(digest, private_key, address) do
     addr_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(address, "0x", ""))
 
-    {:ok, sig} = Cartouche.Signer.Curvy.sign_payload(digest, private_key)
+    {:ok, sig} = Cartouche.Signer.Secp256k1.sign_payload(digest, private_key)
     sig = Cartouche.Recover.normalize_low_s(sig)
     {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, addr_bytes)
 

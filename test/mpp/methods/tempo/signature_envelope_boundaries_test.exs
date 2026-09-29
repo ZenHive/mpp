@@ -17,7 +17,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeBoundariesTest do
   end
 
   test "keychain extraction delegates to the inner signature, but is not a primitive" do
-    {:ok, address} = Cartouche.Signer.Curvy.get_address(:binary.copy(<<1>>, 32))
+    {:ok, address} = Cartouche.Signer.Secp256k1.get_address(:binary.copy(<<1>>, 32))
     digest = :binary.copy(<<1>>, 32)
     signature = MPP.Test.TempoAccessKey.sign_proof!(digest, :binary.copy(<<1>>, 32), address)
     {:ok, inner} = SignatureEnvelope.deserialize(signature)

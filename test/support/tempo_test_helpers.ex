@@ -5,7 +5,7 @@ defmodule MPP.Test.TempoTestHelpers do
   @moduledoc false
 
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias Onchain.Tempo.TIP20
 
   # Fixed test sender key — fixtures are signed with it so the recovered sender is
@@ -14,7 +14,7 @@ defmodule MPP.Test.TempoTestHelpers do
 
   @doc "The 20-byte address of the fixed test sender key, as a 0x-prefixed hex string."
   def test_sender_address do
-    {:ok, addr} = Curvy.get_address(@test_sender_key)
+    {:ok, addr} = Secp256k1.get_address(@test_sender_key)
     "0x" <> Base.encode16(addr, case: :lower)
   end
 
@@ -82,8 +82,8 @@ defmodule MPP.Test.TempoTestHelpers do
     # fee-payer-signature placeholders are exactly what cosign + sender recovery
     # reset to, so the recovered sender is stable across the co-sign path.
     signing_payload = <<0x76>> <> ExRLP.encode(base_fields)
-    {:ok, sender_address} = Curvy.get_address(@test_sender_key)
-    {:ok, sig} = Curvy.sign(signing_payload, @test_sender_key)
+    {:ok, sender_address} = Secp256k1.get_address(@test_sender_key)
+    {:ok, sig} = Secp256k1.sign(signing_payload, @test_sender_key)
     {:ok, recid} = Recover.find_recid(signing_payload, sig, sender_address)
     sender_sig = <<sig.r::unsigned-big-size(256), sig.s::unsigned-big-size(256), recid + 27::8>>
 

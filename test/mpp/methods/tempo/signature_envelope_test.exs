@@ -2,7 +2,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   use ExUnit.Case, async: true
 
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias MPP.Methods.Tempo.SignatureEnvelope
 
   @root_private_key "01" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
@@ -11,7 +11,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   @digest_b "b2" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
 
   test "deserializes plain secp256k1 envelope" do
-    {:ok, root_address} = Curvy.get_address(@root_private_key)
+    {:ok, root_address} = Secp256k1.get_address(@root_private_key)
     digest = @digest_a
     sig_hex = sign_digest!(digest, @root_private_key, root_address)
 
@@ -32,7 +32,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   end
 
   test "recovery fails closed when the library raises on an unusable signature" do
-    unusable = {:secp256k1, %Elixir.Curvy.Signature{crv: :secp256k1, r: 0, s: 0, recid: 0}}
+    unusable = {:secp256k1, %Cartouche.Signature{r: 0, s: 0, recid: 0}}
     zero = "0x" <> String.duplicate("0", 40)
 
     refute SignatureEnvelope.verify_secp256k1(unusable, @digest_a, zero)
@@ -40,8 +40,8 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   end
 
   test "deserializes keychain v1 and v2 envelopes" do
-    {:ok, root_address} = Curvy.get_address(@root_private_key)
-    {:ok, access_address} = Curvy.get_address(@access_private_key)
+    {:ok, root_address} = Secp256k1.get_address(@root_private_key)
+    {:ok, access_address} = Secp256k1.get_address(@access_private_key)
     root_hex = "0x" <> Base.encode16(root_address, case: :lower)
     digest = @digest_b
 
@@ -61,7 +61,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   end
 
   test "extract_address and verify_secp256k1 for secp256k1 envelope" do
-    {:ok, root_address} = Curvy.get_address(@root_private_key)
+    {:ok, root_address} = Secp256k1.get_address(@root_private_key)
     root_hex = "0x" <> Base.encode16(root_address, case: :lower)
     digest = @digest_a
     sig_hex = sign_digest!(digest, @root_private_key, root_address)
@@ -78,7 +78,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   end
 
   defp sign_digest!(digest, private_key, address) do
-    {:ok, sig} = Curvy.sign_payload(digest, private_key)
+    {:ok, sig} = Secp256k1.sign_payload(digest, private_key)
     sig = Recover.normalize_low_s(sig)
     {:ok, recid} = Recover.find_recid_from_digest(digest, sig, address)
 

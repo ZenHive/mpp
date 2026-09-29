@@ -1,7 +1,7 @@
 defmodule MPP.Methods.XRPL.Wallet do
   @moduledoc false
 
-  alias Curvy.Key
+  alias Cartouche.Signature
   alias MPP.Methods.XRPL.Codec
   alias MPP.Methods.XRPL.RPC
 
@@ -82,15 +82,38 @@ defmodule MPP.Methods.XRPL.Wallet do
 
   defp sign(%{algorithm: :secp256k1, private_key: private_key}, data) do
     digest = RPC.sha512_half(data)
-    {:ok, Base.encode16(Curvy.sign(digest, private_key, hash: false, normalize: true))}
-  rescue
-    _error in [ArgumentError, ErlangError, FunctionClauseError] -> :error
+
+    case ExSecp256k1.sign(digest, private_key) do
+      {:ok, {<<r::unsigned-256>>, <<s::unsigned-256>>, _recid}} ->
+        %Signature{s: s} = Signature.normalize(%Signature{r: r, s: s})
+        {:ok, Base.encode16(der(r, s))}
+
+      _ ->
+        :error
+    end
+  end
+
+  @doc false
+  # Strict DER (X.690) ECDSA-Sig-Value, the TxnSignature encoding rippled requires.
+  @spec der(pos_integer(), pos_integer()) :: binary()
+  def der(r, s) when is_integer(r) and r > 0 and is_integer(s) and s > 0 do
+    body = der_integer(r) <> der_integer(s)
+    <<0x30, byte_size(body)>> <> body
+  end
+
+  defp der_integer(value) do
+    bytes = :binary.encode_unsigned(value)
+    bytes = if :binary.first(bytes) >= 0x80, do: <<0>> <> bytes, else: bytes
+    <<0x02, byte_size(bytes)>> <> bytes
   end
 
   defp compressed_pubkey(scalar) when is_integer(scalar) and scalar > 0 do
-    {:ok, Key.to_pubkey(Key.from_privkey(<<scalar::unsigned-256>>))}
-  rescue
-    _error in [ArgumentError, ErlangError, FunctionClauseError] -> :error
+    with {:ok, uncompressed} <- ExSecp256k1.create_public_key(<<scalar::unsigned-256>>),
+         {:ok, compressed} <- ExSecp256k1.public_key_compress(uncompressed) do
+      {:ok, compressed}
+    else
+      _ -> :error
+    end
   end
 
   defp derive_scalar(bytes, discrim \\ nil), do: derive_scalar(bytes, discrim, 0)

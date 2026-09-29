@@ -3,7 +3,7 @@ defmodule MPP.Test.EVMAuthorization do
 
   alias Cartouche.Hash
   alias Cartouche.Recover
-  alias Cartouche.Signer.Curvy
+  alias Cartouche.Signer.Secp256k1
   alias Cartouche.Typed
   alias Cartouche.Typed.Domain
   alias Cartouche.Typed.Type
@@ -62,7 +62,7 @@ defmodule MPP.Test.EVMAuthorization do
     }
 
     digest = typed |> Typed.encode() |> Hash.keccak()
-    {:ok, signature} = Curvy.sign_payload(digest, key_bin)
+    {:ok, signature} = Secp256k1.sign_payload(digest, key_bin)
     signature = Recover.normalize_low_s(signature)
     {:ok, recid} = Recover.find_recid_from_digest(digest, signature, from)
 
