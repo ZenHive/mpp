@@ -1,5 +1,6 @@
 defmodule MPP.Test.FaucetWallet do
   @moduledoc false
+  alias Faucet.Source.Tempo
 
   # One `tempo_fundAddress` grant is larger than a charge. The minimum only
   # tells the loop when the fee-token balance has landed.
@@ -9,8 +10,14 @@ defmodule MPP.Test.FaucetWallet do
   @spec tempo!(String.t()) :: Faucet.EVM.wallet()
   def tempo!(rpc_url) when is_binary(rpc_url) do
     {:ok, wallet} = Faucet.EVM.fresh_wallet()
-    Faucet.ensure_min_balance!(Faucet.Source.Tempo, wallet.address_hex, @tempo_minimum, rpc_url: rpc_url)
+    Faucet.ensure_min_balance!(Tempo, wallet.address_hex, @tempo_minimum, rpc_url: rpc_url)
     wallet
+  end
+
+  @spec fund_tempo!(String.t(), String.t()) :: :ok
+  def fund_tempo!(address, rpc_url) when is_binary(address) and is_binary(rpc_url) do
+    Faucet.ensure_min_balance!(Tempo, address, @tempo_minimum, rpc_url: rpc_url)
+    :ok
   end
 
   @spec xrpl!(String.t()) :: %{required(String.t()) => String.t()}

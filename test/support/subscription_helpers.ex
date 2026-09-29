@@ -122,6 +122,15 @@ defmodule MPP.Test.SubscriptionHelpers do
     {serialized, parsed, rpc}
   end
 
+  @doc false
+  @spec p256_authorization(Subscription.t(), keyword(), (binary() -> binary())) :: String.t()
+  def p256_authorization(%Subscription{} = subscription, opts, sign_digest) do
+    challenge_id = authorization_challenge_id(subscription, opts)
+    authorization = authorization_tuple(subscription, opts, challenge_id)
+    digest = authorization |> ExRLP.encode() |> Hash.keccak()
+    hex(ExRLP.encode([authorization, sign_digest.(digest)]))
+  end
+
   @spec transfer_log(String.t(), String.t(), String.t(), non_neg_integer(), binary()) :: map()
   def transfer_log(token, from, recipient, amount, <<memo::binary-size(32)>>) do
     %{

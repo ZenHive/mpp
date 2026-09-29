@@ -52,6 +52,37 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     assert DateTime.compare(record.billing_anchor, DateTime.utc_now()) in [:lt, :eq]
   end
 
+  for prehash <- [false, true] do
+    @prehash prehash
+    test "activates a P-256 root authorization signed by ox with prehash=#{prehash} on Moderato" do
+      access_key_private_key = access_key_private_key!()
+      rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
+      sponsor = FaucetWallet.tempo!(rpc_url)
+      {:ok, recipient} = Signer.address_from_key(@recipient_private_key)
+      {:ok, access_key_address} = Signer.address_from_key(access_key_private_key)
+      {store, config} = subscription_config(access_key_private_key, rpc_url, sponsor)
+      subscription = subscription(config, recipient)
+      test_pid = self()
+
+      signature =
+        SubscriptionHelpers.p256_authorization(subscription, [access_key: access_key_address], fn digest ->
+          fixture = ox_p256_signature!(digest, @prehash)
+          send(test_pid, {:p256_root, fixture["address"]})
+          decode_hex!(fixture["envelope"])
+        end)
+
+      assert_received {:p256_root, root}
+      FaucetWallet.fund_tempo!(root, rpc_url)
+
+      assert {:ok, %Receipt{} = receipt} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert receipt.reference =~ ~r/^0x[0-9a-f]{64}$/
+      assert {:ok, record} = Store.get(store, receipt.subscription_id)
+      assert record.method_state.source == String.downcase(root)
+    end
+  end
+
   test "rejects a witness-bound activation credential replayed under a new challenge" do
     access_key_private_key = access_key_private_key!()
     rpc_url = System.get_env("TEMPO_RPC_URL") || @default_rpc_url
@@ -294,6 +325,18 @@ defmodule MPP.Methods.Tempo.SubscriptionIntegrationTest do
     |> Plug.Conn.put_resp_content_type("application/json")
     |> Plug.Conn.send_resp(200, Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
   end
+
+  defp ox_p256_signature!(digest, prehash) do
+    script = Path.expand("../../../support/tempo_p256_sign.mjs", __DIR__)
+    input = Jason.encode!(%{digest: "0x" <> Base.encode16(digest, case: :lower), prehash: prehash})
+    {output, status} = System.cmd("node", [script, input], stderr_to_stdout: true)
+    assert status == 0, "ox P-256 signing failed (requires npm install --no-save viem@2.55.18): #{output}"
+    fixture = Jason.decode!(output)
+    assert fixture["oxVerifies"] == true
+    fixture
+  end
+
+  defp decode_hex!("0x" <> hex), do: Base.decode16!(hex, case: :mixed)
 
   defp signed_authorization(subscription, payer, access_key_private_key) do
     {:ok, access_key_address} = Signer.address_from_key(access_key_private_key)
