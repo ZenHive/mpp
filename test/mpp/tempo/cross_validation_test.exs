@@ -642,11 +642,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       flunk("Missing `quickbeam` dependency -- see cross_validation tag docs")
     end
 
-    {:ok, rt} = QuickBEAM.start(apis: :browser)
-
-    on_exit(fn ->
-      if Process.alive?(rt), do: QuickBEAM.stop(rt)
-    end)
+    rt = start_supervised!({QuickBEAM, apis: :browser})
 
     {:ok, rt: rt}
   end
@@ -658,12 +654,8 @@ defmodule MPP.Tempo.CrossValidationTest do
       flunk("Missing `quickbeam` dependency -- see cross_validation tag docs")
     end
 
-    {:ok, rt} = QuickBEAM.start(apis: :browser)
+    rt = start_supervised!({QuickBEAM, apis: :browser})
     OxTempoBundle.load!(rt)
-
-    on_exit(fn ->
-      if Process.alive?(rt), do: QuickBEAM.stop(rt)
-    end)
 
     {:ok, rt: rt}
   end

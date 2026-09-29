@@ -54,9 +54,8 @@ defmodule MPP.ChallengeHeaderCrossValidationTest do
         flunk("QuickBEAM not available. This test requires the dev/test dependency stack.")
       end
 
-      {:ok, rt} = QuickBEAM.start(apis: :browser)
+      rt = start_supervised!({QuickBEAM, apis: :browser})
       MppxChallengeBundle.load!(rt)
-      on_exit(fn -> if Process.alive?(rt), do: QuickBEAM.stop(rt) end)
       %{rt: rt}
     end
 

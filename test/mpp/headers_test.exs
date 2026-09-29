@@ -916,9 +916,8 @@ defmodule MPP.HeadersTest do
         """)
       end
 
-      {:ok, rt} = QuickBEAM.start(apis: :browser)
+      rt = start_supervised!({QuickBEAM, apis: :browser})
       MPP.Test.MppxChallengeBundle.load!(rt)
-      on_exit(fn -> if Process.alive?(rt), do: QuickBEAM.stop(rt) end)
       %{rt: rt}
     end
 
