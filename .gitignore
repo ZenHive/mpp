@@ -56,3 +56,6 @@ mpp-*.tar
 # removed again before staging, so tracking it only makes delivery commits
 # delete it (Task 130). A plain clone gets no operational rules by design.
 /.cursor/rules/harness-operational.mdc
+
+# local dep-audit hook watermark
+.dep-audit-watch.json
