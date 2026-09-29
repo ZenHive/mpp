@@ -5,7 +5,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 <!-- Selective-load floor (Opus 4.8): critical-rules is the eager guardrail floor;
-     harness-workflow is the second eager include for this harness-registered repo;
+     harness-guardrails is the second eager include (full workflow: harness:harness-workflow skill) for this harness-registered repo;
      ethereum-rpc is a host-specific exception (no skill mirror) — MPP's EVM integration
      tests rely on the node/Sepolia env vars it documents. Everything else is reachable
      on demand as a skill (task-prioritization, task-writing, rmap, web-command,
@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      workflow-philosophy, elixir-volt, quickbeam, oxc, upstream-pr-workflow). -->
 @~/.claude/includes/critical-rules.md
 @~/.claude/includes/elixir-security-adjudications.md
-@~/.claude/includes/harness-workflow.md
+@~/.claude/includes/harness-guardrails.md
 @~/.claude/includes/ethereum-rpc.md
 
 ## Project
