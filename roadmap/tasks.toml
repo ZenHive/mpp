@@ -3566,7 +3566,7 @@ shipped_in = "fc0f7f90856658c8db3c3d312c68a696e8f7dff5"
 id = "129"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "superseded"
 title = "Fail the gate when a lib/ module is missing from the CLAUDE.md module map"
 scores = { d = 4, b = 6, u = 5 }
 acceptance_criteria = ["A test (or mix task folded into `mix precommit.full`) fails when a module defined under `lib/` appears in neither the CLAUDE.md '### Module map' fenced block nor the '@moduledoc false internals' paragraph that follows it, naming the missing module(s)", "It also fails in the other direction: a name listed in either place that no longer resolves to a module under `lib/` (catches renames and deletions)", "The brace-expansion syntax already used in the internals paragraph (`MPP.Methods.Tempo.{AccessKey, EnvelopeFields, ProofSignature, ...}`) is expanded by the checker, not worked around by rewriting the docs", "The check runs against CLAUDE.md only; AGENTS.md stays covered by the existing `mix agents.check` sync check, so a single source of truth is graded once", "Deliberately deleting one module-map line makes the check fail with that module named — paste the output", "mix ci passes"]
@@ -3765,7 +3765,7 @@ shipped_in = "426c90076e06151c3866fe6db7d3fed3eeeb3142"
 id = "136"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "superseded"
 title = "Make full QA freshness checks executable in isolated worktrees"
 scores = { d = 3, b = 4, u = 4 }
 acceptance_criteria = ["Provide a reproducible project-owned command or documented worktree bootstrap for AGENTS rendering freshness and advisory-mirror freshness, avoiding developer-specific absolute paths.", "At a cold isolated checkout, mix precommit.full executes both freshness checks; absent prerequisites are explicitly incomplete or failing rather than reported as verified.", "Test stale AGENTS output, unavailable freshness prerequisites, and the mirror actually consumed by mix_audit; retain all existing full-QA checks and focused dispatch scope."]
@@ -3881,7 +3881,7 @@ shipped_in = "f9bf5b7028b6d754379e6ff28d94692b242628e1"
 id = "141"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "superseded"
 title = "Refresh payment-security mutation evidence after integrated source changes"
 scores = { d = 3, b = 5, u = 5 }
 acceptance_criteria = ["Reproduce the fingerprint_mismatch in test/mutation/security_campaign_test.exs on the integrated source and identify which fingerprint inputs changed.", "Run the executable payment-security mutation campaign against the current source, inspect all outcomes and repair any surviving mutants or invalid replacements through normal implementation and independent review.", "Update the ledger only with observed campaign results; do not merely replace the hash or weaken validation. The focused ledger test passes and the report records the campaign command, revision and outcomes."]

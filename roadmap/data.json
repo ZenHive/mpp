@@ -5464,7 +5464,7 @@
       "id": "129",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "superseded",
       "title": "Fail the gate when a lib/ module is missing from the CLAUDE.md module map",
       "scores": {
         "d": 4,
@@ -5787,7 +5787,7 @@
       "id": "136",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "superseded",
       "title": "Make full QA freshness checks executable in isolated worktrees",
       "scores": {
         "d": 3,
@@ -6001,7 +6001,7 @@
       "id": "141",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "pending",
+      "status": "superseded",
       "title": "Refresh payment-security mutation evidence after integrated source changes",
       "scores": {
         "d": 3,
