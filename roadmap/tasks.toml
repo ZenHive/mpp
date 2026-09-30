@@ -3881,7 +3881,7 @@ shipped_in = "f9bf5b7028b6d754379e6ff28d94692b242628e1"
 id = "141"
 phase = 16
 bundle = "additional-methods"
-status = "superseded"
+status = "pending"
 title = "Refresh payment-security mutation evidence after integrated source changes"
 scores = { d = 3, b = 5, u = 5 }
 acceptance_criteria = ["Reproduce the fingerprint_mismatch in test/mutation/security_campaign_test.exs on the integrated source and identify which fingerprint inputs changed.", "Run the executable payment-security mutation campaign against the current source, inspect all outcomes and repair any surviving mutants or invalid replacements through normal implementation and independent review.", "Update the ledger only with observed campaign results; do not merely replace the hash or weaken validation. The focused ledger test passes and the report records the campaign command, revision and outcomes."]
