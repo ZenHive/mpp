@@ -6290,7 +6290,7 @@
       "id": "148",
       "phase": 10,
       "bundle": "session",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550)",
       "scores": {
         "d": 4,
@@ -6317,6 +6317,7 @@
       ],
       "body": "Three session-layer parity items from mpp-rs:\n\n- #495 (5fc1541): session receipts carry `intent`, `challengeId` and (where applicable) `txHash`. Ours emit `action`, `channelId`, `acceptedCumulative`, `spent` and `units` only (lib/mpp/session/actions.ex ~574-586). mppx session clients may reject the receipt. Thread `challenge_id` through the session opts and add the fields. Check `MPP.Methods.Tempo.SessionReceipt` for reuse.\n- #494 (be42c45): validate the open voucher's signature and deposit bounds before the open transaction is broadcast. `Actions` calls the `verify_open` callback (which normally broadcasts) at ~92, before `ensure_open_within_escrow` (~93) and the signature check (~102). A bad voucher then leaves the client with a funded channel the server never recorded. Reorder so every local check runs before `verify_open`. Also document that `verify_top_up` must check the topUp calldata targets the channel.\n- #550 (c126522): add a StreamData property suite over random session action sequences, asserting the invariants mpp-rs pins: spent monotonic and >= settled; settled monotonic; finalized sticky; deposit never decreases; a deduction happens only while open and within the authorized amount; vouchers strictly increase by >= min_voucher_delta; close amount >= spent. stream_data is already a dev/test dep (Task 63).\n",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     },
