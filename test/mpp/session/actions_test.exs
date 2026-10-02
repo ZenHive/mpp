@@ -952,6 +952,21 @@ defmodule MPP.Session.ActionsTest do
       assert :not_found = Store.get(store, @channel_id)
     end
 
+    test "rejects an invalid open signature before broadcasting when the payer is unknown", %{opts: opts, store: store} do
+      never =
+        opts
+        |> Keyword.delete(:payer)
+        |> Keyword.put(:verify_open, fn _, _ -> flunk("verify_open called") end)
+
+      for signature <- [other_voucher("open", @channel_id, 50)["signature"], "0x01"] do
+        payload = Map.put(open_payload(50), "signature", signature)
+        assert {:error, %Errors{} = error} = Actions.dispatch(payload, never)
+        assert String.contains?(error.type, "invalid-signature")
+      end
+
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
     test "rejects an open voucher below the request before broadcasting", %{opts: opts, store: store} do
       never =
         opts

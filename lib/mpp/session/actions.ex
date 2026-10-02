@@ -63,13 +63,17 @@ defmodule MPP.Session.Actions do
   settlement proof.
 
   Local open checks run before `verify_open` broadcasts. The channel must be
-  absent, and the voucher's cumulative amount must cover the request. When
-  payer, recipient, and token are already known, the signature must recover
-  to the locally resolved signer, and a descriptor or credential signer that
-  already disagrees with server configuration is rejected. A missing payer
-  may still be supplied by the callback. The on-chain deposit is known only
-  after `verify_open`. When that callback names a different signer, the
-  signature is checked again against it.
+  absent, and the voucher's cumulative amount must cover the request. When a
+  signer is already known (the configured key, or a bound descriptor's signer),
+  the signature must recover to that signer even if the payer is still
+  missing. A descriptor or credential signer that already disagrees with
+  server configuration is rejected once payer, recipient, and token are known.
+  A missing payer may still be supplied by the callback. The on-chain deposit
+  is known only after `verify_open`, so a callback that broadcasts must reject
+  a voucher above the decoded deposit before sending. Actions repeats that
+  bound, and rejects an unsettled deposit below the request, only after the
+  callback returns. When that callback names a different signer, the signature
+  is checked again against it.
 
   `close` requires a settlement callback, passed as the `:settle_close` option
   or the server-only `"settle_close"` method-config key. Once the close voucher
@@ -80,10 +84,11 @@ defmodule MPP.Session.Actions do
   then is the channel marked closed. The hash is recorded on its proof and
   returned as the receipt `txHash`; the receipt reference stays the channel id.
   Before the callback runs, the channel is reserved as closing: it accepts no
-  vouchers, spends, top-ups or competing closes. `{:error, %MPP.Errors{}}` must mean the close definitively did not
-  settle; it releases the reservation and the channel stays active. Any other
-  result (or a raise) leaves the outcome unknown, so the close is rejected and
-  the channel stays reserved for the operator to reconcile. Methods
+  vouchers, spends, top-ups or competing closes. `{:error, %MPP.Errors{}}`
+  must mean the close definitively did not settle; it releases the reservation
+  and the channel stays active. Any other result (or a raise) leaves the
+  outcome unknown, so the close is rejected and the channel stays reserved
+  for the operator to reconcile. Methods
   that redeem closed channels themselves (`MPP.Methods.XRPL.Session`) pass
   `settle_close: :caller`.
   """
@@ -654,15 +659,31 @@ defmodule MPP.Session.Actions do
   defp same_address?(_a, _b), do: false
 
   # A missing payer can still arrive from verify_open. Definitive local
-  # identity failures and a signature the local signer did not produce are
-  # rejected before that callback broadcasts.
+  # identity failures, and a signature that does not recover to a signer
+  # already known locally, are rejected before that callback broadcasts.
   defp precheck_local_open(payload, opts) do
     case fetch_open_identity(payload, opts) do
-      {:ok, identity} -> maybe_verify_signature(payload, identity.authorized_signer, opts)
-      {:error, :identity_incomplete} -> :ok
-      {:error, %Errors{}} = error -> error
+      {:ok, identity} ->
+        maybe_verify_signature(payload, identity.authorized_signer, opts)
+
+      {:error, :identity_incomplete} ->
+        case local_open_signer(payload, opts) do
+          signer when is_binary(signer) -> maybe_verify_signature(payload, signer, opts)
+          _signer -> :ok
+        end
+
+      {:error, %Errors{}} = error ->
+        error
     end
   end
+
+  # The signer `fetch_open_identity/2` would use once the payer arrives.
+  # `verified_signer` is not known until after `verify_open`.
+  defp local_open_signer(%Payload{descriptor: nil}, opts) do
+    resolve_signer(Keyword.get(opts, :authorized_signer), Keyword.get(opts, :payer))
+  end
+
+  defp local_open_signer(%Payload{descriptor: descriptor}, _opts), do: descriptor_signer(descriptor)
 
   defp require_open_identity(payload, opts) do
     case fetch_open_identity(payload, opts) do
