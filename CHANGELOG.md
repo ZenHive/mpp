@@ -8,6 +8,17 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-10-02
+
+### Fixed
+
+- **Session channels persisted by an earlier release can be closed.**
+  `MPP.Session.Store` passes every channel it reads through the new
+  `MPP.Session.Channel.upgrade/1`, so a `%Channel{}` term stored by v0.19
+  (without the `closing` field) gains the field's default instead of failing
+  the close reservation. 0.20.0 was tagged but not published to Hex; upgrade
+  from 0.19.x straight to 0.20.1.
+
 ## [0.20.0] — 2026-10-02
 
 ### Changed

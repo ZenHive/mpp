@@ -1,7 +1,7 @@
 defmodule MPP.MixProject do
   use Mix.Project
 
-  @version "0.20.0"
+  @version "0.20.1"
   @source_url "https://github.com/ZenHive/mpp"
 
   def project do
