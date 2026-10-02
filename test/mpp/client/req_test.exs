@@ -210,8 +210,7 @@ defmodule MPP.Client.ReqTest do
         )
 
       # `create/2` drops anything but Payment-Authorization, so the foreign
-      # name has to arrive on the wire. A parsed `Cookie` stays stored and
-      # `payable?/1` refuses it.
+      # name has to arrive on the wire. Parse rejects it.
       header = Headers.format_challenge(challenge) <> ~s(, header="Cookie")
 
       plug = fn conn ->

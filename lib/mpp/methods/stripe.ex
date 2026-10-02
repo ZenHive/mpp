@@ -88,7 +88,10 @@ defmodule MPP.Methods.Stripe do
   alias MPP.Methods.Stripe.Subscription, as: StripeSubscription
   alias MPP.Receipt
 
+  require Logger
+
   @stripe_api_url "https://api.stripe.com/v1/payment_intents"
+  @internal_payment_error_detail "An internal payment error occurred."
 
   # Stripe API version with `.preview` suffix — required for
   # `shared_payment_granted_token` (SPTs are in private preview). Keep in sync
@@ -147,7 +150,7 @@ defmodule MPP.Methods.Stripe do
       ]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, error}` on failure"},
-    errors: [:invalid_payload, :verification_failed]
+    errors: [:invalid_payload, :verification_failed, :payment_action_required, :internal_payment_error]
   )
 
   @impl MPP.Method
@@ -334,11 +337,16 @@ defmodule MPP.Methods.Stripe do
           {:ok, body}
         end
 
+      {:ok, %Req.Response{status: status}} when status >= 500 ->
+        Logger.warning("MPP.Methods.Stripe: PaymentIntent request failed with HTTP #{status}")
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+
       {:ok, %Req.Response{}} ->
         {:error, Errors.new(:verification_failed, "Stripe PaymentIntent creation failed")}
 
-      {:error, _exception} ->
-        {:error, Errors.new(:verification_failed, "Stripe API request failed")}
+      {:error, exception} ->
+        Logger.warning("MPP.Methods.Stripe: PaymentIntent request failed: #{Exception.message(exception)}")
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -443,6 +451,7 @@ defmodule MPP.Methods.Stripe do
   end
 
   defp check_status(_body, _charge) do
-    {:error, Errors.new(:verification_failed, "Unexpected Stripe response: missing status field")}
+    Logger.warning("MPP.Methods.Stripe: PaymentIntent response is missing status")
+    {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
   end
 end

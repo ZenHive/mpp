@@ -535,9 +535,8 @@ defmodule MPP.Headers do
 
   # Builds a Challenge struct from parsed auth-params.
   # `header="Authorization"` (the implicit default) is stored as nil so it is
-  # never advertised. Any other value is kept, including one this draft does
-  # not allow: `Challenge.payable?/1` refuses it and `format_challenge/1`
-  # will not emit it (`Challenge.bound_header/1`).
+  # never advertised. Any other value is kept for `Challenge.validate_fields/1`,
+  # which accepts only `Payment-Authorization` and rejects the rest.
   defp params_to_challenge(params) do
     %Challenge{
       id: params["id"],
@@ -548,7 +547,7 @@ defmodule MPP.Headers do
       expires: params["expires"],
       digest: params["digest"],
       description: params["description"],
-      header: params["header"],
+      header: Challenge.advertised_header(params["header"]),
       opaque: params["opaque"]
     }
   end

@@ -252,14 +252,30 @@ defmodule MPP.Methods.StripeTest do
       refute error.detail =~ "invalid_request_error"
     end
 
-    test "returns error on network failure", %{charge: charge} do
+    test "returns a fixed internal error on network failure", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.transport_error(conn, :econnrefused)
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Stripe API request failed"
+      assert error.status == 500
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+      refute error.detail =~ "econnrefused"
+    end
+
+    test "returns a fixed internal error on Stripe 500", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_status(500)
+        |> Req.Test.json(%{"error" => %{"message" => "upstream secret"}})
+      end)
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.status == 500
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+      refute error.detail =~ "upstream secret"
     end
 
     test "returns error when stripe_secret_key is missing" do
@@ -413,7 +429,7 @@ defmodule MPP.Methods.StripeTest do
       refute Map.has_key?(params, "metadata[mpp_server_id]")
     end
 
-    test "returns error on plain string error body", %{charge: charge} do
+    test "returns a fixed internal error on a plain-text Stripe 500", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         conn
         |> Plug.Conn.put_status(500)
@@ -422,7 +438,10 @@ defmodule MPP.Methods.StripeTest do
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
-      assert error.type =~ "verification-failed"
+      assert error.status == 500
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+      refute error.detail =~ "Internal Server Error"
     end
 
     test "returns error on unexpected response body format", %{charge: charge} do
@@ -436,14 +455,16 @@ defmodule MPP.Methods.StripeTest do
       assert error.type =~ "verification-failed"
     end
 
-    test "handles missing status field in response", %{charge: charge} do
+    test "a 200 PaymentIntent without status is an internal error", %{charge: charge} do
       Req.Test.stub(Stripe, fn conn ->
         Req.Test.json(conn, %{"id" => @pi_id})
       end)
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "missing status"
+      assert error.status == 500
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+      refute error.detail =~ @pi_id
     end
   end
 
@@ -2586,13 +2607,14 @@ defmodule MPP.Methods.StripeTest do
                StripeSubscription.cancel(activation.subscription_id, subscription.method_details)
     end
 
-    test "maps Stripe's synchronous first-invoice action requirement to verification failure" do
+    test "maps Stripe's synchronous first-invoice action requirement to payment-action-required" do
       stub_subscription_flow(subscription_error: :requires_action)
 
       assert {:error, %Errors{} = error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
 
-      assert error.type =~ "verification-failed"
+      assert error.status == 402
+      assert error.type =~ "payment-action-required"
       assert error.detail == "Stripe subscription first invoice requires customer action"
     end
 

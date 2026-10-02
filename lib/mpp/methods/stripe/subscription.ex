@@ -1296,7 +1296,7 @@ defmodule MPP.Methods.Stripe.Subscription do
         {:ok, body}
 
       {:error, {:stripe, 402, %{"error" => %{"code" => "subscription_payment_intent_requires_action"}}}} ->
-        {:absent, Errors.new(:verification_failed, "Stripe subscription first invoice requires customer action")}
+        {:absent, Errors.new(:payment_action_required, "Stripe subscription first invoice requires customer action")}
 
       # Stripe rejects these before creating anything; a 409 is a concurrent
       # request on the same idempotency key whose outcome is still unknown.

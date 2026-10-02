@@ -215,11 +215,13 @@ defmodule MPP.HeadersTest do
       assert parsed.header == "Payment-Authorization"
     end
 
-    test "rejects explicit header=Authorization" do
+    test "treats header=Authorization as absent" do
       original = make_challenge()
       header = Headers.format_challenge(original) <> ~s(, header="Authorization")
 
-      assert {:error, :invalid_header} = Headers.parse_challenge(header)
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == nil
+      assert parsed.id == original.id
     end
 
     test "roundtrip preserves escaped quotes in description" do

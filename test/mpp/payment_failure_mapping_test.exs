@@ -84,14 +84,14 @@ defmodule MPP.PaymentFailureMappingTest do
   test "both parse paths reject malformed bound fields with distinct errors" do
     fields = [
       {:intent, "charge|extra", :invalid_intent},
-      {:intent, "charge_now", :invalid_intent},
+      {:intent, "charge.now", :invalid_intent},
       {:intent, "", :invalid_intent},
       {:opaque, "a|b", :invalid_opaque},
       {:opaque, "%%%", :invalid_opaque},
       {:digest, "sha-256=", :invalid_digest},
       {:digest, "sha-256=:abc|def:", :invalid_digest},
       {:header, "Cookie", :invalid_header},
-      {:header, "Authorization", :invalid_header}
+      {:header, "X-Payment-Authorization", :invalid_header}
     ]
 
     base = Challenge.create([realm: "api.example.com", method: "tempo", intent: "charge", request: "e30"], "secret")
@@ -108,6 +108,35 @@ defmodule MPP.PaymentFailureMappingTest do
   end
 
   test "valid bound field spellings parse and problem codes stay consistent" do
+    standard_opaque = Base.encode64("opaque+")
+
+    challenge =
+      Challenge.create(
+        [
+          realm: "api.example.com",
+          method: "tempo",
+          intent: "charge_now",
+          request: "e30",
+          opaque: standard_opaque
+        ],
+        "secret"
+      )
+
+    header = Headers.format_challenge(challenge) <> ~s(, header="Authorization")
+    assert {:ok, parsed} = Headers.parse_challenge(header)
+    assert parsed.intent == "charge_now"
+    assert parsed.opaque == standard_opaque
+    assert parsed.header == nil
+    assert parsed.id == challenge.id
+
+    assert {:ok, decoded} =
+             %Credential{challenge: %{challenge | header: "Authorization"}, payload: %{}}
+             |> Credential.encode()
+             |> Credential.decode()
+
+    assert decoded.challenge.header == nil
+    assert decoded.challenge.opaque == standard_opaque
+
     for digest <- ["sha-256=YWJj", "sha-256=:YWJj:"] do
       challenge =
         Challenge.create(
@@ -126,7 +155,11 @@ defmodule MPP.PaymentFailureMappingTest do
       assert {:ok, ^challenge} = challenge |> Headers.format_challenge() |> Headers.parse_challenge()
     end
 
-    for {kind, code} <- [internal_payment_error: -32_603, invalid_challenge: -32_043, payment_action_required: -32_043] do
+    for {kind, code} <- [
+          internal_payment_error: -32_603,
+          invalid_challenge: -32_043,
+          payment_action_required: -32_043
+        ] do
       assert Mcp.error_code(MPP.Errors.new(kind, "detail")) == code
     end
 

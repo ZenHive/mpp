@@ -139,7 +139,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -239,16 +239,27 @@ defmodule MPP.Challenge do
 
   defp validate_request(_request), do: {:error, :invalid_request}
 
+  # Spec grammar `1*( ALPHA / DIGIT / "-" )`, plus `_`, which mppx accepts in
+  # custom intents (mpp-rs #496 `is_valid_intent_name`). `|` stays excluded so
+  # it cannot shift an HMAC slot.
   defp validate_intent(intent) when is_binary(intent) do
-    if Regex.match?(~r/\A[A-Za-z0-9-]+\z/, intent), do: :ok, else: {:error, :invalid_intent}
+    if Regex.match?(~r/\A[A-Za-z0-9_-]+\z/, intent), do: :ok, else: {:error, :invalid_intent}
   end
 
   defp validate_intent(_intent), do: {:error, :invalid_intent}
 
   defp validate_opaque(nil), do: :ok
 
+  # mpp-rs `base64url_decode` accepts the URL-safe alphabet and standard
+  # base64 (`+`, `/`, `=` padding) after normalizing to unpadded base64url.
   defp validate_opaque(opaque) when is_binary(opaque) do
-    case Base.url_decode64(opaque, padding: false) do
+    normalized =
+      opaque
+      |> String.replace("=", "")
+      |> String.replace("+", "-")
+      |> String.replace("/", "_")
+
+    case Base.url_decode64(normalized, padding: false) do
       {:ok, _} -> :ok
       :error -> {:error, :invalid_opaque}
     end
@@ -256,10 +267,18 @@ defmodule MPP.Challenge do
 
   defp validate_opaque(_opaque), do: {:error, :invalid_opaque}
 
+  # Absent, empty, and `Authorization` are the implicit default. Only
+  # `Payment-Authorization` may be selected; every other name is rejected
+  # (mpp-rs `parse_advertised_credential_header`).
   defp validate_header(nil), do: :ok
+  defp validate_header(""), do: :ok
 
   defp validate_header(header) when is_binary(header) do
-    if payment_authorization_header?(header), do: :ok, else: {:error, :invalid_header}
+    cond do
+      payment_authorization_header?(header) -> :ok
+      default_credential_header?(header) -> :ok
+      true -> {:error, :invalid_header}
+    end
   end
 
   defp validate_header(_header), do: {:error, :invalid_header}

@@ -180,6 +180,7 @@ defmodule MPP.Credential do
       }
 
       with :ok <- validate_optional_challenge_fields(map),
+           challenge = %{challenge | header: Challenge.advertised_header(challenge.header)},
            :ok <- Challenge.validate_fields(challenge) do
         {:ok, challenge}
       end
