@@ -6421,7 +6421,7 @@
       "id": "151",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Map remaining method infrastructure failures to internal-payment-error",
       "scores": {
         "d": 5,
@@ -6465,6 +6465,7 @@
       ],
       "body": "Task 144 mapped Tempo, EVM and Stripe-charge infrastructure failures (RPC, transport, store) to internal-payment-error: HTTP 500, fixed detail, no WWW-Authenticate. The other methods still answer the same failures with verification-failed (402), which re-issues a challenge after a broadcast may already have succeeded, so the client can pay twice.\n\nRemaining sites found by the task 144 reviewer (run-1790940990496-832fb80e): \"RPC request failed\" verification-failed results in Solana, USDC (EVM and Solana profiles), Stellar, XRPL and Near Intents; Stripe subscription transport/uncertain API failures while the activation claim is held (`{:uncertain, Errors.new(:verification_failed, ...)}`); session store failures that return verification-failed with `inspect(reason)` in the detail.\n\nApply the same mapping Task 144 introduced, reusing its helper rather than adding a parallel one. Client-fault outcomes (reverted or declined payment, wrong amount/recipient, malformed credential) stay verification-failed or payment-action-required. Authority: the spec error table and mpp-rs #496 / mppx Errors.ts, as in Task 144.\n",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     }
