@@ -17,7 +17,7 @@ defmodule MPP.Errors do
     * `:method_unsupported` — payment method not accepted (400)
     * `:malformed_credential` — credential cannot be parsed (402)
     * `:invalid_challenge` — challenge ID doesn't match or is unknown (402)
-    * `:credential_mismatch` — echoed challenge fields don't match this endpoint (402)
+    * `:credential_mismatch` — compatibility alias for `:invalid_challenge` (402)
     * `:invalid_payload` — credential payload doesn't match schema (402)
     * `:internal_payment_error` — unexpected payment-processor failure (500)
     * `:bad_request` — malformed request (400)
@@ -50,10 +50,9 @@ defmodule MPP.Errors do
     method_unsupported: %{suffix: "method-unsupported", title: "Method Unsupported", status: 400},
     malformed_credential: %{suffix: "malformed-credential", title: "Malformed Credential", status: 402},
     invalid_challenge: %{suffix: "invalid-challenge", title: "Invalid Challenge", status: 402},
-    credential_mismatch: %{suffix: "credential-mismatch", title: "Credential Mismatch", status: 402},
+    credential_mismatch: %{suffix: "invalid-challenge", title: "Invalid Challenge", status: 402},
     invalid_payload: %{suffix: "invalid-payload", title: "Invalid Payload", status: 402},
-    # mppx parity (`InternalPaymentError`, refs/mppx/src/Errors.ts). Not in
-    # mpp-specs CORE_PROBLEMS at scoring time (draft-00); MCP maps it to -32603.
+    # Core draft-01 problem registry; MCP maps this to -32603.
     internal_payment_error: %{
       suffix: "internal-payment-error",
       title: "Internal Payment Error",

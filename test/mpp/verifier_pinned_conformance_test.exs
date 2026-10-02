@@ -95,9 +95,9 @@ defmodule MPP.VerifierPinnedConformanceTest do
     )
   end
 
-  defp assert_credential_mismatch(result, field_fragment) do
+  defp assert_invalid_challenge(result, field_fragment) do
     assert {:error, %Errors{} = error} = result
-    assert String.contains?(error.type, "credential-mismatch")
+    assert String.contains?(error.type, "invalid-challenge")
     assert String.contains?(error.detail, field_fragment)
   end
 
@@ -117,7 +117,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       tampered = tempo_charge(currency: "0xDEAD000000000000000000000000000000000000")
       credential = credential_from_echo(base_echo_params(tampered))
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "currency")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "currency")
     end
 
     test "recipient mismatch (test_pinned_recipient_mismatch_rejected)" do
@@ -125,7 +125,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       tampered = tempo_charge(recipient: "0xDEAD000000000000000000000000000000000000")
       credential = credential_from_echo(base_echo_params(tampered))
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "recipient")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "recipient")
     end
 
     test "chainId mismatch (test_pinned_chain_id_mismatch_rejected)" do
@@ -133,7 +133,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       tampered = tempo_charge(method_details: %{"chainId" => 9999})
       credential = credential_from_echo(base_echo_params(tampered))
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "chainId")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "chainId")
     end
 
     test "chainId missing when required (test_pinned_chain_id_missing_rejected)" do
@@ -141,7 +141,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       tampered = tempo_charge()
       credential = credential_from_echo(base_echo_params(tampered))
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "chainId")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "chainId")
     end
 
     test "intent mismatch (test_pinned_intent_mismatch_rejected)" do
@@ -149,7 +149,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       echo_params = base_echo_params(charge, intent: "session")
       credential = credential_from_echo(echo_params)
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "intent")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "intent")
     end
 
     test "method mismatch (test_pinned_method_mismatch_rejected)" do
@@ -157,7 +157,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       echo_params = base_echo_params(charge, method: "stripe")
       credential = credential_from_echo(echo_params)
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "method")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "method")
     end
 
     test "opaque mismatch when endpoint expects opaque (test_pinned_opaque_configured_mismatch_rejected)" do
@@ -168,7 +168,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       credential =
         credential_from_echo(base_echo_params(charge, opaque: other_opaque))
 
-      assert_credential_mismatch(
+      assert_invalid_challenge(
         Verifier.verify(credential, verify_opts(charge, opaque: route_opaque)),
         "opaque"
       )
@@ -179,7 +179,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       charge = tempo_charge()
       credential = credential_from_echo(base_echo_params(charge))
 
-      assert_credential_mismatch(
+      assert_invalid_challenge(
         Verifier.verify(credential, verify_opts(charge, opaque: route_opaque)),
         "opaque"
       )
@@ -187,16 +187,16 @@ defmodule MPP.VerifierPinnedConformanceTest do
   end
 
   describe "mpp-rs Tier-1 vs Tier-2 error distinction" do
-    test "tampered realm without re-sign hits Tier-2 credential_mismatch (test_hmac_tampered_realm_rejected)" do
+    test "tampered realm without re-sign hits Tier-2 invalid_challenge (test_hmac_tampered_realm_rejected)" do
       charge = tempo_charge()
       challenge = resign_echo(base_echo_params(charge))
       tampered = %{challenge | realm: "evil.example.com"}
       credential = %Credential{challenge: tampered, payload: %{"tx" => "0xdeadbeef"}}
 
-      assert_credential_mismatch(Verifier.verify(credential, verify_opts(charge)), "realm")
+      assert_invalid_challenge(Verifier.verify(credential, verify_opts(charge)), "realm")
     end
 
-    test "wrong secret hits Tier-1 invalid_challenge, not credential_mismatch" do
+    test "wrong secret hits Tier-1 invalid_challenge" do
       charge = tempo_charge()
       credential = credential_from_echo(base_echo_params(charge))
 
@@ -204,7 +204,6 @@ defmodule MPP.VerifierPinnedConformanceTest do
                Verifier.verify(credential, verify_opts(charge, secret_key: "wrong-secret-xxxxxxxxxxxxxxxxxxx"))
 
       assert String.contains?(error.type, "invalid-challenge")
-      refute String.contains?(error.type, "credential-mismatch")
     end
 
     test "tampered request without re-sign hits Tier-1 invalid_challenge (test_hmac_tampered_request_rejected)" do

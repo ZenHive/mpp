@@ -141,6 +141,21 @@ defmodule MPP.Methods.EVMPermit2SettlementTest do
     refute_receive {:rpc, "eth_sendRawTransaction", _}
   end
 
+  test "infrastructure failures return a fixed internal payment error", ctx do
+    {charge, payload} = payment(ctx, "single")
+
+    for method <- ["eth_call", "eth_estimateGas", "eth_sendRawTransaction", "eth_getTransactionReceipt"] do
+      stub("single", ctx.owner, %{
+        method => {"error", %{"code" => -32_000, "message" => "private upstream failure"}}
+      })
+
+      assert {:error, error} = EVM.verify(payload, charge)
+      assert error.status == 500
+      assert error.type == "https://paymentauth.org/problems/internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+    end
+  end
+
   test "RPC failures and a mismatched network never become successful payments", ctx do
     {charge, payload} = payment(ctx, "single")
 

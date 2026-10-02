@@ -146,9 +146,8 @@ defmodule MPP.Methods.EVM do
   # Single-use dedup: an EVM tx hash is namespaced separately from Tempo's
   # "mpp:charge:" keyspace so one shared store can back both methods without
   # cross-method key collisions.
-  @dedup_store_error_detail "Dedup store error"
-  @evm_rpc_error_detail "EVM RPC request failed"
   @store_key_prefix "mpp:evm:"
+  @internal_payment_error_detail "An internal payment error occurred."
   @zero_amount_non_proof_detail "Zero-amount challenges require a proof credential"
 
   api(:method_name, "Return the payment method identifier for EVM.")
@@ -402,7 +401,7 @@ defmodule MPP.Methods.EVM do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.EVM: RPC get_transaction_receipt failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -416,7 +415,7 @@ defmodule MPP.Methods.EVM do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.EVM: RPC eth_getTransactionByHash failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -486,7 +485,7 @@ defmodule MPP.Methods.EVM do
     case Store.get(store, store_key(hash)) do
       :not_found -> :ok
       {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -500,7 +499,7 @@ defmodule MPP.Methods.EVM do
     case Store.check_and_mark(store, store_key(hash), System.system_time(:millisecond)) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 

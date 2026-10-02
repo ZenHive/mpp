@@ -517,7 +517,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
       charge = charge(%{"private_key" => EVMAuthorization.private_key()})
       assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "surfaces a receipt-fetch RPC failure after broadcast" do
@@ -535,7 +535,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
       charge = charge(%{"private_key" => EVMAuthorization.private_key()})
       assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "offered?/1 is false when chain_id is missing even with a settlement key" do
@@ -623,7 +623,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
       charge = charge(%{"private_key" => EVMAuthorization.private_key()})
       assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "polls until the settlement receipt appears" do
@@ -693,7 +693,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
       charge = charge(%{"private_key" => EVMAuthorization.private_key()})
       assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "surfaces an RPC transport failure from authorizationState" do
@@ -701,7 +701,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
       charge = charge(%{"private_key" => EVMAuthorization.private_key()})
       assert {:error, %Errors{} = error} = Authorization.settle(signed_payload(), charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
       refute error.detail =~ "econnrefused"
     end
   end

@@ -250,9 +250,8 @@ defmodule MPP.CredentialTest do
         assert {:error, :invalid_optional_field} = Credential.decode(encode_credential(header: value))
       end
 
-      for value <- [nil, "", "Authorization", "authorization"] do
-        assert {:ok, credential} = Credential.decode(encode_credential(header: value))
-        assert credential.challenge.header == nil
+      for value <- ["", "Authorization", "authorization", "Cookie"] do
+        assert {:error, :invalid_header} = Credential.decode(encode_credential(header: value))
       end
     end
 

@@ -529,7 +529,7 @@ defmodule MPP.Methods.EVMTest do
 
       payload = %{"hash" => @tx_hash}
       assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
       refute error.detail =~ "server error"
     end
 
@@ -607,7 +607,7 @@ defmodule MPP.Methods.EVMTest do
         })
       end)
 
-      assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = EVM.verify(%{"hash" => @tx_hash}, charge)
     end
 
     test "rejects a contract-creation transaction as a native payment", %{eth_charge: charge} do
@@ -639,7 +639,8 @@ defmodule MPP.Methods.EVMTest do
           })
         end)
 
-        assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+        assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+                 EVM.verify(%{"hash" => @tx_hash}, charge)
       end
     end
 
@@ -834,14 +835,14 @@ defmodule MPP.Methods.EVMTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "error when the RPC transport fails", %{charge: charge} do
       Req.Test.stub(EVM, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
       refute error.detail =~ "econnrefused"
     end
 
@@ -852,7 +853,7 @@ defmodule MPP.Methods.EVMTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "error when method_config is missing rpc_url", %{charge: charge} do
@@ -897,7 +898,7 @@ defmodule MPP.Methods.EVMTest do
         rpc_dispatch(conn, %{"eth_getTransactionReceipt" => receipt})
       end)
 
-      assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = EVM.verify(%{"hash" => @tx_hash}, charge)
     end
   end
 
@@ -1038,7 +1039,7 @@ defmodule MPP.Methods.EVMTest do
       charge = with_store(charge, GetFailStore)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "Dedup store error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "atomic commit collision (already_exists) is rejected as replay", %{charge: charge} do
@@ -1054,7 +1055,7 @@ defmodule MPP.Methods.EVMTest do
       charge = with_store(charge, AtomicFailStore)
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
-      assert error.detail == "Dedup store error"
+      assert error.detail == "An internal payment error occurred."
     end
   end
 

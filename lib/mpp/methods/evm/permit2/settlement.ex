@@ -89,5 +89,7 @@ defmodule MPP.Methods.EVM.Permit2.Settlement do
   defp rpc_error({:rpc_error, %{data: "0x756688fe"}}),
     do: {:error, Errors.new(:verification_failed, "Permit2 nonce already used")}
 
-  defp rpc_error(_reason), do: {:error, Errors.new(:settlement_failed, "Permit2 RPC request failed")}
+  defp rpc_error({:rpc_error, %{code: 3}}), do: {:error, Errors.new(:settlement_failed, "Permit2 RPC request failed")}
+
+  defp rpc_error(_reason), do: {:error, Errors.new(:internal_payment_error, "An internal payment error occurred.")}
 end

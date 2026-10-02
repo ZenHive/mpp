@@ -191,7 +191,7 @@ defmodule MPP.Methods.StripeTest do
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
       assert error.status == 402
-      assert error.type =~ "verification-failed"
+      assert error.type =~ "payment-action-required"
       assert error.detail =~ "requires action"
     end
 
@@ -2874,7 +2874,7 @@ defmodule MPP.Methods.StripeTest do
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "payment-action-required"
       assert body["detail"] =~ "requires action"
     end
 

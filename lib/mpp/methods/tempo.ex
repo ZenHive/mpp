@@ -190,13 +190,10 @@ defmodule MPP.Methods.Tempo do
   @attribution_server_fingerprint_length 10
   @attribution_client_fingerprint_length 10
   @attribution_nonce_length 7
-  @dedup_store_error_detail "Dedup store error"
   @store_key_prefix "mpp:charge:"
   @proof_store_key_prefix "mpp:proof:"
-  @tempo_rpc_error_detail "Tempo RPC request failed"
+  @internal_payment_error_detail "An internal payment error occurred."
   @simulation_rejected_detail "Pre-broadcast simulation rejected the transaction"
-  @simulation_failed_detail "Pre-broadcast simulation failed"
-  @sponsor_budget_unavailable_detail "Tempo sponsorship is temporarily unavailable"
   @sponsor_capacity_detail "Tempo sponsor capacity is temporarily unavailable"
 
   api(:method_name, "Return the payment method identifier for Tempo.")
@@ -1034,7 +1031,7 @@ defmodule MPP.Methods.Tempo do
         reserve_sponsor_budget(store, config, chain_id, sponsor_id, policy, measurement)
       else
         {:error, reason} when is_binary(reason) -> {:error, reason}
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+        {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
       end
     else
       {:ok, nil}
@@ -1066,7 +1063,7 @@ defmodule MPP.Methods.Tempo do
         {:error, error}
 
       {:error, _reason} ->
-        {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1166,7 +1163,7 @@ defmodule MPP.Methods.Tempo do
       {:error, :budget_transition_failed} ->
         safe_budget_release(budget)
         safe_dedup_release(store, reserved_hash, token)
-        {:error, Errors.new(:verification_failed, @sponsor_budget_unavailable_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
 
       {:error, _reason} = error ->
         error
@@ -1235,7 +1232,7 @@ defmodule MPP.Methods.Tempo do
 
     with :ok <- check_fee_payer_placeholder(tx),
          :ok <- check_fee_token_empty(tx),
-         {:ok, cosigned} <- HostedFeePayer.fill(tx, url, hosted_req_options(config)),
+         {:ok, cosigned} <- fill_hosted_transaction(tx, url, config),
          {:ok, fee_token_hex} <- fee_token_hex(cosigned),
          :ok <- check_returned_fee_token_allowed(config, fee_token_hex, chain_id) do
       {:ok, cosigned}
@@ -1344,7 +1341,7 @@ defmodule MPP.Methods.Tempo do
     case store_get(store, key) do
       :not_found -> :ok
       {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1397,7 +1394,7 @@ defmodule MPP.Methods.Tempo do
     case store_check_and_mark(store, key, ts) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1579,11 +1576,18 @@ defmodule MPP.Methods.Tempo do
         simulate_with_eth_call(raw_hex, rpc_url, config)
 
       {:error, _reason} ->
-        {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
   defp rpc_options(config), do: [req_options: config["req_options"] || []]
+
+  defp fill_hosted_transaction(tx, url, config) do
+    case HostedFeePayer.fill(tx, url, hosted_req_options(config)) do
+      {:ok, filled} -> {:ok, filled}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+    end
+  end
 
   defp hosted_req_options(config) do
     case config["req_options"] do
@@ -1595,21 +1599,21 @@ defmodule MPP.Methods.Tempo do
   defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
     case RPC.broadcast_async(raw_hex, rpc_url, opts) do
       {:ok, _tx_hash} = ok -> ok
-      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+      {:error, _msg} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
   defp rpc_broadcast_sync(raw_hex, rpc_url, opts) do
     case RPC.broadcast_sync(raw_hex, rpc_url, opts) do
       {:ok, _tx_hash, _receipt} = ok -> ok
-      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+      {:error, _msg} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
   defp rpc_fetch_receipt(hash, rpc_url, opts) do
     case RPC.fetch_receipt(hash, rpc_url, opts) do
       {:ok, _receipt} = ok -> ok
-      {:error, _msg} -> {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+      {:error, _msg} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1733,10 +1737,10 @@ defmodule MPP.Methods.Tempo do
       case rpc_json_request("eth_call", [request, "latest"], rpc_url, rpc_options(config)) do
         {:ok, result} when is_binary(result) -> :ok
         {:error, %{"code" => 3}} -> {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
-        _other -> {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
+        _other -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
       end
     else
-      _error -> {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
+      _error -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1786,10 +1790,10 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
 
       {:error, _exception} ->
-        {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
 
       {:ok, %Req.Response{}} ->
-        {:error, Errors.new(:verification_failed, @tempo_rpc_error_detail)}
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 

@@ -224,7 +224,7 @@ defmodule MPP.Methods.EVM.Transaction do
   defp tx_hash(bytes), do: Onchain.Hex.encode(Hash.keccak(bytes))
 
   defp wrap_rpc_error(_reason) do
-    {:error, Errors.new(:verification_failed, "EVM RPC request failed")}
+    {:error, Errors.new(:internal_payment_error, "An internal payment error occurred.")}
   end
 
   defp reject_splits(config) do

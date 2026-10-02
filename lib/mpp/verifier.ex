@@ -43,8 +43,7 @@ defmodule MPP.Verifier do
 
   **Tier 2** — Field-by-field pinning of the credential's echoed challenge against
   this endpoint's configuration (realm, method, intent, request, digest, opaque).
-  Failures return `:credential_mismatch` so callers can distinguish replay attacks
-  from corrupt credentials.
+  Failures return `:invalid_challenge` with a detail identifying the mismatched field.
   """
 
   use Descripex, namespace: "/protocol"
@@ -62,7 +61,7 @@ defmodule MPP.Verifier do
 
   require Logger
 
-  @verification_failed_detail "Payment verification failed"
+  @internal_payment_error_detail "An internal payment error occurred."
 
   api(:verify, "Verify a payment credential against endpoint configuration. Transport-neutral.",
     params: [
@@ -76,13 +75,13 @@ defmodule MPP.Verifier do
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, %Errors{}}` on failure"},
     errors: [
       :invalid_challenge,
-      :credential_mismatch,
       :intent_mismatch,
       :method_mismatch,
       :payment_expired,
       :realm_mismatch,
       :request_mismatch,
       :invalid_payload,
+      :internal_payment_error,
       :verification_failed
     ]
   )
@@ -111,7 +110,7 @@ defmodule MPP.Verifier do
       with :ok <- verify_tier1(credential.challenge, secret_key, realm),
            :ok <- verify_pinned_fields(credential.challenge, method, realm, charge, digest, opaque),
            :ok <- check_credential_type(credential, method, charge),
-           {:ok, receipt} <- method.verify(credential.payload, charge_for_verify) do
+           {:ok, receipt} <- verify_payment(method, credential.payload, charge_for_verify) do
         {:ok, receipt}
       else
         {:error, :invalid_challenge} ->
@@ -121,10 +120,10 @@ defmodule MPP.Verifier do
           {:error, Errors.new(:payment_expired, "Challenge has expired")}
 
         {:error, :missing_expires} ->
-          {:error, Errors.new(:credential_mismatch, "Challenge missing required expires field")}
+          {:error, Errors.new(:invalid_challenge, "Challenge missing required expires field")}
 
         {:error, :invalid_expires} ->
-          {:error, Errors.new(:credential_mismatch, "Challenge expires is not a valid ISO 8601 timestamp")}
+          {:error, Errors.new(:invalid_challenge, "Challenge expires is not a valid ISO 8601 timestamp")}
 
         {:error, reason}
         when reason in [
@@ -138,14 +137,10 @@ defmodule MPP.Verifier do
                :recipient_mismatch,
                :chain_id_mismatch
              ] ->
-          {:error, Errors.new(:credential_mismatch, pinning_detail(reason, credential.challenge, charge))}
+          {:error, Errors.new(:invalid_challenge, pinning_detail(reason, credential.challenge, charge))}
 
         {:error, %Errors{} = error} ->
           {:error, error}
-
-        {:error, reason} ->
-          Logger.warning("MPP.Verifier: payment verification failed: #{inspect(reason)}")
-          {:error, Errors.new(:verification_failed, @verification_failed_detail)}
       end
 
     case result do
@@ -157,6 +152,20 @@ defmodule MPP.Verifier do
       {:error, error} ->
         Telemetry.verify_fail(credential, charge, start_time, error, %{realm: realm})
         {:error, error}
+    end
+  end
+
+  defp verify_payment(method, payload, charge) do
+    case method.verify(payload, charge) do
+      {:error, %Errors{}} = error ->
+        error
+
+      {:error, reason} ->
+        Logger.warning("MPP.Verifier: payment verification failed: #{inspect(reason)}")
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+
+      result ->
+        result
     end
   end
 

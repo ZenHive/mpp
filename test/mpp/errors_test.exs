@@ -12,7 +12,7 @@ defmodule MPP.ErrorsTest do
     {:method_unsupported, 400, "Method Unsupported"},
     {:malformed_credential, 402, "Malformed Credential"},
     {:invalid_challenge, 402, "Invalid Challenge"},
-    {:credential_mismatch, 402, "Credential Mismatch"},
+    {:credential_mismatch, 402, "Invalid Challenge"},
     {:invalid_payload, 402, "Invalid Payload"},
     {:internal_payment_error, 500, "Internal Payment Error"},
     {:bad_request, 400, "Bad Request"},

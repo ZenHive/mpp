@@ -108,6 +108,9 @@ defmodule MPP.Headers do
       :request_too_large,
       :empty_id,
       :invalid_method,
+      :invalid_intent,
+      :invalid_opaque,
+      :invalid_header,
       :invalid_request,
       :invalid_digest,
       :invalid_expires
@@ -147,6 +150,9 @@ defmodule MPP.Headers do
       :request_too_large,
       :empty_id,
       :invalid_method,
+      :invalid_intent,
+      :invalid_opaque,
+      :invalid_header,
       :invalid_request,
       :invalid_digest,
       :invalid_expires
@@ -542,7 +548,7 @@ defmodule MPP.Headers do
       expires: params["expires"],
       digest: params["digest"],
       description: params["description"],
-      header: Challenge.advertised_header(params["header"]),
+      header: params["header"],
       opaque: params["opaque"]
     }
   end

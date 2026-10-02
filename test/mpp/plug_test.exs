@@ -1003,7 +1003,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "digest"
     end
 
@@ -1060,7 +1060,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "opaque"
     end
   end
@@ -1237,7 +1237,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
     end
 
     test "rejects credential with wrong currency" do
@@ -1254,7 +1254,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
     end
 
     test "rejects credential with wrong recipient" do
@@ -1271,7 +1271,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
     end
 
     test "rejects credential with no recipient on endpoint that requires one" do
@@ -1290,7 +1290,7 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
     end
 
     test "rejects credential with wrong realm (shared-secret deployment)" do
@@ -1628,12 +1628,12 @@ defmodule MPP.PlugTest do
 
       assert conn.status == 402
       body = decode_json_body(conn)
-      assert body["type"] =~ "credential-mismatch"
+      assert body["type"] =~ "invalid-challenge"
     end
   end
 
   describe "verify_credential/4 catch-all error" do
-    test "unexpected error type from method returns 402 with verification_failed" do
+    test "unexpected error type from method returns 500 without a challenge" do
       config = init_config(method: MockMethodUnexpectedError)
       auth_header = build_authorization_header(config, %{"anything" => "value"})
 
@@ -1643,10 +1643,11 @@ defmodule MPP.PlugTest do
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
-      assert conn.status == 402
+      assert conn.status == 500
       body = decode_json_body(conn)
-      assert body["type"] =~ "verification-failed"
-      assert body["detail"] =~ "Payment verification failed"
+      assert body["type"] =~ "internal-payment-error"
+      assert body["detail"] == "An internal payment error occurred."
+      assert Plug.Conn.get_resp_header(conn, "www-authenticate") == []
     end
   end
 
@@ -1654,7 +1655,7 @@ defmodule MPP.PlugTest do
     test "malformed expires in an Authorization credential is rejected as malformed-credential" do
       # Challenge.create still accepts a bad expires (server-constructed); the wire
       # parse path now rejects it before Verifier.check_expiration/1. Verifier's
-      # credential-mismatch mapping for a directly-built struct is unchanged
+      # invalid-challenge mapping for a directly-built struct is unchanged
       # (see verifier_test.exs).
       config = init_config()
       entry = first_entry(config)

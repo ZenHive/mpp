@@ -519,8 +519,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "returns error when transaction reverted", %{charge: charge} do
@@ -612,8 +612,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "returns error on network failure", %{charge: charge} do
@@ -623,8 +623,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "returns error on unexpected RPC response body", %{charge: charge} do
@@ -636,8 +636,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "rejects transaction with invalid hex in signature field", %{charge: charge} do
@@ -854,7 +854,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
-      assert error.detail == "Tempo RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
   end
 
@@ -967,8 +967,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "returns error when transaction reverts on-chain", %{charge: charge, tx_hex: tx_hex} do
@@ -1052,8 +1052,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
@@ -1074,8 +1074,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
   end
 
@@ -1153,13 +1153,13 @@ defmodule MPP.Methods.TempoTest do
       out_of_gas = %{"code" => -32_003, "message" => "out of gas: gas exhausted during precompiled contract execution"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => out_of_gas, "id" => 1})
       assert {:error, %Errors{} = underfunded} = Tempo.verify(payload, charge)
-      assert underfunded.detail =~ "Pre-broadcast simulation failed"
+      assert underfunded.detail =~ "An internal payment error occurred."
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       unavailable = %{"code" => -32_000, "message" => "header not found"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => unavailable, "id" => 1})
       assert {:error, %Errors{} = failed} = Tempo.verify(payload, charge)
-      assert failed.detail =~ "Pre-broadcast simulation failed"
+      assert failed.detail =~ "An internal payment error occurred."
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
   end
@@ -1274,8 +1274,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "calls eth_simulateV1 then eth_sendRawTransaction (not sync variant)", %{charge: charge, tx_hex: tx_hex} do
@@ -1314,8 +1314,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Pre-broadcast simulation failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail =~ "An internal payment error occurred."
     end
 
     test "async broadcast network failure returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -1336,8 +1336,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "async broadcast unexpected response status returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -1359,8 +1359,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail == "Tempo RPC request failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "multicall: simulates the full co-signed transaction before broadcast", %{charge: charge} do
@@ -1710,8 +1710,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Dedup store error"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail =~ "An internal payment error occurred."
     end
 
     test "concurrent requests with same signed tx — only one succeeds", %{charge: charge} do
@@ -1904,7 +1904,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail == "Tempo RPC request failed"
+      assert error.detail == "An internal payment error occurred."
       assert_received :broadcast_issued
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
 
@@ -2299,8 +2299,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Dedup store error"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail =~ "An internal payment error occurred."
     end
   end
 
@@ -2320,8 +2320,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Dedup store error"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail =~ "An internal payment error occurred."
     end
   end
 
@@ -2379,8 +2379,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "Pre-broadcast simulation failed"
+      assert error.type =~ "internal-payment-error"
+      assert error.detail =~ "An internal payment error occurred."
     end
   end
 
@@ -3032,7 +3032,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "Tempo RPC request failed"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
       assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
       assert [%{phase: :broadcasting}] = Map.values(state.reservations)
     end
@@ -3105,7 +3105,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = reserve_error} =
                Tempo.verify(%{"type" => "transaction", "signature" => reserve_failure_tx}, reserve_failure_charge)
 
-      assert reserve_error.detail == "Tempo sponsorship is temporarily unavailable"
+      assert reserve_error.detail == "An internal payment error occurred."
 
       {:ok, store_failure_tx} = build_sponsored_client_tx(nonce: 12)
       missing_store_charge = put_in(charge.method_details["store"], false)
@@ -3113,7 +3113,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = store_error} =
                Tempo.verify(%{"type" => "transaction", "signature" => store_failure_tx}, missing_store_charge)
 
-      assert store_error.detail == "Tempo sponsorship is temporarily unavailable"
+      assert store_error.detail == "An internal payment error occurred."
 
       {:ok, transition_failure_tx} = build_sponsored_client_tx(nonce: 13)
       :ok = SponsorLifecycleStore.configure(2)
@@ -3123,7 +3123,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = transition_error} =
                Tempo.verify(%{"type" => "transaction", "signature" => transition_failure_tx}, transition_failure_charge)
 
-      assert transition_error.detail == "Tempo sponsorship is temporarily unavailable"
+      assert transition_error.detail == "An internal payment error occurred."
 
       {:ok, release_failure_tx} = build_sponsored_client_tx(nonce: 14)
       :ok = SponsorLifecycleStore.configure(3)
@@ -4182,7 +4182,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail =~ "temporarily unavailable"
+      assert error.detail == "An internal payment error occurred."
       assert :not_found = ConCacheStore.get(expected_key, store_opts)
 
       Req.Test.stub(Tempo, fn conn ->

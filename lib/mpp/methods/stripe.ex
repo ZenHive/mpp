@@ -435,7 +435,7 @@ defmodule MPP.Methods.Stripe do
   end
 
   defp check_status(%{"status" => "requires_action"}, _charge) do
-    {:error, Errors.new(:verification_failed, "PaymentIntent requires action (e.g., 3DS)")}
+    {:error, Errors.new(:payment_action_required, "PaymentIntent requires action (e.g., 3DS)")}
   end
 
   defp check_status(%{"status" => status}, _charge) do

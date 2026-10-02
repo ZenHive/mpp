@@ -675,7 +675,7 @@ defmodule MPP.Methods.EVM.Authorization do
         {:error, Errors.new(:settlement_failed, message)}
 
       true ->
-        {:error, Errors.new(:verification_failed, "EVM RPC request failed")}
+        {:error, Errors.new(:internal_payment_error, "An internal payment error occurred.")}
     end
   end
 

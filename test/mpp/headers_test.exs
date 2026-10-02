@@ -190,15 +190,9 @@ defmodule MPP.HeadersTest do
       assert parsed.id == original.id
     end
 
-    test "keeps a parsed header other than Payment-Authorization but does not emit or pay it" do
-      original = make_challenge()
-      header = Headers.format_challenge(original) <> ~s(, header="Cookie")
-
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.header == "Cookie"
-      refute Challenge.payable?(parsed)
-      assert Challenge.credential_header(parsed) == "Authorization"
-      refute Headers.format_challenge(parsed) =~ "header="
+    test "rejects a parsed header other than Payment-Authorization" do
+      header = Headers.format_challenge(make_challenge()) <> ~s(, header="Cookie")
+      assert {:error, :invalid_header} = Headers.parse_challenge(header)
     end
 
     test "parsed payment-authorization is payable in any ASCII case" do
@@ -221,12 +215,11 @@ defmodule MPP.HeadersTest do
       assert parsed.header == "Payment-Authorization"
     end
 
-    test "treats header=Authorization as absent" do
+    test "rejects explicit header=Authorization" do
       original = make_challenge()
       header = Headers.format_challenge(original) <> ~s(, header="Authorization")
 
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.header == nil
+      assert {:error, :invalid_header} = Headers.parse_challenge(header)
     end
 
     test "roundtrip preserves escaped quotes in description" do

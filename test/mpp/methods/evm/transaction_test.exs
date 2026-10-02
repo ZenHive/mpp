@@ -407,7 +407,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(signed.payload, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "maps a receipt RPC error after broadcast", %{signed: signed, charge: charge} do
@@ -424,7 +424,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
       end)
 
       assert {:error, %Errors{} = error} = EVM.verify(signed.payload, charge)
-      assert error.detail == "EVM RPC request failed"
+      assert error.detail == "An internal payment error occurred."
     end
 
     test "times out when the receipt never appears", %{signed: signed, charge: charge} do

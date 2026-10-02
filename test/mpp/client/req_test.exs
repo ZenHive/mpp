@@ -222,7 +222,7 @@ defmodule MPP.Client.ReqTest do
 
       req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
 
-      assert {:error, %ClientReq.Error{reason: :no_supported_challenge}} =
+      assert {:error, %ClientReq.Error{reason: :invalid_header}} =
                Req.get(req, url: "http://example.com/resource")
 
       refute_received {:paid, _}

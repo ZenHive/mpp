@@ -74,6 +74,9 @@ defmodule MPP.Credential do
       :invalid_optional_field,
       :empty_id,
       :invalid_method,
+      :invalid_intent,
+      :invalid_opaque,
+      :invalid_header,
       :invalid_request,
       :invalid_digest
     ],
@@ -177,7 +180,6 @@ defmodule MPP.Credential do
       }
 
       with :ok <- validate_optional_challenge_fields(map),
-           challenge = %{challenge | header: Challenge.advertised_header(challenge.header)},
            :ok <- Challenge.validate_fields(challenge) do
         {:ok, challenge}
       end

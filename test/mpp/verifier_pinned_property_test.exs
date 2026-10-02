@@ -81,8 +81,8 @@ defmodule MPP.VerifierPinnedPropertyTest do
     end
   end
 
-  describe "property: pinned-field divergence yields credential_mismatch when HMAC re-signed" do
-    property "tampered echoed realm without re-sign returns credential_mismatch" do
+  describe "property: pinned-field divergence yields invalid_challenge when HMAC re-signed" do
+    property "tampered echoed realm without re-sign returns invalid_challenge" do
       check all(other_realm <- StreamData.string(:alphanumeric, min_length: 3, max_length: 20)) do
         charge = build_charge("1000", "usd")
         credential = valid_credential(charge)
@@ -92,12 +92,12 @@ defmodule MPP.VerifierPinnedPropertyTest do
           assert {:ok, _} = Verifier.verify(tampered, verify_opts(charge))
         else
           assert {:error, %Errors{type: type}} = Verifier.verify(tampered, verify_opts(charge))
-          assert String.contains?(type, "credential-mismatch")
+          assert String.contains?(type, "invalid-challenge")
         end
       end
     end
 
-    property "wrong currency in request (re-signed) returns credential_mismatch" do
+    property "wrong currency in request (re-signed) returns invalid_challenge" do
       check all(
               amount <- StreamData.constant("1000"),
               currency <- StreamData.one_of([StreamData.constant("usd"), StreamData.constant("eur")]),
@@ -124,12 +124,12 @@ defmodule MPP.VerifierPinnedPropertyTest do
           assert {:ok, _} = Verifier.verify(credential, verify_opts(charge))
         else
           assert {:error, %Errors{type: type}} = Verifier.verify(credential, verify_opts(charge))
-          assert String.contains?(type, "credential-mismatch")
+          assert String.contains?(type, "invalid-challenge")
         end
       end
     end
 
-    property "wrong amount in request (re-signed) returns credential_mismatch" do
+    property "wrong amount in request (re-signed) returns invalid_challenge" do
       check all(
               amount <- StreamData.integer(1..999_999),
               other_amount <- StreamData.integer(1..999_999)
@@ -155,14 +155,14 @@ defmodule MPP.VerifierPinnedPropertyTest do
           assert {:ok, _receipt} = Verifier.verify(credential, verify_opts(charge))
         else
           assert {:error, %Errors{type: type}} = Verifier.verify(credential, verify_opts(charge))
-          assert String.contains?(type, "credential-mismatch")
+          assert String.contains?(type, "invalid-challenge")
         end
       end
     end
   end
 
-  describe "property: HMAC corruption yields invalid_challenge, not credential_mismatch" do
-    property "wrong secret never returns credential_mismatch" do
+  describe "property: HMAC corruption yields invalid_challenge" do
+    property "wrong secret returns invalid_challenge" do
       check all(
               wrong <- StreamData.string(:alphanumeric, min_length: 8, max_length: 32),
               wrong != @secret
@@ -174,7 +174,6 @@ defmodule MPP.VerifierPinnedPropertyTest do
                  Verifier.verify(credential, charge |> verify_opts() |> Keyword.put(:secret_key, wrong))
 
         assert String.contains?(type, "invalid-challenge")
-        refute String.contains?(type, "credential-mismatch")
       end
     end
   end

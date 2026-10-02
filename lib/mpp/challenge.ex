@@ -35,8 +35,7 @@ defmodule MPP.Challenge do
     * `header` — (optional) credential HTTP field. `create/2` stores only
       `Payment-Authorization` (any ASCII case, spelling preserved).
       `Authorization` is the default and is never stored. Any other value is
-      dropped on create; a parsed challenge may still carry it, and
-      `payable?/1` refuses it.
+      dropped on create and rejected at parse time.
     * `opaque` — (optional) base64url-encoded JSON server correlation data
   """
 
@@ -140,7 +139,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, request base64url-JSON object, digest `sha-256=…`, expires RFC 3339). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -148,15 +147,36 @@ defmodule MPP.Challenge do
       ]
     ],
     returns: %{type: :tagged, description: "`:ok` if all fields are well-formed, `{:error, reason}` otherwise"},
-    errors: [:empty_id, :invalid_method, :invalid_request, :invalid_digest, :invalid_expires],
+    errors: [
+      :empty_id,
+      :invalid_method,
+      :invalid_intent,
+      :invalid_opaque,
+      :invalid_header,
+      :invalid_request,
+      :invalid_digest,
+      :invalid_expires
+    ],
     composes_with: [:create, :verify]
   )
 
   @spec validate_fields(t()) ::
-          :ok | {:error, :empty_id | :invalid_method | :invalid_request | :invalid_digest | :invalid_expires}
+          :ok
+          | {:error,
+             :empty_id
+             | :invalid_method
+             | :invalid_intent
+             | :invalid_opaque
+             | :invalid_header
+             | :invalid_request
+             | :invalid_digest
+             | :invalid_expires}
   def validate_fields(%__MODULE__{} = challenge) do
     with :ok <- validate_id(challenge.id),
          :ok <- validate_method(challenge.method),
+         :ok <- validate_intent(challenge.intent),
+         :ok <- validate_opaque(challenge.opaque),
+         :ok <- validate_header(challenge.header),
          :ok <- validate_request(challenge.request),
          :ok <- validate_digest(challenge.digest) do
       validate_expires(challenge.expires)
@@ -219,10 +239,40 @@ defmodule MPP.Challenge do
 
   defp validate_request(_request), do: {:error, :invalid_request}
 
-  # digest, when present, MUST start with "sha-256=" (mpp-rs `is_valid_digest_format`;
-  # mppx `z.regex(/^sha-256=/)`).
+  defp validate_intent(intent) when is_binary(intent) do
+    if Regex.match?(~r/\A[A-Za-z0-9-]+\z/, intent), do: :ok, else: {:error, :invalid_intent}
+  end
+
+  defp validate_intent(_intent), do: {:error, :invalid_intent}
+
+  defp validate_opaque(nil), do: :ok
+
+  defp validate_opaque(opaque) when is_binary(opaque) do
+    case Base.url_decode64(opaque, padding: false) do
+      {:ok, _} -> :ok
+      :error -> {:error, :invalid_opaque}
+    end
+  end
+
+  defp validate_opaque(_opaque), do: {:error, :invalid_opaque}
+
+  defp validate_header(nil), do: :ok
+
+  defp validate_header(header) when is_binary(header) do
+    if payment_authorization_header?(header), do: :ok, else: {:error, :invalid_header}
+  end
+
+  defp validate_header(_header), do: {:error, :invalid_header}
+
+  # Accept bare base64 and the RFC 9530 byte-sequence spelling, as in mpp-rs #496.
   defp validate_digest(nil), do: :ok
-  defp validate_digest("sha-256=" <> _), do: :ok
+
+  defp validate_digest("sha-256=" <> value) do
+    if Regex.match?(~r/\A(?:[A-Za-z0-9+\/_=-]+|:[A-Za-z0-9+\/_=-]+:)\z/, value),
+      do: :ok,
+      else: {:error, :invalid_digest}
+  end
+
   defp validate_digest(_digest), do: {:error, :invalid_digest}
 
   # expires, when present, MUST be RFC 3339. Parse-time rejection (mpp-rs #377
