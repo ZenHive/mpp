@@ -63,6 +63,10 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-25v8-3q3q-3m7j` | — (to be requested from the EEF CNA) | MEDIUM | 0.19.0 | Generic session `topUp` raised the deposit ceiling without verified escrow funding |
 | `GHSA-9c4m-cr2r-c3px` | — (to be requested from the EEF CNA) | HIGH | 0.19.0 | Generic session `open` set the deposit ceiling without verifying escrow funding |
 | `GHSA-c33f-jwgj-rw53` | — (to be requested from the EEF CNA) | HIGH | 0.19.0 | Generic session layer verified vouchers against a client-selected signer instead of the one bound at open |
+| `GHSA-g95p-rmq5-gpxm` | — (to be requested from the EEF CNA) | HIGH | 0.20.1 | Tempo hash credential was not canonicalized — one on-chain payment could be redeemed twice under different spellings of its hash |
+| `GHSA-69rf-j8gf-4525` | — (to be requested from the EEF CNA) | HIGH | 0.20.1 | Tempo session close finalized off-chain only and did not retain the accepted voucher for settlement; close now requires a `settle_close` callback and reserves the channel while it runs (mpp-rs #460 parity) |
+| `GHSA-4rg3-425j-59hj` | — (to be requested from the EEF CNA) | MEDIUM | 0.20.1 | Session vouchers accepted non-canonical (high-s) signatures the escrow cannot settle |
+| `GHSA-c8mm-74wp-238x` | — (not requested: LOW-severity hardening backfill) | LOW | 0.20.1 | Tempo fee-payer and verification hardening backfill: 32-byte `secret_key` minimum, transaction `source` bound to the sender, sponsored swap prefix bound to the charge, fail-closed `eth_call` simulation fallback (mpp-rs #473, #475, #477, #491 parity) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18. The four 0.16.2 advisories
@@ -161,9 +165,10 @@ open-items note below).
 
 ## Open hardening items
 
-**4 open items** as of 2026-10-02, tracked in private draft security advisories.
+**0 open items** as of 2026-10-02.
 
-Previously resolved items: the three inbound reports triaged 2026-09-24 and the two related session findings from their review shipped in 0.19.0 and were published the same day (`GHSA-6xg7-3f46-g3g5`, `GHSA-2g9q-rg79-676x`, `GHSA-25v8-3q3q-3m7j`, `GHSA-9c4m-cr2r-c3px`, `GHSA-c33f-jwgj-rw53`).
+Previously resolved items: the four draft advisories from the 2026-10-02 upstream sweep shipped in 0.20.1 and were published the same day (`GHSA-g95p-rmq5-gpxm`, `GHSA-69rf-j8gf-4525`, `GHSA-4rg3-425j-59hj`, `GHSA-c8mm-74wp-238x`; 0.20.0 was tagged but never published to Hex).
+Earlier: the three inbound reports triaged 2026-09-24 and the two related session findings from their review shipped in 0.19.0 and were published the same day (`GHSA-6xg7-3f46-g3g5`, `GHSA-2g9q-rg79-676x`, `GHSA-25v8-3q3q-3m7j`, `GHSA-9c4m-cr2r-c3px`, `GHSA-c33f-jwgj-rw53`).
 Earlier: the low-severity draft advisory from the post-landing content review of the 0.17.0 wave (Task 119) shipped in 0.17.1 and was published the same day (`GHSA-rp92-r4rc-42gw`); it was deleted by GitHub Support on 2026-09-16 (a published repository advisory cannot be withdrawn by its owner, only deleted on request) after the EEF CNA review established that the affected code (XRPL `RedeemLock`, Task 118) landed after the 0.17.0 tag and first shipped in 0.17.1 together with its fix, so no released version was ever affected (the `<= 0.17.0` range on the advisory was wrong). Earlier: the draft advisory from the post-landing content review of the 0.16.2 wave (Task 114) shipped in 0.17.0 and was published the same day (`GHSA-65c4-v2vw-rr64`). The four draft advisories from the 2026-09-04 and 2026-09-11 upstream sweeps (Tasks 103, 104, 111, 112) shipped in 0.16.2 and were published the same day (`GHSA-82qh-vrvm-gqvc`, `GHSA-8x7x-5j8g-8hcx`, `GHSA-8c63-r789-xrrf`, `GHSA-p9fv-9w58-95x2`). The two inbound HIGH reports from 2026-09-04 shipped in 0.16.1 and were published the same day (`GHSA-5qrp-r24c-w6jr`, `GHSA-rpwj-vrf7-4x36`). Previously resolved advisories were published with their
 patched releases; the earlier "4 open items" from
 the 2026-06-24 upstream audit shipped in 0.6.1 and were disclosed as `GHSA-wvj9-hmjr-7359`
