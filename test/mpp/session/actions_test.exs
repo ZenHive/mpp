@@ -398,12 +398,19 @@ defmodule MPP.Session.ActionsTest do
       assert {:ok, %Channel{status: :active}} = Store.get(store, @channel_id)
     end
 
-    test "a failed or malformed settlement leaves the channel active", %{opts: opts, store: store} do
+    test "a definitive settlement failure releases the close reservation", %{opts: opts, store: store} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
       reverted = Errors.new(:verification_failed, "close transaction reverted")
 
       assert {:error, ^reverted} =
                Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> {:error, reverted} end))
+
+      assert {:ok, %Channel{status: :active, closing: false, cumulative_amount: 50}} = Store.get(store, @channel_id)
+      assert {:ok, _} = Actions.dispatch(voucher_payload(80), opts)
+    end
+
+    test "an unrecognized settlement result keeps the channel reserved", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
 
       for result <- [
             :ok,
@@ -416,10 +423,51 @@ defmodule MPP.Session.ActionsTest do
         assert {:error, %Errors{} = error} =
                  Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> result end))
 
-        assert error.detail =~ "close settlement failed"
+        assert error.detail =~ "channel left pending close"
+        assert {:ok, %Channel{status: :active, closing: true}} = Store.get(store, @channel_id)
+
+        assert {:error, %Errors{} = voucher} = Actions.dispatch(voucher_payload(80), opts)
+        assert String.contains?(voucher.type, "channel-finalized")
+        assert voucher.detail == "channel is closing"
+
+        {:ok, _} = Store.update(store, @channel_id, &{:ok, Channel.clear_closing(&1)})
+      end
+    end
+
+    test "reserves the channel while settlement is in flight", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      test_pid = self()
+
+      settle = fn _payload, _channel, _opts ->
+        send(test_pid, {:settling, self()})
+
+        receive do
+          :settled -> {:ok, %{tx_hash: @close_tx_hash}}
+        end
       end
 
-      assert {:ok, %Channel{status: :active, cumulative_amount: 50}} = Store.get(store, @channel_id)
+      close = Task.async(fn -> Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, settle)) end)
+      assert_receive {:settling, settler}
+
+      assert {:error, %Errors{detail: "channel is closing"}} = Actions.dispatch(voucher_payload(80), opts)
+
+      competing = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("second settlement submitted") end)
+      assert {:error, %Errors{detail: "channel is closing"}} = Actions.dispatch(close_payload(50), competing)
+
+      assert {:error, %Errors{detail: "channel is closing"}} =
+               Actions.dispatch(
+                 top_up_payload(400),
+                 Keyword.put(opts, :verify_top_up, fn _, _, _ -> flunk("verifier called") end)
+               )
+
+      assert {:ok, %Channel{spent: spent}} = Store.get(store, @channel_id)
+      send(settler, :settled)
+
+      assert {:ok, receipt} = Task.await(close)
+      assert receipt.reference == @close_tx_hash
+
+      assert {:ok, %Channel{status: :closed, closing: false, spent: ^spent, cumulative_amount: 50}} =
+               Store.get(store, @channel_id)
     end
 
     test "settles with the validated close and records the canonical transaction hash", %{opts: opts, store: store} do

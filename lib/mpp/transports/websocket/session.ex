@@ -172,6 +172,9 @@ defmodule MPP.Transports.WebSocket.Session do
       {:error, {:invalid_transition, :closed, _to}} ->
         {:error, %{session | status: :complete}, Frame.error_frame("session channel is closed")}
 
+      {:error, :channel_closing} ->
+        {:error, %{session | status: :complete}, Frame.error_frame("session channel is closing")}
+
       {:error, :channel_not_found} ->
         {:error, session, Frame.error_frame("session channel not found")}
 

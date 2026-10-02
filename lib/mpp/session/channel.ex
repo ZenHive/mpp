@@ -58,6 +58,7 @@ defmodule MPP.Session.Channel do
           settled: non_neg_integer(),
           units: non_neg_integer(),
           status: status(),
+          closing: boolean(),
           proof: proof() | nil
         }
 
@@ -74,6 +75,7 @@ defmodule MPP.Session.Channel do
     settled: 0,
     units: 0,
     status: :open,
+    closing: false,
     proof: nil
   ]
 
@@ -132,11 +134,27 @@ defmodule MPP.Session.Channel do
 
   def activate(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :active}}
 
-  @doc "Move an active channel to the closed state."
+  @doc "Move an active channel to the closed state, ending any pending close."
   @spec close(t()) :: {:ok, t()} | {:error, {:invalid_transition, status(), :closed}}
-  def close(%__MODULE__{status: :active} = channel), do: {:ok, %{channel | status: :closed}}
+  def close(%__MODULE__{status: :active} = channel), do: {:ok, %{channel | status: :closed, closing: false}}
 
   def close(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :closed}}
+
+  @doc """
+  Reserve an active channel for an on-chain close.
+
+  While a close is pending the channel accepts no vouchers, spends, top-ups or
+  competing closes, so the settled amount cannot fall behind what was spent
+  (mpp-rs `ChannelState::mark_pending_close`).
+  """
+  @spec mark_closing(t()) :: {:ok, t()} | {:error, :channel_closing | {:invalid_transition, status(), :closed}}
+  def mark_closing(%__MODULE__{status: :active, closing: false} = channel), do: {:ok, %{channel | closing: true}}
+  def mark_closing(%__MODULE__{status: :active, closing: true}), do: {:error, :channel_closing}
+  def mark_closing(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :closed}}
+
+  @doc "Release a pending close after the on-chain close definitively failed."
+  @spec clear_closing(t()) :: t()
+  def clear_closing(%__MODULE__{} = channel), do: %{channel | closing: false}
 
   @doc "Authorized-but-unspent voucher balance (`cumulative_amount - spent`)."
   @spec available_balance(t()) :: non_neg_integer()
@@ -159,6 +177,7 @@ defmodule MPP.Session.Channel do
   def apply_voucher(channel, amount, proof \\ nil)
 
   def apply_voucher(%__MODULE__{status: :closed}, _amount, _proof), do: {:error, {:invalid_transition, :closed, :active}}
+  def apply_voucher(%__MODULE__{closing: true}, _amount, _proof), do: {:error, :channel_closing}
 
   def apply_voucher(%__MODULE__{} = channel, amount, proof) when is_integer(amount) and amount >= 0 do
     cond do
@@ -194,6 +213,8 @@ defmodule MPP.Session.Channel do
   def apply_verified_deposit(%__MODULE__{status: :closed}, _deposit, _settled),
     do: {:error, {:invalid_transition, :closed, :active}}
 
+  def apply_verified_deposit(%__MODULE__{closing: true}, _deposit, _settled), do: {:error, :channel_closing}
+
   def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit, settled)
       when is_integer(deposit) and deposit > current and is_integer(settled) and settled >= 0 and settled <= deposit do
     settled = max(settled, channel.settled)
@@ -219,6 +240,7 @@ defmodule MPP.Session.Channel do
   @doc "Deduct a per-request spend from the authorized voucher balance."
   @spec apply_spend(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
   def apply_spend(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
+  def apply_spend(%__MODULE__{closing: true}, _amount), do: {:error, :channel_closing}
 
   def apply_spend(%__MODULE__{} = channel, 0), do: {:ok, channel}
 

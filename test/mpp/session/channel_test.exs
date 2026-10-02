@@ -200,6 +200,20 @@ defmodule MPP.Session.ChannelTest do
       assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_spend(closed, 1)
     end
 
+    test "a pending close blocks balance mutations and competing closes until released or closed" do
+      {:ok, active} = channel_opts() |> Channel.new!() |> Channel.activate()
+      {:ok, closing} = Channel.mark_closing(active)
+
+      assert {:error, :channel_closing} = Channel.mark_closing(closing)
+      assert {:error, :channel_closing} = Channel.apply_voucher(closing, 1)
+      assert {:error, :channel_closing} = Channel.apply_verified_deposit(closing, 10_000_000)
+      assert {:error, :channel_closing} = Channel.apply_spend(closing, 0)
+      assert {:error, {:invalid_transition, :open, :closed}} = channel_opts() |> Channel.new!() |> Channel.mark_closing()
+
+      assert Channel.clear_closing(closing) == active
+      assert {:ok, %Channel{status: :closed, closing: false}} = Channel.close(closing)
+    end
+
     test "rejects non-integer balance mutations and treats a zero spend as a no-op" do
       channel = Channel.new!(channel_opts())
 

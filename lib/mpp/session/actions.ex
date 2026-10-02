@@ -63,8 +63,12 @@ defmodule MPP.Session.Actions do
   for the transaction to succeed at the finality the server requires, and
   return `{:ok, %{tx_hash: "0x" <> 64 hex}}` or `{:error, %MPP.Errors{}}`. Only
   then is the channel marked closed; the hash is recorded on its proof and
-  returned as the receipt reference. Without a callback, on an error, or on any
-  other result, the close is rejected and the channel stays active. Methods
+  returned as the receipt reference. Before the callback runs, the channel is
+  reserved as closing: it accepts no vouchers, spends, top-ups or competing
+  closes. `{:error, %MPP.Errors{}}` must mean the close definitively did not
+  settle; it releases the reservation and the channel stays active. Any other
+  result (or a raise) leaves the outcome unknown, so the close is rejected and
+  the channel stays reserved for the operator to reconcile. Methods
   that redeem closed channels themselves (`MPP.Methods.XRPL.Session`) pass
   `settle_close: :caller`.
   """
@@ -154,6 +158,7 @@ defmodule MPP.Session.Actions do
   defp fetch_live_channel(payload, opts) do
     case Store.get(store(opts), payload.channel_id) do
       {:ok, %Channel{status: :closed}} -> {:error, Errors.new(:channel_closed, "channel is closed")}
+      {:ok, %Channel{closing: true}} -> {:error, store_error(:channel_closing)}
       {:ok, %Channel{} = channel} -> {:ok, channel}
       :not_found -> {:error, Errors.new(:channel_not_found, "channel not found")}
       {:error, reason} -> {:error, store_error(reason)}
@@ -204,20 +209,14 @@ defmodule MPP.Session.Actions do
     end
   end
 
+  # The channel is reserved (`closing`) atomically before settlement, so no
+  # voucher, spend, top-up or competing close can move it while the escrow
+  # close is in flight (mpp-rs `mark_pending_close`, mppx CredentialVerification).
   defp settle_and_close(payload, settle, opts) do
-    with {:ok, current} <- fetch_live_channel(payload, opts),
-         signer = channel_signer(current, opts),
-         :ok <- ensure_same_descriptor(payload, signer, opts),
-         :ok <- maybe_verify_signature(payload, signer, opts),
-         {:ok, closing} <- close_channel(current, payload, opts),
-         {:ok, tx_hash} <- payload |> settle.(closing, opts) |> close_settlement(),
-         {:ok, receipt} <-
-           with_channel_signer(payload, opts, fn channel, payload, opts ->
-             with {:ok, closed} <- close_channel(channel, payload, opts) do
-               {:ok, put_close_tx_hash(closed, tx_hash)}
-             end
-           end) do
-      {:ok, %{receipt | reference: tx_hash}}
+    with {:ok, reserved} <- reserve_close(payload, opts),
+         {:ok, closing} <- reserved |> Channel.clear_closing() |> close_channel(payload, opts),
+         {:ok, tx_hash} <- settle_reserved(payload, settle.(payload, closing, opts), opts) do
+      finalize_close(payload, tx_hash, opts)
     else
       {:error, {:invalid_transition, _status, _to} = reason} -> {:error, store_error(reason)}
       {:error, {:invalid_amount, _field} = reason} -> {:error, store_error(reason)}
@@ -225,17 +224,66 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp close_settlement({:ok, %{tx_hash: "0x" <> hex}}) when byte_size(hex) == 64 do
-    if MPP.Hex.hex_string?(hex),
-      do: {:ok, "0x" <> String.downcase(hex)},
-      else: close_settlement_failure({:ok, %{tx_hash: "0x" <> hex}})
+  defp reserve_close(payload, opts) do
+    store_update(payload, opts, fn
+      :not_found ->
+        {:error, Errors.new(:channel_not_found, "channel not found")}
+
+      %Channel{status: :closed} ->
+        {:error, Errors.new(:channel_closed, "channel is closed")}
+
+      %Channel{} = channel ->
+        with :ok <- verify_channel_signer(channel, payload, opts),
+             {:ok, _closed} <- channel |> Channel.clear_closing() |> close_channel(payload, opts) do
+          Channel.mark_closing(channel)
+        end
+    end)
   end
 
-  defp close_settlement({:error, %Errors{}} = error), do: error
-  defp close_settlement(other), do: close_settlement_failure(other)
+  # Only a definitive `{:error, %MPP.Errors{}}` releases the reservation. Any
+  # other result leaves the close outcome unknown, so the channel stays pending
+  # close (no further spending) until the operator reconciles it.
+  defp settle_reserved(payload, {:error, %Errors{}} = failed, opts) do
+    _released =
+      Store.update(store(opts), payload.channel_id, fn
+        %Channel{closing: true} = channel -> {:ok, Channel.clear_closing(channel)}
+        %Channel{} = channel -> {:ok, channel}
+        :not_found -> {:error, :channel_not_found}
+      end)
 
-  defp close_settlement_failure(result),
-    do: {:error, Errors.new(:verification_failed, "close settlement failed: #{inspect(result)}")}
+    failed
+  end
+
+  defp settle_reserved(_payload, {:ok, %{tx_hash: "0x" <> hex}}, _opts) when byte_size(hex) == 64 do
+    if MPP.Hex.hex_string?(hex),
+      do: {:ok, "0x" <> String.downcase(hex)},
+      else: unknown_settlement({:ok, %{tx_hash: "0x" <> hex}})
+  end
+
+  defp settle_reserved(_payload, result, _opts), do: unknown_settlement(result)
+
+  defp unknown_settlement(result) do
+    {:error,
+     Errors.new(
+       :verification_failed,
+       "close settlement returned an unrecognized result; channel left pending close: #{inspect(result)}"
+     )}
+  end
+
+  defp finalize_close(payload, tx_hash, opts) do
+    result =
+      update_channel(payload, opts, fn
+        %Channel{status: :active, closing: true} = channel ->
+          with {:ok, closed} <- channel |> Channel.clear_closing() |> close_channel(payload, opts) do
+            {:ok, put_close_tx_hash(closed, tx_hash)}
+          end
+
+        _other ->
+          {:error, Errors.new(:verification_failed, "channel is no longer pending close")}
+      end)
+
+    with {:ok, receipt} <- result, do: {:ok, %{receipt | reference: tx_hash}}
+  end
 
   defp put_close_tx_hash(%Channel{proof: proof} = channel, tx_hash) when is_map(proof),
     do: %{channel | proof: Map.put(proof, :tx_hash, tx_hash)}
@@ -254,13 +302,18 @@ defmodule MPP.Session.Actions do
         {:error, Errors.new(:channel_closed, "channel is closed")}
 
       %Channel{} = channel ->
-        signer = channel_signer(channel, opts)
-
-        with :ok <- ensure_same_descriptor(payload, signer, opts),
-             :ok <- maybe_verify_signature(payload, signer, opts) do
+        with :ok <- verify_channel_signer(channel, payload, opts) do
           apply_fun.(channel, payload, opts)
         end
     end)
+  end
+
+  defp verify_channel_signer(channel, payload, opts) do
+    signer = channel_signer(channel, opts)
+
+    with :ok <- ensure_same_descriptor(payload, signer, opts) do
+      maybe_verify_signature(payload, signer, opts)
+    end
   end
 
   defp channel_signer(%Channel{authorized_signer: signer, payer: payer}, _opts) when is_binary(signer),
@@ -369,13 +422,18 @@ defmodule MPP.Session.Actions do
   defp update_channel(%Payload{} = payload, opts, fun) do
     opts = Keyword.put(opts, :action, payload.action)
 
+    with {:ok, channel} <- store_update(payload, opts, fun), do: {:ok, receipt(channel, opts)}
+  end
+
+  defp store_update(%Payload{} = payload, opts, fun) do
     case Store.update(store(opts), payload.channel_id, &normalize_update(fun.(&1))) do
-      {:ok, channel} -> {:ok, receipt(channel, opts)}
+      {:ok, channel} -> {:ok, channel}
       {:error, reason} -> {:error, store_error(reason)}
     end
   end
 
   defp store_error(%Errors{} = error), do: error
+  defp store_error(:channel_closing), do: Errors.new(:channel_closed, "channel is closing")
   defp store_error(:insufficient_balance), do: Errors.new(:insufficient_balance, "insufficient channel balance")
   defp store_error(:amount_exceeds_deposit), do: Errors.new(:amount_exceeds_deposit, "amount exceeds channel deposit")
 
