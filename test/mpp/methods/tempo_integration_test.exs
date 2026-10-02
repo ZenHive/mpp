@@ -309,66 +309,27 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
-  describe "transferWithMemo hash credential path" do
-    test "happy path: matching transferWithMemo hash succeeds", %{
+  describe "challenge-bound attribution on Moderato" do
+    test "rejects a pre-seeded static-memo hash that is not bound to the challenge", %{
       recipient: recipient_address,
       rpc_url: rpc_url,
       memo_tx_hash: memo_tx_hash
     } do
-      start_supervised!(TempoMemoryStore)
-
-      memo_config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
-
-      challenge = request_challenge!(memo_config)
-
-      credential = %Credential{
-        challenge: challenge,
-        payload: %{"type" => "hash", "hash" => memo_tx_hash}
-      }
-
-      conn =
-        :get
-        |> Plug.Test.conn("/api/data")
-        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
-        |> MPP.Plug.call(memo_config)
-
-      assert conn.status == nil, "Plug should pass through on valid memo hash credential"
-      assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
-      assert receipt.status == "success"
-      assert receipt.method == "tempo"
-      assert receipt.reference == memo_tx_hash
+      config = tempo_config(recipient_address, rpc_url, %{})
+      body = submit_credential!(config, %{"type" => "hash", "hash" => memo_tx_hash})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "No matching Transfer"
     end
 
-    test "rejects plain transfer hash when memo is configured", %{
+    test "rejects a plain transfer hash", %{
       recipient: recipient_address,
       rpc_url: rpc_url,
       tx_hash: tx_hash
     } do
-      start_supervised!(TempoMemoryStore)
-
-      memo_config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
-
-      body = submit_credential!(memo_config, %{"type" => "hash", "hash" => tx_hash})
+      config = tempo_config(recipient_address, rpc_url, %{})
+      body = submit_credential!(config, %{"type" => "hash", "hash" => tx_hash})
       assert body["type"] =~ "verification-failed"
-      assert body["detail"] =~ "TransferWithMemo"
-    end
-
-    test "rejects transferWithMemo hash when memo mismatches", %{
-      recipient: recipient_address,
-      rpc_url: rpc_url,
-      memo_tx_hash: memo_tx_hash
-    } do
-      start_supervised!(TempoMemoryStore)
-      wrong_memo = "0x" <> String.duplicate("cd", 32)
-
-      memo_config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => wrong_memo, "store" => TempoMemoryStore})
-
-      body = submit_credential!(memo_config, %{"type" => "hash", "hash" => memo_tx_hash})
-      assert body["type"] =~ "verification-failed"
-      assert body["detail"] =~ "TransferWithMemo"
+      assert body["detail"] =~ "No matching Transfer"
     end
   end
 
@@ -422,22 +383,19 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert receipt.reference == tx_hash
     end
 
-    test "regression (GHSA-34g7-vx6g-82mq residual): third party cannot claim an observed static-memo transfer", %{
+    test "regression (GHSA-34g7-vx6g-82mq residual): third party cannot claim an observed transfer", %{
       recipient: recipient_address,
       rpc_url: rpc_url,
       memo_tx_hash: memo_tx_hash
     } do
-      # The advisory's residual scenario: static memo bypasses per-challenge
-      # attribution, so with a store the hash path degrades to a front-running
-      # race. With presenter binding required, an attacker who merely OBSERVED
-      # the settled transfer (memo_tx_hash, sent by the suite's fixture wallet)
-      # cannot claim it: their presenter signature is valid for their own wallet,
-      # but that wallet is not the transfer's sender.
+      # An attacker who merely observed the suite's fixture transfer (a static
+      # memo, sent by the fixture wallet) cannot claim it against their own
+      # challenge: presenter binding requires their signature to match the
+      # transfer sender, and the memo is not bound to this challenge.
       start_supervised!(TempoMemoryStore)
 
       config =
         tempo_config(recipient_address, rpc_url, %{
-          "memo" => @test_memo,
           "store" => TempoMemoryStore,
           "require_presenter_binding" => true
         })
@@ -470,7 +428,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
       assert body["type"] =~ "verification-failed"
-      assert body["detail"] =~ "TransferWithMemo"
+      assert body["detail"] =~ "No matching Transfer"
     end
 
     test "rejects a hash credential without presenterSignature when binding is required", %{
@@ -482,7 +440,6 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       config =
         tempo_config(recipient_address, rpc_url, %{
-          "memo" => @test_memo,
           "store" => TempoMemoryStore,
           "require_presenter_binding" => true
         })
@@ -494,33 +451,17 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   describe "transferWithMemo transaction credential path" do
-    test "happy path: 402 -> signed transferWithMemo credential -> server broadcasts -> receipt", %{
+    test "happy path: 402 -> signed challenge-bound transferWithMemo -> server broadcasts -> receipt", %{
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
       sender = FaucetWallet.tempo!(rpc_url)
       start_supervised!(TempoMemoryStore)
 
-      memo_config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
+      config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+      challenge = request_challenge!(config)
 
-      memo_call =
-        TempoTestHelpers.build_call(
-          @path_usd,
-          TempoTestHelpers.transfer_with_memo_calldata(recipient_address, @transfer_amount, @test_memo)
-        )
-
-      {:ok, signed_tx} =
-        TempoTxBuilder.build_signed_multicall(
-          private_key: sender.private_key,
-          calls: typed_calls([memo_call]),
-          chain_id: @chain_id,
-          rpc_url: rpc_url,
-          fee_token: @path_usd,
-          nonce: 0
-        )
-
-      challenge = request_challenge!(memo_config)
+      {:ok, signed_tx} = build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge)
 
       credential = %Credential{
         challenge: challenge,
@@ -531,7 +472,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
         :get
         |> Plug.Test.conn("/api/data")
         |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
-        |> MPP.Plug.call(memo_config)
+        |> MPP.Plug.call(config)
 
       assert conn.status == nil, "Plug should pass through on valid memo transaction credential"
       assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
@@ -1610,18 +1551,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   describe "memo in challenge details" do
-    test "challenge includes memo when configured", %{
+    test "a configured static memo is rejected at init", %{
       recipient: recipient_address,
       rpc_url: rpc_url
     } do
-      config =
-        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo, "store" => TempoMemoryStore})
-
-      challenge = request_challenge!(config)
-      assert {:ok, request_json} = Base.url_decode64(challenge.request, padding: false)
-      assert {:ok, request_map} = Jason.decode(request_json)
-
-      assert request_map["methodDetails"]["memo"] == @test_memo
+      assert_raise ArgumentError, ~r/challenge-bound attribution/, fn ->
+        tempo_config(recipient_address, rpc_url, %{"memo" => @test_memo})
+      end
     end
 
     test "challenge omits memo when not configured", %{config: config} do

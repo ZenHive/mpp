@@ -93,7 +93,7 @@ defmodule MPP.Client.Providers.TempoTest do
       assert reason =~ "No matching transfer"
     end
 
-    test "keeps a static memo and chain pin on the machine-token route" do
+    test "ignores an advertised memo on the machine-token route and pins the chain" do
       memo = "0x" <> String.duplicate("ab", 32)
 
       challenge =
@@ -102,8 +102,16 @@ defmodule MPP.Client.Providers.TempoTest do
       assert {:ok, credential} = Tempo.pay(challenge, provider_config())
       assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
 
-      assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, memo)
-      assert route.memo == String.downcase(memo)
+      assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil)
+      assert {:ok, memo_bytes} = Base.decode16(String.trim_leading(route.memo, "0x"), case: :mixed)
+      tag = @attribution_tag
+
+      assert <<^tag::binary-size(4), 1, server::binary-size(10), _client::binary-size(10), nonce::binary-size(7)>> =
+               memo_bytes
+
+      assert server == fingerprint(@realm, 10)
+      assert nonce == fingerprint(@challenge_id, 7)
+      refute route.memo == String.downcase(memo)
 
       assert {:error, {:chain_id_mismatch, @chain_id, 1}} =
                Tempo.pay(
@@ -140,21 +148,29 @@ defmodule MPP.Client.Providers.TempoTest do
       assert {:ok, _payment} = payment_call(credential)
     end
 
-    test "uses a challenge-provided static memo verbatim" do
-      memo = "0x" <> String.duplicate("ab", 32)
-      challenge = challenge(method_details: %{"chainId" => @chain_id, "memo" => memo})
+    test "ignores a server-advertised memo and sends the attribution memo" do
+      advertised = "0x" <> String.duplicate("ab", 32)
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "memo" => advertised})
 
       assert {:ok, credential} = Tempo.pay(challenge, provider_config())
       assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
 
-      assert {:ok, %{memo: decoded_memo}} =
+      assert {:ok, %{memo: memo_hex}} =
                Transaction.find_payment_call(tx, @token,
                  amount: "1250",
-                 recipient: @recipient,
-                 memo: memo
+                 recipient: @recipient
                )
 
-      assert decoded_memo == String.downcase(memo)
+      assert {:ok, memo} = Base.decode16(String.trim_leading(memo_hex, "0x"), case: :mixed)
+      tag = @attribution_tag
+
+      assert <<^tag::binary-size(4), 1, server::binary-size(10), client::binary-size(10), nonce::binary-size(7)>> =
+               memo
+
+      assert server == fingerprint(@realm, 10)
+      assert client == fingerprint(@client_id, 10)
+      assert nonce == fingerprint(@challenge_id, 7)
+      refute String.downcase(memo_hex) == String.downcase(advertised)
     end
 
     test "builds a fee-payer transaction when advertised by the challenge" do
@@ -344,7 +360,7 @@ defmodule MPP.Client.Providers.TempoTest do
       assert {:ok, _credential} = Tempo.pay(challenge(method_details: nil, amount: "0"), pinned_config)
     end
 
-    test "rejects malformed payment details and memos" do
+    test "rejects malformed payment details" do
       assert {:error, :invalid_method_details} =
                Tempo.pay(
                  challenge(method_details: "invalid"),
@@ -356,11 +372,17 @@ defmodule MPP.Client.Providers.TempoTest do
                "accepted #{inspect(amount)}"
       end
 
-      assert {:error, :invalid_memo} =
-               Tempo.pay(challenge(method_details: %{"chainId" => @chain_id, "memo" => "0xab"}), provider_config())
+      for memo <- ["0xab", 12] do
+        assert {:ok, credential} =
+                 Tempo.pay(challenge(method_details: %{"chainId" => @chain_id, "memo" => memo}), provider_config())
 
-      assert {:error, :invalid_memo} =
-               Tempo.pay(challenge(method_details: %{"chainId" => @chain_id, "memo" => 12}), provider_config())
+        assert {:ok, %{memo: memo_hex}} = payment_call(credential)
+        assert {:ok, memo_bytes} = Base.decode16(String.trim_leading(memo_hex, "0x"), case: :mixed)
+        tag = @attribution_tag
+
+        assert <<^tag::binary-size(4), 1, _server::binary-size(10), _client::binary-size(10), _nonce::binary-size(7)>> =
+                 memo_bytes
+      end
     end
 
     test "validates all explicit provider config fields" do

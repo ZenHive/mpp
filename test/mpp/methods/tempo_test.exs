@@ -154,53 +154,28 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
-    test "accepts valid memo with 0x prefix (with a store)" do
-      memo = "0x" <> String.duplicate("ab", 32)
-      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => ConCacheStore})
-    end
-
-    test "accepts valid memo without 0x prefix (with a store)" do
-      memo = String.duplicate("ab", 32)
-      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => ConCacheStore})
-    end
-
     test "accepts nil memo" do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => nil})
     end
 
-    test "raises when a static memo is configured with dedup explicitly disabled (store: false)" do
-      memo = "0x" <> String.duplicate("ab", 32)
-
-      assert_raise ArgumentError, ~r/static "memo" requires dedup/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo, "store" => false})
+    test "raises when a static memo is configured" do
+      for memo <- ["0x" <> String.duplicate("ab", 32), String.duplicate("ab", 32), "0xdead", 12_345] do
+        assert_raise ArgumentError, ~r/static "memo" option was removed/, fn ->
+          Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
+        end
       end
     end
 
-    test "accepts a static memo with no store configured (dedup is on by default)" do
-      memo = "0x" <> String.duplicate("ab", 32)
-
-      # nil/absent store resolves to the app-started default, so the memo's missing
-      # attribution binding is backstopped by single-use enforcement automatically.
-      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
-    end
-
-    test "raises on memo with wrong length" do
-      assert_raise ArgumentError, ~r/32-byte hex string/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => "0xdead"})
-      end
-    end
-
-    test "raises on memo with non-hex characters" do
-      memo = "0x" <> String.duplicate("zz", 32)
-
-      assert_raise ArgumentError, ~r/32-byte hex string/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => memo})
-      end
-    end
-
-    test "raises on non-string memo" do
-      assert_raise ArgumentError, ~r/32-byte hex string/, fn ->
-        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "memo" => 12_345})
+    test "Plug.init rejects a static memo and names challenge-bound attribution" do
+      assert_raise ArgumentError, ~r/challenge-bound attribution/, fn ->
+        MPP.Plug.init(
+          secret_key: String.duplicate("k", 32),
+          realm: @realm,
+          method: Tempo,
+          amount: "1000000",
+          currency: @token_address,
+          method_config: %{"rpc_url" => @rpc_url, "memo" => @test_memo}
+        )
       end
     end
 
@@ -302,12 +277,12 @@ defmodule MPP.Methods.TempoTest do
       assert details["feePayer"] == true
     end
 
-    test "includes memo when configured", %{charge: charge} do
+    test "never emits memo, even when method_details still carries one", %{charge: charge} do
       memo = "0x" <> String.duplicate("ab", 32)
       charge = %{charge | method_details: %{"memo" => memo}}
       details = Tempo.challenge_method_details(charge)
 
-      assert details["memo"] == memo
+      refute Map.has_key?(details, "memo")
     end
 
     test "omits memo when not configured", %{charge: charge} do
@@ -684,58 +659,105 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
-  describe "verify/2 — memo enforcement" do
+  describe "verify/2 — static memo cannot disable attribution binding" do
     setup %{charge: charge} do
-      # Add memo to method_details
       charge = %{
         charge
-        | method_details: Map.put(charge.method_details, "memo", @test_memo)
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "memo" => @test_memo,
+              "challenge_id" => @challenge_id,
+              "realm" => @realm
+            })
       }
 
       {:ok, charge: charge}
     end
 
-    test "returns receipt when TransferWithMemo matches with correct memo", %{charge: charge} do
-      receipt = success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)])
-      stub_receipt(receipt)
+    test "rejects a receipt whose memo is only the configured static value", %{charge: charge} do
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
-      payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
-      assert receipt.method == "tempo"
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "No matching Transfer"
     end
 
-    test "returns error when only plain Transfer event (memo configured)", %{charge: charge} do
+    test "accepts a challenge-bound attribution memo despite a static memo in method_details", %{charge: charge} do
+      memo = attribution_memo(@realm, @challenge_id)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
+    test "rejects a plain transfer even when a static memo is configured", %{charge: charge} do
       stub_receipt(success_receipt())
 
-      payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "TransferWithMemo"
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail =~ "No matching Transfer"
     end
 
-    test "returns error when TransferWithMemo has wrong memo", %{charge: charge} do
-      wrong_memo = "0x" <> String.duplicate("cd", 32)
-      receipt = success_receipt(logs: [transfer_with_memo_log(memo: wrong_memo)])
-      stub_receipt(receipt)
+    test "rejects a transaction call that carries only the static memo, before broadcast", %{charge: charge} do
+      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
+      tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
 
-      payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.type =~ "verification-failed"
-      assert error.detail =~ "TransferWithMemo"
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:rpc, Jason.decode!(body)["method"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+      assert error.detail =~ "not bound to this challenge"
+      refute_received {:rpc, _}
     end
 
-    test "accepts TransferWithMemo when no memo configured (no-memo path)", %{charge: charge} do
-      # Remove memo from config
+    test "rejects a machine-token route whose swap memo is only the static value", %{charge: charge} do
+      charge = enable_machine_token(charge)
+      tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, @test_memo), chain_id: 42_431)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+      assert error.detail =~ "not bound to this challenge"
+    end
+
+    test "fee-payer pre-cosign rejects a static memo before broadcast", %{charge: charge} do
+      start_supervised!(TempoMemoryStore)
+
       charge = %{
         charge
-        | method_details: Map.delete(charge.method_details, "memo")
+        | method_details:
+            Map.merge(charge.method_details, %{
+              "fee_payer" => true,
+              "fee_payer_private_key" => String.duplicate("ab", 32),
+              "fee_token" => @token_address,
+              "store" => TempoMemoryStore
+            })
       }
 
-      receipt = success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)])
-      stub_receipt(receipt)
+      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
 
-      payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      tx_hex =
+        build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431, fee_payer: true)
+
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:rpc, Jason.decode!(body)["method"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end)
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+      assert error.detail =~ "not bound to this challenge"
+      refute_received {:rpc, "eth_sendRawTransactionSync"}
+      refute_received {:rpc, "eth_sendRawTransaction"}
     end
   end
 
@@ -791,7 +813,6 @@ defmodule MPP.Methods.TempoTest do
       charge = enable_machine_token(charge)
       swapper = machine_token_swapper()
       memo = @test_memo
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
 
       stub_receipt_and_transaction_from(
         success_receipt(logs: [transfer_with_memo_log(from: swapper, memo: memo)]),
@@ -820,7 +841,6 @@ defmodule MPP.Methods.TempoTest do
       charge = enable_machine_token(charge)
       swapper = machine_token_swapper()
       memo = @test_memo
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
 
       charge = %{
         charge
@@ -834,7 +854,7 @@ defmodule MPP.Methods.TempoTest do
 
       assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.type =~ "verification-failed"
-      assert error.detail =~ "No matching TransferWithMemo"
+      assert error.detail =~ "No matching Transfer"
     end
 
     test "rejects machine tokens on an unsupported chain at verify time", %{charge: charge} do
@@ -1055,9 +1075,7 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_getTransactionReceipt", _}
     end
 
-    test "returns receipt on valid transferWithMemo transaction when memo configured", %{charge: charge} do
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
-
+    test "returns receipt on a valid transferWithMemo transaction", %{charge: charge} do
       calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
       call = build_call(@token_address, calldata)
       tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
@@ -1437,7 +1455,6 @@ defmodule MPP.Methods.TempoTest do
     test "accepts the canonical [approve, swapTo] route", %{charge: charge} do
       charge = enable_machine_token(charge)
       memo = @test_memo
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
       tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, memo), chain_id: 42_431)
 
       stub_broadcast_and_receipt(
@@ -1461,12 +1478,11 @@ defmodule MPP.Methods.TempoTest do
     test "rejects a mutated machine-token route that is not a TIP-20 transfer", %{charge: charge} do
       charge = enable_machine_token(charge)
       memo = @test_memo
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
       [_approve, swap] = machine_token_calls(1_000_000, memo)
       tx_hex = build_tempo_tx(calls: [swap], chain_id: 42_431)
 
       assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
-      assert error.detail =~ "No matching transferWithMemo call"
+      assert error.detail =~ "No matching transfer"
     end
   end
 
@@ -1628,11 +1644,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
     end
 
-    test "static-memo hash path rejects replay of already-used hash (store backstops missing attribution binding)",
-         %{charge: charge} do
-      # Static memo disables per-challenge attribution binding, so the dedup store is the
-      # sole replay defense — this proves it holds on the static-memo path.
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
+    test "hash path rejects replay of an already-used hash", %{charge: charge} do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
@@ -1646,7 +1658,6 @@ defmodule MPP.Methods.TempoTest do
 
     test "hash path dedups every spelling of one hash and reports the canonical reference",
          %{charge: charge} do
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
       "0x" <> hex = @tx_hash
 
@@ -3489,7 +3500,6 @@ defmodule MPP.Methods.TempoTest do
     test "skips DEX call-scope when the canonical machine-token route matches", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "machine_token_enabled", true)}
       memo = @test_memo
-      charge = %{charge | method_details: Map.put(charge.method_details, "memo", memo)}
 
       tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, memo), chain_id: 42_431, fee_payer: true)
 

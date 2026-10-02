@@ -63,7 +63,9 @@ defmodule MPP.Methods.Tempo do
     * `"sponsor_budget_reconcile"` — (optional, defaults to `false`) when `true`, an
       at-capacity request checks a bounded set of pending async transaction receipts
       before rejecting.
-    * `"memo"` — (optional) bytes32 hex memo for `transferWithMemo`
+    * `"memo"` — removed. Configuring a static memo raises at startup (`MPP.Plug.init/1`).
+      Every Tempo charge must carry a challenge-bound attribution memo; that check is
+      already the default verification path (mppx #904 / mpp-rs #421).
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Pre-simulates the full co-signed transaction via
       `eth_simulateV1` first (same guard as the default path) to reject a tx that would
@@ -75,7 +77,7 @@ defmodule MPP.Methods.Tempo do
       Postgres, etc. — for multi-node deployments) or `{MPP.Tempo.ConCacheStore, opts}` to
       configure the built-in store (for example a custom cache `:name`). A configured store
       MUST implement the atomic `check_and_mark/2`. Pass `store: false` to explicitly opt out
-      of dedup (not recommended; incompatible with a static `"memo"`).
+      of dedup (not recommended).
       Fee sponsorship is stricter: the store must be selected explicitly and implement
       atomic `update/3`. `MPP.Tempo.ConCacheStore` provides a single-node bound. Every
       node and endpoint sponsoring the same wallet must use the same physical shared
@@ -182,7 +184,6 @@ defmodule MPP.Methods.Tempo do
   @moderato_chain_id 42_431
   @swap_exact_amount_out_selector Onchain.Tempo.TIP20.swap_exact_amount_out_selector()
   @required_config_keys ~w(rpc_url)
-  @memo_hex_length 64
   @attribution_memo_length 32
   @submission_modes ~w(pull push)
   @attribution_tag binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
@@ -227,9 +228,8 @@ defmodule MPP.Methods.Tempo do
             "MPP.Methods.Tempo requires these keys in method_config: #{Enum.join(missing, ", ")}"
     end
 
-    validate_memo!(config["memo"])
+    reject_static_memo!(config)
     validate_store!(config["store"])
-    validate_memo_store_binding!(config)
     validate_fee_payer!(config)
     validate_sponsor_budget!(config)
     validate_fee_payer_allowed_tokens!(config)
@@ -328,7 +328,6 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp verify_hash_credential(payload, charge, config) do
-    memo = config["memo"]
     store = Store.resolve(config["store"])
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
@@ -340,7 +339,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
          :ok <- Shared.check_receipt_status(receipt),
          {:ok, sender_policy} <- hash_sender_policy(hash, rpc_url, config),
-         {:ok, transfer} <- find_matching_transfer(receipt, charge, memo, source, sender_policy),
+         {:ok, transfer} <- find_matching_transfer(receipt, charge, source, sender_policy),
          :ok <- commit_hash_used(store, hash) do
       {:ok,
        Receipt.new(
@@ -402,7 +401,6 @@ defmodule MPP.Methods.Tempo do
   defp transaction_funding_currency(_tx, _payment, _charge, _config), do: nil
 
   defp verify_transaction_credential(payload, charge, config) do
-    memo = config["memo"]
     store = Store.resolve(config["store"])
     expected_chain_id = config["chain_id"] || @moderato_chain_id
     wait? = config["wait_for_confirmation"] != false
@@ -413,10 +411,10 @@ defmodule MPP.Methods.Tempo do
            {:ok, tx, _hash} <- canonicalize_transaction(tx),
            :ok <- verify_chain_id(tx, expected_chain_id),
            :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
-           {:ok, payment} <- find_transaction_payment(tx, charge, config, memo),
+           {:ok, payment} <- find_transaction_payment(tx, charge, config),
            :ok <- maybe_validate_call_scope(tx, charge, config, payment),
            {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id) do
-        verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget)
+        verify_transaction_after_budget(tx, payment, charge, config, store, wait?, budget)
       end
 
     case result do
@@ -428,18 +426,18 @@ defmodule MPP.Methods.Tempo do
 
   api(
     :challenge_method_details,
-    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `machineTokenEnabled`, `presenterBinding`, `supportedModes`) for the 402 challenge.",
+    "Return Tempo-specific fields (`chainId`, `feePayer`, `machineTokenEnabled`, `presenterBinding`, `supportedModes`) for the 402 challenge.",
     params: [
       charge: [
         kind: :value,
         description:
-          "Charge struct with method_details containing `chain_id`, `fee_payer`, and optionally `memo` / `supported_modes`"
+          "Charge struct with method_details containing `chain_id`, `fee_payer`, and optionally `supported_modes`"
       ]
     ],
     returns: %{
       type: :map,
       description:
-        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, `machineTokenEnabled` (present and `true` only when enabled), `presenterBinding` (present and `true` only when required), and `supportedModes` (present only when configured)"
+        "Map with `chainId` (default 42431), `feePayer` (default false), `machineTokenEnabled` (present and `true` only when enabled), `presenterBinding` (present and `true` only when required), and `supportedModes` (present only when configured). Never includes `memo`."
     }
   )
 
@@ -452,12 +450,6 @@ defmodule MPP.Methods.Tempo do
       "chainId" => config["chain_id"] || @moderato_chain_id,
       "feePayer" => fee_payer_enabled?(config)
     }
-
-    details =
-      case config["memo"] do
-        nil -> details
-        memo -> Map.put(details, "memo", memo)
-      end
 
     details =
       case config["supported_modes"] do
@@ -521,25 +513,17 @@ defmodule MPP.Methods.Tempo do
 
   # --- Fee payer helpers ---
 
-  # A static `memo` disables the automatic per-challenge attribution binding that the
-  # no-memo path relies on (the memo can't hold both a fixed value and a challenge-bound
-  # nonce). Without a dedup `store`, any third party can replay a publicly-observable
-  # matching TransferWithMemo they never signed. Dedup is on by default, so this only
-  # bites when the operator has explicitly opted out (`store: false`) — reject that
-  # combination. Matches mpp-rs's store-on-by-default backstop (refs/mpp-rs/src/server/tempo.rs).
-  defp validate_memo_store_binding!(%{"memo" => memo} = config) when is_binary(memo) do
-    if is_nil(Store.resolve(config["store"])) do
-      raise ArgumentError,
-            ~s{MPP.Methods.Tempo: a static "memo" requires dedup, but you disabled it with `store: false` — } <>
-              "without single-use enforcement, a publicly-observable matching transfer can be replayed by a " <>
-              "third party. Remove `store: false` (dedup is on by default) or omit the static memo to use " <>
-              "challenge-bound attribution."
-    end
-
-    :ok
+  # mppx #904 / mpp-rs #421: the primary charge memo is always the challenge-bound
+  # attribution memo. A configured static value cannot be that nonce, so it is rejected
+  # rather than advertised or used as a verification bypass. `nil` is not a memo.
+  defp reject_static_memo!(%{"memo" => memo}) when not is_nil(memo) do
+    raise ArgumentError,
+          "MPP.Methods.Tempo: the static \"memo\" option was removed. " <>
+            "Tempo charges require a challenge-bound attribution memo, which is already the default path. " <>
+            "Omit \"memo\" from method_config."
   end
 
-  defp validate_memo_store_binding!(_config), do: :ok
+  defp reject_static_memo!(_config), do: :ok
 
   defp validate_fee_payer!(%{"fee_payer_url" => url} = config) when is_binary(url) do
     if config["fee_payer_private_key"] || config["fee_token"] do
@@ -1064,35 +1048,34 @@ defmodule MPP.Methods.Tempo do
 
   defp validate_swap_prefix(_calls, _charge), do: :ok
 
-  defp find_transaction_payment(tx, charge, config, memo) do
-    case maybe_match_machine_token_route(tx, charge, config, memo) do
+  defp find_transaction_payment(tx, charge, config) do
+    case maybe_match_machine_token_route(tx, charge, config) do
       {:ok, _route} = ok -> ok
-      :error -> find_tip20_payment_call(tx, charge, memo)
+      :error -> find_tip20_payment_call(tx, charge)
     end
   end
 
-  defp maybe_match_machine_token_route(tx, charge, config, memo) do
+  defp maybe_match_machine_token_route(tx, charge, config) do
     if machine_token_enabled?(config) do
-      match_machine_token_route(tx, charge, config, memo)
+      match_machine_token_route(tx, charge, config)
     else
       :error
     end
   end
 
-  defp match_machine_token_route(tx, charge, config, memo) do
+  defp match_machine_token_route(tx, charge, config) do
     chain_id = config["chain_id"] || @moderato_chain_id
 
-    case MachineToken.match_route(tx.calls, chain_id, charge.currency, charge.amount, charge.recipient, memo) do
+    case MachineToken.match_route(tx.calls, chain_id, charge.currency, charge.amount, charge.recipient, nil) do
       {:ok, route} -> {:ok, Map.put(route, :machine_token?, true)}
       :error -> :error
     end
   end
 
-  defp find_tip20_payment_call(tx, charge, memo) do
+  defp find_tip20_payment_call(tx, charge) do
     Transaction.find_payment_call(tx, charge.currency,
       amount: charge.amount,
-      recipient: charge.recipient,
-      memo: memo
+      recipient: charge.recipient
     )
   end
 
@@ -1179,10 +1162,10 @@ defmodule MPP.Methods.Tempo do
 
   defp normalize_sponsor_id(_sponsor_id), do: {:error, :missing_identity}
 
-  defp verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget) do
-    case prepare_sponsored_transaction(tx, payment, config, memo, store) do
+  defp verify_transaction_after_budget(tx, payment, charge, config, store, wait?, budget) do
+    case prepare_sponsored_transaction(tx, payment, config, store) do
       {:ok, tx, rpc_url, reserved_hash, token} ->
-        broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
+        broadcast_reserved_transaction(tx, rpc_url, config, charge, wait?, %{
           store: store,
           budget: budget,
           hash: reserved_hash,
@@ -1196,10 +1179,10 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp prepare_sponsored_transaction(tx, payment, config, memo, store) do
+  defp prepare_sponsored_transaction(tx, payment, config, store) do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),
          :ok <- maybe_validate_fee_payer_envelope(tx, config),
-         {:ok, _payment} <- check_matched_memo_binding(payment, config, memo),
+         {:ok, _payment} <- check_matched_memo_binding(payment, config),
          {:ok, token} <- reserve_hash_atomic(store, hash) do
       finish_reserved_transaction(tx, config, store, hash, token)
     end
@@ -1225,7 +1208,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_reserved_transaction(tx, rpc_url, config, charge, memo, wait?, %{
+  defp broadcast_reserved_transaction(tx, rpc_url, config, charge, wait?, %{
          store: store,
          budget: budget,
          hash: reserved_hash,
@@ -1233,7 +1216,7 @@ defmodule MPP.Methods.Tempo do
          funding_currency: funding_currency
        }) do
     with :ok <- begin_budget_broadcast(budget),
-         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
+         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget) do
       safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
 
       {:ok,
@@ -1263,14 +1246,14 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, memo, true, budget) do
+  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, true, budget) do
     case rpc_broadcast_sync(raw_hex, rpc_url, rpc_options(config)) do
       {:ok, tx_hash, receipt} ->
         safe_budget_release(budget)
 
         with :ok <- Shared.check_receipt_status(receipt),
              {:ok, sender_policy} <- transaction_sender_policy(tx, config),
-             {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, nil, sender_policy) do
+             {:ok, _transfer} <- find_matching_transfer(receipt, charge, nil, sender_policy) do
           {:ok, tx_hash}
         end
 
@@ -1279,7 +1262,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, _charge, _memo, false, budget) do
+  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, _charge, false, budget) do
     case rpc_broadcast_async(raw_hex, rpc_url, rpc_options(config)) do
       {:ok, tx_hash} ->
         safe_budget_pending(budget, tx_hash)
@@ -1567,25 +1550,6 @@ defmodule MPP.Methods.Tempo do
     "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
   end
 
-  # Validates memo format: exactly 32 bytes of hex (64 chars), optional 0x prefix.
-  defp validate_memo!(nil), do: :ok
-
-  defp validate_memo!(memo) when is_binary(memo) do
-    hex = Hex.strip_0x(memo)
-
-    if !(byte_size(hex) == @memo_hex_length and Hex.hex_string?(hex)) do
-      raise ArgumentError,
-            "memo must be a 32-byte hex string (#{@memo_hex_length} hex chars), got: #{inspect(memo)}"
-    end
-
-    :ok
-  end
-
-  defp validate_memo!(other) do
-    raise ArgumentError,
-          "memo must be a 32-byte hex string (#{@memo_hex_length} hex chars), got: #{inspect(other)}"
-  end
-
   defp parse_hash_credential_source(nil, _expected_chain_id), do: {:ok, nil}
 
   defp parse_hash_credential_source(source, expected_chain_id) when is_binary(source) do
@@ -1684,16 +1648,14 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Finds a matching transfer event. When memo is configured, requires TransferWithMemo
-  # with matching memo. When no memo, accepts both Transfer and TransferWithMemo events.
+  # Finds a matching transfer. When the charge carries a challenge id and realm, a
+  # TransferWithMemo must be bound to that pair; a plain Transfer is rejected. A
+  # configured static memo is not consulted (mppx #904 / mpp-rs #421).
   # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
   # `sender_policy` is the mpp-rs ReceiptSenderPolicy: when machine tokens are
   # enabled, a transfer `from` the canonical swapper is accepted if the
   # transaction sender equals the expected payer.
-  defp find_matching_transfer(receipt, charge, memo, source, sender_policy)
-
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, nil, source, sender_policy) do
-    # No memo configured — accept Transfer OR TransferWithMemo matching token/recipient/amount.
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, source, sender_policy) do
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       # Also check TransferWithMemo events (onchain only parses standard Transfer)
@@ -1711,32 +1673,6 @@ defmodule MPP.Methods.Tempo do
       case match do
         nil -> {:error, Errors.new(:verification_failed, "No matching Transfer event found in transaction")}
         transfer -> {:ok, transfer}
-      end
-    end
-  end
-
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, memo, source, sender_policy) when is_binary(memo) do
-    # Memo configured — MUST match TransferWithMemo with matching memo value.
-    with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount) do
-      normalized_memo = String.downcase(Hex.strip_0x(memo))
-
-      match =
-        logs
-        |> Transfer.parse_transfer_with_memo_logs()
-        |> Enum.find(fn transfer ->
-          Onchain.Address.equal?(transfer.token, charge.currency) and
-            Onchain.Address.equal?(transfer.to, charge.recipient) and
-            transfer.amount == amount_int and
-            String.downcase(Hex.strip_0x(transfer.memo)) == normalized_memo and
-            transfer_sender_allowed?(transfer, source, sender_policy)
-        end)
-
-      case match do
-        nil ->
-          {:error, Errors.new(:verification_failed, "No matching TransferWithMemo event found in transaction")}
-
-        transfer ->
-          {:ok, transfer}
       end
     end
   end
@@ -1880,9 +1816,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp check_matched_memo_binding(match, _config, memo) when is_binary(memo), do: {:ok, match}
-
-  defp check_matched_memo_binding(match, %{"challenge_id" => challenge_id, "realm" => realm}, nil) do
+  defp check_matched_memo_binding(match, %{"challenge_id" => challenge_id, "realm" => realm}) do
     case Map.fetch(match, :memo) do
       {:ok, memo} ->
         if attribution_memo_bound?(memo, realm, challenge_id) do
@@ -1896,7 +1830,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp check_matched_memo_binding(match, _config, nil), do: {:ok, match}
+  defp check_matched_memo_binding(match, _config), do: {:ok, match}
 
   defp attribution_memo_bound?(memo, realm, challenge_id) do
     with {:ok, bytes} <- decode_memo(memo),

@@ -35,6 +35,8 @@ defmodule MPP.Client.Providers.Tempo do
   A challenge whose `methodDetails.supportedModes` is present and does not
   list `"pull"` is declined before any RPC or signing (mpp-rs #455 / #470).
   Zero-amount charges use `type="proof"` and ignore `supportedModes`.
+  The payment memo is always the challenge-bound attribution memo. A `memo`
+  advertised in method details is ignored (mppx #904 / mpp-rs #421).
   """
 
   use MPP.Client.PaymentProvider
@@ -233,8 +235,6 @@ defmodule MPP.Client.Providers.Tempo do
     {:ok, %{"type" => "transaction", "signature" => signature}}
   end
 
-  defp payment_memo(_challenge, %{"memo" => memo}, _client_id), do: decode_memo(memo)
-
   defp payment_memo(challenge, _details, client_id) do
     client =
       if is_binary(client_id) and client_id != "",
@@ -250,17 +250,6 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   defp fingerprint(value), do: binary_part(Onchain.Hash.keccak(value), 0, @server_fingerprint_bytes)
-
-  defp decode_memo("0x" <> hex), do: decode_memo(hex)
-
-  defp decode_memo(hex) when is_binary(hex) do
-    case Base.decode16(hex, case: :mixed) do
-      {:ok, <<memo::binary-size(@memo_bytes)>>} -> {:ok, memo}
-      _ -> {:error, :invalid_memo}
-    end
-  end
-
-  defp decode_memo(_memo), do: {:error, :invalid_memo}
 
   defp proof_signature(challenge, chain_id, address, private_key) do
     digest =

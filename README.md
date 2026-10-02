@@ -89,8 +89,7 @@ pipeline :paid_tempo do
         "max_in_flight_total_fee" => 500_000_000_000_000_000,
         "max_in_flight_reservations" => 100
       },
-      "wait_for_confirmation" => false,
-      "memo" => "0x...(optional 32-byte memo)"
+      "wait_for_confirmation" => false
     }
 end
 ```
@@ -357,9 +356,9 @@ With MPP, you add one Plug to your router and your API charges per-request. No a
 
 The server can offer multiple payment methods in a single 402 response. The agent picks whichever it can pay with.
 
-**Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), memo matching for transaction tagging, zero-amount proof credentials, delegated access-key proof authorization, opt-in presenter-identity binding for hash/transaction credentials, first-party machine-token (MPP Credits / machineUSD) charge payments via `"machine_token_enabled"`, and pluggable dedup stores with a built-in ETS+TTL option via ConCache, including per-store key prefixes for shared-cache tenancy.
+**Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), challenge-bound attribution memos, zero-amount proof credentials, delegated access-key proof authorization, opt-in presenter-identity binding for hash/transaction credentials, first-party machine-token (MPP Credits / machineUSD) charge payments via `"machine_token_enabled"`, and pluggable dedup stores with a built-in ETS+TTL option via ConCache, including per-store key prefixes for shared-cache tenancy.
 
-**Tempo security note:** Challenges expire by default. On routes without a configured static memo, Tempo payments must use challenge-bound attribution metadata; plain transfers are rejected by the hardened verifier. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast. Setting `"require_presenter_binding" => true` in the Tempo `method_config` additionally requires hash/transaction credential presenters to prove control of the transfer sender's wallet with a `"presenterSignature"` (the proof path's EIP-712 envelope, signed by the sender wallet or an authorized access key; the client signs `MPP.Methods.Tempo.Proof.hash/1` typed data) — closing the front-running residual documented in GHSA-34g7-vx6g-82mq. The requirement is advertised as `"presenterBinding": true` in the 402 method details. Opt-in because neither reference SDK binds the presenter on the hash path.
+**Tempo security note:** Challenges expire by default. Tempo payments must use challenge-bound attribution metadata; a static `"memo"` in `method_config` is rejected at startup, and plain transfers are rejected by the verifier. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast. Setting `"require_presenter_binding" => true` in the Tempo `method_config` additionally requires hash/transaction credential presenters to prove control of the transfer sender's wallet with a `"presenterSignature"` (the proof path's EIP-712 envelope, signed by the sender wallet or an authorized access key; the client signs `MPP.Methods.Tempo.Proof.hash/1` typed data) — closing the front-running residual documented in GHSA-34g7-vx6g-82mq. The requirement is advertised as `"presenterBinding": true` in the 402 method details. Opt-in because neither reference SDK binds the presenter on the hash path.
 
 **Tempo networks:** [Mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) (chain ID `4217`, `rpc.tempo.xyz`) | [Testnet (Moderato)](https://docs.tempo.xyz/quickstart/connection-details#testnet) (chain ID `42431`, `rpc.moderato.tempo.xyz`)
 
@@ -470,8 +469,8 @@ Req.new()
 `MPP.Client.Req` intercepts HTTP 402, pays, and retries with `Authorization: Payment`.
 Provider credentials and endpoints are passed explicitly; the providers do not read
 application configuration or environment variables. The Tempo provider verifies that
-the RPC serves the challenge's advertised chain before signing and automatically creates
-the challenge-bound attribution memo required by routes without a static memo.
+the RPC serves the challenge's advertised chain before signing and always creates
+the challenge-bound attribution memo. A `memo` advertised by the server is ignored.
 When `:expected_recipients` is set, the provider refuses a challenge whose primary
 `recipient` or any `splits` recipient is outside that allowlist — before signing a
 transaction or a zero-amount proof. Address comparison is checksum-agnostic. Omit

@@ -66,7 +66,9 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "hash path filters correct Transfer from noisy logs" do
     test "selects correct Transfer event ignoring unrelated logs" do
-      config = init_tempo_config_with_memo_store()
+      config = init_tempo_config_with_store()
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
 
       unrelated_log = %{
         "address" => "0x0000000000000000000000000000000000000001",
@@ -78,12 +80,12 @@ defmodule MPP.Methods.TempoFullFlowTest do
       }
 
       wrong_token_transfer = transfer_log(token: "0x0000000000000000000000000000000000000099")
-      correct_transfer = transfer_with_memo_log(memo: @test_memo)
+      correct_transfer = transfer_with_memo_log(memo: memo)
 
       receipt = success_receipt(logs: [unrelated_log, wrong_token_transfer, correct_transfer])
       stub_receipt(receipt)
 
-      conn = submit_credential_expect_success!(config, %{"type" => "hash", "hash" => @tx_hash})
+      conn = submit_challenge_expect_success!(config, challenge, %{"type" => "hash", "hash" => @tx_hash})
 
       assert conn.assigns[:mpp_receipt].reference == @tx_hash
       assert conn.assigns[:mpp_receipt].status == "success"
@@ -97,7 +99,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "transferWithMemo full flow" do
     test "hash path: rejects when log has wrong memo" do
-      config = init_tempo_config_with_memo_store()
+      config = init_tempo_config_with_store()
 
       wrong_memo = "0x" <> String.duplicate("cd", 32)
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: wrong_memo)]))
@@ -107,8 +109,8 @@ defmodule MPP.Methods.TempoFullFlowTest do
       assert body["type"] =~ "verification-failed"
     end
 
-    test "hash path: rejects plain Transfer when memo is configured" do
-      config = init_tempo_config_with_memo_store()
+    test "hash path: rejects plain Transfer" do
+      config = init_tempo_config_with_store()
 
       # success_receipt() generates a plain Transfer log (no memo)
       stub_receipt(success_receipt())
@@ -119,11 +121,12 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end
 
     test "hash path: accepts matching transferWithMemo" do
-      config = init_tempo_config_with_memo_store()
+      config = init_tempo_config_with_store()
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
-      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
-
-      conn = submit_credential_expect_success!(config, %{"type" => "hash", "hash" => @tx_hash})
+      conn = submit_challenge_expect_success!(config, challenge, %{"type" => "hash", "hash" => @tx_hash})
 
       assert %Receipt{} = receipt = conn.assigns[:mpp_receipt]
       assert receipt.status == "success"
@@ -138,16 +141,17 @@ defmodule MPP.Methods.TempoFullFlowTest do
     end
 
     test "transaction path: accepts matching transferWithMemo" do
-      config = init_tempo_config_with_memo_store()
+      config = init_tempo_config_with_store()
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
 
-      # Build tx with transferWithMemo calldata
-      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, memo))
       tx_hex = build_tempo_tx(calls: [call], chain_id: @chain_id)
 
-      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
       conn =
-        submit_credential_expect_success!(config, %{
+        submit_challenge_expect_success!(config, challenge, %{
           "type" => "transaction",
           "signature" => tx_hex
         })
@@ -213,26 +217,23 @@ defmodule MPP.Methods.TempoFullFlowTest do
     test "first submission succeeds, second rejected as already used" do
       start_supervised!(TempoMemoryStore)
 
-      config =
-        init_tempo_config(method_config: %{"store" => TempoMemoryStore, "memo" => @test_memo})
+      config = init_tempo_config(method_config: %{"store" => TempoMemoryStore})
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
 
-      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, memo))
       tx_hex = build_tempo_tx(calls: [call], chain_id: @chain_id)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
       # First: succeeds
-      conn =
-        submit_credential_expect_success!(config, %{
-          "type" => "transaction",
-          "signature" => tx_hex
-        })
+      conn = submit_challenge_expect_success!(config, challenge, payload)
 
       assert conn.assigns[:mpp_receipt].status == "success"
 
-      # Second: rejected as already used
-      body =
-        submit_credential!(config, %{"type" => "transaction", "signature" => tx_hex})
+      # Second: same challenge and tx, rejected as already used
+      body = submit_challenge!(config, challenge, payload)
 
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
@@ -245,14 +246,16 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   describe "optimistic multicall simulates the full transaction before broadcast" do
     test "simulates via eth_simulateV1, then broadcasts" do
-      config = init_tempo_config_with_memo_store(%{"wait_for_confirmation" => false})
+      config = init_tempo_config_with_store(%{"wait_for_confirmation" => false})
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
 
       # Build 3-call tx: [approve(dex), swap(dex), transfer(token)]. The full tx is
       # simulated via eth_simulateV1 — there is no per-call eth_call to mis-target.
       dex = dex_address()
       approve_call = build_call(@token_address, approve_calldata(dex, 1_000_000))
       swap_call = build_call(dex, swap_calldata(@token_address, @token_address, 1_000_000, 1_000_000))
-      transfer_call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
+      transfer_call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, memo))
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: @chain_id)
 
       test_pid = self()
@@ -272,7 +275,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       end)
 
       conn =
-        submit_credential_expect_success!(config, %{
+        submit_challenge_expect_success!(config, challenge, %{
           "type" => "transaction",
           "signature" => tx_hex
         })
@@ -296,11 +299,11 @@ defmodule MPP.Methods.TempoFullFlowTest do
       fee_payer_mc = Keyword.fetch!(fee_payer_config(), :method_config)
 
       config =
-        init_tempo_config(
-          method_config: fee_payer_mc |> Map.put("store", TempoMemoryStore) |> Map.put("memo", @test_memo)
-        )
+        init_tempo_config(method_config: Map.put(fee_payer_mc, "store", TempoMemoryStore))
 
-      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
+      challenge = request_challenge!(config)
+      memo = bound_memo(challenge)
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, memo))
 
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_multicall(
@@ -316,20 +319,16 @@ defmodule MPP.Methods.TempoFullFlowTest do
           valid_before: future_valid_before()
         )
 
-      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
+      payload = %{"type" => "transaction", "signature" => signed_tx}
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
       # First: co-signed and broadcast succeeds
-      conn =
-        submit_credential_expect_success!(config, %{
-          "type" => "transaction",
-          "signature" => signed_tx
-        })
+      conn = submit_challenge_expect_success!(config, challenge, payload)
 
       assert conn.assigns[:mpp_receipt].status == "success"
 
       # Second: same client tx -> store catches duplicate
-      body =
-        submit_credential!(config, %{"type" => "transaction", "signature" => signed_tx})
+      body = submit_challenge!(config, challenge, payload)
 
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
@@ -342,10 +341,21 @@ defmodule MPP.Methods.TempoFullFlowTest do
 
   # --- Config builders ---
 
-  defp init_tempo_config_with_memo_store(extra \\ %{}) do
+  defp init_tempo_config_with_store(extra \\ %{}) do
     start_supervised!(TempoMemoryStore)
 
-    init_tempo_config(method_config: Map.merge(%{"store" => TempoMemoryStore, "memo" => @test_memo}, extra))
+    init_tempo_config(method_config: Map.merge(%{"store" => TempoMemoryStore}, extra))
+  end
+
+  # Challenge-bound attribution memo (tag || version || realm fingerprint ||
+  # zero client fingerprint || challenge-id nonce). Matches `MPP.Methods.Tempo`.
+  defp bound_memo(challenge) do
+    tag = binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
+    server = binary_part(Onchain.Hash.keccak(challenge.realm), 0, 10)
+    client = <<0::80>>
+    nonce = binary_part(Onchain.Hash.keccak(challenge.id), 0, 7)
+
+    "0x" <> Base.encode16(tag <> <<1>> <> server <> client <> nonce, case: :lower)
   end
 
   defp init_tempo_config(overrides) do
@@ -411,23 +421,29 @@ defmodule MPP.Methods.TempoFullFlowTest do
     Jason.decode!(conn.resp_body)
   end
 
-  # Gets fresh challenge, builds credential, submits. Asserts pass-through, returns conn.
-  defp submit_credential_expect_success!(config, payload) do
-    challenge = request_challenge!(config)
+  defp submit_challenge!(config, challenge, payload) do
+    conn = submit_challenge_conn(config, challenge, payload)
+    assert conn.status == 402, "Expected 402, got #{conn.status || "nil (pass-through)"}"
+    Jason.decode!(conn.resp_body)
+  end
 
-    credential = %Credential{challenge: challenge, payload: payload}
-    auth_header = Headers.format_credential(credential)
-
-    conn =
-      :get
-      |> Plug.Test.conn("/api/data")
-      |> Plug.Conn.put_req_header("authorization", auth_header)
-      |> PaymentPlug.call(config)
+  defp submit_challenge_expect_success!(config, challenge, payload) do
+    conn = submit_challenge_conn(config, challenge, payload)
 
     assert conn.status == nil,
            "Expected pass-through, got #{conn.status}: #{conn.resp_body}"
 
     conn
+  end
+
+  defp submit_challenge_conn(config, challenge, payload) do
+    credential = %Credential{challenge: challenge, payload: payload}
+    auth_header = Headers.format_credential(credential)
+
+    :get
+    |> Plug.Test.conn("/api/data")
+    |> Plug.Conn.put_req_header("authorization", auth_header)
+    |> PaymentPlug.call(config)
   end
 
   # --- Stub helpers ---

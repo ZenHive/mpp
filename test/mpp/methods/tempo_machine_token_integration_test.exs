@@ -28,7 +28,6 @@ defmodule MPP.Methods.TempoMachineTokenIntegrationTest do
   @merchant "0x967fa869a1f124770f93d48cc900255936de641a"
   @currency "0x20c0000000000000000000000000000000000001"
   @amount "10000000"
-  @memo "0x1b9389b6b5448148fbf008ef525dbb5107467f234586b4fad360b7aff3509dde"
   @wrong_source "0x1111111111111111111111111111111111111111"
 
   setup_all do
@@ -61,7 +60,7 @@ defmodule MPP.Methods.TempoMachineTokenIntegrationTest do
 
     assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
     assert error.type =~ "verification-failed"
-    assert error.detail =~ "No matching TransferWithMemo"
+    assert error.detail =~ "No matching Transfer"
   end
 
   test "accepts the settlement when the credential source is the on-chain payer", %{rpc_url: rpc_url} do
@@ -88,7 +87,6 @@ defmodule MPP.Methods.TempoMachineTokenIntegrationTest do
       | method_details: %{
           "rpc_url" => rpc_url,
           "chain_id" => @chain_id,
-          "memo" => @memo,
           "machine_token_enabled" => true,
           "store" => false
         }
