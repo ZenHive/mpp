@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) on 2026-10-02
 
-**Up next:** Task 141 — Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67] 🚀
+**Up next:** Task 134 — Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -270,7 +270,7 @@
 | Task 132 | ✅ | 🎁 **additional-methods** · Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25] 🎯 |
 | Task 135 | ✅ | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀 |
 | Task 136 | ⛔ | 🎁 **additional-methods** · Make full QA freshness checks executable in isolated worktrees [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 141 | ⬜ | 🎁 **additional-methods** · Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67] 🚀 |
+| Task 141 | 🔄 | 🎁 **additional-methods** · Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67] 🚀 |
 | Task 142 | ✅ | 🎁 **additional-methods** · Document shipped x402, USDC and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯 |
 | Task 143 | ✅ | 🎁 **additional-methods** · Adjudicate the pending private security inbox reports [D:5/B:5/U:5 → Eff:1.0] 📋 |
 <!-- TASKS:END -->

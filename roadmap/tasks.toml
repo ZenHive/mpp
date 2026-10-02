@@ -3897,7 +3897,7 @@ shipped_in = "f9bf5b7028b6d754379e6ff28d94692b242628e1"
 id = "141"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "Refresh payment-security mutation evidence after integrated source changes"
 scores = { d = 3, b = 5, u = 5 }
 acceptance_criteria = ["Reproduce the fingerprint_mismatch in test/mutation/security_campaign_test.exs on the integrated source and identify which fingerprint inputs changed.", "Run the executable payment-security mutation campaign against the current source, inspect all outcomes and repair any surviving mutants or invalid replacements through normal implementation and independent review.", "Update the ledger only with observed campaign results; do not merely replace the hash or weaken validation. The focused ledger test passes and the report records the campaign command, revision and outcomes."]
@@ -3906,6 +3906,7 @@ assignee = "codex"
 model = "gpt-6-astra"
 body = "Full QA at 750acbe288d165621f63ef2f74855616569154fa failed its ledger validation with fingerprint_mismatch; automatic retry confirmed it. SecurityMutations.fingerprint/1 hashes mutation definitions and complete source/test inputs, and the landed range changed those inputs. Tasks 82 and 93 delivered the campaign and scheduling, but no pending task owns this evidence refresh. Reconcile current evidence rather than certifying an unrun campaign. See .audit/750acbe.md. D3 reflects campaign execution and review, B5 restores a failing payment-security regression check, U5 reflects the observed full-QA failure. Reconfirmed at integrated 1df67f67e955238eba3829901b3bd69e7f43db40: 2364 tests passed, one fingerprint_mismatch failed and was confirmed by the automatic retry; aggregate coverage was 97.68%. No ledger hash or validation was changed. See .audit/1df67f6.md."
 created_at = "2026-09-24"
+started_at = "2026-10-02"
 scored_at = "2026-09-24"
 
 [[task]]
