@@ -384,7 +384,10 @@ defmodule MPP.PlugTest do
   end
 
   describe "ordered charge currencies" do
-    @ousd "0x20c0000000000000000000006a37da5c996874be"
+    # docs.tempo.xyz/guide/ousd prints the lowercase account; challenges use the
+    # EIP-55 form from viem/mppx (`tokens.ousd`).
+    @ousd_docs "0x20c0000000000000000000006a37da5c996874be"
+    @ousd "0x20c0000000000000000000006a37DA5C996874BE"
     @path_usd "0x20c0000000000000000000000000000000000000"
 
     test "Tempo and EVM expand currencies in both option forms, in caller order" do
@@ -428,6 +431,23 @@ defmodule MPP.PlugTest do
         assert Enum.map(PaymentPlug.init(opts).method_entries, & &1.charge.currency) == currencies
         assert [%{charge: %{currency: @path_usd}}] = PaymentPlug.init(opts ++ [currency: @path_usd]).method_entries
       end
+
+      assert Onchain.Address.equal?(@ousd, @ousd_docs)
+      assert Tempo.default_currencies(4217) == [@ousd, "0x20C000000000000000000000b9537d11c60E8b50"]
+    end
+
+    test "repeated addresses collapse case-insensitively and keep the first spelling" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: Tempo,
+          amount: "100",
+          currencies: [@ousd_docs, @ousd, @path_usd, @path_usd],
+          method_config: %{"rpc_url" => "https://rpc.example", "chain_id" => 42_431}
+        )
+
+      assert Enum.map(config.method_entries, & &1.charge.currency) == [@ousd_docs, @path_usd]
     end
 
     test "invalid, conflicting and non-charge currencies fail at init" do

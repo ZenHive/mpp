@@ -746,6 +746,37 @@ defmodule MPP.Methods.TempoTest do
       assert receipt.funding_currency == charge.currency
     end
 
+    test "derives legacy funding from transaction.to when calls are absent", %{charge: charge} do
+      stub_hash_transaction(success_receipt(), %{"from" => @payer, "to" => charge.currency})
+
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert receipt.funding_currency == charge.currency
+    end
+
+    test "omits funding metadata when the transaction sender is not the credential source", %{charge: charge} do
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      stub_hash_transaction(success_receipt(logs: [transfer_log(from: @payer)]), %{
+        "from" => "0x2222222222222222222222222222222222222222",
+        "calls" => [%{"to" => charge.currency}]
+      })
+
+      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
+    test "omits funding metadata when the route has extra calls", %{charge: charge} do
+      stub_hash_transaction(success_receipt(), %{
+        "from" => @payer,
+        "to" => charge.currency,
+        "calls" => [%{"to" => charge.currency}, %{"to" => "0x20c0000000000000000000000000000000000001"}]
+      })
+
+      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
     test "omits funding metadata when the transaction route is unavailable", %{charge: charge} do
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -2421,6 +2452,21 @@ defmodule MPP.Methods.TempoTest do
   # Stubs a successful JSON-RPC response wrapping the given receipt map.
   defp stub_receipt(receipt) do
     stub_receipt_response(%{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+  end
+
+  defp stub_hash_transaction(receipt, transaction) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      result =
+        case Jason.decode!(body)["method"] do
+          "eth_getTransactionReceipt" -> receipt
+          "eth_getTransactionByHash" -> transaction
+          _other -> nil
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => 1})
+    end)
   end
 
   defp stub_receipt_and_transaction_from(receipt, from) do

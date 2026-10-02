@@ -9,13 +9,15 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.FaucetWallet
+  alias Onchain.Address
   alias Onchain.Tempo.RPC
   alias Onchain.Tempo.Transaction.Builder
 
   @moduletag :integration
-  # docs.tempo.xyz/guide/ousd and mppx src/tempo/internal/defaults.ts:
-  # OUSD has the same deployment on mainnet and Moderato.
-  @ousd "0x20c0000000000000000000006a37da5c996874be"
+  # docs.tempo.xyz/guide/ousd prints this account in lowercase and deploys it on
+  # both mainnet and Moderato. Challenges use the EIP-55 form (viem/mppx).
+  @ousd "0x20c0000000000000000000006a37DA5C996874BE"
+  @ousd_docs "0x20c0000000000000000000006a37da5c996874be"
   @path_usd "0x20c0000000000000000000000000000000000000"
   @recipient "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
 
@@ -47,6 +49,7 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
         method_config: %{"chain_id" => 42_431, "rpc_url" => rpc_url, "store" => false}
       )
 
+    assert Address.equal?(@ousd, @ousd_docs)
     assert Enum.map(config.method_entries, & &1.charge.currency) == [@ousd, @path_usd]
     [ousd, path_usd] = config.method_entries
     payload = %{"type" => "hash", "hash" => hash}

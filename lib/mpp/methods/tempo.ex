@@ -243,8 +243,10 @@ defmodule MPP.Methods.Tempo do
   @doc "Ordered charge currencies for Tempo mainnet or Moderato."
   @spec default_currencies(non_neg_integer()) :: [String.t()]
   def default_currencies(chain_id) do
-    # docs.tempo.xyz/guide/ousd; mppx src/tempo/internal/currencies.ts (#933).
-    ousd = "0x20c0000000000000000000006a37da5c996874be"
+    # Same account as docs.tempo.xyz/guide/ousd (printed lowercase). Challenges use
+    # the EIP-55 form from viem `ousd(4217).address` / mppx `tokens.ousd` (#933).
+    # USDC.e matches mppx `tokens.usdc`; pathUSD matches `tokens.pathUsd`.
+    ousd = "0x20c0000000000000000000006a37DA5C996874BE"
 
     case chain_id do
       4217 -> [ousd, "0x20C000000000000000000000b9537d11c60E8b50"]
@@ -340,37 +342,52 @@ defmodule MPP.Methods.Tempo do
          method: "tempo",
          reference: hash,
          external_id: charge.external_id,
-         funding_currency: hash_funding_currency(hash, transfer, charge, config, sender_policy)
+         funding_currency: hash_funding_currency(hash, transfer, charge, config, sender_policy, source)
        )}
     end
   end
 
-  defp hash_funding_currency(hash, transfer, charge, config, %{settlement_senders: senders}) do
+  defp hash_funding_currency(hash, transfer, charge, config, %{settlement_senders: senders}, sender) do
     if settlement_sender?(transfer.from, senders) do
       MachineToken.token(config["chain_id"] || @moderato_chain_id)
     else
-      hash_direct_funding_currency(hash, charge, config)
+      hash_direct_funding_currency(hash, charge, config, sender)
     end
   end
 
-  defp hash_funding_currency(hash, _transfer, charge, config, nil) do
-    hash_direct_funding_currency(hash, charge, config)
+  defp hash_funding_currency(hash, _transfer, charge, config, nil, sender) do
+    hash_direct_funding_currency(hash, charge, config, sender)
   end
 
-  # A settlement log alone cannot distinguish direct funding from a DEX swap.
-  # Funding metadata is optional when the provider cannot supply the route.
-  defp hash_direct_funding_currency(hash, charge, config) do
+  # mppx `Charge.ts` sets hash `fundingCurrency` only for a direct payment of the
+  # charge currency (one Tempo call, or a legacy `to`) whose transaction sender is
+  # the payer. Extra calls omit the field. With no credential source, the receipt
+  # sender is the transaction sender; `RPC.fetch_receipt/3` drops `from`, so that
+  # check is the source binding below.
+  defp hash_direct_funding_currency(hash, charge, config, sender) do
     case rpc_json_request("eth_getTransactionByHash", [hash], config["rpc_url"], rpc_options(config)) do
-      {:ok, %{"calls" => [%{"to" => token}]}} when is_binary(token) ->
-        if Onchain.Address.equal?(token, charge.currency), do: charge.currency
-
-      {:ok, %{"to" => token}} when is_binary(token) ->
-        if Onchain.Address.equal?(token, charge.currency), do: charge.currency
+      {:ok, %{"from" => from} = tx} when is_binary(from) ->
+        if funding_sender_matches?(from, sender), do: direct_route_funding_currency(tx, charge)
 
       _ ->
         nil
     end
   end
+
+  defp funding_sender_matches?(_from, nil), do: true
+  defp funding_sender_matches?(from, sender), do: Onchain.Address.equal?(from, sender)
+
+  defp direct_route_funding_currency(%{"calls" => [%{"to" => token}]}, charge) when is_binary(token) do
+    if Onchain.Address.equal?(token, charge.currency), do: charge.currency
+  end
+
+  defp direct_route_funding_currency(%{"calls" => calls}, _charge) when is_list(calls), do: nil
+
+  defp direct_route_funding_currency(%{"to" => token}, charge) when is_binary(token) do
+    if Onchain.Address.equal?(token, charge.currency), do: charge.currency
+  end
+
+  defp direct_route_funding_currency(_tx, _charge), do: nil
 
   defp transaction_funding_currency(_tx, %{machine_token?: true}, _charge, config) do
     MachineToken.token(config["chain_id"] || @moderato_chain_id)

@@ -423,37 +423,48 @@ defmodule MPP.Plug do
     method = require_opt!(opts, :method)
     plural? = Keyword.has_key?(opts, :currencies)
     singular? = Keyword.has_key?(opts, :currency)
-
-    cond do
-      plural? and singular? ->
-        raise ArgumentError, "MPP.Plug: provide either :currency or :currencies, not both"
-
-      plural? and (intent != "charge" or method not in [Tempo, MPP.Methods.EVM]) ->
-        raise ArgumentError, "MPP.Plug: :currencies is supported only for Tempo and EVM charges"
-
-      plural? ->
-        expand_currency_list(opts, Keyword.fetch!(opts, :currencies))
-
-      not singular? and intent == "charge" and method == Tempo ->
-        chain_id = Map.get(Keyword.get(opts, :method_config, %{}), "chain_id", 42_431)
-        expand_currency_list(opts, Tempo.default_currencies(chain_id))
-
-      true ->
-        [opts]
-    end
+    expand_currencies(method, plural?, singular?, opts, intent)
   end
+
+  defp expand_currencies(_method, true, true, _opts, _intent) do
+    raise ArgumentError, "MPP.Plug: provide either :currency or :currencies, not both"
+  end
+
+  defp expand_currencies(method, true, false, opts, "charge") when method in [Tempo, MPP.Methods.EVM] do
+    expand_currency_list(opts, Keyword.fetch!(opts, :currencies))
+  end
+
+  defp expand_currencies(_method, true, false, _opts, _intent) do
+    raise ArgumentError, "MPP.Plug: :currencies is supported only for Tempo and EVM charges"
+  end
+
+  defp expand_currencies(Tempo, false, false, opts, "charge") do
+    chain_id = Map.get(Keyword.get(opts, :method_config, %{}), "chain_id", 42_431)
+    expand_currency_list(opts, Tempo.default_currencies(chain_id))
+  end
+
+  defp expand_currencies(_method, false, _singular?, opts, _intent), do: [opts]
 
   defp expand_currency_list(opts, currencies) when is_list(currencies) and currencies != [] do
     if !Enum.all?(currencies, &(is_binary(&1) and &1 != "")) do
       raise ArgumentError, "MPP.Plug: :currencies must contain non-empty currency strings"
     end
 
-    Enum.map(currencies, &Keyword.put(Keyword.delete(opts, :currencies), :currency, &1))
+    currencies
+    |> Enum.uniq_by(&currency_identity/1)
+    |> Enum.map(&Keyword.put(Keyword.delete(opts, :currencies), :currency, &1))
   end
 
   defp expand_currency_list(_opts, _currencies) do
     raise ArgumentError, "MPP.Plug: :currencies must be a non-empty list"
   end
+
+  # mppx drops repeated addresses case-insensitively and keeps the first spelling.
+  defp currency_identity("0x" <> hex = currency) do
+    if byte_size(hex) == 40 and MPP.Hex.hex_string?(hex), do: String.downcase(currency), else: currency
+  end
+
+  defp currency_identity(currency), do: currency
 
   @doc """
   Runs the MPP 402 payment handshake for the current request.
