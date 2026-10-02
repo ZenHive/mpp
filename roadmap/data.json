@@ -5917,7 +5917,7 @@
       "id": "139",
       "phase": 13,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity)",
       "scores": {
         "d": 4,
@@ -5955,6 +5955,7 @@
       ],
       "body": "mppx 0.11.0 (#902, commit ba6f7a2, 2026-09-22) re-added machine-token charge funding against a new MACH deployment: token `0x20c0…f37de3740ADec032` on both chains, swapper `0xF72E…6A3F` (mainnet) and `0xd05f…C466` (Moderato). Before that, mppx moved addresses in #800 and removed machine-token payments in #839. mpp-rs has not followed: its `machine_token.rs:127-135` still carries the machineUSD token/swapper pair that our `lib/mpp/methods/tempo/machine_token.ex:33-36` pins (shipped in Task 84). The two reference SDKs therefore disagree on which contracts a machine-token charge goes through.\n\nOn 2026-09-24 `eth_getCode` returned bytecode for both swappers on Moderato and on mainnet, and the TIP-20 marker `0xef` for both tokens, so both deployments are live. A merchant running our server with `machine_token_enabled` rejects a payment from an mppx 0.11 client, because the MACH swapper is not a trusted settlement sender for us. The payment fails closed; nothing can be exploited. The client never gets the resource.\n\nThe decision to make at pickup: accept both deployments (the recommended default: mpp-rs clients keep working and mppx clients start working), or only MACH if live evidence shows the machineUSD swapper is being retired. Say in the delivery which one you chose and on what evidence. Swapper bytecode differs in size between the two deployments (≈16 KB vs ≈5 KB), so read the verified MACH swapper source or a live `swapTo` receipt before assuming the `swapTo(address,uint256,address,address,bytes32)` selector and event shape carry over. Found by the 2026-09-24 sdk-delta-watch sweep.\n",
       "created_at": "2026-09-24",
+      "started_at": "2026-10-02",
       "scored_at": "2026-09-24",
       "cross_repo": []
     },

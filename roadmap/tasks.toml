@@ -3839,7 +3839,7 @@ shipped_in = "991cff27e43fa514c3d0a78d4ef41cd7d104bdb7"
 id = "139"
 phase = 13
 bundle = "tempo"
-status = "pending"
+status = "in_progress"
 title = "Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity)"
 scores = { d = 4, b = 6, u = 6 }
 acceptance_criteria = ["`MPP.Methods.Tempo.MachineToken` holds both deployments per chain: the current machineUSD token/swapper (matches refs/mpp-rs `src/protocol/methods/tempo/machine_token.rs:127-135`) and MACH token `0x20c000000000000000000000f37de3740ADec032` with swapper `0xF72E5107c32C655ffA7539a3C8e97B7C3cE16A3F` (mainnet) / `0xd05f8EdFBB54Da0d765C9fE9b2B3f7d2E3a8C466` (Moderato), per refs/mppx `src/tempo/internal/defaults.ts:24-35`. Which deployments the server accepts is decided from live chain behavior at pickup, not from either SDK alone; the delivery states which it found.", """With `machine_token_enabled`, the server accepts a charge settled through either deployment's canonical `[approve, swapTo]` route (hash receipts and `type="transaction"` calls): the swapper is a trusted settlement `from` only when the receipt's transaction sender equals the expected payer (refs/mppx `src/tempo/server/Charge.ts` `isValidTransferSender`), and the challenge-bound attribution memo check is unchanged.""", "Configuring a machine-token address (either deployment) as the charge `currency` raises at boot with a message pointing at `machine_token_enabled` (refs/mppx server Charge.ts `isMachineToken` guard).", "`MPP.Client.Providers.Tempo` picks the route a current mppx client would build for the same challenge, and still pays through the machineUSD route when a server only accepts that one.", "One live Moderato success through the MACH route and one relevant live rejection are pinned as `:integration` tests; missing credentials flunk with the exact `export` lines. Non-machine-token TIP-20 verification is unchanged."]
@@ -3855,6 +3855,7 @@ On 2026-09-24 `eth_getCode` returned bytecode for both swappers on Moderato and 
 The decision to make at pickup: accept both deployments (the recommended default: mpp-rs clients keep working and mppx clients start working), or only MACH if live evidence shows the machineUSD swapper is being retired. Say in the delivery which one you chose and on what evidence. Swapper bytecode differs in size between the two deployments (≈16 KB vs ≈5 KB), so read the verified MACH swapper source or a live `swapTo` receipt before assuming the `swapTo(address,uint256,address,address,bytes32)` selector and event shape carry over. Found by the 2026-09-24 sdk-delta-watch sweep.
 """
 created_at = "2026-09-24"
+started_at = "2026-10-02"
 scored_at = "2026-09-24"
 
 [[task]]
