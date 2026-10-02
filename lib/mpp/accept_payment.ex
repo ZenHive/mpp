@@ -38,9 +38,9 @@ defmodule MPP.AcceptPayment do
   # RFC 9110 qvalue: 0 or 1, optional `.` and up to three digits (only zeros
   # after 1). ASCII `[0-9]` — Elixir `\d` is Unicode. Cited: mpp-rs #488
   # `parse_q_value` and mppx `parseHeaderQ` (`src/internal/AcceptPayment.ts`).
-  @qvalue ~r/^(0(\.[0-9]{0,3})?|1(\.0{0,3})?)$/
-  @intent_token ~r/^[a-z0-9-]+$/
-  @param_name ~r/^[A-Za-z0-9_-]+$/
+  @qvalue ~r/\A(0(\.[0-9]{0,3})?|1(\.0{0,3})?)\z/
+  @intent_token ~r/\A[a-z0-9-]+\z/
+  @param_name ~r/\A[A-Za-z0-9_-]+\z/
 
   api(
     :parse,
@@ -305,7 +305,7 @@ defmodule MPP.AcceptPayment do
         name = String.trim(name)
         value = String.trim(value)
 
-        if name =~ @param_name and value != "" and value =~ ~r/^\S+$/ do
+        if name =~ @param_name and value != "" and value =~ ~r/\A\S+\z/ do
           parse_accept_payment_named_q(name, value, acc)
         else
           {:halt, {:error, :malformed}}

@@ -49,7 +49,7 @@ defmodule MPP.Methods.SharedTest do
     end
 
     test "rejects signs, exponents, and surrounding whitespace (mpp-rs #485)" do
-      for amount <- ["+100", "-5", "1e3", " 100", "100 ", "0x10", "1_000", ""] do
+      for amount <- ["+100", "-5", "1e3", " 100", "100 ", "100\n", "0x10", "1_000", ""] do
         assert {:error, %Errors{}} = Shared.parse_charge_amount(amount), "accepted #{inspect(amount)}"
       end
     end

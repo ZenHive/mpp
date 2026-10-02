@@ -62,7 +62,7 @@ defmodule MPP.Intents.ChargeTest do
     end
 
     test "rejects signs, exponents, and surrounding whitespace (mpp-rs #485)" do
-      for amount <- ["+100", "-5", "1e3", " 100"] do
+      for amount <- ["+100", "-5", "1e3", " 100", "100\n"] do
         assert {:error, :invalid_amount} = Charge.new(amount: amount, currency: "usd"),
                "accepted #{inspect(amount)}"
       end

@@ -581,7 +581,7 @@ defmodule MPP.Transports.WebSocketTest do
       assert sess.meter.tick_cost == 50
     end
 
-    test "init requires a positive tick_cost when the session amount is not a unit count" do
+    test "init requires a positive tick_cost when the session amount is not a positive unit count" do
       store = session_store()
 
       assert_raise ArgumentError, ~r/positive :tick_cost/, fn ->
@@ -591,7 +591,7 @@ defmodule MPP.Transports.WebSocketTest do
           realm: @realm,
           intent: "session",
           method: MockSessionMethod,
-          amount: "0.5",
+          amount: "0",
           currency: @token,
           recipient: @recipient,
           suggested_deposit: "1000",

@@ -12,8 +12,9 @@ defmodule MPP.Intents.Shared do
   def validate_amount(amount) when is_binary(amount) do
     # Integer parsers are more lenient than the protocol (`Integer.parse` reads
     # "+100" and " 100"). Check digits first, matching mpp-rs #485
-    # `base_unit_digits`. Leading zeros stay accepted (mppx `/^\d+/` accepts "007").
-    if amount =~ ~r/^[0-9]+$/, do: {:ok, amount}, else: {:error, :invalid_amount}
+    # `base_unit_digits`. `\A..\z`, not `^..$`: `$` also matches before a
+    # trailing newline. Leading zeros stay accepted (mppx `/^\d+/` accepts "007").
+    if amount =~ ~r/\A[0-9]+\z/, do: {:ok, amount}, else: {:error, :invalid_amount}
   end
 
   def validate_amount(_), do: {:error, :invalid_amount}
