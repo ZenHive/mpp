@@ -83,11 +83,13 @@ defmodule MPP.Methods.Tempo do
       node and endpoint sponsoring the same wallet must use the same physical shared
       atomic backend for a cluster-wide bound.
     * `"machine_token_enabled"` — (optional) advertise and verify first-party
-      machine-token (MPP Credits / machineUSD) charge payments. When `true`, 402
-      method details include `"machineTokenEnabled" => true`, hash receipts may
-      settle from the canonical swapper, and `type="transaction"` credentials may
-      match the exact `[approve, swapTo]` route. Supported only on Tempo mainnet
-      (`4217`) and Moderato (`42431`). Defaults to `false`.
+      machine-token charge payments through both live deployments (MACH and
+      machineUSD). When `true`, 402 method details include
+      `"machineTokenEnabled" => true`, hash receipts may settle from either
+      canonical swapper, and `type="transaction"` credentials may match that
+      deployment's exact `[approve, swapTo]` route. A machine-token address is
+      not a charge currency. Supported only on Tempo mainnet (`4217`) and
+      Moderato (`42431`). Defaults to `false`.
     * `"require_presenter_binding"` — (optional) require `type="hash"` and
       `type="transaction"` credential presenters to prove control of the transfer's
       sender wallet via a `"presenterSignature"` payload field (see *Presenter
@@ -134,7 +136,8 @@ defmodule MPP.Methods.Tempo do
     * `type="hash"` — the credential's top-level `source` (a `did:pkh:eip155:` DID)
       is required and names the account; the signature must recover to it, and the
       matched transfer's `from` must equal it (or, when `"machine_token_enabled"`
-      is set, equal the canonical swapper while the transaction sender equals it).
+      is set, equal a canonical MACH or machineUSD swapper while the transaction
+      sender equals it).
     * `type="transaction"` — the account is the sender recovered from the signed
       transaction itself; a `source`, when present, must match it.
 
@@ -1665,7 +1668,7 @@ defmodule MPP.Methods.Tempo do
   # configured static memo is not consulted (mppx #904 / mpp-rs #421).
   # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
   # `sender_policy` is the mpp-rs ReceiptSenderPolicy: when machine tokens are
-  # enabled, a transfer `from` the canonical swapper is accepted if the
+  # enabled, a transfer `from` either canonical swapper is accepted if the
   # transaction sender equals the expected payer.
   defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, source, sender_policy) do
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
@@ -1691,7 +1694,7 @@ defmodule MPP.Methods.Tempo do
 
   # Non-machine-token path: no source means any `from`; a source must match the
   # transfer sender. Machine-token path (mpp-rs `ReceiptSenderPolicy` /
-  # mppx `isValidTransferSender`): accept the expected payer or the canonical
+  # mppx `isValidTransferSender`): accept the expected payer or either canonical
   # swapper when the transaction sender is that payer.
   defp transfer_sender_allowed?(transfer, source, nil) do
     is_nil(source) or Onchain.Address.equal?(transfer.from, source)

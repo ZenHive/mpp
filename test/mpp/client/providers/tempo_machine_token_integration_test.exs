@@ -72,7 +72,8 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
                nil
              )
 
-    assert route.settlement_sender == MachineToken.settlement_sender(@chain_id)
+    assert [mach, legacy] = MachineToken.deployments(@chain_id)
+    assert route.settlement_sender == mach.swapper
 
     assert {:ok, memo} = Base.decode16(String.trim_leading(route.memo, "0x"), case: :mixed)
     tag = @attribution_tag
@@ -89,6 +90,31 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
              )
 
     assert reason =~ "No matching transfer"
+
+    assert {:ok, legacy_credential} =
+             TempoProvider.pay(challenge, %{
+               private_key: sender.private_key,
+               rpc_url: rpc_url,
+               expected_chain_id: @chain_id,
+               client_id: @client_id,
+               nonce: 0,
+               gas_limit: @gas_limit,
+               machine_token_deployment: :machine_usd
+             })
+
+    assert {:ok, legacy_tx} = Transaction.deserialize(legacy_credential.payload["signature"])
+
+    assert {:ok, legacy_route} =
+             MachineToken.match_route(
+               legacy_tx.calls,
+               @chain_id,
+               @path_usd,
+               Integer.to_string(@transfer_amount),
+               recipient,
+               nil
+             )
+
+    assert legacy_route.settlement_sender == legacy.swapper
   end
 
   test "rejects a machineTokenEnabled challenge whose chain disagrees with live Moderato", %{

@@ -851,9 +851,10 @@ defmodule MPP.Methods.TempoTest do
       }
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
+      memo = attribution_memo(@realm, @challenge_id)
 
       receipt =
-        success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: attribution_memo(@realm, @challenge_id))])
+        success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: memo)])
 
       stub_receipt_and_transaction_from(receipt, @payer)
       assert {:ok, %Receipt{funding_currency: funding}} = Tempo.verify(payload, charge)
