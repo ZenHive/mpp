@@ -208,7 +208,7 @@
 | Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0?] 🎯 |
 | Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93?] ⚠️ |
 | Task 137 | ✅ | 🎁 **tempo** · Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀 |
-| Task 139 | 🔄 | 🎁 **tempo** · Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity) [D:4/B:6/U:6 → Eff:1.5] 🚀 |
+| Task 139 | ✅ | 🎁 **tempo** · Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity) [D:4/B:6/U:6 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---
