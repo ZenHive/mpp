@@ -6537,7 +6537,7 @@
       "id": "153",
       "phase": 17,
       "bundle": "transport-ws",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Offer every Tempo charge currency on the WebSocket handshake",
       "scores": {
         "d": 4,
@@ -6568,6 +6568,7 @@
       ],
       "body": "Since Task 149 a Tempo charge with no currency (or with :currencies) expands into one method entry per currency, but MPP.Transports.WebSocket builds its handshake challenge from the first entry only, so a socket offers OUSD alone and a client holding only pathUSD / USDC.e cannot pay. HTTP and JSON-RPC already offer every entry and select the credential's entry via MPP.Plug.find_method_entry/2. Make the WebSocket handshake present the same offer set in offer order; credential verification already routes through the JSON-RPC adapter.",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     }
