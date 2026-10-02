@@ -15,6 +15,7 @@ defmodule MPP.Receipt do
     * `timestamp` — RFC 3339 datetime string
     * `reference` — method-specific payment reference (PaymentIntent ID, tx hash, etc.)
     * `external_id` — optional, echoed from the credential payload
+    * `funding_currency` — optional token used to fund the payment (wire `fundingCurrency`)
     * `subscription_id` — optional server-issued subscription identifier (wire `subscriptionId`)
     * `extensions` — method-specific top-level fields not in the core set (e.g. `originTxHash`)
 
@@ -28,7 +29,7 @@ defmodule MPP.Receipt do
 
   alias MPP.Codec
 
-  @core_wire_keys ~w(status method timestamp reference externalId subscriptionId)
+  @core_wire_keys ~w(status method timestamp reference externalId subscriptionId fundingCurrency)
 
   @type t :: %__MODULE__{
           status: String.t(),
@@ -37,6 +38,7 @@ defmodule MPP.Receipt do
           reference: String.t(),
           external_id: String.t() | nil,
           subscription_id: String.t() | nil,
+          funding_currency: String.t() | nil,
           extensions: %{optional(String.t()) => term()}
         }
 
@@ -47,6 +49,7 @@ defmodule MPP.Receipt do
             reference: nil,
             external_id: nil,
             subscription_id: nil,
+            funding_currency: nil,
             extensions: %{}
 
   api(:new, "Create a new receipt with defaults for `status` and `timestamp`.",
@@ -54,7 +57,7 @@ defmodule MPP.Receipt do
       opts: [
         kind: :value,
         description:
-          "Keyword list with `:method` (required), `:reference` (required), `:external_id`, `:subscription_id`, `:extensions` (optional), `:timestamp` (optional, defaults to now)"
+          "Keyword list with `:method` (required), `:reference` (required), `:external_id`, `:subscription_id`, `:funding_currency`, `:extensions` (optional), `:timestamp` (optional, defaults to now)"
       ]
     ],
     returns: %{type: :struct, description: "Receipt struct with status `\"success\"` and RFC 3339 timestamp"}
@@ -115,12 +118,14 @@ defmodule MPP.Receipt do
     |> Map.merge(core)
     |> maybe_put("externalId", receipt.external_id)
     |> maybe_put("subscriptionId", receipt.subscription_id)
+    |> maybe_put("fundingCurrency", receipt.funding_currency)
   end
 
   # Deserializes a string-keyed map into a receipt struct.
   defp from_map(%{"method" => method, "reference" => reference, "timestamp" => timestamp} = map)
        when is_binary(timestamp) do
-    with {:ok, subscription_id} <- optional_string(Map.get(map, "subscriptionId")) do
+    with {:ok, subscription_id} <- optional_string(Map.get(map, "subscriptionId")),
+         {:ok, funding_currency} <- optional_string(Map.get(map, "fundingCurrency")) do
       {:ok,
        %__MODULE__{
          status: Map.get(map, "status", "success"),
@@ -129,6 +134,7 @@ defmodule MPP.Receipt do
          reference: reference,
          external_id: Map.get(map, "externalId"),
          subscription_id: subscription_id,
+         funding_currency: funding_currency,
          extensions: Map.drop(map, @core_wire_keys)
        }}
     end

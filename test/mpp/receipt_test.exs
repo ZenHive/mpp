@@ -3,6 +3,30 @@ defmodule MPP.ReceiptTest do
 
   alias MPP.Receipt
 
+  test "fundingCurrency round-trips, stays optional, and cannot be shadowed" do
+    receipt =
+      Receipt.new(
+        method: "tempo",
+        reference: "tx",
+        funding_currency: "token",
+        extensions: %{"fundingCurrency" => "wrong"}
+      )
+
+    wire = receipt |> Receipt.encode() |> Base.url_decode64!(padding: false) |> Jason.decode!()
+    assert wire["fundingCurrency"] == "token"
+    assert {:ok, %{funding_currency: "token", extensions: %{}}} = Receipt.decode(Receipt.encode(receipt))
+    plain = Receipt.new(method: "tempo", reference: "tx")
+
+    refute plain
+           |> Receipt.encode()
+           |> Base.url_decode64!(padding: false)
+           |> Jason.decode!()
+           |> Map.has_key?("fundingCurrency")
+
+    invalid = wire |> Map.put("fundingCurrency", 123) |> Jason.encode!() |> Base.url_encode64(padding: false)
+    assert {:error, :invalid_field_type} = Receipt.decode(invalid)
+  end
+
   describe "new/1" do
     test "creates receipt with required fields and defaults" do
       receipt = Receipt.new(method: "stripe", reference: "pi_abc123")

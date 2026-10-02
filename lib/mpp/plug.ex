@@ -18,7 +18,7 @@ defmodule MPP.Plug do
 
   Accept multiple payment methods per endpoint. Each method can have its own
   pricing and config. The 402 response includes one `WWW-Authenticate` header
-  per method; the agent picks whichever it can pay with.
+  per currency offer; the agent picks whichever it can pay with.
 
       plug MPP.Plug,
         secret_key: "a-random-secret-of-at-least-32-bytes",
@@ -68,7 +68,11 @@ defmodule MPP.Plug do
 
     * `:method` — (required) module implementing `MPP.Method`
     * `:amount` — (required) price in base units (string)
-    * `:currency` — (required) currency code (string, preserved verbatim on the wire)
+    * `:currency` — currency code (string, preserved verbatim on the wire)
+    * `:currencies` — ordered non-empty list of currency strings for Tempo/EVM
+      charges, mutually exclusive with `:currency`. Amounts are base units for
+      each currency. Tempo charges without either option offer OUSD then USDC.e
+      on mainnet, or OUSD then pathUSD on Moderato (the default chain).
     * `:recipient` — (optional) payment recipient identifier
     * `:description` — (optional) human-readable description
     * `:external_id` — (optional) merchant reference ID included in the challenge request
@@ -85,7 +89,7 @@ defmodule MPP.Plug do
   ## Multi-Method Options
 
     * `:methods` — (required) list of keyword lists, each with per-method opts:
-      `:method`, `:amount`, `:currency`, and optionally `:recipient`,
+      `:method`, `:amount`, `:currency` (or `:currencies` for Tempo/EVM charges), and optionally `:recipient`,
       `:description`, `:external_id`, `:method_config`
   """
 
@@ -100,6 +104,7 @@ defmodule MPP.Plug do
   alias MPP.Intents.Shared, as: Intent
   alias MPP.Intents.Subscription
   alias MPP.JCS
+  alias MPP.Methods.Tempo
   alias MPP.Replay
   alias MPP.Session.Store, as: SessionStore
   alias MPP.Telemetry
@@ -173,18 +178,18 @@ defmodule MPP.Plug do
 
   Normalizes single- or multi-method opts into a `%Config{}` with one
   `MethodEntry` per accepted payment method. Raises on missing required
-  options or duplicate method names.
+  options or ambiguous method request bindings.
   """
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
     intent = validate_intent!(Keyword.get(opts, :intent, "charge"))
     session_store = resolve_session_store(intent, Keyword.get(opts, :session_store))
-    method_lists = normalize_methods(opts)
+    method_lists = Enum.flat_map(normalize_methods(opts), &expand_currencies(&1, intent))
     expires_in = validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds))
     entries = Enum.map(method_lists, &build_method_entry(&1, intent, session_store, expires_in))
     validate_method_name_format!(entries)
-    validate_unique_method_names!(entries)
+    validate_unique_requests!(entries, intent)
 
     %Config{
       secret_key: opts |> require_opt!(:secret_key) |> validate_secret_key!(),
@@ -283,6 +288,7 @@ defmodule MPP.Plug do
             :method,
             :amount,
             :currency,
+            :currencies,
             :recipient,
             :description,
             :external_id,
@@ -401,14 +407,52 @@ defmodule MPP.Plug do
     end
   end
 
-  # Validates that all method entries have unique method names.
-  defp validate_unique_method_names!(entries) do
-    names = Enum.map(entries, & &1.method.method_name())
-    dupes = names -- Enum.uniq(names)
+  # Identical public bindings cannot select between different server configs.
+  defp validate_unique_requests!(entries, intent) do
+    bindings =
+      Enum.map(entries, fn entry ->
+        if intent == "charge", do: {entry.method.method_name(), entry.request}, else: entry.method.method_name()
+      end)
 
-    if dupes != [] do
-      raise ArgumentError, "MPP.Plug: duplicate method names: #{inspect(Enum.uniq(dupes))}"
+    if length(bindings) != length(Enum.uniq(bindings)) do
+      raise ArgumentError, "MPP.Plug: duplicate method request bindings"
     end
+  end
+
+  defp expand_currencies(opts, intent) do
+    method = require_opt!(opts, :method)
+    plural? = Keyword.has_key?(opts, :currencies)
+    singular? = Keyword.has_key?(opts, :currency)
+
+    cond do
+      plural? and singular? ->
+        raise ArgumentError, "MPP.Plug: provide either :currency or :currencies, not both"
+
+      plural? and (intent != "charge" or method not in [Tempo, MPP.Methods.EVM]) ->
+        raise ArgumentError, "MPP.Plug: :currencies is supported only for Tempo and EVM charges"
+
+      plural? ->
+        expand_currency_list(opts, Keyword.fetch!(opts, :currencies))
+
+      not singular? and intent == "charge" and method == Tempo ->
+        chain_id = Map.get(Keyword.get(opts, :method_config, %{}), "chain_id", 42_431)
+        expand_currency_list(opts, Tempo.default_currencies(chain_id))
+
+      true ->
+        [opts]
+    end
+  end
+
+  defp expand_currency_list(opts, currencies) when is_list(currencies) and currencies != [] do
+    if !Enum.all?(currencies, &(is_binary(&1) and &1 != "")) do
+      raise ArgumentError, "MPP.Plug: :currencies must contain non-empty currency strings"
+    end
+
+    Enum.map(currencies, &Keyword.put(Keyword.delete(opts, :currencies), :currency, &1))
+  end
+
+  defp expand_currency_list(_opts, _currencies) do
+    raise ArgumentError, "MPP.Plug: :currencies must be a non-empty list"
   end
 
   @doc """
@@ -458,16 +502,15 @@ defmodule MPP.Plug do
         respond_error(conn, config, Errors.new(:malformed_credential, "#{reason}"))
 
       {:ok, credential} ->
-        case find_method_entry(config, credential.challenge.method) do
-          nil ->
+        case find_method_entry(config, credential.challenge) do
+          {:error, error} ->
             charge = Telemetry.charge_from_challenge(credential.challenge)
-            error = Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
             start_time = Telemetry.verify_start(credential, charge, %{realm: config.realm})
             Telemetry.verify_fail(credential, charge, start_time, error, %{realm: config.realm})
 
             respond_error(conn, config, error)
 
-          entry ->
+          {:ok, entry} ->
             verify_credential(conn, config, credential, entry)
         end
     end
@@ -517,11 +560,23 @@ defmodule MPP.Plug do
     end)
   end
 
-  # Finds the MethodEntry matching the credential's method name.
-  defp find_method_entry(config, method_name) do
-    Enum.find(config.method_entries, fn entry ->
-      entry.method.method_name() == method_name
-    end)
+  @doc false
+  @spec find_method_entry(Config.t(), Challenge.t()) :: {:ok, MethodEntry.t()} | {:error, Errors.t()}
+  def find_method_entry(config, challenge) do
+    case Enum.filter(config.method_entries, &(&1.method.method_name() == challenge.method)) do
+      [] ->
+        {:error, Errors.new(:method_unsupported, "Unknown payment method: #{challenge.method}")}
+
+      # Preserve single-entry/session validation, including its pinned-field errors.
+      [entry] ->
+        {:ok, entry}
+
+      entries ->
+        case Enum.filter(entries, &(&1.request == challenge.request)) do
+          [entry] -> {:ok, entry}
+          _ -> {:error, Errors.new(:invalid_challenge, "Challenge request does not select a unique payment offer")}
+        end
+    end
   end
 
   # Delegates verification to the transport-neutral MPP.Verifier, then handles

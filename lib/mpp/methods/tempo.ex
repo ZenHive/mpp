@@ -240,6 +240,19 @@ defmodule MPP.Methods.Tempo do
     :ok
   end
 
+  @doc "Ordered charge currencies for Tempo mainnet or Moderato."
+  @spec default_currencies(non_neg_integer()) :: [String.t()]
+  def default_currencies(chain_id) do
+    # docs.tempo.xyz/guide/ousd; mppx src/tempo/internal/currencies.ts (#933).
+    ousd = "0x20c0000000000000000000006a37da5c996874be"
+
+    case chain_id do
+      4217 -> [ousd, "0x20C000000000000000000000b9537d11c60E8b50"]
+      42_431 -> [ousd, "0x20c0000000000000000000000000000000000000"]
+      _ -> raise ArgumentError, "Tempo: explicit currency required for chain ID #{chain_id}"
+    end
+  end
+
   api(:verify, "Verify a Tempo credential by checking on-chain settlement.",
     params: [
       payload: [
@@ -320,11 +333,51 @@ defmodule MPP.Methods.Tempo do
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
          :ok <- Shared.check_receipt_status(receipt),
          {:ok, sender_policy} <- hash_sender_policy(hash, rpc_url, config),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, memo, source, sender_policy),
+         {:ok, transfer} <- find_matching_transfer(receipt, charge, memo, source, sender_policy),
          :ok <- commit_hash_used(store, hash) do
-      {:ok, Receipt.new(method: "tempo", reference: hash, external_id: charge.external_id)}
+      {:ok,
+       Receipt.new(
+         method: "tempo",
+         reference: hash,
+         external_id: charge.external_id,
+         funding_currency: hash_funding_currency(hash, transfer, charge, config, sender_policy)
+       )}
     end
   end
+
+  defp hash_funding_currency(hash, transfer, charge, config, %{settlement_senders: senders}) do
+    if settlement_sender?(transfer.from, senders) do
+      MachineToken.token(config["chain_id"] || @moderato_chain_id)
+    else
+      hash_direct_funding_currency(hash, charge, config)
+    end
+  end
+
+  defp hash_funding_currency(hash, _transfer, charge, config, nil) do
+    hash_direct_funding_currency(hash, charge, config)
+  end
+
+  # A settlement log alone cannot distinguish direct funding from a DEX swap.
+  # Funding metadata is optional when the provider cannot supply the route.
+  defp hash_direct_funding_currency(hash, charge, config) do
+    case rpc_json_request("eth_getTransactionByHash", [hash], config["rpc_url"], rpc_options(config)) do
+      {:ok, %{"calls" => [%{"to" => token}]}} when is_binary(token) ->
+        if Onchain.Address.equal?(token, charge.currency), do: charge.currency
+
+      {:ok, %{"to" => token}} when is_binary(token) ->
+        if Onchain.Address.equal?(token, charge.currency), do: charge.currency
+
+      _ ->
+        nil
+    end
+  end
+
+  defp transaction_funding_currency(_tx, %{machine_token?: true}, _charge, config) do
+    MachineToken.token(config["chain_id"] || @moderato_chain_id)
+  end
+
+  defp transaction_funding_currency(%Transaction{calls: [_call]}, _payment, charge, _config), do: charge.currency
+  defp transaction_funding_currency(_tx, _payment, _charge, _config), do: nil
 
   defp verify_transaction_credential(payload, charge, config) do
     memo = config["memo"]
@@ -1111,7 +1164,8 @@ defmodule MPP.Methods.Tempo do
           store: store,
           budget: budget,
           hash: reserved_hash,
-          token: token
+          token: token,
+          funding_currency: transaction_funding_currency(tx, payment, charge, config)
         })
 
       {:error, _reason} = error ->
@@ -1153,12 +1207,20 @@ defmodule MPP.Methods.Tempo do
          store: store,
          budget: budget,
          hash: reserved_hash,
-         token: token
+         token: token,
+         funding_currency: funding_currency
        }) do
     with :ok <- begin_budget_broadcast(budget),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, memo, wait?, budget) do
       safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
-      {:ok, Receipt.new(method: "tempo", reference: tx_hash, external_id: charge.external_id)}
+
+      {:ok,
+       Receipt.new(
+         method: "tempo",
+         reference: tx_hash,
+         external_id: charge.external_id,
+         funding_currency: funding_currency
+       )}
     else
       {:error, :budget_transition_failed} ->
         safe_budget_release(budget)

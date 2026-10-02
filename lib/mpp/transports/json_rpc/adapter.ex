@@ -67,14 +67,13 @@ defmodule MPP.Transports.JsonRpc.Adapter do
   end
 
   defp verify_credential(request, config, credential) do
-    case find_method_entry(config, credential.challenge.method) do
-      nil ->
-        error = Errors.new(:method_unsupported, "Unknown payment method: #{credential.challenge.method}")
+    case MPP.Plug.find_method_entry(config, credential.challenge) do
+      {:error, error} ->
         challenges = generate_challenges(config)
 
         {:error, error_response(request, Mcp.error_code(error), error.title, challenges, error)}
 
-      entry ->
+      {:ok, entry} ->
         verify_with_entry(request, config, credential, entry)
     end
   end
@@ -108,12 +107,6 @@ defmodule MPP.Transports.JsonRpc.Adapter do
             {:error, error_response(request, Mcp.error_code(error), error.title, challenges, error)}
         end
     end
-  end
-
-  defp find_method_entry(%Config{} = config, method_name) do
-    Enum.find(config.method_entries, fn entry ->
-      entry.method.method_name() == method_name
-    end)
   end
 
   defp generate_challenges(%Config{} = config) do

@@ -46,6 +46,8 @@ defmodule MPP.Methods.TempoMachineTokenIntegrationTest do
     assert receipt.method == "tempo"
     assert receipt.status == "success"
     assert receipt.reference == @tx_hash
+    assert receipt.funding_currency == MPP.Methods.Tempo.MachineToken.token(@chain_id)
+    assert {:ok, ^receipt} = receipt |> Receipt.encode() |> Receipt.decode()
   end
 
   test "rejects the same settlement when the credential source is not the payer", %{rpc_url: rpc_url} do

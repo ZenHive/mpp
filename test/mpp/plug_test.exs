@@ -9,6 +9,7 @@ defmodule MPP.PlugTest do
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
+  alias MPP.Methods.Tempo
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Session.ETSStore
@@ -382,6 +383,113 @@ defmodule MPP.PlugTest do
     end
   end
 
+  describe "ordered charge currencies" do
+    @ousd "0x20c0000000000000000000006a37da5c996874be"
+    @path_usd "0x20c0000000000000000000000000000000000000"
+
+    test "Tempo and EVM expand currencies in both option forms, in caller order" do
+      for method <- [Tempo, MPP.Methods.EVM], multi? <- [false, true] do
+        entry = [
+          method: method,
+          amount: "100",
+          currencies: [@path_usd, @ousd],
+          method_config: %{"rpc_url" => "https://rpc.example", "chain_id" => 42_431}
+        ]
+
+        options = if multi?, do: [methods: [entry]], else: entry
+        config = PaymentPlug.init([secret_key: @secret_key, realm: "api.test.com"] ++ options)
+        conn = PaymentPlug.call(Plug.Test.conn(:get, "/paid"), config)
+        assert conn.status == 402
+
+        challenges =
+          Enum.map(Plug.Conn.get_resp_header(conn, "www-authenticate"), fn header ->
+            {:ok, challenge} = Headers.parse_challenge(header)
+            challenge.request |> Base.url_decode64!(padding: false) |> Jason.decode!()
+          end)
+
+        assert Enum.map(challenges, & &1["currency"]) == [@path_usd, @ousd]
+        assert Enum.map(challenges, & &1["amount"]) == ["100", "100"]
+      end
+    end
+
+    test "Tempo defaults are chain-aware and explicit currency restricts offers" do
+      for {chain, currencies} <- [
+            {4217, [@ousd, "0x20C000000000000000000000b9537d11c60E8b50"]},
+            {42_431, [@ousd, @path_usd]}
+          ] do
+        opts = [
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: Tempo,
+          amount: "100",
+          method_config: %{"rpc_url" => "https://rpc.example", "chain_id" => chain}
+        ]
+
+        assert Enum.map(PaymentPlug.init(opts).method_entries, & &1.charge.currency) == currencies
+        assert [%{charge: %{currency: @path_usd}}] = PaymentPlug.init(opts ++ [currency: @path_usd]).method_entries
+      end
+    end
+
+    test "invalid, conflicting and non-charge currencies fail at init" do
+      base = [
+        secret_key: @secret_key,
+        realm: "api.test.com",
+        method: Tempo,
+        amount: "100",
+        method_config: %{"rpc_url" => "https://rpc.example"}
+      ]
+
+      for opts <- [
+            [currencies: []],
+            [currencies: "usd"],
+            [currencies: [nil]],
+            [currencies: [@ousd], currency: @path_usd],
+            [currencies: [@ousd], intent: "session"],
+            [currencies: [@ousd], intent: "subscription"]
+          ] do
+        assert_raise ArgumentError, fn -> PaymentPlug.init(base ++ opts) end
+      end
+    end
+
+    test "same-named entries select by the whole request in HTTP and JSON-RPC" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          store: false,
+          methods: [
+            [method: MockMethod, amount: "1000", currency: "usd"],
+            [method: MockMethod, amount: "500", currency: "eur"],
+            [method: MockMethod, amount: "750", currency: "eur"]
+          ]
+        )
+
+      for entry <- config.method_entries do
+        auth = build_authorization_header_for_entry(config, entry, %{"proof" => "valid"})
+
+        conn =
+          :get |> Plug.Test.conn("/paid") |> Plug.Conn.put_req_header("authorization", auth) |> PaymentPlug.call(config)
+
+        refute conn.halted
+        assert conn.assigns.mpp_receipt.reference == "ref_#{entry.charge.amount}"
+        {:ok, credential} = Headers.parse_credential(auth)
+        request = JsonRpc.attach_credential(%{"jsonrpc" => "2.0", "id" => 1, "method" => "paid"}, credential)
+        response = MPP.Transports.JsonRpc.Adapter.call(request, config, fn _ -> %{"paid" => true} end, :root)
+        assert response["result"] == %{"paid" => true}
+      end
+
+      entry = List.last(config.method_entries)
+      foreign = %{entry | request: Base.url_encode64(~s({"amount":"1","currency":"eur"}), padding: false)}
+      auth = build_authorization_header_for_entry(config, foreign, %{"proof" => "valid"})
+
+      conn =
+        :get |> Plug.Test.conn("/paid") |> Plug.Conn.put_req_header("authorization", auth) |> PaymentPlug.call(config)
+
+      assert conn.status == 402
+      refute Map.has_key?(conn.assigns, :mpp_receipt)
+    end
+  end
+
   describe "init/1 multi-method" do
     test "returns Config with multiple MethodEntry structs" do
       config =
@@ -448,14 +556,14 @@ defmodule MPP.PlugTest do
       end
     end
 
-    test "raises on duplicate method names" do
-      assert_raise ArgumentError, ~r/duplicate method names/, fn ->
+    test "raises on duplicate method request bindings" do
+      assert_raise ArgumentError, ~r/duplicate method request bindings/, fn ->
         PaymentPlug.init(
           secret_key: @secret_key,
           realm: "api.test.com",
           methods: [
             [method: MockMethod, amount: "1000", currency: "usd"],
-            [method: MockMethod, amount: "500", currency: "usd"]
+            [method: MockMethod, amount: "1000", currency: "usd"]
           ]
         )
       end
@@ -1894,7 +2002,7 @@ defmodule MPP.PlugTest do
       # --- Multi-method cross-route replay ---
       realm: "api.test.com",
       intent: "subscription",
-      method: MPP.Methods.Tempo,
+      method: Tempo,
       amount: "1000000",
       currency: SubscriptionHelpers.token(),
       recipient: SubscriptionHelpers.recipient(),

@@ -630,6 +630,7 @@ defmodule MPP.McpTest do
       receipt = %{
         sample_receipt()
         | subscription_id: "sub_123",
+          funding_currency: "0xabc",
           extensions: %{"originTxHash" => "0xdef456"}
       }
 
@@ -637,6 +638,7 @@ defmodule MPP.McpTest do
       mcp_receipt = updated["_meta"]["org.paymentauth/receipt"]
 
       assert mcp_receipt["subscriptionId"] == "sub_123"
+      assert mcp_receipt["fundingCurrency"] == "0xabc"
       assert mcp_receipt["originTxHash"] == "0xdef456"
       assert mcp_receipt["challengeId"] == "ch_123"
     end

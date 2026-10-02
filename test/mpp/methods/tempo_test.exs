@@ -740,19 +740,20 @@ defmodule MPP.Methods.TempoTest do
   end
 
   describe "verify/2 — hash credential with machine tokens" do
-    test "does not fetch the transaction sender when the flag is off", %{charge: charge} do
-      test_pid = self()
+    test "derives direct funding from the on-chain route", %{charge: charge} do
+      stub_receipt_and_transaction_from(success_receipt(), @payer)
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert receipt.funding_currency == charge.currency
+    end
 
+    test "omits funding metadata when the transaction route is unavailable", %{charge: charge} do
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
-        request = Jason.decode!(body)
-        send(test_pid, {:rpc_call, request["method"]})
-        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        result = if Jason.decode!(body)["method"] == "eth_getTransactionReceipt", do: success_receipt()
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => 1})
       end)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
-      assert_received {:rpc_call, "eth_getTransactionReceipt"}
-      refute_received {:rpc_call, "eth_getTransactionByHash"}
+      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "accepts TransferWithMemo from the canonical swapper when the tx sender is the payer", %{charge: charge} do
@@ -766,7 +767,8 @@ defmodule MPP.Methods.TempoTest do
         @payer
       )
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert receipt.funding_currency == MachineToken.token(42_431)
     end
 
     test "accepts an ordinary payer Transfer when machine tokens are enabled", %{charge: charge} do
@@ -779,7 +781,8 @@ defmodule MPP.Methods.TempoTest do
 
       stub_receipt_and_transaction_from(success_receipt(logs: [transfer_log(from: @payer)]), @payer)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert receipt.funding_currency == charge.currency
     end
 
     test "rejects a swapper settlement when the tx sender is not the credential source", %{charge: charge} do
@@ -1410,7 +1413,8 @@ defmodule MPP.Methods.TempoTest do
         success_receipt(logs: [transfer_with_memo_log(from: machine_token_swapper(), memo: memo)])
       )
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert receipt.funding_currency == MachineToken.token(42_431)
     end
 
     test "falls through to TIP-20 transfer matching when the route does not match", %{charge: charge} do
@@ -1419,7 +1423,8 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
       stub_broadcast_and_receipt(success_receipt(logs: [transfer_log(from: test_sender_address())]))
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert receipt.funding_currency == charge.currency
     end
 
     test "rejects a mutated machine-token route that is not a TIP-20 transfer", %{charge: charge} do
@@ -2426,7 +2431,7 @@ defmodule MPP.Methods.TempoTest do
       result =
         case request["method"] do
           "eth_getTransactionReceipt" -> receipt
-          "eth_getTransactionByHash" -> %{"from" => from, "hash" => @tx_hash}
+          "eth_getTransactionByHash" -> %{"from" => from, "hash" => @tx_hash, "calls" => [%{"to" => @token_address}]}
           _other -> nil
         end
 

@@ -631,10 +631,20 @@ defmodule MPP.Mcp do
     }
 
     receipt.extensions
-    |> Map.drop(["status", "method", "timestamp", "reference", "externalId", "subscriptionId", "challengeId"])
+    |> Map.drop([
+      "status",
+      "method",
+      "timestamp",
+      "reference",
+      "externalId",
+      "subscriptionId",
+      "fundingCurrency",
+      "challengeId"
+    ])
     |> Map.merge(core)
     |> maybe_put("externalId", receipt.external_id)
     |> maybe_put("subscriptionId", receipt.subscription_id)
+    |> maybe_put("fundingCurrency", receipt.funding_currency)
   end
 
   # Decodes base64url-encoded request to a native JSON map for MCP wire format.
