@@ -11,11 +11,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (9 of 11 done · 0 in progress)
+**Focus phase:** 12 — Client SDK (9 of 11 done · 1 in progress)
 
 **Last shipped:** no recent shipments
 
-**Up next:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋
+**Up next:** Task 137 — Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀
 <!-- FOCUS:END -->
 
 ---
@@ -184,7 +184,7 @@
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17?] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 | Task 140 | ✅ | 🎁 **client-sdk** · Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) [D:2/B:4/U:4 → Eff:2.0] 🎯 |
-| Task 150 | ⬜ | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋 |
+| Task 150 | 🔄 | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
 ---
