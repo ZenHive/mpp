@@ -8,6 +8,30 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Changed
+
+- **Infrastructure failures return `internal-payment-error` (HTTP 500, no
+  challenge)** instead of `verification-failed` with a fresh 402, matching
+  mpp-rs. This covers RPC broadcast and receipt fetch, dedup-store and sponsor
+  budget errors, Stripe 5xx and transport errors, and unclassified EVM node
+  errors. Because the server cannot tell whether a broadcast went through, the
+  client is not invited to pay again. Reverts, used hashes or authorizations,
+  and token rejections stay 402.
+- **Pinned-field mismatches report `invalid-challenge`.** `credential_mismatch`
+  is kept as an alias for that problem type.
+- **Challenge validation is stricter**: `intent` must be a token, `opaque` must
+  decode as base64url, `header` must be `Authorization` or
+  `Payment-Authorization`, and `digest` must be a structured-field byte
+  sequence or token.
+- **Stripe `requires_action` returns `payment-action-required`.**
+- **Session receipts follow mpp-rs `SessionReceipt`**: they carry `intent` and
+  `challengeId`, and `txHash` when the action produced one. The close receipt's
+  `reference` is the channel id again; the settlement transaction hash moved to
+  `txHash`.
+- **Session open rejects a voucher below the request, or signed by the wrong
+  known signer, before `verify_open` runs**, so an invalid open is never
+  broadcast.
+
 ## [0.20.1] — 2026-10-02
 
 ### Fixed
