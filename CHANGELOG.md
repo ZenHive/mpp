@@ -8,6 +8,26 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Breaking
+
+- **The static Tempo `"memo"` option is removed.** Configuring it raises at
+  `MPP.Plug.init/1`; every Tempo charge requires the challenge-bound
+  attribution memo (mppx #904 / mpp-rs #421). `MPP.Client.Providers.Tempo`
+  ignores a server-advertised `memo` and always sends the attribution memo.
+
+### Added
+
+- **Multi-currency Tempo charges.** `MPP.Plug` accepts `:currencies` and
+  offers one challenge per currency; a Tempo charge without a currency offers
+  OUSD plus the chain's stablecoin (mainnet `4217`: USDC.e; Moderato `42431`:
+  pathUSD). The
+  credential is matched to its entry by method and request, so endpoint
+  validation now rejects duplicate requests instead of duplicate method names.
+- **Tempo receipts carry `fundingCurrency`**, the token the payer spent: the
+  charge currency for a direct single-call payment, the machine token for a
+  machine-token route. It is omitted when the route cannot be attributed
+  (mppx `Charge.ts` parity).
+
 ### Changed
 
 - **Infrastructure failures return `internal-payment-error` (HTTP 500, no
