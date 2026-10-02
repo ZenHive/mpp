@@ -4152,7 +4152,7 @@ shipped_in = "020abb4656606f47e9445f749618560bee570baa"
 id = "151"
 phase = 1
 bundle = "core-protocol"
-status = "in_progress"
+status = "done"
 title = "Map remaining method infrastructure failures to internal-payment-error"
 scores = { d = 5, b = 7, u = 6 }
 markers = ["parallel"]
@@ -4169,9 +4169,16 @@ Remaining sites found by the task 144 reviewer (run-1790940990496-832fb80e): "RP
 
 Apply the same mapping Task 144 introduced, reusing its helper rather than adding a parallel one. Client-fault outcomes (reverted or declined payment, wrong amount/recipient, malformed credential) stay verification-failed or payment-action-required. Authority: the spec error table and mpp-rs #496 / mppx Errors.ts, as in Task 144.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1790943943613-80df9167, 0bc92ef1291205bdde4e85771ad4d99e2e58896f)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1790943943613-80df9167"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "0bc92ef1291205bdde4e85771ad4d99e2e58896f"
 
 [bundles.testnet-funding]
 phase = 1
