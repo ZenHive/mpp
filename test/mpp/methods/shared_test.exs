@@ -35,6 +35,8 @@ defmodule MPP.Methods.SharedTest do
   describe "parse_charge_amount/1" do
     test "parses a plain integer string" do
       assert {:ok, 1000} = Shared.parse_charge_amount("1000")
+      assert {:ok, 0} = Shared.parse_charge_amount("0")
+      assert {:ok, 7} = Shared.parse_charge_amount("007")
     end
 
     test "rejects a non-integer string" do
@@ -44,6 +46,12 @@ defmodule MPP.Methods.SharedTest do
 
     test "rejects trailing garbage after the integer" do
       assert {:error, %Errors{}} = Shared.parse_charge_amount("100abc")
+    end
+
+    test "rejects signs, exponents, and surrounding whitespace (mpp-rs #485)" do
+      for amount <- ["+100", "-5", "1e3", " 100", "100 ", "0x10", "1_000", ""] do
+        assert {:error, %Errors{}} = Shared.parse_charge_amount(amount), "accepted #{inspect(amount)}"
+      end
     end
   end
 

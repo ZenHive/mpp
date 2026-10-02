@@ -10,6 +10,7 @@ defmodule MPP.Methods.Shared do
   """
 
   alias MPP.Errors
+  alias MPP.Intents.Shared, as: IntentShared
 
   @doc """
   Fetch a required key from a method's config map.
@@ -40,14 +41,17 @@ defmodule MPP.Methods.Shared do
   @doc """
   Parse a charge amount string into an integer.
 
+  The string must be one or more ASCII digits (`^[0-9]+$`). Signs, exponents,
+  and surrounding whitespace are rejected (mpp-rs #485).
+
   Returns `{:ok, integer}`, or a `:verification_failed` error when `amount` is
   not a valid integer string.
   """
   @spec parse_charge_amount(String.t()) :: {:ok, integer()} | {:error, Errors.t()}
-  def parse_charge_amount(amount) do
-    case Integer.parse(amount) do
-      {int, ""} -> {:ok, int}
-      _ -> {:error, Errors.new(:verification_failed, "Invalid charge amount: not a valid integer")}
+  def parse_charge_amount(amount) when is_binary(amount) do
+    case IntentShared.validate_amount(amount) do
+      {:ok, digits} -> {:ok, String.to_integer(digits)}
+      {:error, _reason} -> {:error, Errors.new(:verification_failed, "Invalid charge amount: not a valid integer")}
     end
   end
 

@@ -1013,7 +1013,7 @@ defmodule MPP.Session.ActionsTest do
     test "verify/2 tolerates extra and malformed method_details keys", %{store: store} do
       {:ok, session} =
         Session.new(
-          amount: "bad",
+          amount: "1",
           currency: @token,
           recipient: @recipient,
           suggested_deposit: "500",

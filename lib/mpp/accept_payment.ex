@@ -3,9 +3,11 @@ defmodule MPP.AcceptPayment do
   Parse, format, and rank the `Accept-Payment` client-preference header.
 
   The `Accept-Payment` header lets a client advertise which `method/intent`
-  pairs it can pay with, optionally weighted by a `q` value (`0.0..1.0`), so a
-  server can filter and reorder its offers to match. The syntax mirrors HTTP
-  content negotiation: `method/intent[;q=value]`, comma-separated.
+  pairs it can pay with, optionally weighted by an RFC 9110 `qvalue`
+  (`0`/`1` with up to three fraction digits), so a server can filter and
+  reorder its offers to match. The syntax mirrors HTTP content negotiation:
+  `method/intent[;q=value]`, comma-separated. The `q` parameter name is
+  case-insensitive (`Q=0` is an opt-out).
 
       # Client: build a preference header
       MPP.AcceptPayment.format([{"stripe", "charge", 1.0}, {"tempo", "charge", 0.5}])
@@ -33,6 +35,13 @@ defmodule MPP.AcceptPayment do
   # (mpp-rs #299). At-limit input still parses; only over-limit is ignored.
   @max_token_len 16 * 1024
 
+  # RFC 9110 qvalue: 0 or 1, optional `.` and up to three digits (only zeros
+  # after 1). ASCII `[0-9]` — Elixir `\d` is Unicode. Cited: mpp-rs #488
+  # `parse_q_value` and mppx `parseHeaderQ` (`src/internal/AcceptPayment.ts`).
+  @qvalue ~r/^(0(\.[0-9]{0,3})?|1(\.0{0,3})?)$/
+  @intent_token ~r/^[a-z0-9-]+$/
+  @param_name ~r/^[A-Za-z0-9_-]+$/
+
   api(
     :parse,
     "Parse an `Accept-Payment` header into client preference entries. Malformed input returns `[]` (spec MAY-ignore).",
@@ -49,8 +58,9 @@ defmodule MPP.AcceptPayment do
   @doc """
   Parse an `Accept-Payment` header value into preference entries.
 
-  Each entry is `{method, intent, q}` where `method` and `intent` are lowercase
-  tokens or `*`, and `q` is `0.0..1.0` (default `1.0`).
+  Each entry is `{method, intent, q}` where `method` is `*` or a challenge
+  method name (`[a-z][a-z0-9:_-]*`), `intent` is `*` or `[a-z0-9-]+`, and `q`
+  is an RFC 9110 qvalue (default `1.0`).
 
   Returns `[]` for empty, whitespace-only, or malformed input (spec MAY-ignore).
   Headers larger than 16 KiB are ignored the same way (DoS cap, applied before parsing).
@@ -248,9 +258,9 @@ defmodule MPP.AcceptPayment do
 
     case String.split(token, "/", parts: 2) do
       [method, intent] when method != "" and intent != "" ->
-        with :ok <- validate_accept_payment_token(method, part),
-             :ok <- validate_accept_payment_token(intent, part),
-             {:ok, q} <- parse_accept_payment_q(params_str, part) do
+        with :ok <- validate_accept_payment_token(method, :method),
+             :ok <- validate_accept_payment_token(intent, :intent),
+             {:ok, q} <- parse_accept_payment_q(params_str) do
           {:ok, %{method: method, intent: intent, q: q, index: index}}
         else
           _ -> {:error, :malformed}
@@ -261,60 +271,81 @@ defmodule MPP.AcceptPayment do
     end
   end
 
-  defp validate_accept_payment_token("*", _part), do: :ok
+  defp validate_accept_payment_token("*", _kind), do: :ok
 
-  defp validate_accept_payment_token(token, _part) do
-    if Regex.match?(~r/^[a-z0-9-]+$/, token) do
-      :ok
-    else
-      {:error, :malformed}
+  # Method tokens follow the challenge method grammar (`:`, `_` included);
+  # intent tokens stay `[a-z0-9-]+` (mpp-rs #488 `validate_token`).
+  defp validate_accept_payment_token(token, :method) do
+    if Challenge.valid_method_name?(token), do: :ok, else: {:error, :malformed}
+  end
+
+  defp validate_accept_payment_token(token, :intent) do
+    if token =~ @intent_token, do: :ok, else: {:error, :malformed}
+  end
+
+  defp parse_accept_payment_q(nil), do: {:ok, 1.0}
+  defp parse_accept_payment_q(""), do: {:ok, 1.0}
+
+  defp parse_accept_payment_q(params_str) do
+    params_str
+    |> String.split(";")
+    |> Enum.reduce_while({:ok, 1.0}, &parse_accept_payment_q_param/2)
+  end
+
+  defp parse_accept_payment_q_param(param, {:ok, acc}) do
+    case String.trim(param) do
+      "" -> {:cont, {:ok, acc}}
+      trimmed -> parse_accept_payment_q_pair(trimmed, acc)
     end
   end
 
-  defp parse_accept_payment_q(nil, _part), do: {:ok, 1.0}
-  defp parse_accept_payment_q("", _part), do: {:ok, 1.0}
+  defp parse_accept_payment_q_pair(param, acc) do
+    case String.split(param, "=", parts: 2) do
+      [name, value] ->
+        name = String.trim(name)
+        value = String.trim(value)
 
-  defp parse_accept_payment_q(params_str, part) do
-    params_str
-    |> String.split(";")
-    |> Enum.reduce_while({:ok, 1.0}, &parse_accept_payment_q_param(&1, &2, part))
+        if name =~ @param_name and value != "" and value =~ ~r/^\S+$/ do
+          parse_accept_payment_named_q(name, value, acc)
+        else
+          {:halt, {:error, :malformed}}
+        end
+
+      _ ->
+        {:halt, {:error, :malformed}}
+    end
   end
 
-  defp parse_accept_payment_q_param(param, {:ok, acc}, part) do
-    param
-    |> String.trim()
-    |> String.split("=", parts: 2)
-    |> parse_accept_payment_q_param_parts(acc, part)
-  end
-
-  defp parse_accept_payment_q_param_parts([name, value], acc, part) do
-    if String.trim(name) == "q" do
-      value |> String.trim() |> parse_accept_payment_q_value(part) |> continue_accept_payment_q()
+  defp parse_accept_payment_named_q(name, value, acc) do
+    if String.downcase(name, :ascii) == "q" do
+      continue_accept_payment_q(parse_accept_payment_q_value(value))
     else
       {:cont, {:ok, acc}}
     end
   end
 
-  defp parse_accept_payment_q_param_parts(_parts, acc, _part), do: {:cont, {:ok, acc}}
-
   defp continue_accept_payment_q({:ok, q}), do: {:cont, {:ok, q}}
   defp continue_accept_payment_q(error), do: {:halt, error}
 
-  defp parse_accept_payment_q_value(value, _part) do
-    with {q, ""} <- Float.parse(value),
-         true <- q >= 0.0 and q <= 1.0,
-         true <- accept_payment_q_decimals_ok?(value) do
-      {:ok, q}
+  defp parse_accept_payment_q_value(value) do
+    if value =~ @qvalue do
+      {:ok, qvalue_to_float(value)}
     else
-      _ -> {:error, :malformed}
+      {:error, :malformed}
     end
   end
 
-  defp accept_payment_q_decimals_ok?(value) do
-    case String.split(value, ".", parts: 2) do
-      [_int, decimals] -> String.length(decimals) <= 3
-      [_int] -> true
-    end
+  # Do not use Float.parse/1: it accepts `1e-1` / `+0.5` and leaves `.` as rest
+  # on `0.` / `1.`. The regex already pinned RFC 9110, so 1.* is 1.0 and 0*
+  # is thousandths (mpp-rs #488 `parse_q_value`).
+  defp qvalue_to_float("1" <> _rest), do: 1.0
+  defp qvalue_to_float("0"), do: 0.0
+
+  defp qvalue_to_float("0." <> frac) do
+    frac
+    |> String.pad_trailing(3, "0")
+    |> String.to_integer()
+    |> Kernel./(1000)
   end
 
   defp format_accept_payment_q(q) do

@@ -863,8 +863,7 @@ defmodule MPP.Methods.EVMTest do
     end
 
     test "error when the charge amount is not a valid integer", %{eth_charge: charge} do
-      {:ok, bad} = Charge.new(amount: "not-a-number", currency: "ETH", recipient: @recipient)
-      bad = %{bad | method_details: charge.method_details}
+      bad = %{charge | amount: "not-a-number"}
 
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{

@@ -61,6 +61,18 @@ defmodule MPP.Intents.ChargeTest do
       assert {:error, :invalid_amount} = Charge.new(amount: 1000, currency: "usd")
     end
 
+    test "rejects signs, exponents, and surrounding whitespace (mpp-rs #485)" do
+      for amount <- ["+100", "-5", "1e3", " 100"] do
+        assert {:error, :invalid_amount} = Charge.new(amount: amount, currency: "usd"),
+               "accepted #{inspect(amount)}"
+      end
+    end
+
+    test "accepts leading zeros as base-unit digits" do
+      assert {:ok, %Charge{amount: "007"}} = Charge.new(amount: "007", currency: "usd")
+      assert {:ok, %Charge{amount: "0"}} = Charge.new(amount: "0", currency: "usd")
+    end
+
     test "returns error when currency is missing" do
       assert {:error, :currency_required} = Charge.new(amount: "1000")
     end

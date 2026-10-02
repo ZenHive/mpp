@@ -50,6 +50,41 @@ defmodule MPP.AcceptPaymentTest do
       assert AcceptPayment.parse("tempo/charge;q=-0.1") == []
       assert AcceptPayment.parse("tempo/charge;q=0.1234") == []
     end
+
+    test "rejects non-HTTP qvalues (mpp-rs #488, mppx parseHeaderQ)" do
+      for q <- [".5", "1e-1", "+0.5", "0.5f", "01", "1.001", "inf", "NaN", ""] do
+        assert AcceptPayment.parse("tempo/charge;q=#{q}") == [], "q=#{q}"
+      end
+
+      assert AcceptPayment.parse("tempo/charge;q=0.") == [{"tempo", "charge", 0.0}]
+      assert AcceptPayment.parse("tempo/charge;q=1.") == [{"tempo", "charge", 1.0}]
+      assert AcceptPayment.parse("tempo/charge;q=1.000") == [{"tempo", "charge", 1.0}]
+      assert AcceptPayment.parse("tempo/charge;q=0.25") == [{"tempo", "charge", 0.25}]
+    end
+
+    test "honours Q=0 as an opt-out (q parameter name is case-insensitive)" do
+      offers = [accept_payment_offer("tempo", "charge"), accept_payment_offer("stripe", "charge")]
+      prefs = AcceptPayment.parse("tempo/charge;Q=0, stripe/charge")
+
+      assert prefs == [{"tempo", "charge", 0.0}, {"stripe", "charge", 1.0}]
+      assert [%{method: "stripe"}] = AcceptPayment.rank(offers, prefs)
+    end
+
+    test "rejects a valueless q parameter and empty parameter names" do
+      assert AcceptPayment.parse("tempo/charge;q") == []
+      assert AcceptPayment.parse("tempo/charge;q=") == []
+      assert AcceptPayment.parse("tempo/charge;=0.5") == []
+      assert [{"tempo", "charge", 0.5}] = AcceptPayment.parse("tempo/charge;foo=bar;q=0.5")
+    end
+
+    test "accepts method tokens that follow the challenge method grammar" do
+      assert [{"eip155:8453_usdc", "charge", 0.5}] =
+               AcceptPayment.parse("eip155:8453_usdc/charge;q=0.5")
+
+      assert Challenge.valid_method_name?("eip155:8453_usdc")
+      assert AcceptPayment.parse("tempo/char:ge") == []
+      assert AcceptPayment.parse("tempo/char_ge") == []
+    end
   end
 
   describe "Accept-Payment header size cap (DoS, mpp-rs #299)" do

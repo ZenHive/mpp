@@ -89,7 +89,7 @@ defmodule MPP.AmountTest do
 
   describe "with_base_units/2" do
     test "transforms charge amount to base units" do
-      {:ok, charge} = Charge.new(amount: "1.50", currency: "usd")
+      charge = %Charge{amount: "1.50", currency: "usd"}
       assert {:ok, %Charge{amount: "1500000"}} = Amount.with_base_units(charge, 6)
     end
 
@@ -102,7 +102,7 @@ defmodule MPP.AmountTest do
     end
 
     test "preserves other charge fields" do
-      {:ok, charge} = Charge.new(amount: "0.10", currency: "usd", recipient: "0xabc")
+      charge = %Charge{amount: "0.10", currency: "usd", recipient: "0xabc"}
       {:ok, result} = Amount.with_base_units(charge, 6)
       assert result.amount == "100000"
       assert result.currency == "usd"
@@ -110,7 +110,7 @@ defmodule MPP.AmountTest do
     end
 
     test "propagates parse errors" do
-      {:ok, charge} = Charge.new(amount: "abc", currency: "usd")
+      charge = %Charge{amount: "abc", currency: "usd"}
       assert {:error, {:invalid_format, _}} = Amount.with_base_units(charge, 6)
     end
   end

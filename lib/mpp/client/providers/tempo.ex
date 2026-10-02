@@ -46,6 +46,7 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.DID
   alias MPP.Intents.Charge
   alias MPP.Intents.Subscription
+  alias MPP.Methods.Shared, as: MethodShared
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
@@ -392,9 +393,9 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   defp parse_amount(amount) do
-    case Integer.parse(amount) do
-      {integer, ""} when integer >= 0 -> {:ok, integer}
-      _other -> {:error, :invalid_amount}
+    case MethodShared.parse_charge_amount(amount) do
+      {:ok, integer} -> {:ok, integer}
+      {:error, _reason} -> {:error, :invalid_amount}
     end
   end
 

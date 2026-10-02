@@ -349,7 +349,10 @@ defmodule MPP.Client.Providers.TempoTest do
                  provider_config() |> Map.delete(:req_options) |> Map.delete(:client_id)
                )
 
-      assert {:error, :invalid_amount} = Tempo.pay(challenge(amount: "-1"), provider_config())
+      for amount <- ["+100", "-5", "1e3", " 100"] do
+        assert {:error, :invalid_amount} = Tempo.pay(challenge_with_amount(amount), provider_config()),
+               "accepted #{inspect(amount)}"
+      end
 
       assert {:error, :invalid_memo} =
                Tempo.pay(challenge(method_details: %{"chainId" => @chain_id, "memo" => "0xab"}), provider_config())
@@ -639,6 +642,20 @@ defmodule MPP.Client.Providers.TempoTest do
       request: request,
       expires: expires
     }
+  end
+
+  defp challenge_with_amount(amount) do
+    request =
+      %{
+        "amount" => amount,
+        "currency" => @token,
+        "recipient" => @recipient,
+        "methodDetails" => %{"chainId" => @chain_id}
+      }
+      |> Jason.encode!()
+      |> Base.url_encode64(padding: false)
+
+    %{challenge() | request: request}
   end
 
   defp provider_config do

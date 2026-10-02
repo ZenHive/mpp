@@ -5,10 +5,17 @@ defmodule MPP.Intents.Shared do
   alias MPP.Intents.Session
   alias MPP.Intents.Subscription
 
-  @doc "Validate a required non-empty string amount."
+  @doc "Validate a required base-unit amount: one or more ASCII digits (`^[0-9]+$`)."
   @spec validate_amount(term()) :: {:ok, String.t()} | {:error, :amount_required | :invalid_amount}
   def validate_amount(nil), do: {:error, :amount_required}
-  def validate_amount(amount) when is_binary(amount) and byte_size(amount) > 0, do: {:ok, amount}
+
+  def validate_amount(amount) when is_binary(amount) do
+    # Integer parsers are more lenient than the protocol (`Integer.parse` reads
+    # "+100" and " 100"). Check digits first, matching mpp-rs #485
+    # `base_unit_digits`. Leading zeros stay accepted (mppx `/^\d+/` accepts "007").
+    if amount =~ ~r/^[0-9]+$/, do: {:ok, amount}, else: {:error, :invalid_amount}
+  end
+
   def validate_amount(_), do: {:error, :invalid_amount}
 
   @doc """

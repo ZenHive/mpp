@@ -67,6 +67,13 @@ defmodule MPP.Intents.SessionTest do
       assert {:error, :invalid_amount} = Session.new(amount: 1000, currency: "usd")
     end
 
+    test "rejects signs, exponents, and surrounding whitespace (mpp-rs #485)" do
+      for amount <- ["+100", "-5", "1e3", " 100"] do
+        assert {:error, :invalid_amount} = Session.new(amount: amount, currency: "usd"),
+               "accepted #{inspect(amount)}"
+      end
+    end
+
     test "returns error when currency is missing" do
       assert {:error, :currency_required} = Session.new(amount: "1000")
     end
@@ -245,7 +252,7 @@ defmodule MPP.Intents.SessionTest do
     test "roundtrip does not restore transient decimals or external_id" do
       assert {:ok, session} =
                Session.new(
-                 amount: "1.5",
+                 amount: "1500000",
                  currency: "usd",
                  unit_type: "second",
                  decimals: 6,
