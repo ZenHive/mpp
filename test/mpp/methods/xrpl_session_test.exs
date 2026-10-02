@@ -15,6 +15,7 @@ defmodule MPP.Methods.XRPL.SessionTest do
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
   alias MPP.Session.Store
+  alias MPP.Test.InternalPaymentError
 
   defmodule DownStore do
     @moduledoc false
@@ -939,6 +940,48 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert {:ok, %Channel{status: :closed, proof: %{amount: 100_000}}} = Store.get(context.store, @channel_id)
   end
 
+  test "close maps a redeem RPC transport failure to internal-payment-error", context do
+    destination = @fixture["destination"]["ed25519"]
+
+    {:ok, session} =
+      session(%{
+        "session_store" => context.session.method_details["session_store"],
+        "destination_secret" => destination["seed"],
+        "defer_redemption" => false
+      })
+
+    session = %{session | recipient: destination["address"]}
+
+    {:ok, channel} =
+      Channel.new(
+        channel_id: @channel_id,
+        payer: @payer,
+        recipient: destination["address"],
+        token: "XRP",
+        deposit: 1_000_000,
+        cumulative_amount: 100_000,
+        spent: 100_000,
+        proof: %{amount: 100_000, signature: @open_sig, public_key: @fixture["payer"]["publicKey"]}
+      )
+
+    {:ok, channel} = Channel.activate(channel)
+    assert :ok = Store.put(context.store, channel)
+
+    stub(%{context | session: session}, @hash,
+      destination: destination["address"],
+      transport_error: "account_info"
+    )
+
+    assert {:error, error} =
+             XRPLSession.verify(
+               %{"action" => "close", "channelId" => @channel_id, "amount" => "100000", "signature" => @open_sig},
+               session
+             )
+
+    InternalPaymentError.assert_error(error)
+    assert {:ok, %Channel{status: :closed, proof: %{amount: 100_000}}} = Store.get(context.store, @channel_id)
+  end
+
   test "concurrent redeem/2 of two channels sharing a Destination uses distinct Sequences", context do
     destination = @fixture["destination"]["ed25519"]
     {:ok, wallet} = Wallet.from_seed(destination["seed"])
@@ -1494,7 +1537,12 @@ defmodule MPP.Methods.XRPL.SessionTest do
     method = decoded["method"]
     params = decoded |> Map.get("params", []) |> List.first() || %{}
     send(owner, {:rpc, method})
-    Req.Test.json(conn, %{"result" => rpc_override(method, hash, opts, params, claimed, owner)})
+
+    if Keyword.get(opts, :transport_error) == method do
+      Req.Test.transport_error(conn, :timeout)
+    else
+      Req.Test.json(conn, %{"result" => rpc_override(method, hash, opts, params, claimed, owner)})
+    end
   end
 
   defp rpc_override(method, hash, opts, params, claimed, owner) do

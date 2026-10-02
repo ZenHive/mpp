@@ -14,6 +14,7 @@ defmodule MPP.PlugTest do
   alias MPP.Receipt
   alias MPP.Session.ETSStore
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.SessionSigning
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
@@ -82,6 +83,20 @@ defmodule MPP.PlugTest do
     def verify(_payload, _charge) do
       {:error, :some_unknown_reason}
     end
+  end
+
+  defmodule ErroringReplayStore do
+    @moduledoc false
+    @behaviour MPP.Tempo.Store
+
+    @impl true
+    def get(_key), do: {:error, :boom}
+
+    @impl true
+    def put(_key, _value), do: {:error, :boom}
+
+    @impl true
+    def check_and_mark(_key, _value), do: {:error, :boom}
   end
 
   defmodule MockMethodBadName do
@@ -919,6 +934,19 @@ defmodule MPP.PlugTest do
       refute first_conn.halted
       assert second_conn.status == 402
       assert decode_json_body(second_conn)["detail"] == "Payment credential already used"
+    end
+
+    test "a replay store error returns 500 without a challenge" do
+      config = init_config(store: ErroringReplayStore)
+      auth_header = build_authorization_header(config)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", auth_header)
+        |> call_plug(config)
+
+      InternalPaymentError.assert_plug(conn)
     end
 
     test "tempo method with its own store skips plug-level replay store" do

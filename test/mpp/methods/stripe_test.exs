@@ -1360,8 +1360,8 @@ defmodule MPP.Methods.StripeTest do
       fail_update = fail_nth_update(&(not activation_claim?(&1)), 1)
       subscription = &spy_subscription(&1, fail_update: fail_update)
 
-      assert {:error, %Errors{detail: "Stripe subscription store unavailable"}} =
-               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+      assert {:error, error} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+      InternalPaymentError.assert_error(error)
 
       refute_received {:stripe_request, "DELETE", _path, _params, _headers}
       flush_stripe_requests()
@@ -1382,8 +1382,8 @@ defmodule MPP.Methods.StripeTest do
       fail_update = fail_nth_update(&activation_claim?/1, 3)
       subscription = &spy_subscription(&1, fail_update: fail_update)
 
-      assert {:error, %Errors{detail: "Stripe subscription store unavailable"}} =
-               Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+      assert {:error, error} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription.("ch_subscription"))
+      InternalPaymentError.assert_error(error)
 
       refute_received {:stripe_request, "DELETE", _path, _params, _headers}
       assert ledger_status(ledger, "sub_test") == "active"
@@ -1460,8 +1460,10 @@ defmodule MPP.Methods.StripeTest do
 
       fail_update = fail_nth_update(&activation_claim?/1, 2)
 
-      assert {:error, %Errors{detail: "Stripe subscription store unavailable"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_fence", fail_update: fail_update))
+
+      InternalPaymentError.assert_error(error)
 
       flush_stripe_requests()
       assert {:ok, %Receipt{}} = Stripe.verify(%{"paymentMethod" => "pm_input"}, spy_subscription("ch_fence"))
@@ -1550,8 +1552,8 @@ defmodule MPP.Methods.StripeTest do
         timestamp: "2023-11-14T22:13:20Z"
       }
 
-      for {store_opts, detail} <- [
-            {[get: {:error, :down}, update: {:error, :down}], "Stripe subscription store unavailable"},
+      for {store_opts, expected} <- [
+            {[get: {:error, :down}, update: {:error, :down}], :internal_payment_error},
             {[get: {:ok, foreign}, update: {:error, :down}],
              "Stripe subscription activation conflicts with durable state"}
           ] do
@@ -1561,7 +1563,8 @@ defmodule MPP.Methods.StripeTest do
             store_opts
           })
 
-        assert {:error, %Errors{detail: ^detail}} = StripeSubscription.inspect_activation(subscription, "pm_test")
+        assert {:error, error} = StripeSubscription.inspect_activation(subscription, "pm_test")
+        assert_store_or_detail(error, expected)
         assert {:error, %Errors{}} = StripeSubscription.resolve_activation(subscription, "pm_test", :release)
       end
 
@@ -1640,14 +1643,14 @@ defmodule MPP.Methods.StripeTest do
       conflict = "Stripe subscription activation conflicts with durable state"
 
       cases = [
-        {[get: {:error, :down}, update: {:error, :down}], "Stripe subscription store unavailable"},
-        {[get: :not_found, update: {:error, :down}], "Stripe subscription store unavailable"},
+        {[get: {:error, :down}, update: {:error, :down}], :internal_payment_error},
+        {[get: :not_found, update: {:error, :down}], :internal_payment_error},
         {[get: {:ok, foreign}, update: {:error, :down}], conflict},
         {[get: {:ok, active_claim}, update: {:error, :down}], conflict},
         {[get: {:ok, malformed_claim}, update: {:error, :down}], conflict}
       ]
 
-      for {store_opts, detail} <- cases do
+      for {store_opts, expected} <- cases do
         stub_subscription_flow()
 
         subscription =
@@ -1656,7 +1659,8 @@ defmodule MPP.Methods.StripeTest do
             store_opts
           })
 
-        assert {:error, %Errors{detail: ^detail}} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+        assert {:error, error} = Stripe.verify(%{"paymentMethod" => "pm_input"}, subscription)
+        assert_store_or_detail(error, expected)
         refute_received {:stripe_request, "POST", _path, _params, _headers}
       end
     end
@@ -2169,16 +2173,17 @@ defmodule MPP.Methods.StripeTest do
       controlled = Errors.new(:verification_failed, "controlled lifecycle store error")
 
       cases = [
-        {{:error, :store_down}, "Stripe subscription store unavailable"},
+        {{:error, :store_down}, :internal_payment_error},
         {{:error, controlled}, "controlled lifecycle store error"},
         {{:apply, :not_found}, "Stripe subscription lifecycle event does not match the subscription"},
         {{:apply, %{record | method: "tempo"}}, "Stripe subscription lifecycle event does not match the subscription"}
       ]
 
-      for {update, detail} <- cases do
+      for {update, expected} <- cases do
         lifecycle_store = {StripeLifecycleStore, get: {:ok, record}, update: update}
         config = Map.put(subscription.method_details, "subscription_store", lifecycle_store)
-        assert {:error, %Errors{detail: ^detail}} = StripeSubscription.process_event(event, config)
+        assert {:error, error} = StripeSubscription.process_event(event, config)
+        assert_store_or_detail(error, expected)
       end
     end
 
@@ -2543,24 +2548,26 @@ defmodule MPP.Methods.StripeTest do
       controlled = Errors.new(:verification_failed, "controlled stale claim error")
 
       cases = [
-        {{:error, :store_down}, "Stripe subscription store unavailable"},
+        {{:error, :store_down}, :internal_payment_error},
         {{:error, controlled}, "controlled stale claim error"},
         {{:apply, :not_found}, "Stripe subscription lifecycle event does not match the subscription"},
         {{:apply, %{record | method: "tempo"}}, "Stripe subscription lifecycle event does not match the subscription"}
       ]
 
-      for {update, detail} <- cases do
+      for {update, expected} <- cases do
         lifecycle_store = {StripeLifecycleStore, get: {:ok, record}, update: update}
 
         config = Map.put(subscription.method_details, "subscription_store", lifecycle_store)
 
-        assert {:error, %Errors{detail: ^detail}} =
+        assert {:error, error} =
                  StripeSubscription.void_stale_invoice(
                    activation.subscription_id,
                    "in_claim_error",
                    ~U[2023-11-16 22:13:20Z],
                    config
                  )
+
+        assert_store_or_detail(error, expected)
       end
 
       refute_received {:stripe_request, "POST", "/v1/invoices/in_claim_error/void", _params, _headers}
@@ -3563,4 +3570,7 @@ defmodule MPP.Methods.StripeTest do
       nil -> nil
     end
   end
+
+  defp assert_store_or_detail(error, :internal_payment_error), do: InternalPaymentError.assert_error(error)
+  defp assert_store_or_detail(%Errors{detail: detail}, detail), do: detail
 end

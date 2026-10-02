@@ -6,6 +6,7 @@ defmodule MPP.ReplayTest do
   alias MPP.Replay
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.InternalPaymentError
 
   defmodule TempoMethod do
     @moduledoc false
@@ -30,7 +31,7 @@ defmodule MPP.ReplayTest do
   end
 
   # Store whose get/check_and_mark both return an unexpected error, to exercise
-  # the `{:error, _}` -> "Dedup store error" branches.
+  # the `{:error, _}` -> internal-payment-error branches.
   defmodule ErroringStore do
     @moduledoc false
     @behaviour Store
@@ -92,14 +93,14 @@ defmodule MPP.ReplayTest do
   end
 
   describe "store error paths" do
-    test "check_unused surfaces a store get error as a generic dedup error" do
+    test "check_unused surfaces a store get error as internal-payment-error" do
       assert {:error, error} = Replay.check_unused(ErroringStore, @credential)
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
-    test "mark_used surfaces an unexpected store error as a generic dedup error" do
+    test "mark_used surfaces an unexpected store error as internal-payment-error" do
       assert {:error, error} = Replay.mark_used(ErroringStore, @credential)
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
   end
 
@@ -107,7 +108,7 @@ defmodule MPP.ReplayTest do
     # A float in the attacker-supplied payload must reject the credential as
     # malformed, not leak the JCS raise. Using ErroringStore proves the key
     # failure short-circuits before any store access (a store hit would surface
-    # "Dedup store error" instead).
+    # internal-payment-error instead).
     @float_credential %Credential{
       challenge: %Challenge{id: "ch_replay_2", realm: "api.example.com", method: "mock", intent: "charge", request: "e30"},
       payload: %{"proof" => "valid", "x" => 1.5}

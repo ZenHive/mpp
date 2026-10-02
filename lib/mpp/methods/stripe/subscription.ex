@@ -75,7 +75,6 @@ defmodule MPP.Methods.Stripe.Subscription do
   @stripe_object_id ~r/\A[a-z]+_[A-Za-z0-9_]+\z/
   @renewal_invoice_error "Stripe renewal invoice does not match the subscription"
   @lifecycle_event_error "Stripe subscription lifecycle event does not match the subscription"
-  @subscription_store_error "Stripe subscription store unavailable"
   @activation_claim_method "stripe_activation"
   # An activation owns its claim for this lease. A Stripe write may only start
   # with at least the write budget left, and the budget far exceeds the bounded
@@ -241,7 +240,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     else
       {:error, :already_canceled, record} -> {:ok, record}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -1020,7 +1019,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     "stripe-activation:" <> digest
   end
 
-  defp store_unavailable, do: {:error, Errors.new(:verification_failed, @subscription_store_error)}
+  defp store_unavailable, do: {:error, Shared.internal_payment_error()}
 
   defp activation_in_progress do
     Errors.new(:verification_failed, "Stripe subscription activation is already in progress for this payment method")
@@ -1545,7 +1544,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     case Store.update(subscription_store, record.subscription_id, &put_activation_record(&1, record)) do
       {:ok, stored} -> {:ok, stored}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -1627,7 +1626,7 @@ defmodule MPP.Methods.Stripe.Subscription do
          end) do
       {:ok, updated} -> {:ok, updated}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -1728,7 +1727,7 @@ defmodule MPP.Methods.Stripe.Subscription do
       {:error, {:already_closed, current}} -> {:error, :already_closed, current}
       {:ok, claimed} -> {:ok, claimed}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -1802,7 +1801,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     case Store.update(store(config), record.subscription_id, update) do
       {:ok, updated} -> {:ok, updated}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -2023,7 +2022,7 @@ defmodule MPP.Methods.Stripe.Subscription do
          end) do
       {:ok, updated} -> {:ok, updated}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -2163,10 +2162,10 @@ defmodule MPP.Methods.Stripe.Subscription do
         {:ok, %{current | in_flight_reference: nil}}
 
       %Record{} ->
-        {:error, Errors.new(:verification_failed, @subscription_store_error)}
+        store_unavailable()
 
       :not_found ->
-        {:error, Errors.new(:verification_failed, @subscription_store_error)}
+        store_unavailable()
     end)
   end
 
@@ -2192,7 +2191,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     case Store.get(subscription_store, subscription_id) do
       {:ok, record} -> {:ok, record}
       :not_found -> {:error, Errors.new(:verification_failed, "Stripe subscription not found")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @subscription_store_error)}
+      {:error, _reason} -> store_unavailable()
     end
   end
 

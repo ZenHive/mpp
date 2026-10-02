@@ -13,6 +13,23 @@ defmodule MPP.Methods.NearIntentsTest do
   alias MPP.Test.InternalPaymentError
   alias MPP.Test.RPCShapes
 
+  defmodule FailingSettlementStore do
+    @moduledoc false
+    @behaviour MPP.Tempo.Store
+
+    @impl true
+    def get(_key), do: {:error, :down}
+
+    @impl true
+    def put(_key, _value), do: {:error, :down}
+
+    @impl true
+    def check_and_mark(_key, _value), do: {:error, :down}
+
+    @impl true
+    def update(_key, _fun, _opts), do: {:error, :down}
+  end
+
   @one_click_url "https://1click.example"
   @origin_rpc_url "https://origin-rpc.example"
   @origin_network "eip155:1"
@@ -631,6 +648,11 @@ defmodule MPP.Methods.NearIntentsTest do
       end)
 
       assert_error(verify(charge), "verification-failed", "already been consumed")
+    end
+
+    test "a settlement-state store error is internal-payment-error", %{charge: charge} do
+      charge = put_in(charge.method_details["store"], FailingSettlementStore)
+      InternalPaymentError.assert_error(verify(charge))
     end
   end
 

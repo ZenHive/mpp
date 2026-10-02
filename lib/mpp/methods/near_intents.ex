@@ -44,6 +44,7 @@ defmodule MPP.Methods.NearIntents do
   alias MPP.Intents.Charge
   alias MPP.Methods.NearIntents.OneClick
   alias MPP.Methods.NearIntents.Origin
+  alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
@@ -310,7 +311,7 @@ defmodule MPP.Methods.NearIntents do
       {:ok, %{state: :inflight, lease_until: lease_until}} when lease_until <= now -> :ok
       {:ok, %{state: :inflight}} -> {:error, Errors.new(:verification_failed, inflight_detail(kind))}
       {:ok, _consumed} -> {:error, Errors.new(consumed_error(kind), consumed_detail(kind))}
-      {:error, _reason} -> {:error, Errors.new(:settlement_unavailable, "Settlement state store is unavailable")}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -362,7 +363,7 @@ defmodule MPP.Methods.NearIntents do
       {:ok, :claimed} -> :ok
       {:ok, :inflight} -> {:error, Errors.new(:verification_failed, inflight_detail(kind))}
       {:ok, :consumed} -> {:error, Errors.new(consumed_error(kind), consumed_detail(kind))}
-      {:error, _reason} -> {:error, Errors.new(:settlement_unavailable, "Settlement state store is unavailable")}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -519,7 +520,7 @@ defmodule MPP.Methods.NearIntents do
            ttl_ms: ttl_ms
          ) do
       {:ok, :ok} -> :ok
-      _other -> {:error, Errors.new(:settlement_unavailable, "Settlement state store is unavailable")}
+      _other -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -537,7 +538,7 @@ defmodule MPP.Methods.NearIntents do
            _other -> {:noop, :ok}
          end) do
       {:ok, :ok} -> :ok
-      {:error, _reason} -> {:error, Errors.new(:settlement_unavailable, "Settlement state store is unavailable")}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 

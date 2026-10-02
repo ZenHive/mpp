@@ -28,6 +28,7 @@ defmodule MPP.Methods.XRPL.Session do
 
   alias MPP.Errors
   alias MPP.Intents.Session
+  alias MPP.Methods.Shared
   alias MPP.Methods.XRPL.Claim
   alias MPP.Methods.XRPL.Codec
   alias MPP.Methods.XRPL.RedeemLock
@@ -517,7 +518,7 @@ defmodule MPP.Methods.XRPL.Session do
     else
       case redeem(channel_id, config) do
         {:ok, hash} -> {:ok, Map.put(extra, "txHash", hash)}
-        {:error, %Errors{}} -> {:error, settlement_failed()}
+        {:error, %Errors{} = error} -> {:error, redeem_close_error(error)}
       end
     end
   end
@@ -834,7 +835,16 @@ defmodule MPP.Methods.XRPL.Session do
 
   # draft-xrpl-session-00 §Error Responses: ledger result codes MUST NOT be
   # surfaced raw, so the client-facing close error drops the engine result that
-  # `redeem/2` reports to the operator.
+  # `redeem/2` reports to the operator. RPC/transport failures stay
+  # internal-payment-error so the client is not re-challenged.
+  defp redeem_close_error(%Errors{type: type}) do
+    if type == Shared.internal_payment_error().type do
+      Shared.internal_payment_error()
+    else
+      settlement_failed()
+    end
+  end
+
   defp settlement_failed, do: Errors.new(:settlement_failed, "XRPL PaymentChannelClaim was not settled")
 
   defp failed, do: {:error, Errors.new(:verification_failed, "XRPL session verification failed")}

@@ -9,10 +9,10 @@ defmodule MPP.Replay do
 
   alias MPP.Errors
   alias MPP.JCS
+  alias MPP.Methods.Shared
   alias MPP.Tempo.Store
 
   @store_key_prefix "mpp:credential:"
-  @store_error_detail "Dedup store error"
 
   @doc """
   Selects the plug-level credential store for a method entry, honoring the
@@ -44,7 +44,7 @@ defmodule MPP.Replay do
       case Store.get(store, key) do
         :not_found -> :ok
         {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+        {:error, _reason} -> {:error, Shared.internal_payment_error()}
       end
     end
   end
@@ -66,7 +66,7 @@ defmodule MPP.Replay do
       case Store.check_and_mark(store, key, value) do
         :ok -> :ok
         {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
-        {:error, _reason} -> {:error, Errors.new(:verification_failed, @store_error_detail)}
+        {:error, _reason} -> {:error, Shared.internal_payment_error()}
       end
     end
   end
