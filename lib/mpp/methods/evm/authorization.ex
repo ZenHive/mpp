@@ -481,11 +481,7 @@ defmodule MPP.Methods.EVM.Authorization do
         :ok
       end
     else
-      {:error, %Errors{} = error} ->
-        {:error, error}
-
-      {:error, reason} ->
-        wrap_rpc_error(reason)
+      {:error, reason} -> wrap_rpc_error(reason)
     end
   end
 

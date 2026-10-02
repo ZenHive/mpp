@@ -51,7 +51,6 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          {:ok, tx} <- maybe_cosign(tx, config) do
       {:ok, tx, hex(memo)}
     else
-      {:error, %ArgumentError{} = error} -> {:error, Exception.message(error)}
       {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} -> {:error, inspect(reason)}
     end

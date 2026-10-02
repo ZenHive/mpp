@@ -599,7 +599,36 @@ defmodule MPP.Methods.EVMTest do
       assert {:ok, %Receipt{reference: @tx_hash}} = EVM.verify(%{"hash" => @tx_hash}, charge)
     end
 
-    for {field, bad} <- [{"value", "-0x1"}, {"value", "0x-1"}, {"value", nil}, {"to", "0x1234"}] do
+    test "fails closed on a non-object transaction result", %{eth_charge: charge} do
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => "0xdead"
+        })
+      end)
+
+      assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+    end
+
+    test "rejects a contract-creation transaction as a native payment", %{eth_charge: charge} do
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => %{native_tx() | "to" => nil}
+        })
+      end)
+
+      assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert error.detail =~ "recipient"
+    end
+
+    for {field, bad} <- [
+          {"value", "-0x1"},
+          {"value", "0x-1"},
+          {"value", nil},
+          {"to", "0x1234"},
+          {"to", "0x" <> String.duplicate("zz", 20)}
+        ] do
       test "fails closed on a transaction with malformed #{field} #{inspect(bad)}", %{eth_charge: charge} do
         tx = Map.put(native_tx(), unquote(field), unquote(bad))
 

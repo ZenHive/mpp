@@ -106,12 +106,8 @@ defmodule MPP.Methods.Tempo.MachineToken do
          {:ok, swapper_bin} <- decode_addr(deployment.swapper) do
       {:ok,
        [
-         %{to: token_bin, value: 0, input: TIP20.approve_calldata(swapper_bin, amount_int)},
-         %{
-           to: swapper_bin,
-           value: 0,
-           input: swap_to_calldata(token_bin, amount_int, currency_bin, recipient_bin, memo)
-         }
+         zero_value_call(token_bin, TIP20.approve_calldata(swapper_bin, amount_int)),
+         zero_value_call(swapper_bin, swap_to_calldata(token_bin, amount_int, currency_bin, recipient_bin, memo))
        ]}
     else
       _ -> :error
@@ -119,6 +115,8 @@ defmodule MPP.Methods.Tempo.MachineToken do
   end
 
   def settlement_calls(_chain_id, _currency, _amount, _recipient, _memo), do: :error
+
+  defp zero_value_call(to, input), do: %{to: to, value: 0, input: input}
 
   @doc """
   Match the exact canonical `[approve, swapTo]` route for a charge.

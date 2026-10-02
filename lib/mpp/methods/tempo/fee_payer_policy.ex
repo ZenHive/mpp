@@ -336,7 +336,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
           {:ok, pos_integer()} | {:error, String.t()}
   defp check_validity_window(%Transaction{valid_before: valid_before}, %{max_validity_window_seconds: max}, now) do
     cond do
-      valid_before in [nil, 0] ->
+      is_nil(valid_before) ->
         {:error, "fee-payer transaction must declare valid_before"}
 
       valid_before <= now ->
