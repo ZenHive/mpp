@@ -4083,14 +4083,14 @@ scored_at = "2026-10-02"
 id = "149"
 phase = 4
 bundle = "tempo"
-status = "pending"
+status = "in_progress"
 title = "Ordered multi-currency charge offers across Tempo and EVM, with fundingCurrency in receipts (mppx #933, #915)"
 scores = { d = 6, b = 5, u = 4 }
 acceptance_criteria = ["A Tempo or EVM method entry can declare an ordered currencies list; the 402 carries one challenge per currency in that order", "A credential is verified against the entry whose currency matches its echoed request; with two same-named entries, the wrong entry is never used (test)", "Tempo charge receipts include fundingCurrency (direct: the currency; machine-token route: the funding token) and it round-trips through MPP.Receipt", "OUSD addresses are confirmed against refs/mppx + Tempo docs and pinned by a live :integration test on Moderato"]
 out_of_scope = ["Session-intent multi-currency"]
+touches = ["lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/plug.ex", "lib/mpp/plug/", "lib/mpp/receipt.ex", "test/mpp/methods/", "test/mpp/plug_test.exs", "test/mpp/receipt_test.exs"]
 assignee = "codex"
 model = "gpt-6-astra"
-touches = ["lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/plug.ex", "lib/mpp/plug/", "lib/mpp/receipt.ex", "test/mpp/methods/", "test/mpp/plug_test.exs", "test/mpp/receipt_test.exs"]
 body = """
 mppx #933 (e4f0e02) lets a server offer an ordered `currencies` list for Tempo and EVM. A single route expands into one challenge per currency (mainnet default: OUSD then USDC.e; Moderato: OUSD then pathUSD). mppx #915 (c7968ca) adds an optional `fundingCurrency` receipt field derived from the payment route.
 
@@ -4101,6 +4101,7 @@ Design note from mppx #936 (3a23894): once several entries share a method name, 
 Verify the OUSD token addresses and default ordering against refs/mppx and docs.tempo.xyz. Pin them with a live Moderato integration test: one real success and one relevant real error.
 """
 created_at = "2026-10-02"
+started_at = "2026-10-02"
 scored_at = "2026-10-02"
 
 [[task]]
