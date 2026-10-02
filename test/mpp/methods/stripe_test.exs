@@ -68,6 +68,7 @@ defmodule MPP.Methods.StripeTest do
   alias MPP.Subscription.ETSStore, as: SubscriptionStore
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.StripeLifecycleStore
 
   @stripe_secret_key "sk_test_abc123"
@@ -1034,8 +1035,10 @@ defmodule MPP.Methods.StripeTest do
     test "an adopted activation returns its receipt only to the activating credential" do
       stub_subscription_flow(subscription_error: :lost_response)
 
-      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      InternalPaymentError.assert_error(error)
 
       assert {:error, %Errors{detail: "Payment credential does not match the activation for this challenge"}} =
                Stripe.verify(%{"paymentMethod" => "pm_input", "customer" => "cus_test"}, stripe_subscription())
@@ -1052,8 +1055,10 @@ defmodule MPP.Methods.StripeTest do
     test "a subscription adopted from an earlier generation returns no receipt under a later credential" do
       stub_subscription_flow(subscription_error: :lost_response)
 
-      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      InternalPaymentError.assert_error(error)
 
       # A later generation takes the claim while the first subscription is still live.
       assert {:ok, %{claim_id: claim_id}} = inspect_activation()
@@ -1109,8 +1114,10 @@ defmodule MPP.Methods.StripeTest do
     test "an activation whose Stripe outcome is unknown stays blocked until reconciled" do
       ledger = stub_subscription_flow(subscription_error: :lost_response)
 
-      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      InternalPaymentError.assert_error(error)
 
       assert_received {:stripe_request, "POST", "/v1/subscriptions", params, _headers}
       assert "stripe-activation:" <> _digest = params["metadata[mpp_activation_claim]"]
@@ -1195,8 +1202,10 @@ defmodule MPP.Methods.StripeTest do
     test "several tagged subscriptions fail closed until an operator adopts one" do
       ledger = stub_subscription_flow(subscription_error: :lost_response)
 
-      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      InternalPaymentError.assert_error(error)
 
       tagged = Agent.get(ledger, &Map.fetch!(&1, "sub_test"))
 
@@ -1288,8 +1297,10 @@ defmodule MPP.Methods.StripeTest do
     test "an empty listing reopens the claim only after the lease has run out" do
       stub_subscription_flow(subscription_error: :api_error)
 
-      assert {:error, %Errors{detail: "Stripe subscription activation failed"}} =
+      assert {:error, error} =
                Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription())
+
+      InternalPaymentError.assert_error(error)
 
       stub_subscription_flow()
       flush_stripe_requests()
@@ -2619,15 +2630,14 @@ defmodule MPP.Methods.StripeTest do
     end
 
     test "maps Stripe subscription API failures and non-object responses" do
-      for {failure, detail} <- [
-            {:api_error, "Stripe subscription activation failed"},
-            {:invalid_response, "Stripe returned an invalid Subscription"}
-          ] do
+      for failure <- [:api_error, :invalid_response] do
         stub_subscription_flow(subscription_error: failure)
 
         # An uncertain outcome holds its plan, so each case uses its own.
-        assert {:error, %Errors{detail: ^detail}} =
+        assert {:error, error} =
                  Stripe.verify(%{"paymentMethod" => "pm_input"}, stripe_subscription(external_id: "plan_#{failure}"))
+
+        InternalPaymentError.assert_error(error)
       end
     end
 

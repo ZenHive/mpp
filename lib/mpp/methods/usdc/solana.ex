@@ -311,7 +311,7 @@ defmodule MPP.Methods.USDC.Solana do
   defp genesis_hash(rpc_opts) do
     case RPC.send_rpc("getGenesisHash", [], rpc_opts) do
       {:ok, hash} when is_binary(hash) and byte_size(hash) >= 32 -> {:ok, hash}
-      {:ok, _hash} -> {:error, Errors.new(:verification_failed, "Solana RPC request failed")}
+      {:ok, _hash} -> {:error, Shared.internal_payment_error()}
       {:error, reason} -> solana_rpc_failure(reason)
     end
   end
@@ -507,6 +507,6 @@ defmodule MPP.Methods.USDC.Solana do
 
   defp solana_rpc_failure(reason) do
     Logger.warning("MPP.Methods.USDC.Solana: RPC request failed: #{inspect(reason)}")
-    {:error, Errors.new(:verification_failed, "Solana RPC request failed")}
+    {:error, Shared.internal_payment_error()}
   end
 end

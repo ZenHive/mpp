@@ -13,6 +13,15 @@ defmodule MPP.Methods.Shared do
   alias MPP.Hex
   alias MPP.Intents.Shared, as: IntentShared
 
+  @internal_payment_error_detail "An internal payment error occurred."
+
+  @doc """
+  Fixed internal-payment-error (HTTP 500). Use for RPC, transport, and store
+  failures so a client is not re-challenged after a broadcast may have succeeded.
+  """
+  @spec internal_payment_error() :: Errors.t()
+  def internal_payment_error, do: Errors.new(:internal_payment_error, @internal_payment_error_detail)
+
   @doc """
   Fetch a required key from a method's config map.
 

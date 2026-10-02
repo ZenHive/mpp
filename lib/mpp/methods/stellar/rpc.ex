@@ -272,6 +272,6 @@ defmodule MPP.Methods.Stellar.RPC do
 
   defp rpc_error(_error), do: unavailable()
 
-  defp unavailable, do: {:error, Errors.new(:settlement_unavailable, "Stellar RPC is unavailable")}
+  defp unavailable, do: {:error, Shared.internal_payment_error()}
   defp timeout, do: {:error, Errors.new(:settlement_timeout, "Stellar transaction did not reach a terminal state")}
 end

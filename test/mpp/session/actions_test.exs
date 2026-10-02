@@ -9,6 +9,7 @@ defmodule MPP.Session.ActionsTest do
   alias MPP.Session.ETSStore
   alias MPP.Session.Payload
   alias MPP.Session.Store
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.SessionSigning
   alias Onchain.Address
 
@@ -361,8 +362,10 @@ defmodule MPP.Session.ActionsTest do
         |> Keyword.put(:store, __MODULE__.FailingStore)
         |> Keyword.put(:verify_top_up, fn _payload, _channel, _opts -> flunk("verifier called") end)
 
-      assert {:error, %Errors{detail: detail}} = Actions.dispatch(top_up_payload(400), opts)
-      assert detail =~ "session store update failed"
+      assert {:error, %Errors{} = error} = Actions.dispatch(top_up_payload(400), opts)
+      InternalPaymentError.assert_error(error)
+      refute error.detail =~ "unavailable"
+      refute error.detail =~ inspect(:unavailable)
     end
 
     test "verify/2 reads the funding verifier from server-only method details", %{store: store} do
@@ -1024,8 +1027,10 @@ defmodule MPP.Session.ActionsTest do
       assert String.contains?(closed.type, "channel-finalized")
 
       failing = Keyword.put(never, :store, FailingStore)
-      assert {:error, %Errors{detail: store_detail}} = Actions.dispatch(open_payload(50), failing)
-      assert store_detail =~ "session store"
+      assert {:error, %Errors{} = store_error} = Actions.dispatch(open_payload(50), failing)
+      InternalPaymentError.assert_error(store_error)
+      refute store_error.detail =~ "unavailable"
+      refute store_error.detail =~ inspect(:unavailable)
     end
 
     test "an open that loses a race during verification does not overwrite the channel", %{opts: opts, store: store} do

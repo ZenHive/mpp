@@ -131,7 +131,7 @@ defmodule MPP.Methods.NearIntents.Origin do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.NearIntents: origin transaction RPC failed: #{inspect(reason)}")
-        {:error, Errors.new(:settlement_unavailable, "Origin RPC request failed")}
+        {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -149,7 +149,7 @@ defmodule MPP.Methods.NearIntents.Origin do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.NearIntents: origin receipt RPC failed: #{inspect(reason)}")
-        {:error, Errors.new(:settlement_unavailable, "Origin RPC request failed")}
+        {:error, Shared.internal_payment_error()}
     end
   end
 

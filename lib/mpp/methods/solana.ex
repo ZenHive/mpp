@@ -156,8 +156,6 @@ defmodule MPP.Methods.Solana do
   @empty_signature <<0::512>>
   @store_key_prefix "mpp:solana:"
   @settled_key_prefix "mpp:solana-settled:"
-  @dedup_store_error_detail "Dedup store error"
-  @solana_rpc_error_detail "Solana RPC request failed"
   @zero_amount_detail "Zero-amount challenges are not supported for Solana credentials"
   @signature_bytes 64
   @push_modes ["challenge_memo", "unbound"]
@@ -237,7 +235,7 @@ defmodule MPP.Methods.Solana do
       ]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, error}` on failure"},
-    errors: [:invalid_payload, :verification_failed]
+    errors: [:invalid_payload, :verification_failed, :internal_payment_error]
   )
 
   @impl MPP.Method
@@ -615,7 +613,7 @@ defmodule MPP.Methods.Solana do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.Solana: simulateTransaction failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @solana_rpc_error_detail)}
+        {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -629,11 +627,11 @@ defmodule MPP.Methods.Solana do
         {:error, Errors.new(:verification_failed, "Transaction failed on-chain")}
 
       {:error, :timeout} ->
-        {:error, Errors.new(:verification_failed, "Timed out waiting for transaction confirmation")}
+        {:error, Shared.internal_payment_error()}
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.Solana: sendTransaction failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @solana_rpc_error_detail)}
+        {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -646,7 +644,7 @@ defmodule MPP.Methods.Solana do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.Solana: sendTransaction failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @solana_rpc_error_detail)}
+        {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -670,7 +668,7 @@ defmodule MPP.Methods.Solana do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.Solana: getTransaction failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @solana_rpc_error_detail)}
+        {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -1051,7 +1049,7 @@ defmodule MPP.Methods.Solana do
     case Store.get(store, key) do
       :not_found -> :ok
       {:ok, _} -> {:error, signature_used_error()}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -1061,7 +1059,7 @@ defmodule MPP.Methods.Solana do
     case Store.check_and_mark(store, store_key(signature), System.system_time(:millisecond)) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -1089,7 +1087,7 @@ defmodule MPP.Methods.Solana do
     case Store.check_and_mark(store, store_key(signature), token) do
       :ok -> {:ok, token}
       {:error, :already_exists} -> {:error, :already_exists}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -1110,7 +1108,7 @@ defmodule MPP.Methods.Solana do
 
       {:error, reason} ->
         Logger.warning("MPP.Methods.Solana: dedup store read failed: #{inspect(reason)}")
-        {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+        {:error, Shared.internal_payment_error()}
 
       _other ->
         {:error, signature_used_error()}
@@ -1132,7 +1130,7 @@ defmodule MPP.Methods.Solana do
     case Store.check_and_mark(store, settled_key(signature), System.system_time(:millisecond)) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, signature_used_error()}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 

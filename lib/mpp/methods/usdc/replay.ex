@@ -9,6 +9,7 @@ defmodule MPP.Methods.USDC.Replay do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.Shared
   alias MPP.Tempo.Store
 
   @prefix "mpp:usdc:"
@@ -60,7 +61,7 @@ defmodule MPP.Methods.USDC.Replay do
     case Store.check_and_mark(store, @prefix <> key, token) do
       :ok -> {:ok, token}
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, detail)}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, "Dedup store error")}
+      {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 

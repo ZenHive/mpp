@@ -1,11 +1,15 @@
 defmodule MPP.Methods.XRPLTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Credential
   alias MPP.Errors
+  alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.XRPL
+  alias MPP.Plug, as: PaymentPlug
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.InternalPaymentError
 
   @fixture "test/fixtures/xrpl/payment.json" |> File.read!() |> Jason.decode!()
   @hash @fixture["signed"]["hash"]
@@ -384,20 +388,63 @@ defmodule MPP.Methods.XRPLTest do
     refute_received {:rpc, _}
   end
 
-  test "network mismatch and unavailable or malformed RPC responses fail closed", context do
+  test "network mismatch stays verification-failed", context do
     for response <- [%{"info" => %{"network_id" => 0}}, %{}, %{"error" => "noNetwork"}] do
       stub(context, @ledger, network: response)
       assert_error(XRPL.verify(payload("hash"), context.charge), :verification_failed)
     end
+  end
 
+  test "RPC transport and malformed envelopes are internal-payment-error", context do
     for response <- [
           fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end,
           fn conn -> Req.Test.json(conn, %{"unexpected" => true}) end,
           fn conn -> Req.Test.transport_error(conn, :timeout) end
         ] do
       Req.Test.stub(__MODULE__, response)
-      assert_error(XRPL.verify(payload("hash"), context.charge), :verification_failed)
+      InternalPaymentError.assert_error(XRPL.verify(payload("hash"), context.charge))
     end
+  end
+
+  test "RPC transport error returns internal-payment-error without a challenge", context do
+    Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :timeout) end)
+
+    config =
+      PaymentPlug.init(
+        secret_key: String.duplicate("s", 32),
+        realm: "api.example.com",
+        method: XRPL,
+        amount: "1000",
+        currency: "XRP",
+        recipient: "rEZ8RaN8QkwE4e7pNxSQhNsqrzJjgJpZf6",
+        method_config: %{
+          "rpc_url" => "https://xrpl.test",
+          "network" => "testnet",
+          "store" => context.charge.method_details["store"],
+          "store_retention_ms" => 600_000,
+          "allow_process_local_store" => true,
+          "req_options" => [plug: {Req.Test, __MODULE__}]
+        }
+      )
+
+    initial = :get |> Plug.Test.conn("/") |> PaymentPlug.call(config)
+    [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+    assert {:ok, challenge} = Headers.parse_challenge(header)
+
+    conn =
+      :get
+      |> Plug.Test.conn("/")
+      |> Plug.Conn.put_req_header(
+        "authorization",
+        Headers.format_credential(%Credential{
+          challenge: challenge,
+          payload: payload("hash"),
+          source: "did:pkh:xrpl:1:rL5wvsJ7b8NavedxyHKuSSJH3ByJL71yUu"
+        })
+      )
+      |> PaymentPlug.call(config)
+
+    InternalPaymentError.assert_plug(conn)
   end
 
   test "submission failures expose no raw ledger codes", context do
@@ -453,14 +500,13 @@ defmodule MPP.Methods.XRPLTest do
   end
 
   test "store failures and atomic conflicts prevent success", context do
-    assert_error(
-      XRPL.verify(payload("hash"), config_charge(context, %{"store" => UnavailableStore})),
-      :verification_failed
+    InternalPaymentError.assert_error(
+      XRPL.verify(payload("hash"), config_charge(context, %{"store" => UnavailableStore}))
     )
 
     stub(context, @ledger)
     charge = config_charge(context, %{"store" => FailingCommitStore})
-    assert_error(XRPL.verify(payload("hash"), charge), :verification_failed)
+    InternalPaymentError.assert_error(XRPL.verify(payload("hash"), charge))
     Process.put(:xrpl_commit_error, :already_exists)
     assert_error(XRPL.verify(payload("hash"), charge), :invalid_challenge)
   end

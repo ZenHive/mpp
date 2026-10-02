@@ -97,7 +97,7 @@ defmodule MPP.Methods.USDC do
       charge: [kind: :value, description: "Charge whose method_details select the USDC profile"]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` or `{:error, error}`"},
-    errors: [:invalid_payload, :verification_failed]
+    errors: [:invalid_payload, :verification_failed, :internal_payment_error]
   )
 
   @impl MPP.Method

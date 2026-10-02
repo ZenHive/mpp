@@ -1,6 +1,7 @@
 defmodule MPP.Methods.USDCTest do
   use ExUnit.Case, async: false
 
+  alias MPP.Credential
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
@@ -15,6 +16,7 @@ defmodule MPP.Methods.USDCTest do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
   alias MPP.Test.EVMAuthorization
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.RPCShapes
   alias Onchain.Address
   alias Onchain.Hex
@@ -351,6 +353,50 @@ defmodule MPP.Methods.USDCTest do
       end
     end
 
+    test "Solana RPC transport error returns internal-payment-error without a challenge" do
+      {payer, seed} = keypair()
+      {recipient, _} = keypair()
+      recipient_addr = Keys.to_address(recipient)
+
+      Req.Test.stub(USDC, fn conn ->
+        {request, conn} = read_rpc(conn)
+        rpc_json(conn, request["id"], "error", %{"code" => -32_002, "message" => "down"})
+      end)
+
+      config =
+        MPP.Plug.init(
+          secret_key: "test-secret-xxxxxxxxxxxxxxxxxxxx",
+          realm: @realm,
+          method: USDC,
+          amount: "1",
+          currency: @devnet_usdc,
+          recipient: recipient_addr,
+          method_config:
+            Map.merge(solana_server_config(@solana_rpc), %{
+              "req_options" => [plug: {Req.Test, USDC}],
+              "store" => false
+            })
+        )
+
+      initial = MPP.Plug.call(Plug.Test.conn(:get, "/paid"), config)
+      [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(header)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/paid")
+        |> Plug.Conn.put_req_header(
+          "authorization",
+          Headers.format_credential(%Credential{
+            challenge: challenge,
+            payload: encoded_transfer(payer, seed, recipient)
+          })
+        )
+        |> MPP.Plug.call(config)
+
+      InternalPaymentError.assert_plug(conn)
+    end
+
     test "rejects out-of-range program and account indexes before RPC" do
       {payer, seed} = keypair()
       {recipient, _} = keypair()
@@ -582,7 +628,11 @@ defmodule MPP.Methods.USDCTest do
 
       stub_evm(%{"DOMAIN_SEPARATOR()" => "0x01"})
       assert {:error, domain} = USDC.verify(payload, charge)
-      assert domain.detail =~ "EVM RPC" or domain.detail =~ "domain"
+      InternalPaymentError.assert_error(domain)
+
+      stub_evm(%{"DOMAIN_SEPARATOR()" => word(1)})
+      assert {:error, mismatched_domain} = USDC.verify(payload, charge)
+      assert mismatched_domain.detail =~ "domain"
 
       Req.Test.stub(USDC, fn conn ->
         {request, conn} = read_rpc(conn)
@@ -628,9 +678,62 @@ defmodule MPP.Methods.USDCTest do
       end)
 
       assert {:error, receipt_rpc} = USDC.verify(payload, charge)
-      assert receipt_rpc.status == 500
-      assert receipt_rpc.type == "https://paymentauth.org/problems/internal-payment-error"
-      assert receipt_rpc.detail == "An internal payment error occurred."
+      InternalPaymentError.assert_error(receipt_rpc)
+    end
+
+    test "EVM RPC transport error returns internal-payment-error without a challenge" do
+      Req.Test.stub(USDC, fn conn ->
+        {request, conn} = read_rpc(conn)
+        rpc_json(conn, request["id"], "error", %{"code" => -32_000, "message" => "down"})
+      end)
+
+      config =
+        MPP.Plug.init(
+          secret_key: "test-secret-xxxxxxxxxxxxxxxxxxxx",
+          realm: @realm,
+          method: USDC,
+          amount: @amount,
+          currency: @sepolia_usdc,
+          recipient: @recipient,
+          method_config:
+            Map.merge(evm_config(11_155_111), %{
+              "req_options" => [plug: {Req.Test, USDC}],
+              "store" => false
+            })
+        )
+
+      initial = MPP.Plug.call(Plug.Test.conn(:get, "/paid"), config)
+      [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(header)
+      {:ok, json} = Base.url_decode64(challenge.request, padding: false)
+      {:ok, request} = Jason.decode(json)
+      nonce = Binding.authorization_nonce(challenge.id, @realm, request)
+
+      payload =
+        EVMAuthorization.payload(%{
+          currency: @sepolia_usdc,
+          name: "USDC",
+          version: "2",
+          chain_id: 11_155_111,
+          from: EVMAuthorization.signer_address(),
+          recipient: @recipient,
+          amount: @amount,
+          challenge_id: challenge.id,
+          realm: @realm,
+          nonce: nonce,
+          private_key: EVMAuthorization.private_key()
+        })
+
+      conn =
+        :get
+        |> Plug.Test.conn("/paid")
+        |> Plug.Conn.put_req_header(
+          "authorization",
+          Headers.format_credential(%Credential{challenge: challenge, payload: payload})
+        )
+        |> MPP.Plug.call(config)
+
+      InternalPaymentError.assert_plug(conn)
     end
 
     test "a dedup store error is reported and solana profile fields are rejected" do
@@ -652,7 +755,7 @@ defmodule MPP.Methods.USDCTest do
       }
 
       assert {:error, store} = USDC.verify(auth_payload(charge), charge)
-      assert store.detail =~ "Dedup store"
+      InternalPaymentError.assert_error(store)
 
       {payer, seed} = keypair()
       {recipient, _} = keypair()
@@ -703,7 +806,7 @@ defmodule MPP.Methods.USDCTest do
       end)
 
       assert {:error, rpc} = USDC.verify(tx, solana)
-      assert rpc.detail =~ "Solana RPC"
+      InternalPaymentError.assert_error(rpc)
 
       stub_solana(%{
         "getGenesisHash" => @devnet_genesis,
@@ -765,7 +868,7 @@ defmodule MPP.Methods.USDCTest do
       }
 
       assert {:error, offline_error} = USDCSolana.verify(tx, offline)
-      assert offline_error.detail =~ "Solana RPC"
+      InternalPaymentError.assert_error(offline_error)
 
       assert {:error, frozen} = USDC.verify(tx, solana_with_accounts(payer, recipient, :frozen))
       assert frozen.detail =~ "frozen"
@@ -780,7 +883,7 @@ defmodule MPP.Methods.USDCTest do
       assert encoded.detail =~ "could not be decoded"
 
       assert {:error, rpc_account} = USDC.verify(tx, solana_with_accounts(payer, recipient, :account_error))
-      assert rpc_account.detail =~ "Solana RPC"
+      InternalPaymentError.assert_error(rpc_account)
 
       bad_recipient = %{solana | recipient: "not a solana address"}
 

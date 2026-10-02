@@ -95,6 +95,7 @@ defmodule MPP.Session.Actions do
 
   alias MPP.Errors
   alias MPP.Intents.Session
+  alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Session.Channel
   alias MPP.Session.Payload
@@ -466,7 +467,7 @@ defmodule MPP.Session.Actions do
   end
 
   defp store_error({:invalid_amount, field}), do: Errors.new(:invalid_payload, "invalid #{field}")
-  defp store_error(reason), do: Errors.new(:verification_failed, "session store update failed: #{inspect(reason)}")
+  defp store_error(_reason), do: Shared.internal_payment_error()
 
   defp normalize_update({:ok, %Channel{}} = ok), do: ok
   defp normalize_update({:error, _reason} = error), do: error

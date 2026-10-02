@@ -8,6 +8,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.Solana
   alias MPP.Methods.Solana.Confidential
+  alias MPP.Test.InternalPaymentError
   alias Onchain.Solana.ATA
   alias Onchain.Solana.Base58
   alias Onchain.Solana.Keys
@@ -662,7 +663,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
       end)
 
       assert {:error, %Errors{} = error} = Confidential.fetch_snapshot(charge, rpc_opts())
-      assert error.detail == "Solana RPC request failed"
+      InternalPaymentError.assert_error(error)
     end
 
     test "parses a Token-2022 confidential account snapshot" do

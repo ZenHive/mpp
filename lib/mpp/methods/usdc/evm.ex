@@ -355,6 +355,6 @@ defmodule MPP.Methods.USDC.EVM do
 
   defp rpc_failure(reason) do
     Logger.warning("MPP.Methods.USDC.EVM: RPC request failed: #{inspect(reason)}")
-    {:error, Errors.new(:verification_failed, "EVM RPC request failed")}
+    {:error, Shared.internal_payment_error()}
   end
 end

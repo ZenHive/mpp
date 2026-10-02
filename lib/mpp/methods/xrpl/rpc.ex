@@ -1,6 +1,7 @@
 defmodule MPP.Methods.XRPL.RPC do
   @moduledoc false
 
+  alias MPP.Errors
   alias MPP.Methods.Shared
 
   @networks %{"mainnet" => 0, "testnet" => 1, "devnet" => 2}
@@ -33,7 +34,7 @@ defmodule MPP.Methods.XRPL.RPC do
   def timeout(config) when is_map(config), do: Shared.poll_timeout_ms(config)
 
   @doc false
-  @spec call(map(), String.t(), map()) :: {:ok, map()} | :error
+  @spec call(map(), String.t(), map()) :: {:ok, map()} | {:error, Errors.t()}
   def call(config, method, params) when is_map(config) and is_binary(method) and is_map(params) do
     opts =
       Keyword.merge(Map.get(config, "req_options", []),
@@ -44,7 +45,7 @@ defmodule MPP.Methods.XRPL.RPC do
 
     case Req.post(config["rpc_url"], opts) do
       {:ok, %{status: 200, body: %{"result" => result}}} when is_map(result) -> {:ok, result}
-      _ -> :error
+      _ -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -58,7 +59,7 @@ defmodule MPP.Methods.XRPL.RPC do
   end
 
   @doc false
-  @spec submit_blob(String.t(), map()) :: {:ok, String.t()} | :error
+  @spec submit_blob(String.t(), map()) :: {:ok, String.t()} | :error | {:error, Errors.t()}
   def submit_blob(blob, config) when is_binary(blob) and is_map(config) do
     expected = blob_hash(blob)
 
@@ -68,17 +69,19 @@ defmodule MPP.Methods.XRPL.RPC do
          true <- hex?(hash, 64) and String.upcase(hash) == expected do
       {:ok, expected}
     else
+      {:error, %Errors{}} = error -> error
       _ -> :error
     end
   end
 
   @doc false
-  @spec check_network(map()) :: :ok | :error
+  @spec check_network(map()) :: :ok | :error | {:error, Errors.t()}
   def check_network(config) when is_map(config) do
     with {:ok, %{"info" => %{"network_id" => id}}} <- call(config, "server_info", %{}),
          true <- id == @networks[config["network"]] do
       :ok
     else
+      {:error, %Errors{}} = error -> error
       _ -> :error
     end
   end
@@ -88,7 +91,7 @@ defmodule MPP.Methods.XRPL.RPC do
   # A hash this server just submitted is known to exist, so `submitted: true`
   # lets propagation take the full deadline.
   @doc false
-  @spec await_validated(String.t(), map(), keyword()) :: {:ok, map()} | :error
+  @spec await_validated(String.t(), map(), keyword()) :: {:ok, map()} | :error | {:error, Errors.t()}
   def await_validated(hash, config, opts \\ []) when is_binary(hash) and is_map(config) and is_list(opts) do
     budget = if Keyword.get(opts, :submitted, false), do: :infinity, else: @miss_budget
 
@@ -100,6 +103,7 @@ defmodule MPP.Methods.XRPL.RPC do
       {:ok, %{"validated" => true} = result} -> {:ok, result}
       {:ok, %{"error" => "txnNotFound"}} -> miss(hash, config, deadline, misses)
       {:ok, %{"validated" => false}} -> retry(hash, config, deadline, misses)
+      {:error, %Errors{}} = error -> error
       _ -> :error
     end
   end

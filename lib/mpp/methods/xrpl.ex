@@ -161,6 +161,7 @@ defmodule MPP.Methods.XRPL do
   defp submit({:blob, blob}, config) do
     case RPC.submit_blob(blob, config) do
       {:ok, hash} -> {:ok, hash}
+      {:error, %Errors{}} = error -> error
       :error -> failed()
     end
   end
@@ -168,6 +169,7 @@ defmodule MPP.Methods.XRPL do
   defp network(config) do
     case RPC.check_network(config) do
       :ok -> :ok
+      {:error, %Errors{}} = error -> error
       :error -> failed()
     end
   end
@@ -178,6 +180,7 @@ defmodule MPP.Methods.XRPL do
   defp await_transaction(hash, prepared, config) do
     case RPC.await_validated(hash, config, submitted: match?({:blob, _}, prepared)) do
       {:ok, result} -> {:ok, result}
+      {:error, %Errors{}} = error -> error
       :error -> failed()
     end
   end
@@ -412,7 +415,7 @@ defmodule MPP.Methods.XRPL do
     case Store.get(config["store"], store_key(config, suffix)) do
       :not_found -> :ok
       {:ok, _} -> invalid_challenge()
-      _ -> failed()
+      {:error, _} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -420,7 +423,7 @@ defmodule MPP.Methods.XRPL do
     case Store.check_and_mark(config["store"], store_key(config, suffix), true) do
       :ok -> :ok
       {:error, :already_exists} -> invalid_challenge()
-      _ -> failed()
+      {:error, _} -> {:error, Shared.internal_payment_error()}
     end
   end
 

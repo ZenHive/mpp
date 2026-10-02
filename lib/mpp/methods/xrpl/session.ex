@@ -267,6 +267,7 @@ defmodule MPP.Methods.XRPL.Session do
       end
     else
       {:error, {:invalid_channel_id, _}} -> malformed()
+      {:error, %Errors{}} = error -> error
       _ -> failed()
     end
   end
@@ -303,6 +304,9 @@ defmodule MPP.Methods.XRPL.Session do
 
       {:ok, %{"ledger" => %{"close_time" => close_time}}} when is_integer(close_time) ->
         check_closing_window(node, close_time, closing_margin(config))
+
+      {:error, %Errors{}} = error ->
+        error
 
       _ ->
         failed()
@@ -652,6 +656,9 @@ defmodule MPP.Methods.XRPL.Session do
       {:ok, result} ->
         accept_submit(result, hash)
 
+      {:error, %Errors{}} = error ->
+        error
+
       _ ->
         {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
     end
@@ -737,6 +744,9 @@ defmodule MPP.Methods.XRPL.Session do
       {:ok, %{"account_data" => %{"Sequence" => sequence}}} when is_integer(sequence) and sequence >= 0 ->
         {:ok, sequence}
 
+      {:error, %Errors{}} = error ->
+        error
+
       _ ->
         :error
     end
@@ -749,6 +759,9 @@ defmodule MPP.Methods.XRPL.Session do
           {:ok, index} -> {:ok, index + @last_ledger_offset}
           :error -> :error
         end
+
+      {:error, %Errors{}} = error ->
+        error
 
       _ ->
         :error

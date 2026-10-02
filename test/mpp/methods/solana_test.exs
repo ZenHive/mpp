@@ -1,6 +1,7 @@
 defmodule MPP.Methods.SolanaTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Credential
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
@@ -10,6 +11,7 @@ defmodule MPP.Methods.SolanaTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.InternalPaymentError
   alias Onchain.Solana.ATA
   alias Onchain.Solana.Base58
   alias Onchain.Solana.Keys
@@ -1160,7 +1162,7 @@ defmodule MPP.Methods.SolanaTest do
       charge = put_details(charge, %{"store" => AtomicFailStore})
 
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
     test "a signature reserved by an in-flight pull is refused as a push credential", %{
@@ -1408,7 +1410,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
 
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
     test "a release is skipped when the settled key cannot be read", %{
@@ -1429,7 +1431,7 @@ defmodule MPP.Methods.SolanaTest do
       charge = put_details(charge, %{"store" => ReservedGetFailStore, "challenge_id" => "challenge-a"})
 
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
     test "a settle-mark store failure fails closed", %{
@@ -1442,7 +1444,7 @@ defmodule MPP.Methods.SolanaTest do
       stub_pull_success(signature, parsed)
 
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
     for store <- [ErrorDeleteStore, RaisingDeleteStore, ExitingDeleteStore] do
@@ -1494,7 +1496,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "signature", "signature" => fake_signature()}, charge)
 
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
 
     test "atomic commit collision is rejected as replay", %{
@@ -1524,7 +1526,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "signature", "signature" => signature}, charge)
 
-      assert error.detail == "Dedup store error"
+      InternalPaymentError.assert_error(error)
     end
   end
 
@@ -1538,7 +1540,48 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "signature", "signature" => fake_signature()}, charge)
 
-      assert error.detail == "Solana RPC request failed"
+      InternalPaymentError.assert_error(error)
+    end
+
+    test "RPC transport error returns internal-payment-error without a challenge", %{recipient: recipient} do
+      Req.Test.stub(Solana, fn conn ->
+        {_, id, conn} = read_request(conn)
+        rpc_json(conn, id, "error", %{"code" => -32_000, "message" => "down"})
+      end)
+
+      config =
+        PaymentPlug.init(
+          secret_key: String.duplicate("s", 32),
+          realm: "api.example.com",
+          method: Solana,
+          amount: Integer.to_string(@amount),
+          currency: "sol",
+          recipient: Keys.to_address(recipient),
+          method_config: %{
+            "rpc_url" => @rpc_url,
+            "network" => "devnet",
+            "push" => "unbound",
+            "store" => false,
+            "req_options" => [plug: {Req.Test, Solana}]
+          }
+        )
+
+      initial = :get |> Plug.Test.conn("/resource") |> PaymentPlug.call(config)
+      [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+      assert {:ok, challenge} = Headers.parse_challenge(header)
+
+      credential = %Credential{
+        challenge: challenge,
+        payload: %{"type" => "signature", "signature" => fake_signature()}
+      }
+
+      conn =
+        :get
+        |> Plug.Test.conn("/resource")
+        |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+        |> PaymentPlug.call(config)
+
+      InternalPaymentError.assert_plug(conn)
     end
 
     test "simulateTransaction transport failure is a generic RPC error", context do
@@ -1554,7 +1597,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
 
-      assert error.detail == "Solana RPC request failed"
+      InternalPaymentError.assert_error(error)
     end
 
     test "on-chain error after send is rejected", context do
@@ -1602,7 +1645,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
 
-      assert error.detail =~ "Timed out"
+      InternalPaymentError.assert_error(error)
     end
 
     test "wait_for_confirmation false returns after sendTransaction", context do
@@ -1654,7 +1697,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
 
-      assert error.detail == "Solana RPC request failed"
+      InternalPaymentError.assert_error(error)
     end
   end
 
@@ -2283,7 +2326,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:error, %Errors{} = error} =
                Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
 
-      assert error.detail == "Solana RPC request failed"
+      InternalPaymentError.assert_error(error)
     end
   end
 
@@ -2960,7 +3003,7 @@ defmodule MPP.Methods.SolanaTest do
   end
 
   defp present_signature(config, challenge, signature) do
-    credential = %MPP.Credential{
+    credential = %Credential{
       challenge: challenge,
       payload: %{"type" => "signature", "signature" => signature}
     }

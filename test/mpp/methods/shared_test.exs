@@ -99,4 +99,13 @@ defmodule MPP.Methods.SharedTest do
       assert Shared.poll_timeout_ms(%{}) == 60_000
     end
   end
+
+  describe "internal_payment_error/0" do
+    test "returns the fixed 500 problem with no internals" do
+      error = Shared.internal_payment_error()
+      assert error.status == 500
+      assert error.type == "https://paymentauth.org/problems/internal-payment-error"
+      assert error.detail == "An internal payment error occurred."
+    end
+  end
 end

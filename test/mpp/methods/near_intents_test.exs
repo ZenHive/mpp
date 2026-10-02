@@ -1,12 +1,16 @@
 defmodule MPP.Methods.NearIntentsTest do
   use ExUnit.Case, async: false
 
+  alias MPP.Credential
   alias MPP.Errors
+  alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.NearIntents
   alias MPP.Methods.NearIntents.Origin
+  alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.RPCShapes
 
   @one_click_url "https://1click.example"
@@ -433,10 +437,12 @@ defmodule MPP.Methods.NearIntentsTest do
       )
     end
 
-    test "classifies origin RPC failure and unsupported direct-RPC origins as server errors", %{charge: charge} do
+    test "classifies origin RPC failure as internal-payment-error and unsupported origins as server errors", %{
+      charge: charge
+    } do
       charge = with_origin_rpc(charge)
       Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
-      assert_error(verify(charge), "server-error", "Origin RPC")
+      InternalPaymentError.assert_error(verify(charge))
 
       charge = put_in(charge.method_details["origin_network"], "near:mainnet")
       charge = %{charge | currency: "near:mainnet/nep141:usdt.tether-token.near"}
@@ -446,6 +452,44 @@ defmodule MPP.Methods.NearIntentsTest do
         "server-error",
         "supports eip155"
       )
+    end
+
+    test "origin RPC transport error returns internal-payment-error without a challenge" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      config =
+        PaymentPlug.init(
+          secret_key: String.duplicate("s", 32),
+          realm: "api.example.com",
+          method: NearIntents,
+          amount: @amount_in,
+          currency: @origin_asset,
+          recipient: @deposit_address,
+          method_config:
+            method_config(%{
+              "origin_rpc_url" => @origin_rpc_url,
+              "origin_req_options" => [plug: {Req.Test, __MODULE__}],
+              "store" => false
+            })
+        )
+
+      initial = :get |> Plug.Test.conn("/") |> PaymentPlug.call(config)
+      [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+      assert {:ok, challenge} = Headers.parse_challenge(header)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/")
+        |> Plug.Conn.put_req_header(
+          "authorization",
+          Headers.format_credential(%Credential{
+            challenge: challenge,
+            payload: %{"type" => "hash", "hash" => @origin_hash}
+          })
+        )
+        |> PaymentPlug.call(config)
+
+      InternalPaymentError.assert_plug(conn)
     end
 
     test "verifies native EVM deposits", %{charge: charge} do
@@ -505,7 +549,7 @@ defmodule MPP.Methods.NearIntentsTest do
         end
       end)
 
-      assert_error(verify(native), "server-error", "Origin RPC")
+      InternalPaymentError.assert_error(verify(native))
     end
   end
 

@@ -101,7 +101,7 @@ defmodule MPP.Methods.Solana.Confidential do
           parse_snapshot(account)
 
         {:error, _reason} ->
-          error("Solana RPC request failed")
+          {:error, Shared.internal_payment_error()}
       end
     end
   end

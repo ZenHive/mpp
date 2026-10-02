@@ -1,14 +1,18 @@
 defmodule MPP.Methods.StellarTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Credential
   alias MPP.Errors
+  alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Methods.Stellar
   alias MPP.Methods.Stellar.Envelope
   alias MPP.Methods.Stellar.RPC
+  alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.Stellar, as: Fixtures
 
   @rpc_url "https://soroban-testnet.stellar.org"
@@ -446,7 +450,7 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, error} = RPC.send_transaction(context.signed, context.charge.method_details)
-    assert error.status == 503
+    assert error.status == 500
     assert {:ok, %{"status" => "SUCCESS"}} = RPC.get_transaction(context.hash, context.charge.method_details)
     assert {:ok, %{"status" => "SUCCESS"}} = RPC.await_transaction(context.hash, context.charge.method_details)
     assert {:error, sim} = RPC.simulate(context.signed, context.charge.method_details)
@@ -473,14 +477,14 @@ defmodule MPP.Methods.StellarTest do
     assert {:ok, _} = Stellar.verify(payload, charge)
   end
 
-  test "JSON-RPC error objects are settlement-unavailable", context do
+  test "JSON-RPC error objects are internal-payment-error", context do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)
       Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => 1, "error" => %{"code" => -32_000, "message" => "unavailable"}})
     end)
 
     assert {:error, error} = RPC.get_latest_ledger(context.charge.method_details)
-    assert error.status == 503
+    InternalPaymentError.assert_error(error)
   end
 
   test "RPC unavailability during simulation is a server error", context do
@@ -489,7 +493,47 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, error} = Stellar.verify(%{"type" => "transaction", "transaction" => context.signed}, context.charge)
-    assert error.status == 503
+    InternalPaymentError.assert_error(error)
+  end
+
+  test "RPC transport error returns internal-payment-error without a challenge", context do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.transport_error(conn, :econnrefused)
+    end)
+
+    config =
+      PaymentPlug.init(
+        secret_key: String.duplicate("s", 32),
+        realm: "api.example.com",
+        method: Stellar,
+        amount: "1000000",
+        currency: @native_sac,
+        recipient: context.recipient.public,
+        method_config: %{
+          "rpc_url" => @rpc_url,
+          "network" => "stellar:testnet",
+          "store" => false,
+          "req_options" => [plug: {Req.Test, __MODULE__}]
+        }
+      )
+
+    initial = :get |> Plug.Test.conn("/") |> PaymentPlug.call(config)
+    [header] = Plug.Conn.get_resp_header(initial, "www-authenticate")
+    assert {:ok, challenge} = Headers.parse_challenge(header)
+
+    conn =
+      :get
+      |> Plug.Test.conn("/")
+      |> Plug.Conn.put_req_header(
+        "authorization",
+        Headers.format_credential(%Credential{
+          challenge: challenge,
+          payload: %{"type" => "hash", "hash" => context.hash}
+        })
+      )
+      |> PaymentPlug.call(config)
+
+    InternalPaymentError.assert_plug(conn)
   end
 
   test "unsigned unsponsored pull is verification-failed before RPC", context do
@@ -758,7 +802,7 @@ defmodule MPP.Methods.StellarTest do
     charge = %{context.charge | method_details: Map.put(context.charge.method_details, "store", GetFailStore)}
     stub_rpc(context, fn "getTransaction" -> %{"status" => "SUCCESS", "envelopeXdr" => context.signed} end)
     assert {:error, read} = Stellar.verify(%{"type" => "hash", "hash" => context.hash}, charge)
-    assert read.detail == "Dedup store error"
+    assert read.detail == "An internal payment error occurred."
 
     exists = %{context.charge | method_details: Map.put(context.charge.method_details, "store", AlreadyExistsStore)}
     assert {:error, replay} = Stellar.verify(%{"type" => "hash", "hash" => context.hash}, exists)
@@ -766,7 +810,7 @@ defmodule MPP.Methods.StellarTest do
 
     atomic = %{context.charge | method_details: Map.put(context.charge.method_details, "store", AtomicFailStore)}
     assert {:error, commit} = Stellar.verify(%{"type" => "hash", "hash" => context.hash}, atomic)
-    assert commit.detail == "Dedup store error"
+    assert commit.detail == "An internal payment error occurred."
   end
 
   test "sponsored pull covers secret, auth-tree, resource fee and missing send hash", context do
@@ -1189,25 +1233,25 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, http} = RPC.get_latest_ledger(config)
-    assert http.status == 503
+    assert http.status == 500
 
     stub_rpc(context, fn
       "getLatestLedger" -> %{"latestLedger" => 1}
     end)
 
     assert {:error, latest} = RPC.get_latest_ledger(config)
-    assert latest.status == 503
+    InternalPaymentError.assert_error(latest)
 
     Req.Test.stub(__MODULE__, fn conn ->
       Req.Test.transport_error(conn, :econnrefused)
     end)
 
     assert {:error, send_err} = RPC.send_transaction(context.signed, config)
-    assert send_err.status == 503
+    InternalPaymentError.assert_error(send_err)
     assert {:error, get_err} = RPC.get_transaction(context.hash, config)
-    assert get_err.status == 503
+    InternalPaymentError.assert_error(get_err)
     assert {:error, await_err} = RPC.await_transaction(context.hash, short)
-    assert await_err.status == 503
+    InternalPaymentError.assert_error(await_err)
 
     stub_rpc(context, fn
       "getTransaction" -> %{"status" => "NOT_FOUND"}
@@ -1253,7 +1297,7 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, bad_xdr} = RPC.account_sequence(context.payer.public, config)
-    assert bad_xdr.status == 503
+    InternalPaymentError.assert_error(bad_xdr)
 
     stub_rpc(context, fn
       "getLedgerEntries" -> %{"entries" => [%{"xdr" => 12}]}
@@ -1292,7 +1336,7 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, horizon_down} = RPC.account_sequence(context.payer.public, config)
-    assert horizon_down.status == 503
+    InternalPaymentError.assert_error(horizon_down)
 
     Req.Test.stub(__MODULE__, fn conn ->
       case conn.method do
@@ -1306,17 +1350,17 @@ defmodule MPP.Methods.StellarTest do
     end)
 
     assert {:error, missing} = RPC.account_sequence(context.payer.public, config)
-    assert missing.status == 503
+    InternalPaymentError.assert_error(missing)
 
     assert {:error, invalid} = RPC.account_sequence("not-an-account", config)
-    assert invalid.status == 503
+    InternalPaymentError.assert_error(invalid)
 
     stub_rpc(context, fn
       "sendTransaction" -> %{"status" => "UNKNOWN"}
     end)
 
     assert {:error, weird} = RPC.send_transaction(context.signed, config)
-    assert weird.status == 503
+    InternalPaymentError.assert_error(weird)
 
     pubnet_default = Map.put(config, "network", "stellar:pubnet")
 

@@ -53,6 +53,7 @@ defmodule MPP.Methods.Stripe.Subscription do
   alias MPP.Errors
   alias MPP.Intents.Subscription
   alias MPP.JCS
+  alias MPP.Methods.Shared
   alias MPP.Receipt
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
@@ -1304,10 +1305,10 @@ defmodule MPP.Methods.Stripe.Subscription do
         {:absent, Errors.new(:verification_failed, "Stripe subscription activation failed")}
 
       {:error, _reason} ->
-        {:uncertain, Errors.new(:verification_failed, "Stripe subscription activation failed")}
+        {:uncertain, Shared.internal_payment_error()}
 
       {:ok, _body} ->
-        {:uncertain, Errors.new(:verification_failed, "Stripe returned an invalid Subscription")}
+        {:uncertain, Shared.internal_payment_error()}
     end
   end
 

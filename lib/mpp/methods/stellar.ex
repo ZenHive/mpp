@@ -33,7 +33,6 @@ defmodule MPP.Methods.Stellar do
   @store_key_prefix "mpp:stellar:"
   @ledger_close_seconds 5
   @default_challenge_expiry 300
-  @dedup_store_error_detail "Dedup store error"
 
   api(:method_name, "Return the Stellar payment method identifier.")
 
@@ -394,7 +393,7 @@ defmodule MPP.Methods.Stellar do
     case Store.get(store, key) do
       :not_found -> :ok
       {:ok, _} -> {:error, Errors.new(:invalid_challenge, "Stellar credential has already been used")}
-      {:error, _} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _} -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -414,7 +413,7 @@ defmodule MPP.Methods.Stellar do
     case Store.check_and_mark(store, key, System.system_time(:millisecond)) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Stellar credential has already been used")}
-      {:error, _} -> {:error, Errors.new(:verification_failed, @dedup_store_error_detail)}
+      {:error, _} -> {:error, Shared.internal_payment_error()}
     end
   end
 
