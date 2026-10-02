@@ -1709,7 +1709,8 @@ defmodule MPP.PlugTest do
                  close_requested: false,
                  finalized: false
                }}
-            end
+            end,
+            "settle_close" => fn _payload, _channel, _opts -> {:ok, %{tx_hash: "0x" <> String.duplicate("cd", 32)}} end
           },
           store: false
         )
@@ -1777,6 +1778,7 @@ defmodule MPP.PlugTest do
       close_conn = send_success(close_conn)
       {:ok, close_receipt} = Headers.parse_receipt(get_resp_header(close_conn, "payment-receipt"))
       assert close_receipt.extensions["action"] == "close"
+      assert close_receipt.reference == "0x" <> String.duplicate("cd", 32)
     end
 
     test "equal session vouchers return delta-too-small through HTTP, MCP, and JSON-RPC", %{config: config} do

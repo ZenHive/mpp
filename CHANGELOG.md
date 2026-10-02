@@ -10,6 +10,17 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
+- **Breaking: session methods built on `MPP.Session.Method` require a
+  `settle_close` callback.** `close` calls it with the validated close voucher;
+  it must close the channel on-chain and return `{:ok, %{tx_hash: ...}}`. The
+  channel is marked closed only after it succeeds, and the receipt reference is
+  the close transaction hash. The highest accepted voucher signature is kept
+  on the channel. `validate_config!/1` raises without the callback.
+- **Session vouchers require low-s signatures**, matching what the escrow
+  settles.
+- **Tempo hash credentials are canonicalized** to the lowercase `0x` form before
+  dedup, receipt lookup and the receipt reference.
+
 - **Requires onchain `~> 0.16`, onchain_tempo `~> 0.13` and onchain_solana `~> 0.1`;
   `cartouche` and `curvy` are gone from the dependency tree.** secp256k1 runs on
   `ex_secp256k1` (RustCrypto k256). Signatures are `%Onchain.Signature{}`, Solana

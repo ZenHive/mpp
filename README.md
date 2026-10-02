@@ -211,7 +211,10 @@ Session methods built on `MPP.Session.Method` must verify channel funding on the
 server: `open` and `topUp` take the `:verify_open` / `:verify_top_up` callbacks
 (or the server-only `"verify_open"` / `"verify_top_up"` method-config keys),
 which return the confirmed `%{deposit, settled, close_requested, finalized}`
-state. Without them both actions fail closed. See `MPP.Session.Actions`.
+state. Without them both actions fail closed. `close` likewise requires the
+`:settle_close` callback (or the `"settle_close"` key), which submits the escrow
+close and returns the mined `tx_hash`; the channel closes only after it
+succeeds. See `MPP.Session.Actions`.
 
 ### NEAR Intents (1Click)
 

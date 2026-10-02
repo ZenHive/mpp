@@ -23,6 +23,7 @@ defmodule MPP.Session.ActionsTest do
   @tip1034_signature "0x543a3c0d8484f2f0e2a6f190c87e07803cf96b9abdd6d15337455469c003861f40ef9cbf9411ef324692c1bfbc384efee9fd0476d1cd46743afcd6c82638b3b11b"
   @tip1034_amount 50
   @zero_address "0x0000000000000000000000000000000000000000"
+  @close_tx_hash "0x" <> String.duplicate("ab", 32)
 
   defmodule FailingStore do
     @moduledoc false
@@ -58,7 +59,7 @@ defmodule MPP.Session.ActionsTest do
       assert channel.deposit == 1_000
       assert channel.cumulative_amount == 100
       assert channel.spent == 10
-      assert is_nil(channel.proof)
+      assert channel.proof == Channel.new_proof(100, sign(@channel_id, 100), nil)
       assert Channel.available_balance(channel) == 90
       assert Channel.remaining_deposit(channel) == 900
 
@@ -76,8 +77,10 @@ defmodule MPP.Session.ActionsTest do
 
       assert {:ok, close_receipt} = Actions.dispatch(close_payload(250), opts)
       assert close_receipt.extensions["action"] == "close"
+      assert close_receipt.reference == @close_tx_hash
       assert {:ok, closed} = Store.get(store, @channel_id)
       assert closed.status == :closed
+      assert closed.proof.tx_hash == @close_tx_hash
       assert closed.cumulative_amount == 250
       assert closed.spent == 20
     end
@@ -381,6 +384,73 @@ defmodule MPP.Session.ActionsTest do
 
       assert {:error, %Errors{} = above} = Actions.dispatch(close_payload(2_000), opts)
       assert String.contains?(above.type, "amount-exceeds-deposit")
+    end
+
+    test "fails closed without a settlement callback and leaves the channel active", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      for settle <- [nil, :other, fn _payload, _opts -> {:ok, %{tx_hash: @close_tx_hash}} end] do
+        assert {:error, %Errors{} = error} = Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, settle))
+        assert String.contains?(error.type, "verification-failed")
+        assert error.detail =~ "settle_close"
+      end
+
+      assert {:ok, %Channel{status: :active}} = Store.get(store, @channel_id)
+    end
+
+    test "a failed or malformed settlement leaves the channel active", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      reverted = Errors.new(:verification_failed, "close transaction reverted")
+
+      assert {:error, ^reverted} =
+               Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> {:error, reverted} end))
+
+      for result <- [
+            :ok,
+            {:ok, %{}},
+            {:ok, %{tx_hash: "0xdead"}},
+            {:ok, %{tx_hash: "0x" <> String.duplicate("zz", 32)}},
+            {:ok, %{tx_hash: String.duplicate("ab", 32)}},
+            {:error, :timeout}
+          ] do
+        assert {:error, %Errors{} = error} =
+                 Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> result end))
+
+        assert error.detail =~ "close settlement failed"
+      end
+
+      assert {:ok, %Channel{status: :active, cumulative_amount: 50}} = Store.get(store, @channel_id)
+    end
+
+    test "settles with the validated close and records the canonical transaction hash", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      test_pid = self()
+
+      settle = fn payload, channel, _opts ->
+        send(test_pid, {:settle, payload, channel})
+        {:ok, %{tx_hash: @close_tx_hash |> String.upcase() |> String.replace_prefix("0X", "0x")}}
+      end
+
+      assert {:ok, receipt} = Actions.dispatch(close_payload(80), Keyword.put(opts, :settle_close, settle))
+      assert receipt.reference == @close_tx_hash
+      assert receipt.extensions["acceptedCumulative"] == "80"
+
+      signature = sign(@channel_id, 80)
+
+      assert_received {:settle, %Payload{action: :close, cumulative_amount: 80, signature: ^signature},
+                       %Channel{status: :closed, cumulative_amount: 80}}
+
+      assert {:ok, %Channel{status: :closed, proof: proof}} = Store.get(store, @channel_id)
+      assert %{amount: 80, signature: ^signature, tx_hash: @close_tx_hash} = proof
+    end
+
+    test "rejects an invalid close before calling the settlement callback", %{opts: opts} do
+      opts = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("settlement called") end)
+
+      assert {:error, %Errors{status: 410}} = Actions.dispatch(close_payload(50), opts)
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      assert {:error, %Errors{} = below} = Actions.dispatch(close_payload(5), opts)
+      assert below.detail =~ "spent"
     end
   end
 
@@ -1191,7 +1261,8 @@ defmodule MPP.Session.ActionsTest do
       method_name: "mocksession",
       escrow_contract: @tip1034_escrow,
       chain_id: 42_431,
-      authorized_signer: @signer
+      authorized_signer: @signer,
+      settle_close: fn _payload, _channel, _opts -> {:ok, %{tx_hash: @close_tx_hash}} end
     ]
   end
 

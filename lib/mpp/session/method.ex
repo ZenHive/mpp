@@ -19,8 +19,9 @@ defmodule MPP.Session.Method do
       def credential_types, do: ["transaction"]
 
       @doc """
-      Require the voucher verification domain, signer, and open funding
-      verifier (`verify_open`, see `MPP.Session.Actions`) at method initialization.
+      Require the voucher verification domain, signer, open funding verifier
+      (`verify_open`) and close settlement callback (`settle_close`) at method
+      initialization; see `MPP.Session.Actions`.
       """
       @spec validate_config!(map()) :: :ok
       @impl MPP.Method
@@ -28,6 +29,7 @@ defmodule MPP.Session.Method do
         required = ~w(escrow_contract chain_id authorized_signer)
         missing = Enum.filter(required, &is_nil(config[&1]))
         missing = if is_function(config["verify_open"], 2), do: missing, else: missing ++ ["verify_open"]
+        missing = if is_function(config["settle_close"], 3), do: missing, else: missing ++ ["settle_close"]
 
         if missing != [] do
           raise ArgumentError,

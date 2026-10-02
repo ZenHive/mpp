@@ -52,6 +52,21 @@ defmodule MPP.Session.Actions do
   token must match the configured recipient and token. A credential's
   top-level `authorizedSigner` must equal that signer. Vouchers and closes are
   verified against the stored signer only.
+
+  The highest accepted voucher signature is kept on the channel as its
+  settlement proof.
+
+  `close` requires a settlement callback, passed as the `:settle_close` option
+  or the server-only `"settle_close"` method-config key. Once the close voucher
+  has been validated, `close` calls `settle.(payload, closing_channel, opts)`.
+  The callback MUST submit the escrow close (or settle) for that voucher, wait
+  for the transaction to succeed at the finality the server requires, and
+  return `{:ok, %{tx_hash: "0x" <> 64 hex}}` or `{:error, %MPP.Errors{}}`. Only
+  then is the channel marked closed; the hash is recorded on its proof and
+  returned as the receipt reference. Without a callback, on an error, or on any
+  other result, the close is rejected and the channel stays active. Methods
+  that redeem closed channels themselves (`MPP.Methods.XRPL.Session`) pass
+  `settle_close: :caller`.
   """
 
   alias MPP.Errors
@@ -168,9 +183,64 @@ defmodule MPP.Session.Actions do
     with_channel_signer(payload, opts, &accept_voucher/3)
   end
 
+  # A close finalizes the channel only after the escrow settled it on-chain:
+  # the configured `settle_close` callback submits the close and returns the
+  # mined transaction hash. Methods that redeem closed channels themselves
+  # (XRPL `redeem/2`) pass `settle_close: :caller`.
   defp handle_close(payload, opts) do
-    with_channel_signer(payload, opts, &close_channel/3)
+    case Keyword.get(opts, :settle_close) do
+      :caller ->
+        with_channel_signer(payload, opts, &close_channel/3)
+
+      fun when is_function(fun, 3) ->
+        settle_and_close(payload, fun, opts)
+
+      _ ->
+        {:error,
+         Errors.new(
+           :verification_failed,
+           "close requires a configured settlement callback (settle_close) that closes the channel on-chain"
+         )}
+    end
   end
+
+  defp settle_and_close(payload, settle, opts) do
+    with {:ok, current} <- fetch_live_channel(payload, opts),
+         signer = channel_signer(current, opts),
+         :ok <- ensure_same_descriptor(payload, signer, opts),
+         :ok <- maybe_verify_signature(payload, signer, opts),
+         {:ok, closing} <- close_channel(current, payload, opts),
+         {:ok, tx_hash} <- payload |> settle.(closing, opts) |> close_settlement(),
+         {:ok, receipt} <-
+           with_channel_signer(payload, opts, fn channel, payload, opts ->
+             with {:ok, closed} <- close_channel(channel, payload, opts) do
+               {:ok, put_close_tx_hash(closed, tx_hash)}
+             end
+           end) do
+      {:ok, %{receipt | reference: tx_hash}}
+    else
+      {:error, {:invalid_transition, _status, _to} = reason} -> {:error, store_error(reason)}
+      {:error, {:invalid_amount, _field} = reason} -> {:error, store_error(reason)}
+      other -> other
+    end
+  end
+
+  defp close_settlement({:ok, %{tx_hash: "0x" <> hex}}) when byte_size(hex) == 64 do
+    if MPP.Hex.hex_string?(hex),
+      do: {:ok, "0x" <> String.downcase(hex)},
+      else: close_settlement_failure({:ok, %{tx_hash: "0x" <> hex}})
+  end
+
+  defp close_settlement({:error, %Errors{}} = error), do: error
+  defp close_settlement(other), do: close_settlement_failure(other)
+
+  defp close_settlement_failure(result),
+    do: {:error, Errors.new(:verification_failed, "close settlement failed: #{inspect(result)}")}
+
+  defp put_close_tx_hash(%Channel{proof: proof} = channel, tx_hash) when is_map(proof),
+    do: %{channel | proof: Map.put(proof, :tx_hash, tx_hash)}
+
+  defp put_close_tx_hash(channel, _tx_hash), do: channel
 
   # Voucher and close signatures are checked against the signer recorded on
   # the channel at open, never against a signer named by the credential. The
@@ -278,6 +348,8 @@ defmodule MPP.Session.Actions do
     end
   end
 
+  # The highest accepted voucher signature is retained so the channel can be
+  # settled on-chain. XRPL claims also carry the ledger PublicKey.
   defp settlement_proof(%Payload{signature: signature, cumulative_amount: amount}, opts)
        when is_binary(signature) and signature != "" do
     case Keyword.get(opts, :proof) do
@@ -285,7 +357,7 @@ defmodule MPP.Session.Actions do
         Channel.new_proof(amount, signature, key)
 
       _ ->
-        nil
+        Channel.new_proof(amount, signature, nil)
     end
   end
 
@@ -606,7 +678,8 @@ defmodule MPP.Session.Actions do
       request_amount: Map.get(details, "request_amount", session.amount),
       method_name: Map.get(details, "method", "session"),
       verify_open: Map.get(details, "verify_open"),
-      verify_top_up: Map.get(details, "verify_top_up")
+      verify_top_up: Map.get(details, "verify_top_up"),
+      settle_close: Map.get(details, "settle_close")
     ]
   end
 

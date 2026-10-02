@@ -11,10 +11,9 @@ defmodule MPP.Session.Channel do
   Channel lifecycle is deliberately small: a new channel is `:open`, may be
   activated once, and an active channel may be closed once.
 
-  `proof` holds the highest accepted method-specific settlement material
-  (for XRPL: cumulative drops, claim signature, ledger PublicKey, and after
-  a validated `PaymentChannelClaim` the claim `tx_hash`). Tempo leaves it
-  `nil`.
+  `proof` holds the highest accepted settlement material: the cumulative
+  amount and its voucher or claim signature, plus the XRPL ledger PublicKey
+  (`nil` for Tempo), and after on-chain settlement the settling `tx_hash`.
   """
 
   import Bitwise, only: [<<<: 2]
@@ -33,7 +32,7 @@ defmodule MPP.Session.Channel do
   @type proof :: %{
           required(:amount) => non_neg_integer(),
           required(:signature) => String.t(),
-          required(:public_key) => String.t(),
+          required(:public_key) => String.t() | nil,
           optional(:tx_hash) => String.t()
         }
   @type id_params :: %{
@@ -393,9 +392,10 @@ defmodule MPP.Session.Channel do
 
   defp normalize_proof(nil, _amount), do: {:ok, nil}
 
-  defp normalize_proof(%{amount: amount, signature: signature, public_key: key}, amount)
-       when is_binary(signature) and signature != "" and is_binary(key) and key != "" do
-    {:ok, new_proof(amount, signature, key)}
+  defp normalize_proof(%{amount: amount, signature: signature, public_key: key} = proof, amount)
+       when is_binary(signature) and signature != "" and ((is_binary(key) and key != "") or is_nil(key)) do
+    proof = Map.take(proof, [:amount, :signature, :public_key, :tx_hash])
+    {:ok, Map.merge(new_proof(amount, signature, key), proof)}
   end
 
   defp normalize_proof(_proof, _amount), do: {:error, :invalid_proof}
