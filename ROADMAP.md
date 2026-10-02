@@ -11,11 +11,11 @@
 > **Philosophy reminder:** This is a library, not an app. Explicit credentials, no global config, no ENV fallback. Per-route pricing via Plug opts. Stateless HMAC-bound challenges.
 
 <!-- FOCUS:BEGIN -->
-**Focus phase:** 12 — Client SDK (9 of 10 done · 0 in progress)
+**Focus phase:** 12 — Client SDK (9 of 11 done · 0 in progress)
 
-**Last shipped:** Task 140 — Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) on 2026-09-24
+**Last shipped:** no recent shipments
 
-**Up next:** Task 137 — Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀
+**Up next:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -40,6 +40,9 @@
 | Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33] 📋 |
 | Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33] 📋 |
 | Task 138 | ✅ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯 |
+| Task 144 | ⬜ | 🎁 **core-protocol** · Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
+| Task 145 | ⬜ | 🎁 **core-protocol** · Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447) [D:5/B:6/U:5 → Eff:1.1] 📋 |
+| Task 146 | ⬜ | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -75,7 +78,7 @@
 > 8 tasks complete (v0.2.0). Hash + transaction credential paths, fee payer co-signing, optimistic broadcast, dedup store, ConCacheStore, integration tests against Moderato testnet, ox/tempo cross-validation.
 
 <!-- TASKS:BEGIN phase=4 -->
-> 5 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-4-tempo-payment-method).
+> 6 tasks. See [CHANGELOG.md](CHANGELOG.md#phase-4-tempo-payment-method).
 <!-- TASKS:END -->
 
 ---
@@ -149,6 +152,7 @@
 | Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
 | Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
 | Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
+| Task 148 | ⬜ | 🎁 **session** · Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550) [D:4/B:5/U:5 → Eff:1.25] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -180,6 +184,7 @@
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17?] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
 | Task 140 | ✅ | 🎁 **client-sdk** · Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) [D:2/B:4/U:4 → Eff:2.0] 🎯 |
+| Task 150 | ⬜ | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
 ---

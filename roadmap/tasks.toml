@@ -3926,6 +3926,165 @@ created_at = "2026-09-24"
 scored_at = "2026-09-24"
 done_at = "2026-09-25"
 
+[[task]]
+id = "144"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514)"
+scores = { d = 4, b = 7, u = 6 }
+acceptance_criteria = ["An RPC/store/internal failure in Tempo and EVM verification returns internal-payment-error with HTTP 500, no WWW-Authenticate challenge, and a fixed detail that leaks no internals; tests pin this for both methods", "A non-%MPP.Errors{} error from a method's verify/2 surfaces as internal-payment-error (500), not verification_failed", "Echoed-challenge field mismatch returns the spec's invalid-challenge problem type; credential-mismatch is no longer emitted (or is documented as an alias if a spec reference requires it)", "Stripe requires_action returns payment_action_required; test/mpp/methods/stripe_test.exs updated", "Challenge parsing rejects a malformed intent, a non-base64url opaque, a malformed sha-256 digest, and a header other than Payment-Authorization, each with a distinct error", "MCP and JSON-RPC error-code mapping (MPP.Mcp.error_code/1) stays consistent with the new problem types"]
+out_of_scope = ["Changing which failures are retried client-side", "New problem types not in the spec"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+mpp-rs #496 (597ff33) and #430 (e072551) corrected how payment failures map to RFC 9457 problem types. Our mapping diverges in three places, each confirmed by reading the code on 2026-10-02:
+
+1. `MPP.Verifier` turns any non-`%MPP.Errors{}` `{:error, reason}` into `verification_failed`: a 402 with a fresh challenge (lib/mpp/verifier.ex:146-148). Tempo and EVM RPC failures also become `verification_failed` (methods/tempo.ex `rpc_fetch_receipt`, evm.ex ~405-419). A 402 re-challenge tells the client to pay again. When a broadcast succeeded but the receipt fetch failed, the client double-pays. Upstream answers infrastructure failures (RPC, store, upstream provider) with `internal-payment-error`: 500, a fixed detail and no challenge.
+2. A mismatch in an echoed challenge field maps to `credential-mismatch`, which is not in the spec's problem table (refs/mpp-specs/specs/core/draft-httpauth-payment-01.md problem registry). Upstream uses `invalid-challenge`.
+3. Stripe `requires_action` maps to `verification_failed` (lib/mpp/methods/stripe.ex ~437), but `MPP.Errors` already defines `payment_action_required`.
+
+Also port the parse-time field-grammar checks from #496: intent token grammar, base64url `opaque`, base64 after `sha-256=` in `digest`, and `header` limited to `Payment-Authorization`. Then no field that feeds the HMAC id can contain the `|` separator.
+
+Verify the problem-type names and status codes against refs/mpp-rs/src/error.rs and refs/mppx/src/Errors.ts. Where they disagree, the spec text wins.
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "145"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447)"
+scores = { d = 5, b = 6, u = 5 }
+acceptance_criteria = ["Formatting a challenge with realm/description containing U+00E9, a C0 control and DEL yields only 0x09/0x20-0x7E bytes on the wire, and parse(format(x)) == x", 'The HTTP client parses a WWW-Authenticate whose description is the single Latin-1 byte 0xE9 into the string "é" and can build a credential from it without raising', "A challenge ending in `description=` and one with `description=,` parse successfully with an empty description", 'Challenge.create with header: "Cookie" does not emit or HMAC-bind that header; credential_header/1 returns Authorization for it; Payment-Authorization matches case-insensitively', "A credential echoing a legacy object-form opaque verifies against a challenge whose opaque is the base64url(JCS) of that object", "MCP client keeps valid challenges when one entry in error.data.challenges is malformed, and errors only when all are malformed", "headers.ex 16 KiB comment matches mpp-rs #540", ":cross_validation round-trip test against mppx for the escaping change, or a stated reason it cannot run"]
+out_of_scope = ["Problem-type mapping (separate task)", "Accept-Payment grammar (separate task)"]
+assignee = "grok"
+model = "grok-4.7"
+body = '''
+A batch of mpp-rs fixes to WWW-Authenticate challenge encoding and parsing. They are coupled: they share lib/mpp/headers.ex and lib/mpp/challenge.ex, and #450 and #489 must ship together or our own server's output decodes as mojibake.
+
+- #450 (b7c3803): escape every byte outside HTAB and 0x20-0x7E as `\uXXXX`. Today `escape_codepoint` (headers.ex ~324-335) passes U+0080-U+00FF through as raw UTF-8 and C0 controls/DEL through unescaped. Upstream also refuses to format a challenge that would not round-trip.
+- #489 (c7acafa): the client decodes WWW-Authenticate values as Latin-1, so mppx servers sending 0xE9 work. Today `MPP.Client.Transport.HTTP` parses raw bytes (client/transport/http.ex ~119-123), and the resulting invalid UTF-8 later crashes `Jason.encode!` in `MPP.Credential` (credential.ex ~102).
+- #505 (f4c2dc5): an empty unquoted auth-param (`description=` at the end or before a comma) is a valid empty token, not a parse error (headers.ex `parse_value` ~426-434).
+- #453 (cb18bfc): `Challenge.create`/format must never emit a `header` other than (case-insensitive) `Payment-Authorization` (spec draft-httpauth-payment-01 ~585-590). `credential_header/1` falls back to `Authorization` for any other value, and `payable?` compares case-insensitively.
+- #490 (6272fcc): accept an echoed `opaque` in the legacy object form from older mppx clients by re-encoding it as base64url(JCS) before validation (credential.ex ~192-202).
+- #447 (2109d5b): in MCP, one malformed challenge in `error.data.challenges` no longer discards the whole list. Keep the parseable ones, and error only when none parse (lib/mpp/mcp.ex ~612-619).
+- The comment at headers.ex ~264-269 claims mpp-rs's old `>=` 16 KiB check behaved like `>`. mpp-rs #540 shows it did not. Correct the comment (our `>` behavior is right).
+
+Ground truth is refs/mpp-rs and refs/mppx (tier 2). Cross-validate round-trips against mppx via the existing QuickBEAM harness where practical.
+'''
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "146"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485)"
+scores = { d = 3, b = 4, u = 4 }
+acceptance_criteria = ['Accept-Payment: method tokens follow the challenge method grammar; Q=0 is honoured as an opt-out; a valueless q parameter is rejected; only qvalues matching ^(0(\.\d{0,3})?|1(\.0{0,3})?)$ are accepted', 'Protocol amounts accept only ^[0-9]+$ in charge parsing, intent validation and the client Tempo provider; +100, -5, 1e3 and " 100" are rejected with tests']
+out_of_scope = ["Human-readable amount parsing (MPP.Amount.parse_units) — already strict per mpp-rs #413"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #485 (0dcefc2) accepts only ASCII digits in protocol amounts. Our current behavior, read on 2026-10-02:
+
+- `MPP.AcceptPayment` (~267-311): the method token regex `[a-z0-9-]` rejects `:` and `_`, which the method grammar in challenge.ex (~201) allows. The `q` parameter name is case-sensitive, so `Q=0` is ignored and the client's opt-out is lost. A `;q` with no value is ignored instead of rejected. `Float.parse` accepts `1e-1` and `+0.5`.
+- Amounts: `Integer.parse` in `MPP.Methods.Shared.parse_charge_amount` (~47-52) accepts `+100` and `-5`. `MPP.Intents.Shared` `validate_amount` (~11) accepts any non-empty string, and so does the client Tempo provider (~385-390). The server pins the amount, so this is a strictness fix, not an exploit.
+
+Port both, checking against refs/mpp-rs and refs/mppx.
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "147"
+phase = 17
+bundle = "transport-ws"
+status = "pending"
+title = "WebSocket session metering: honour min voucher delta in needVoucher and acknowledge every accepted voucher (mpp-rs #479, #480)"
+scores = { d = 3, b = 5, u = 4 }
+acceptance_criteria = ["With min_voucher_delta greater than the tick cost, a client that signs exactly requiredCumulative is accepted and the stream continues (test)", "Every accepted voucher frame, including one received while awaiting a voucher, is answered with a receipt frame (test)"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Two WS session fixes from mpp-rs:
+
+- #479 (4bb3e40): the needVoucher frame's `requiredCumulative` is `spent + tick_cost` (lib/mpp/transports/websocket/session.ex ~186-194). `MPP.Session.Actions` rejects a voucher whose delta is below `min_voucher_delta` (actions.ex ~230-240). When the minimum delta exceeds the tick cost, the voucher the client signs gets `delta_too_small` and the stream stalls. Request `max(spent + tick, cumulative_amount + min_voucher_delta)`.
+- #480 (7f6809a): a voucher accepted while the session is `:awaiting_voucher` gets no `receipt` frame (websocket.ex ~303). mpp-rs and mppx acknowledge every accepted credential frame.
+
+Verify the frame shapes against refs/mpp-rs/src/server/ws_session.rs and metered.rs.
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "148"
+phase = 10
+bundle = "session"
+status = "pending"
+title = "Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550)"
+scores = { d = 4, b = 5, u = 5 }
+acceptance_criteria = ["Session receipts for open/voucher/topUp/close include intent and challengeId (and txHash where an on-chain tx exists); field names match refs/mpp-rs and refs/mppx", "An open credential with an invalid voucher signature or a deposit below the request is rejected without invoking verify_open (test asserts the callback was not called)", "A StreamData property test over random open/voucher/topUp/close/spend sequences asserts each listed invariant and passes"]
+assignee = "grok"
+model = "grok-4.7"
+body = """
+Three session-layer parity items from mpp-rs:
+
+- #495 (5fc1541): session receipts carry `intent`, `challengeId` and (where applicable) `txHash`. Ours emit `action`, `channelId`, `acceptedCumulative`, `spent` and `units` only (lib/mpp/session/actions.ex ~574-586). mppx session clients may reject the receipt. Thread `challenge_id` through the session opts and add the fields. Check `MPP.Methods.Tempo.SessionReceipt` for reuse.
+- #494 (be42c45): validate the open voucher's signature and deposit bounds before the open transaction is broadcast. `Actions` calls the `verify_open` callback (which normally broadcasts) at ~92, before `ensure_open_within_escrow` (~93) and the signature check (~102). A bad voucher then leaves the client with a funded channel the server never recorded. Reorder so every local check runs before `verify_open`. Also document that `verify_top_up` must check the topUp calldata targets the channel.
+- #550 (c126522): add a StreamData property suite over random session action sequences, asserting the invariants mpp-rs pins: spent monotonic and >= settled; settled monotonic; finalized sticky; deposit never decreases; a deduction happens only while open and within the authorized amount; vouchers strictly increase by >= min_voucher_delta; close amount >= spent. stream_data is already a dev/test dep (Task 63).
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "149"
+phase = 4
+bundle = "tempo"
+status = "pending"
+title = "Ordered multi-currency charge offers across Tempo and EVM, with fundingCurrency in receipts (mppx #933, #915)"
+scores = { d = 6, b = 5, u = 4 }
+acceptance_criteria = ["A Tempo or EVM method entry can declare an ordered currencies list; the 402 carries one challenge per currency in that order", "A credential is verified against the entry whose currency matches its echoed request; with two same-named entries, the wrong entry is never used (test)", "Tempo charge receipts include fundingCurrency (direct: the currency; machine-token route: the funding token) and it round-trips through MPP.Receipt", "OUSD addresses are confirmed against refs/mppx + Tempo docs and pinned by a live :integration test on Moderato"]
+out_of_scope = ["Session-intent multi-currency"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+mppx #933 (e4f0e02) lets a server offer an ordered `currencies` list for Tempo and EVM. A single route expands into one challenge per currency (mainnet default: OUSD then USDC.e; Moderato: OUSD then pathUSD). mppx #915 (c7968ca) adds an optional `fundingCurrency` receipt field derived from the payment route.
+
+We support one currency per method entry, and `MPP.Plug` rejects duplicate method names at init (lib/mpp/plug.ex ~394-400), so a route cannot offer two currencies under one method. A grep on 2026-10-02 found no `fundingCurrency` in lib/.
+
+Design note from mppx #936 (3a23894): once several entries share a method name, verification must pick the entry by request binding (matching currency/amount), never by first match. Port that disambiguation with this change.
+
+Verify the OUSD token addresses and default ordering against refs/mppx and docs.tempo.xyz. Pin them with a live Moderato integration test: one real success and one relevant real error.
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
+[[task]]
+id = "150"
+phase = 12
+bundle = "client-sdk"
+status = "pending"
+title = "Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455)"
+scores = { d = 3, b = 4, u = 3 }
+acceptance_criteria = ["A caller-supplied valid_before later than the challenge expiry is capped to the expiry (test)", "Tempo challenges can advertise supportedModes; the server rejects a credential type outside them, and the client provider declines such a challenge (tests)"]
+assignee = "cursor"
+model = "cursor-grok-4.6-high"
+body = """
+mpp-rs #470 (8ad3b8d) checks chain, modes and expiry before the client signs a charge. Chain pinning and the default validBefore cap are already in `MPP.Client.Providers.Tempo` (client/providers/tempo.ex ~111-112, ~429-436). Two gaps remain:
+
+- A caller-supplied `transaction_options.valid_before` bypasses the cap, because it is merged with `Map.put_new` (~194). Apply `min(value, challenge expires)` to caller values too.
+- mpp-rs #455 (6f94558) adds a `supportedModes` method detail (pull/push) that servers advertise and enforce. We neither advertise nor enforce it (no hits in lib/). Port both sides: the server advertises the configured modes and rejects a credential type outside them, and the client refuses a challenge whose modes exclude what it can produce.
+
+Verify field names and semantics against refs/mpp-rs and refs/mpp-specs.
+"""
+created_at = "2026-10-02"
+scored_at = "2026-10-02"
+
 [bundles.testnet-funding]
 phase = 1
 order = 9
