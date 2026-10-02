@@ -1122,37 +1122,59 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_sendRawTransaction"}
     end
 
-    test "degrades gracefully and broadcasts when the node lacks eth_simulateV1 (-32601)", %{
+    test "falls back to a sender eth_call when the node lacks eth_simulateV1 (-32601)", %{
       charge: charge,
       tx_hex: tx_hex
     } do
-      test_pid = self()
-
-      Req.Test.stub(Tempo, fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
-        request = Jason.decode!(body)
-        send(test_pid, {:rpc_call, request["method"]})
-
-        case request["method"] do
-          "eth_simulateV1" ->
-            Req.Test.json(conn, %{
-              "jsonrpc" => "2.0",
-              "error" => %{"code" => -32_601, "message" => "the method eth_simulateV1 does not exist"},
-              "id" => 1
-            })
-
-          "eth_sendRawTransactionSync" ->
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
-        end
-      end)
-
+      sender = test_sender_address()
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
 
-      # Simulation was attempted, degraded gracefully, then broadcast proceeded.
-      assert_received {:rpc_call, "eth_simulateV1"}
-      assert_received {:rpc_call, "eth_sendRawTransactionSync"}
+      stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert_received {:rpc_call, "eth_simulateV1", _}
+      assert_received {:rpc_call, "eth_call", [call, "latest"]}
+      assert Onchain.Address.equal?(call["from"], sender)
+      assert Onchain.Address.equal?(call["to"], @token_address)
+      assert call["input"] == "0x" <> Base.encode16(transfer_calldata(@recipient, 1_000_000), case: :lower)
+      assert call["calls"] == []
+      refute Map.has_key?(call, "feeToken") or Map.has_key?(call, "gas")
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", _}
+
+      reverted = %{"code" => 3, "message" => "execution reverted: InsufficientBalance"}
+      stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => reverted, "id" => 1})
+      assert {:error, %Errors{} = rejected} = Tempo.verify(payload, charge)
+      assert rejected.detail =~ "Pre-broadcast simulation rejected"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+
+      unavailable = %{"code" => -32_000, "message" => "header not found"}
+      stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => unavailable, "id" => 1})
+      assert {:error, %Errors{} = failed} = Tempo.verify(payload, charge)
+      assert failed.detail =~ "Pre-broadcast simulation failed"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
+  end
+
+  defp stub_unsupported_simulate(test_pid, eth_call_response) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+      send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+      case request["method"] do
+        "eth_simulateV1" ->
+          Req.Test.json(conn, %{
+            "jsonrpc" => "2.0",
+            "error" => %{"code" => -32_601, "message" => "the method eth_simulateV1 does not exist"},
+            "id" => 1
+          })
+
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_response)
+
+        "eth_sendRawTransactionSync" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+      end
+    end)
   end
 
   describe "verify/2 — optimistic broadcast (wait_for_confirmation: false)" do

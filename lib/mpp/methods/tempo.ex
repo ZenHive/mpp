@@ -1561,8 +1561,9 @@ defmodule MPP.Methods.Tempo do
   #
   #   * {:ok, :success}     → would succeed; proceed to broadcast
   #   * {:ok, {:revert, _}} → would fail on-chain; reject before broadcast (the guard)
-  #   * {:ok, :unsupported} → node lacks eth_simulateV1 (-32601); skip + log,
-  #                           degrade gracefully, proceed
+  #   * {:ok, :unsupported} → node lacks eth_simulateV1 (-32601); fall back to
+  #                           an `eth_call` of the calls from the sender, which
+  #                           fails closed like the simulation (mpp-rs #475)
   #   * {:error, reason}    → operational RPC failure; fail closed — never
   #                           broadcast a transaction we could not validate
   defp simulate_cosigned_tx(raw_hex, rpc_url, config) do
@@ -1574,11 +1575,7 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
 
       {:ok, :unsupported} ->
-        Logger.warning(
-          "MPP.Methods.Tempo: node does not implement eth_simulateV1; skipping pre-broadcast fee-payer simulation guard"
-        )
-
-        :ok
+        simulate_with_eth_call(raw_hex, rpc_url, config)
 
       {:error, _reason} ->
         {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
@@ -1720,6 +1717,36 @@ defmodule MPP.Methods.Tempo do
     case MachineToken.settlement_sender(chain_id) do
       nil -> {:error, Errors.new(:verification_failed, "Machine tokens are not supported on chain ID #{chain_id}")}
       swapper -> fun.(swapper)
+    end
+  end
+
+  # Sender-context `eth_call` of the transaction's calls, without fee fields or
+  # signatures (mppx fee-payer.ts `simulationTransaction`, mpp-rs #475): the node
+  # checks call execution only. A revert (JSON-RPC code 3) is rejected; any other
+  # failure fails closed.
+  defp simulate_with_eth_call(raw_hex, rpc_url, config) do
+    with {:ok, tx} <- Transaction.deserialize(raw_hex),
+         {:ok, request} <- Transaction.simulate_request(tx) do
+      call = Map.take(request, ["from", "to", "value", "input", "calls"])
+
+      case rpc_json_request("eth_call", [call, "latest"], rpc_url, rpc_options(config)) do
+        {:ok, result} when is_binary(result) -> :ok
+        {:error, %{"code" => 3}} -> {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
+        _other -> {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
+      end
+    else
+      _error -> {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
+    end
+  end
+
+  defp rpc_json_request(method, params, rpc_url, opts) do
+    body = Jason.encode!(%{"jsonrpc" => "2.0", "method" => method, "params" => params, "id" => 1})
+    request = [url: rpc_url, method: :post, headers: [{"content-type", "application/json"}], body: body]
+
+    case Req.request(request, Keyword.get(opts, :req_options, [])) do
+      {:ok, %Req.Response{status: status, body: %{"result" => result}}} when status in 200..299 -> {:ok, result}
+      {:ok, %Req.Response{body: %{"error" => error}}} -> {:error, error}
+      other -> {:error, other}
     end
   end
 
