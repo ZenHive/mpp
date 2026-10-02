@@ -1,10 +1,10 @@
 defmodule MPP.Methods.Tempo.ProofSignature do
   @moduledoc false
 
-  alias Cartouche.Hash
   alias MPP.Hex
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.SignatureEnvelope
+  alias Onchain.Hash
 
   @p256_half_order 0x7FFFFFFF800000007FFFFFFFFFFFFFFFDE737D56D38BCF4279DCE5617E3192A8
   @magic_suffix :binary.copy(<<0x77>>, 32)

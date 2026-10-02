@@ -3,14 +3,14 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
   import Bitwise, only: [<<<: 2]
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Address
+  alias Onchain.Hash
+  alias Onchain.Recover
   alias Onchain.RPC
+  alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.TIP20
   alias Onchain.Tempo.Transaction
 

@@ -5,6 +5,7 @@ defmodule MPP.Methods.EVM.RPC do
 
   alias MPP.Errors
   alias MPP.Hex
+  alias Onchain.Transaction.Info
 
   @doc "Require a non-negative integer `chain_id` in method config."
   @spec require_chain_id(map()) :: {:ok, non_neg_integer()} | {:error, Errors.t()}
@@ -19,6 +20,31 @@ defmodule MPP.Methods.EVM.RPC do
   @spec canonicalize_hash(String.t()) :: String.t()
   def canonicalize_hash(hash) when is_binary(hash) do
     "0x" <> String.downcase(Hex.strip_0x(hash))
+  end
+
+  @doc """
+  Fetch a transaction's recipient and value by hash (`eth_getTransactionByHash`).
+
+  Legacy transactions carry `to`/`value`, typed ones `destination`/`amount`;
+  both come back as `%{to: <<_::160>> | nil, value: non_neg_integer()}`.
+  An unknown hash is `{:ok, nil}`.
+  """
+  @spec transaction_by_hash(String.t(), keyword()) ::
+          {:ok, %{to: binary() | nil, value: non_neg_integer()} | nil} | {:error, term()}
+  def transaction_by_hash(hash, opts) when is_binary(hash) and is_list(opts) do
+    case Onchain.RPC.eth_get_transaction_by_hash(hash, opts) do
+      {:ok, %Info{transaction: %Onchain.Transaction.V1{to: to, value: value}}} ->
+        {:ok, %{to: to, value: value}}
+
+      {:ok, %Info{transaction: %{destination: to, amount: value}}} ->
+        {:ok, %{to: to, value: value}}
+
+      {:error, :not_found} ->
+        {:ok, nil}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc "Build Onchain.RPC options from an RPC URL and optional Req overrides."

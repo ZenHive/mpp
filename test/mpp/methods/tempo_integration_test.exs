@@ -1709,10 +1709,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   defp attribution_memo(challenge) do
-    tag = binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
-    server = binary_part(Cartouche.Hash.keccak(challenge.realm), 0, @attribution_server_fingerprint_length)
+    tag = binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
+    server = binary_part(Onchain.Hash.keccak(challenge.realm), 0, @attribution_server_fingerprint_length)
     client = <<0::size(@attribution_client_fingerprint_length * 8)>>
-    nonce = binary_part(Cartouche.Hash.keccak(challenge.id), 0, @attribution_nonce_length)
+    nonce = binary_part(Onchain.Hash.keccak(challenge.id), 0, @attribution_nonce_length)
 
     "0x" <> Base.encode16(tag <> <<@attribution_memo_version>> <> server <> client <> nonce, case: :lower)
   end
@@ -1893,7 +1893,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
           realm: realm
         })
 
-      access_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
+      access_bytes = Onchain.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
       signature = TempoAccessKey.sign_proof!(digest, access_key, access_bytes)
 
       charge = %Charge{
@@ -1932,7 +1932,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
           realm: realm
         })
 
-      access_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
+      access_bytes = Onchain.Hex.decode_hex!(String.replace_prefix(access_address, "0x", ""))
       signature = TempoAccessKey.sign_proof!(digest, access_key, access_bytes)
 
       charge = %Charge{
@@ -2097,14 +2097,14 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   defp sign_proof_payload!(digest, private_key, address) do
-    addr_bytes = Cartouche.Hex.decode_hex!(String.replace_prefix(address, "0x", ""))
+    addr_bytes = Onchain.Hex.decode_hex!(String.replace_prefix(address, "0x", ""))
 
-    {:ok, sig} = Cartouche.Signer.Secp256k1.sign_payload(digest, private_key)
-    sig = Cartouche.Recover.normalize_low_s(sig)
-    {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, addr_bytes)
+    {:ok, sig} = Onchain.Signer.Secp256k1.sign_payload(digest, private_key)
+    sig = Onchain.Recover.normalize_low_s(sig)
+    {:ok, recid} = Onchain.Recover.find_recid_from_digest(digest, sig, addr_bytes)
 
-    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
-    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    r = sig.r |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
     "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 end

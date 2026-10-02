@@ -9,11 +9,11 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   id and rejects TIP-1049 admin / account-bound keys.
   """
 
-  alias Cartouche.Hash
   alias MPP.Hex
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.SignatureEnvelope
   alias Onchain.Address
+  alias Onchain.Hash
 
   @transfer_selector <<0xA9, 0x05, 0x9C, 0xBB>>
   @transfer_with_memo_selector <<0x95, 0x77, 0x7D, 0x59>>

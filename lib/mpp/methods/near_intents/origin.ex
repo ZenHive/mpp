@@ -3,6 +3,7 @@ defmodule MPP.Methods.NearIntents.Origin do
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.EVM.RPC, as: EvmRPC
   alias MPP.Methods.NearIntents.OneClick
   alias MPP.Methods.Shared
 
@@ -117,7 +118,7 @@ defmodule MPP.Methods.NearIntents.Origin do
   end
 
   defp verify_native(hash, recipient, minimum, rpc_url, config) when is_binary(recipient) do
-    case Onchain.RPC.get_transaction_by_hash(hash, rpc_opts(rpc_url, config)) do
+    case EvmRPC.transaction_by_hash(hash, rpc_opts(rpc_url, config)) do
       {:ok, %{to: to, value: value}} when is_integer(value) ->
         if Onchain.Address.equal?(to, recipient) and value >= minimum do
           :ok

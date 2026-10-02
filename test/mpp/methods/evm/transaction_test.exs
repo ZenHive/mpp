@@ -276,7 +276,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
 
     test "rejects calldata that is not an ERC-20 transfer", %{charge: charge} do
       {:ok, spender} = Onchain.Address.validate(@recipient)
-      {:ok, hex} = Onchain.ABI.encode_call("approve(address,uint256)", [spender, @amount])
+      {:ok, hex} = Onchain.ABI.encode_hex_call("approve(address,uint256)", [spender, @amount])
       signed = signed_transfer(data: Onchain.Hex.decode!(hex))
       assert {:error, %Errors{} = error} = Transaction.validate(signed.payload, charge)
       assert error.detail =~ "ERC-20 transfer"
@@ -523,7 +523,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
 
   defp unsigned_payload do
     {:ok, to_bin} = Onchain.Address.validate(@recipient)
-    {:ok, calldata_hex} = Onchain.ABI.encode_call("transfer(address,uint256)", [to_bin, @amount])
+    {:ok, calldata_hex} = Onchain.ABI.encode_hex_call("transfer(address,uint256)", [to_bin, @amount])
     calldata = Onchain.Hex.decode!(calldata_hex)
 
     {:ok, unsigned} =
@@ -535,7 +535,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
         max_priority_fee_per_gas: {2, :gwei}
       )
 
-    raw = unsigned |> Cartouche.Transaction.V2.encode() |> Onchain.Hex.encode()
+    raw = unsigned |> Onchain.Transaction.V2.encode() |> Onchain.Hex.encode()
     %{"type" => "transaction", "signature" => raw}
   end
 

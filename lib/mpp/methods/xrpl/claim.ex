@@ -10,9 +10,9 @@ defmodule MPP.Methods.XRPL.Claim do
   sign the raw message bytes.
   """
 
-  alias Cartouche.Signature
   alias MPP.Methods.XRPL.RPC
   alias MPP.Session.Channel
+  alias Onchain.Signature
 
   # secp256k1 curve order n / 2; high-S encodings of an accepted claim are
   # still that claim (draft Signature Malleability).

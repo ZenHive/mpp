@@ -149,7 +149,6 @@ defmodule MPP.Methods.Tempo do
   use MPP.Method
   use Descripex, namespace: "/methods"
 
-  alias Cartouche.Signature
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Hex
@@ -167,6 +166,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias Onchain.Signature
   alias Onchain.Signer
   alias Onchain.Tempo.RPC
   alias Onchain.Tempo.Transaction
@@ -178,7 +178,7 @@ defmodule MPP.Methods.Tempo do
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
   @attribution_memo_length 32
-  @attribution_tag binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
+  @attribution_tag binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
   @attribution_version 1
   @attribution_server_fingerprint_length 10
   @attribution_client_fingerprint_length 10
@@ -588,6 +588,18 @@ defmodule MPP.Methods.Tempo do
   defp valid_fee_token_address?(_), do: false
 
   defp reject_hash_when_fee_payer(config) do
+    # --- Presenter binding helpers (hash/transaction paths) ---
+    #
+    # Deliberate hardening divergence, opt-in via "require_presenter_binding": neither
+    # reference SDK binds the credential presenter to the transfer sender on the hash
+    # path — both default the expected sender to the receipt's `from` with no presenter
+    # proof (refs/mpp-rs/src/protocol/methods/tempo/method.rs verify_hash, expected_sender
+    # fallback; refs/mppx/src/tempo/server/Charge.ts hash branch, `source?.address ??
+    # receipt.from`). The signature envelope reuses the proof path's EIP-712 typed data
+    # (MPP domain v3 {account, challengeId, realm}, refs/mppx/src/tempo/internal/proof.ts),
+    # so no new wire format is introduced and existing proof-capable clients can satisfy
+    # the requirement. challengeId inside the signed digest makes a captured presenter
+    # signature useless against any other challenge.
     if fee_payer_enabled?(config) do
       {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
     else
@@ -688,19 +700,6 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, mismatch_detail)}
     end
   end
-
-  # --- Presenter binding helpers (hash/transaction paths) ---
-  #
-  # Deliberate hardening divergence, opt-in via "require_presenter_binding": neither
-  # reference SDK binds the credential presenter to the transfer sender on the hash
-  # path — both default the expected sender to the receipt's `from` with no presenter
-  # proof (refs/mpp-rs/src/protocol/methods/tempo/method.rs verify_hash, expected_sender
-  # fallback; refs/mppx/src/tempo/server/Charge.ts hash branch, `source?.address ??
-  # receipt.from`). The signature envelope reuses the proof path's EIP-712 typed data
-  # (MPP domain v3 {account, challengeId, realm}, refs/mppx/src/tempo/internal/proof.ts),
-  # so no new wire format is introduced and existing proof-capable clients can satisfy
-  # the requirement. challengeId inside the signed digest makes a captured presenter
-  # signature useless against any other challenge.
 
   defp presenter_binding_required?(config), do: config["require_presenter_binding"] == true
 
@@ -1341,13 +1340,16 @@ defmodule MPP.Methods.Tempo do
     canonical_fields = canonicalize_fields(fields)
     binary = <<0x76>> <> ExRLP.encode(canonical_fields)
     hex = "0x" <> Base.encode16(binary, case: :lower)
-    hash = "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
+    hash = "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
     {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
   end
 
+  # --- Onchain.Tempo.RPC adapter functions ---
+  # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
+
   defp transaction_hash(%Transaction{raw: raw}) when is_binary(raw) do
     {:ok, binary} = Base.decode16(Hex.strip_0x(raw), case: :mixed)
-    "0x" <> Base.encode16(Cartouche.Hash.keccak(binary), case: :lower)
+    "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
   end
 
   defp canonicalize_fields(fields) do
@@ -1514,9 +1516,6 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
     end
   end
-
-  # --- Onchain.Tempo.RPC adapter functions ---
-  # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
 
   defp rpc_options(config), do: [req_options: config["req_options"] || []]
 
@@ -1735,8 +1734,8 @@ defmodule MPP.Methods.Tempo do
   defp attribution_memo_bound?(memo, realm, challenge_id) do
     with {:ok, bytes} <- decode_memo(memo),
          {:ok, server, nonce} <- decode_attribution_parts(bytes) do
-      server == binary_part(Cartouche.Hash.keccak(realm), 0, @attribution_server_fingerprint_length) and
-        nonce == binary_part(Cartouche.Hash.keccak(challenge_id), 0, @attribution_nonce_length)
+      server == binary_part(Onchain.Hash.keccak(realm), 0, @attribution_server_fingerprint_length) and
+        nonce == binary_part(Onchain.Hash.keccak(challenge_id), 0, @attribution_nonce_length)
     else
       _ -> false
     end

@@ -1,10 +1,10 @@
 defmodule MPP.Methods.Tempo.ProofTest do
   use ExUnit.Case, async: true
-  use Cartouche.Hex
+  use Onchain.Hex
 
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Methods.Tempo.Proof
+  alias Onchain.Recover
+  alias Onchain.Signer.Secp256k1
 
   # Pinned from refs/mppx/src/tempo/Proof.conformance.test.ts (wallet-bound MPP v3).
   @vector_account "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
@@ -117,7 +117,7 @@ defmodule MPP.Methods.Tempo.ProofTest do
       }
 
       digest = Proof.hash(params)
-      keychain_payload = Cartouche.Hash.keccak(<<0x04>> <> digest <> root_address)
+      keychain_payload = Onchain.Hash.keccak(<<0x04>> <> digest <> root_address)
       inner = sign_proof_digest!(keychain_payload, @access_private_key, access_address)
       signature = wrap_keychain_v2!(root_address, inner)
 
@@ -166,8 +166,8 @@ defmodule MPP.Methods.Tempo.ProofTest do
     sig = Recover.normalize_low_s(sig)
     {:ok, recid} = Recover.find_recid_from_digest(digest, sig, address)
 
-    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
-    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    r = sig.r |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
     "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 end

@@ -13,17 +13,18 @@ defmodule MPP.Methods.USDCIntegrationTest do
 
   use ExUnit.Case, async: false
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.RPC
-  alias Cartouche.Solana.TokenProgram
-  alias Cartouche.Solana.Transaction
   alias MPP.Intents.Charge
   alias MPP.Methods.USDC
   alias MPP.Methods.USDC.Binding
   alias MPP.Receipt
   alias MPP.Test.EVMAuthorization
   alias Onchain.Address
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.RPC
+  alias Onchain.Solana.TokenProgram
+  alias Onchain.Solana.Transaction
 
   @moduletag :integration
   @moduletag timeout: 180_000
@@ -135,7 +136,7 @@ defmodule MPP.Methods.USDCIntegrationTest do
       end
 
       mint_key =
-        case Cartouche.Base58.decode(@devnet_usdc) do
+        case Base58.decode(@devnet_usdc) do
           {:ok, <<key::binary-32>>} -> key
           other -> flunk("devnet USDC mint did not decode: #{inspect(other)}")
         end
@@ -171,7 +172,7 @@ defmodule MPP.Methods.USDCIntegrationTest do
       assert receipt.status == "success"
       assert receipt.extensions["type"] == "solana"
       assert receipt.extensions["network"] == @devnet_caip
-      assert {:ok, <<_::binary-64>>} = Cartouche.Base58.decode(receipt.reference)
+      assert {:ok, <<_::binary-64>>} = Base58.decode(receipt.reference)
       assert receipt.external_id == "invoice-sol-live"
     end
   end
@@ -333,7 +334,7 @@ defmodule MPP.Methods.USDCIntegrationTest do
   end
 
   defp decode_base58_seed!(trimmed) do
-    case Cartouche.Base58.decode(trimmed) do
+    case Base58.decode(trimmed) do
       {:ok, <<seed::binary-32>>} -> seed
       {:ok, <<seed::binary-32, _pub::binary-32>>} -> seed
       other -> flunk("SOLANA_PRIVATE_KEY is not a valid hex, base58, or JSON key: #{inspect(other)}")

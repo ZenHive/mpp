@@ -15,13 +15,6 @@ defmodule MPP.Methods.EVM.Authorization do
   FiatTokenV2 enforces nonce uniqueness on-chain (`authorizationState`).
   """
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signature
-  alias Cartouche.Signer.Secp256k1
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Hex
@@ -30,9 +23,16 @@ defmodule MPP.Methods.EVM.Authorization do
   alias MPP.Methods.Shared
   alias Onchain.ABI
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.PrivateKey
+  alias Onchain.Recover
   alias Onchain.RPC
+  alias Onchain.Signature
   alias Onchain.Signer
+  alias Onchain.Signer.Secp256k1
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   @primary_type "TransferWithAuthorization"
   @transfer_fn "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)"
@@ -496,7 +496,7 @@ defmodule MPP.Methods.EVM.Authorization do
          {:ok, <<r::binary-size(32), s::binary-size(32), v>>} <- decode_signature_bytes(parsed.signature),
          {value, ""} <- Integer.parse(parsed.value),
          {:ok, calldata_hex} <-
-           ABI.encode_call(@transfer_fn, [
+           ABI.encode_hex_call(@transfer_fn, [
              from_bin,
              to_bin,
              value,

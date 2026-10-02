@@ -7,17 +7,17 @@ defmodule MPP.Methods.Tempo.Proof do
   the same challenge. Matches `refs/mppx/src/tempo/internal/proof.ts`.
   """
 
-  use Cartouche.Hex
+  use Onchain.Hex
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signature
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.Hex
   alias MPP.Methods.Tempo.ProofSignature
   alias MPP.Methods.Tempo.SignatureEnvelope
+  alias Onchain.Hash
+  alias Onchain.Recover
+  alias Onchain.Signature
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   @domain_name "MPP"
   @domain_version "3"

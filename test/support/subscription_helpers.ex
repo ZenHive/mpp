@@ -1,13 +1,12 @@
 defmodule MPP.Test.SubscriptionHelpers do
   @moduledoc false
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Intents.Subscription
   alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Address
-  alias Onchain.Log
+  alias Onchain.Hash
+  alias Onchain.Recover
+  alias Onchain.Signer.Secp256k1
 
   @chain_id 42_431
   @root_private_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
@@ -136,7 +135,7 @@ defmodule MPP.Test.SubscriptionHelpers do
     %{
       "address" => token,
       "topics" => [
-        Log.event_topic!(@transfer_with_memo_event),
+        @transfer_with_memo_event |> Onchain.ABI.event_signature() |> hex(),
         address_topic(from),
         address_topic(recipient),
         hex(memo)

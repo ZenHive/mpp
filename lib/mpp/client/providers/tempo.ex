@@ -31,8 +31,6 @@ defmodule MPP.Client.Providers.Tempo do
 
   use MPP.Client.PaymentProvider
 
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Challenge
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Shared
@@ -44,8 +42,10 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias Onchain.Address
+  alias Onchain.Recover
   alias Onchain.RPC
   alias Onchain.Signer
+  alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.TIP20
   alias Onchain.Tempo.Transaction.Builder
 
@@ -231,18 +231,18 @@ defmodule MPP.Client.Providers.Tempo do
   defp payment_memo(challenge, _details, client_id) do
     client =
       if is_binary(client_id) and client_id != "",
-        do: binary_part(Cartouche.Hash.keccak(client_id), 0, @client_fingerprint_bytes),
+        do: binary_part(Onchain.Hash.keccak(client_id), 0, @client_fingerprint_bytes),
         else: <<0::size(@client_fingerprint_bytes * @bits_per_byte)>>
 
     {:ok,
-     binary_part(Cartouche.Hash.keccak("mpp"), 0, @tag_bytes) <>
+     binary_part(Onchain.Hash.keccak("mpp"), 0, @tag_bytes) <>
        <<@attribution_version>> <>
        fingerprint(challenge.realm) <>
        client <>
-       binary_part(Cartouche.Hash.keccak(challenge.id), 0, @challenge_nonce_bytes)}
+       binary_part(Onchain.Hash.keccak(challenge.id), 0, @challenge_nonce_bytes)}
   end
 
-  defp fingerprint(value), do: binary_part(Cartouche.Hash.keccak(value), 0, @server_fingerprint_bytes)
+  defp fingerprint(value), do: binary_part(Onchain.Hash.keccak(value), 0, @server_fingerprint_bytes)
 
   defp decode_memo("0x" <> hex), do: decode_memo(hex)
 

@@ -26,7 +26,7 @@ defmodule MPP.Methods.Tempo.AccessKeyTypeTest do
 
   test "a valid signature cannot authenticate a different registered key type" do
     private = :binary.copy(<<1>>, 32)
-    {:ok, address} = Cartouche.Signer.Secp256k1.get_address(private)
+    {:ok, address} = Onchain.Signer.Secp256k1.get_address(private)
     params = %{account: @account, chain_id: 42_431, challenge_id: "typed-key", realm: "example.test"}
     signature = MPP.Test.TempoAccessKey.sign_proof!(Proof.hash(params), private, address)
     stub_key(1)

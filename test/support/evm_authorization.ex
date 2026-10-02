@@ -1,16 +1,16 @@
 defmodule MPP.Test.EVMAuthorization do
   @moduledoc false
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.Methods.EVM.Authorization
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.Hex
   alias Onchain.PrivateKey
+  alias Onchain.Recover
+  alias Onchain.Signer.Secp256k1
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   @anvil0_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 

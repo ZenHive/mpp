@@ -1,11 +1,11 @@
 defmodule MPP.Methods.Tempo.SignatureEnvelope do
   @moduledoc false
 
-  use Cartouche.Hex
+  use Onchain.Hex
 
-  alias Cartouche.Recover
-  alias Cartouche.Signature
   alias MPP.Hex
+  alias Onchain.Recover
+  alias Onchain.Signature
 
   @magic_suffix :binary.copy(<<0x77>>, 32)
 

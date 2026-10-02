@@ -1,14 +1,6 @@
 defmodule MPP.Methods.USDCTest do
   use ExUnit.Case, async: false
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.TokenProgram
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
@@ -25,6 +17,15 @@ defmodule MPP.Methods.USDCTest do
   alias MPP.Test.EVMAuthorization
   alias Onchain.Address
   alias Onchain.Hex
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.TokenProgram
+  alias Onchain.Solana.Transaction
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   @mainnet_usdc "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
   @sepolia_usdc "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
@@ -432,7 +433,7 @@ defmodule MPP.Methods.USDCTest do
       charge = %{solana_charge() | recipient: Keys.to_address(recipient)}
       payload = encoded_transfer_with_ata(payer, seed, recipient)
       {:ok, tx} = payload["transaction"] |> Base.decode64!() |> Transaction.deserialize()
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
       stub_solana_success(payer, recipient, signature, dest_missing: true)
 
       assert {:ok, %Receipt{} = receipt} = USDC.verify(payload, charge)
@@ -448,7 +449,7 @@ defmodule MPP.Methods.USDCTest do
       charge = %{charge | method_details: Map.put(charge.method_details, "store", MemoryStore)}
       payload = encoded_transfer(payer, seed, recipient)
       {:ok, tx} = payload["transaction"] |> Base.decode64!() |> Transaction.deserialize()
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
       stub_solana_success(payer, recipient, signature)
 
       charge = %{charge | external_id: "invoice-sol-001"}
@@ -998,7 +999,7 @@ defmodule MPP.Methods.USDCTest do
   end
 
   defp solana_with_accounts(payer, recipient, mode, charge \\ nil) do
-    mint = elem(Cartouche.Base58.decode(@devnet_usdc), 1)
+    mint = elem(Base58.decode(@devnet_usdc), 1)
     {source, _} = ATA.find_address(payer, mint)
     {dest, _} = ATA.find_address(recipient, mint)
     charge = charge || %{solana_charge() | recipient: Keys.to_address(recipient)}
@@ -1102,7 +1103,7 @@ defmodule MPP.Methods.USDCTest do
   end
 
   defp memo_program do
-    {:ok, key} = Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+    {:ok, key} = Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
     key
   end
 
@@ -1112,7 +1113,7 @@ defmodule MPP.Methods.USDCTest do
   end
 
   defp encoded_transfer_with_ata(payer, seed, recipient) do
-    mint = elem(Cartouche.Base58.decode(@devnet_usdc), 1)
+    mint = elem(Base58.decode(@devnet_usdc), 1)
     {source, _} = ATA.find_address(payer, mint)
     {dest, _} = ATA.find_address(recipient, mint)
     create = ATA.create_idempotent(payer, recipient, mint)
@@ -1123,7 +1124,7 @@ defmodule MPP.Methods.USDCTest do
   end
 
   defp encoded_transfer(payer, seed, recipient, opts \\ []) do
-    mint = Keyword.get(opts, :mint, elem(Cartouche.Base58.decode(@devnet_usdc), 1))
+    mint = Keyword.get(opts, :mint, elem(Base58.decode(@devnet_usdc), 1))
     amount = Keyword.get(opts, :amount, 1)
     decimals = Keyword.get(opts, :decimals, 6)
     program = if Keyword.get(opts, :token_2022, false), do: Programs.token_2022_program(), else: Programs.token_program()
@@ -1150,7 +1151,7 @@ defmodule MPP.Methods.USDCTest do
   end
 
   defp stub_solana_success(payer, recipient, signature, opts \\ []) do
-    mint = elem(Cartouche.Base58.decode(@devnet_usdc), 1)
+    mint = elem(Base58.decode(@devnet_usdc), 1)
     {source, _} = ATA.find_address(payer, mint)
     {dest, _} = ATA.find_address(recipient, mint)
 

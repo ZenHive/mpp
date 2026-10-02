@@ -1,10 +1,10 @@
 defmodule MPP.Test.EVMTransaction do
   @moduledoc false
 
-  alias Cartouche.Hash
   alias MPP.Test.EVMAuthorization
   alias Onchain.ABI
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.Hex
   alias Onchain.Signer
 
@@ -34,7 +34,7 @@ defmodule MPP.Test.EVMTransaction do
           data
 
         :error ->
-          {:ok, calldata_hex} = ABI.encode_call("transfer(address,uint256)", [to_bin, amount])
+          {:ok, calldata_hex} = ABI.encode_hex_call("transfer(address,uint256)", [to_bin, amount])
           Hex.decode!(calldata_hex)
       end
 

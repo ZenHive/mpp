@@ -17,8 +17,6 @@ defmodule MPP.Methods.EVM.Transaction do
   advertise it and always reject it.
   """
 
-  alias Cartouche.Hash
-  alias Cartouche.Transaction.V2
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
@@ -26,8 +24,10 @@ defmodule MPP.Methods.EVM.Transaction do
   alias MPP.Methods.Shared
   alias Onchain.ABI
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.RPC
   alias Onchain.Signer
+  alias Onchain.Transaction.V2
 
   @transfer_fn "transfer(address,uint256)"
   # draft-evm-charge-00.md:880 — transfer(address,uint256) selector
@@ -164,7 +164,7 @@ defmodule MPP.Methods.EVM.Transaction do
   end
 
   defp decode_transfer(data) do
-    case ABI.decode_call(@transfer_fn, Onchain.Hex.encode(data)) do
+    case ABI.decode_hex_call(@transfer_fn, Onchain.Hex.encode(data)) do
       {:ok, [to, amount]} -> {:ok, [to, amount]}
       _ -> {:error, Errors.new(:verification_failed, "Transaction is not an ERC-20 transfer")}
     end

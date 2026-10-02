@@ -10,12 +10,8 @@ defmodule MPP.Methods.USDC.Solana do
 
   @behaviour MPP.Methods.USDC.Profile
 
-  use Cartouche.Base58
+  use Onchain.Solana.Base58
 
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.RPC
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Solana.Transaction.CompiledInstruction
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Shared
@@ -25,6 +21,10 @@ defmodule MPP.Methods.USDC.Solana do
   alias MPP.Methods.USDC.Replay
   alias MPP.Receipt
   alias MPP.Tempo.Store
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.RPC
+  alias Onchain.Solana.Transaction
+  alias Onchain.Solana.Transaction.CompiledInstruction
 
   require Logger
 
@@ -499,7 +499,7 @@ defmodule MPP.Methods.USDC.Solana do
   end
 
   defp decode_key(address) do
-    case Cartouche.Base58.decode(address) do
+    case Onchain.Solana.Base58.decode(address) do
       {:ok, <<key::binary-32>>} -> {:ok, key}
       _other -> :error
     end

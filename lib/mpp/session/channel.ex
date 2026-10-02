@@ -19,10 +19,10 @@ defmodule MPP.Session.Channel do
 
   import Bitwise, only: [<<<: 2]
 
-  alias Cartouche.Hash
   alias MPP.Methods.XRPL.Codec
   alias MPP.Methods.XRPL.RPC
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.Hex
 
   @channel_id_types "(address,address,address,address,bytes32,address,bytes32,address,uint256)"
@@ -261,7 +261,7 @@ defmodule MPP.Session.Channel do
          {:ok, escrow_contract} <- normalize_address_bytes(escrow_contract, :escrow_contract),
          :ok <- validate_chain_id(chain_id) do
       encoded =
-        ABI.encode(@channel_id_types, [
+        Onchain.ABI.encode(@channel_id_types, [
           {payer, payee, operator, token, salt, authorized_signer, expiring_nonce_hash, escrow_contract, chain_id}
         ])
 

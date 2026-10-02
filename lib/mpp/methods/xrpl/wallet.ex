@@ -1,9 +1,9 @@
 defmodule MPP.Methods.XRPL.Wallet do
   @moduledoc false
 
-  alias Cartouche.Signature
   alias MPP.Methods.XRPL.Codec
   alias MPP.Methods.XRPL.RPC
+  alias Onchain.Signature
 
   # secp256k1 curve order n (FIPS 186-4 / SEC 2).
   @n 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141

@@ -149,7 +149,7 @@ defmodule MPP.Client.Providers.TempoMachineTokenIntegrationTest do
   end
 
   defp fingerprint(value, byte_count) do
-    binary_part(Cartouche.Hash.keccak(value), 0, byte_count)
+    binary_part(Onchain.Hash.keccak(value), 0, byte_count)
   end
 
   defp ping_moderato!(rpc_url) do

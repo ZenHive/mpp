@@ -1,13 +1,6 @@
 defmodule MPP.Methods.SolanaTest do
   use ExUnit.Case, async: true
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.SystemProgram
-  alias Cartouche.Solana.TokenProgram
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Solana.Transaction.Instruction
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
@@ -17,6 +10,14 @@ defmodule MPP.Methods.SolanaTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.SystemProgram
+  alias Onchain.Solana.TokenProgram
+  alias Onchain.Solana.Transaction
+  alias Onchain.Solana.Transaction.Instruction
 
   @rpc_url "https://api.devnet.solana.com"
   @amount 10_000
@@ -691,7 +692,7 @@ defmodule MPP.Methods.SolanaTest do
       payer_seed: _seed,
       recipient: recipient
     } do
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {ata, _} = ATA.find_address(recipient, mint)
       signature = fake_signature()
 
@@ -885,7 +886,7 @@ defmodule MPP.Methods.SolanaTest do
       %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
       tx = signed_sol_transfer(payer, seed, recipient, @amount)
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       stub_pull_success(signature, sol_parsed_tx(signature, payer, recipient, @amount))
 
@@ -922,7 +923,7 @@ defmodule MPP.Methods.SolanaTest do
       expected_sig =
         :crypto.sign(:eddsa, :none, Transaction.serialize_message(message), [fee_payer_seed, :ed25519])
 
-      expected_b58 = Cartouche.Base58.encode(expected_sig)
+      expected_b58 = Base58.encode(expected_sig)
 
       stub_pull_success(expected_b58, sol_parsed_tx(expected_b58, payer, recipient, @amount))
 
@@ -1023,14 +1024,14 @@ defmodule MPP.Methods.SolanaTest do
 
     test "broadcasts an SPL transferChecked", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       ix = TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 1, 6)
       message = Transaction.build_message(payer, [ix], @blockhash)
       tx = Transaction.sign(message, [seed])
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       {:ok, charge} =
         Charge.new(amount: "1", currency: @usdc_devnet, recipient: Keys.to_address(recipient))
@@ -1111,7 +1112,7 @@ defmodule MPP.Methods.SolanaTest do
     setup %{payer: payer, payer_seed: seed, recipient: recipient} do
       message = Transaction.build_message(payer, [SystemProgram.transfer(payer, recipient, @amount)], @blockhash)
       tx = Transaction.sign(message, [seed])
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       {:ok,
        payload: %{"type" => "transaction", "transaction" => Base.encode64(Transaction.serialize(tx))},
@@ -1560,7 +1561,7 @@ defmodule MPP.Methods.SolanaTest do
       %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
       tx = signed_sol_transfer(payer, seed, recipient, @amount)
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       Req.Test.stub(Solana, fn conn ->
         rpc_dispatch(conn, %{
@@ -1588,7 +1589,7 @@ defmodule MPP.Methods.SolanaTest do
 
       tx = signed_sol_transfer(payer, seed, recipient, @amount)
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       Req.Test.stub(Solana, fn conn ->
         rpc_dispatch(conn, %{
@@ -1614,7 +1615,7 @@ defmodule MPP.Methods.SolanaTest do
 
       tx = signed_sol_transfer(payer, seed, recipient, @amount)
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       Req.Test.stub(Solana, fn conn ->
         rpc_dispatch(conn, %{
@@ -1660,7 +1661,7 @@ defmodule MPP.Methods.SolanaTest do
   describe "verify/2 — compiled instruction policy" do
     test "allows memo and compute-budget instructions", context do
       %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
-      memo_program = elem(Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), 1)
+      memo_program = elem(Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), 1)
 
       ixs = [
         %Instruction{program_id: Programs.compute_budget_program(), accounts: [], data: <<2, 2000::little-32>>},
@@ -1671,7 +1672,7 @@ defmodule MPP.Methods.SolanaTest do
       message = Transaction.build_message(payer, ixs, @blockhash)
       tx = Transaction.sign(message, [seed])
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
       stub_pull_success(signature, sol_parsed_tx(signature, payer, recipient, @amount))
 
       assert {:ok, %Receipt{}} = Solana.verify(%{"type" => "transaction", "transaction" => encoded}, charge)
@@ -1806,7 +1807,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects ATA creation on a native SOL charge", context do
       %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       ixs = [ATA.create_idempotent(payer, recipient, mint), SystemProgram.transfer(payer, recipient, @amount)]
       message = Transaction.build_message(payer, ixs, @blockhash)
       tx = Transaction.sign(message, [seed])
@@ -1821,7 +1822,7 @@ defmodule MPP.Methods.SolanaTest do
     test "accepts idempotent ATA creation for a split recipient", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
       {split_owner, _} = Keys.generate_keypair()
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       {split_ata, _} = ATA.find_address(split_owner, mint)
@@ -1835,7 +1836,7 @@ defmodule MPP.Methods.SolanaTest do
       message = Transaction.build_message(payer, ixs, @blockhash)
       tx = Transaction.sign(message, [seed])
       encoded = Base.encode64(Transaction.serialize(tx))
-      signature = Cartouche.Base58.encode(hd(tx.signatures))
+      signature = Base58.encode(hd(tx.signatures))
 
       {:ok, charge} =
         Charge.new(amount: "10000", currency: @usdc_devnet, recipient: Keys.to_address(recipient))
@@ -1953,7 +1954,7 @@ defmodule MPP.Methods.SolanaTest do
         | method_details:
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
-              "fee_payer_private_key" => Cartouche.Base58.encode(seed)
+              "fee_payer_private_key" => Base58.encode(seed)
             })
       }
 
@@ -2104,7 +2105,7 @@ defmodule MPP.Methods.SolanaTest do
         | method_details:
             Map.merge(charge.method_details, %{
               "fee_payer" => true,
-              "fee_payer_private_key" => Cartouche.Base58.encode(seed <> fee_payer)
+              "fee_payer_private_key" => Base58.encode(seed <> fee_payer)
             })
       }
 
@@ -2209,7 +2210,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "verifies SPL with an undecodable token_program by falling back", context do
       %{payer: payer, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       signature = fake_signature()
 
@@ -2379,7 +2380,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "classifies a non-idempotent ATA create as ata_create", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       ixs = [ATA.create(payer, recipient, mint)]
       message = Transaction.build_message(payer, ixs, @blockhash)
       tx = Transaction.sign(message, [seed])
@@ -2416,7 +2417,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "classifies a truncated ATA instruction as unknown", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       ix = ATA.create_idempotent(payer, recipient, mint)
       message = Transaction.build_message(payer, [ix], @blockhash)
       tx = Transaction.sign(message, [seed])
@@ -2546,7 +2547,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects an extra SPL transfer on a native SOL charge", context do
       %{charge: charge, payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
 
@@ -2564,7 +2565,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects an extra SOL transfer on an SPL charge", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
 
@@ -2583,7 +2584,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects a fee-payer-authorized SPL transfer", context do
       %{recipient: recipient, fee_payer: fee_payer} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(fee_payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       ix = TokenProgram.transfer_checked(source_ata, mint, dest_ata, fee_payer, 1, 6)
@@ -2599,7 +2600,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects ATA creation for the primary recipient", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
 
@@ -2645,7 +2646,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects a plain SPL transfer that is not transferChecked", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       ix = TokenProgram.transfer(source_ata, dest_ata, payer, 1)
@@ -2659,7 +2660,7 @@ defmodule MPP.Methods.SolanaTest do
     test "rejects ATA creation for an unauthorized owner", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
       {stranger, _} = Keys.generate_keypair()
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
 
@@ -2678,7 +2679,7 @@ defmodule MPP.Methods.SolanaTest do
     test "rejects ATA creation funded by someone other than the fee payer", context do
       %{payer: payer, payer_seed: payer_seed, recipient: recipient, fee_payer: fee_payer} = context
       {split_owner, _} = Keys.generate_keypair()
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       {split_ata, _} = ATA.find_address(split_owner, mint)
@@ -2711,7 +2712,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects ATA creation for the wrong mint", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       other_mint = <<3::256>>
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
@@ -2744,7 +2745,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects a transferChecked with too few accounts by classifying it unknown", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       ix = TokenProgram.transfer_checked(source_ata, mint, dest_ata, payer, 1, 6)
@@ -2759,7 +2760,7 @@ defmodule MPP.Methods.SolanaTest do
 
     test "rejects non-idempotent ATA creation", context do
       %{payer: payer, payer_seed: seed, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {source_ata, _} = ATA.find_address(payer, mint)
       {dest_ata, _} = ATA.find_address(recipient, mint)
 
@@ -2800,7 +2801,7 @@ defmodule MPP.Methods.SolanaTest do
   describe "Instructions.verify_parsed/3" do
     test "matches an SPL transfer without a mint opt by decoding the currency", context do
       %{payer: payer, recipient: recipient} = context
-      mint = elem(Cartouche.Base58.decode(@usdc_devnet), 1)
+      mint = elem(Base58.decode(@usdc_devnet), 1)
       {dest_ata, _} = ATA.find_address(recipient, mint)
       {source_ata, _} = ATA.find_address(payer, mint)
 
@@ -2868,7 +2869,7 @@ defmodule MPP.Methods.SolanaTest do
   end
 
   defp fake_signature do
-    Cartouche.Base58.encode(:crypto.strong_rand_bytes(64))
+    Base58.encode(:crypto.strong_rand_bytes(64))
   end
 
   defp signed_sol_transfer(payer, seed, recipient, amount) do
@@ -2940,7 +2941,7 @@ defmodule MPP.Methods.SolanaTest do
   end
 
   defp memo_pull_tx(payer, seed, recipient, memos) do
-    memo_program = elem(Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), 1)
+    memo_program = elem(Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), 1)
     memo_ixs = Enum.map(memos, &%Instruction{program_id: memo_program, accounts: [], data: &1})
     transfer = SystemProgram.transfer(payer, recipient, @amount)
     message = Transaction.build_message(payer, [transfer | memo_ixs], @blockhash)
@@ -2948,7 +2949,7 @@ defmodule MPP.Methods.SolanaTest do
     {tx, Base.encode64(Transaction.serialize(tx))}
   end
 
-  defp pull_signature(tx), do: Cartouche.Base58.encode(hd(tx.signatures))
+  defp pull_signature(tx), do: Base58.encode(hd(tx.signatures))
 
   defp issue_challenge(config, path) do
     conn = :get |> Plug.Test.conn(path) |> PaymentPlug.call(config)

@@ -7,7 +7,6 @@ defmodule MPP.Methods.TempoTest do
 
   import MPP.Test.TempoTestHelpers
 
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
@@ -18,6 +17,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Test.FaultyDeleteStore
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
+  alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -2443,10 +2443,10 @@ defmodule MPP.Methods.TempoTest do
   end
 
   defp attribution_memo(realm, challenge_id) do
-    tag = binary_part(Cartouche.Hash.keccak("mpp"), 0, 4)
-    server = binary_part(Cartouche.Hash.keccak(realm), 0, 10)
+    tag = binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
+    server = binary_part(Onchain.Hash.keccak(realm), 0, 10)
     client = <<0::80>>
-    nonce = binary_part(Cartouche.Hash.keccak(challenge_id), 0, 7)
+    nonce = binary_part(Onchain.Hash.keccak(challenge_id), 0, 7)
 
     "0x" <> Base.encode16(tag <> <<1>> <> server <> client <> nonce, case: :lower)
   end
@@ -3669,11 +3669,11 @@ defmodule MPP.Methods.TempoTest do
   defp sign_access_key_proof!(params, private_key, address) do
     digest = MPP.Methods.Tempo.Proof.hash(params)
     {:ok, sig} = Secp256k1.sign_payload(digest, private_key)
-    sig = Cartouche.Recover.normalize_low_s(sig)
-    {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, address)
+    sig = Onchain.Recover.normalize_low_s(sig)
+    {:ok, recid} = Onchain.Recover.find_recid_from_digest(digest, sig, address)
 
-    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
-    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    r = sig.r |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
     "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 

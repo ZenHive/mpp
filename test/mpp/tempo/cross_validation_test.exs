@@ -27,17 +27,18 @@ defmodule MPP.Tempo.CrossValidationTest do
 
   use ExUnit.Case, async: true
 
+  alias MPP.Methods.Tempo.KeyAuthorization
+  alias MPP.Test.OxTempoBundle
+  alias MPP.Test.SubscriptionHelpers
+
   # Excluded from the default offline gate (cold check, precommit) because it
   # requires the gitignored JS toolchain (node_modules/ox, node_modules/viem,
   # npx esbuild); the cross-validation workflow installs that toolchain and runs
   # this suite nightly. Opt in locally with `mix test.json --include
   # cross_validation` (or `mix test --include cross_validation`) when the
   # toolchain is set up. Mirrors :integration handling.
-  alias Cartouche.Hash
-  alias Cartouche.Signer.Secp256k1
-  alias MPP.Methods.Tempo.KeyAuthorization
-  alias MPP.Test.OxTempoBundle
-  alias MPP.Test.SubscriptionHelpers
+  alias Onchain.Hash
+  alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -685,8 +686,6 @@ defmodule MPP.Tempo.CrossValidationTest do
            "Round-trip hex mismatch:\n  original:     #{hex}\n  reserialized: #{reserialized}"
   end
 
-  # --- Helpers: Elixir RLP transaction builders ---
-
   @default_max_priority_fee 1_000_000_000
   @default_max_fee 25_000_000_000
   @default_amount 1_000_000_000_000_000_000
@@ -786,6 +785,8 @@ defmodule MPP.Tempo.CrossValidationTest do
       <<>>,
       []
     ]
+
+    # --- Helpers: Elixir RLP transaction builders ---
 
     "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
   end

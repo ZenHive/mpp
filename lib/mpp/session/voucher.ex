@@ -9,15 +9,15 @@ defmodule MPP.Session.Voucher do
 
   import Bitwise, only: [<<<: 2]
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
-  alias Cartouche.Signature
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.Session.Channel
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.Hex
+  alias Onchain.Recover
+  alias Onchain.Signature
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   @domain_name "TIP20 Channel Reserve"
   @domain_version "1"

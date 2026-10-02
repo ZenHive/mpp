@@ -1,9 +1,9 @@
 defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   use ExUnit.Case, async: true
 
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Methods.Tempo.SignatureEnvelope
+  alias Onchain.Recover
+  alias Onchain.Signer.Secp256k1
 
   @root_private_key "01" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
   @access_private_key "02" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
@@ -32,7 +32,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
   end
 
   test "recovery fails closed when the library raises on an unusable signature" do
-    unusable = {:secp256k1, %Cartouche.Signature{r: 0, s: 0, recid: 0}}
+    unusable = {:secp256k1, %Onchain.Signature{r: 0, s: 0, recid: 0}}
     zero = "0x" <> String.duplicate("0", 40)
 
     refute SignatureEnvelope.verify_secp256k1(unusable, @digest_a, zero)
@@ -49,7 +49,7 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
       payload =
         case version do
           :v1 -> digest
-          :v2 -> Cartouche.Hash.keccak(<<0x04>> <> digest <> root_address)
+          :v2 -> Onchain.Hash.keccak(<<0x04>> <> digest <> root_address)
         end
 
       inner_hex = sign_digest!(payload, @access_private_key, access_address)
@@ -82,8 +82,8 @@ defmodule MPP.Methods.Tempo.SignatureEnvelopeTest do
     sig = Recover.normalize_low_s(sig)
     {:ok, recid} = Recover.find_recid_from_digest(digest, sig, address)
 
-    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
-    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    r = sig.r |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
     "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 

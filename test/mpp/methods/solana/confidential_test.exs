@@ -1,20 +1,21 @@
 defmodule MPP.Methods.Solana.ConfidentialTest do
   use ExUnit.Case, async: true
-  use Cartouche.Base58
+  use Onchain.Solana.Base58
 
   import Bitwise
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.SystemProgram
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Solana.Transaction.AccountMeta
-  alias Cartouche.Solana.Transaction.Instruction
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Solana
   alias MPP.Methods.Solana.Confidential
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.SystemProgram
+  alias Onchain.Solana.Transaction
+  alias Onchain.Solana.Transaction.AccountMeta
+  alias Onchain.Solana.Transaction.Instruction
 
   @rpc_url "https://api.devnet.solana.com"
   @token_2022_address "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
@@ -89,7 +90,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
     end
 
     test "rejects confidential with the legacy token program", %{config: config} do
-      legacy = Cartouche.Base58.encode(Programs.token_program())
+      legacy = Base58.encode(Programs.token_program())
 
       assert_raise ArgumentError, ~r/require token_program/, fn ->
         Solana.validate_config!(Map.put(config, "token_program", legacy))
@@ -200,7 +201,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
 
     test "settles a signed bundle after decrypting the recipient pending-balance delta", context do
       transactions = signed_bundle(context)
-      signature = Cartouche.Base58.encode(hd(List.last(transactions).signatures))
+      signature = Base58.encode(hd(List.last(transactions).signatures))
       previous = account_rpc_value(@identity <> @identity, @identity <> @identity)
       current = account_rpc_value(@low_ciphertext, @high_ciphertext)
       counter = :atomics.new(1, signed: false)
@@ -285,7 +286,7 @@ defmodule MPP.Methods.Solana.ConfidentialTest do
          "type" => "bundle",
          "transactions" => Enum.map(transactions, &(&1 |> Transaction.serialize() |> Base.encode64()))
        },
-       signature: Cartouche.Base58.encode(hd(List.last(transactions).signatures)),
+       signature: Base58.encode(hd(List.last(transactions).signatures)),
        default_store: default_store_charge(context.charge)}
     end
 

@@ -51,12 +51,12 @@ defmodule MPP.Test.TempoAccessKey do
   @doc "Sign a proof digest with an access key (plain secp256k1 envelope)."
   @spec sign_proof!(<<_::256>>, binary(), binary()) :: String.t()
   def sign_proof!(digest, private_key, address_bytes) when is_binary(digest) and byte_size(digest) == 32 do
-    {:ok, sig} = Cartouche.Signer.Secp256k1.sign_payload(digest, private_key)
-    sig = Cartouche.Recover.normalize_low_s(sig)
-    {:ok, recid} = Cartouche.Recover.find_recid_from_digest(digest, sig, address_bytes)
+    {:ok, sig} = Onchain.Signer.Secp256k1.sign_payload(digest, private_key)
+    sig = Onchain.Recover.normalize_low_s(sig)
+    {:ok, recid} = Onchain.Recover.find_recid_from_digest(digest, sig, address_bytes)
 
-    r = sig.r |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
-    s = sig.s |> Cartouche.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    r = sig.r |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
+    s = sig.s |> Onchain.Hex.encode_bytes(32) |> Base.encode16(case: :lower)
     "0x" <> r <> s <> Base.encode16(<<27 + recid>>, case: :lower)
   end
 

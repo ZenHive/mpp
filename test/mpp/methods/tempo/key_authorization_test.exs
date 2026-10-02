@@ -1,9 +1,9 @@
 defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
   use ExUnit.Case, async: true
 
-  alias Cartouche.Hash
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Test.SubscriptionHelpers
+  alias Onchain.Hash
 
   @transfer_selector "0xa9059cbb"
   @transfer_with_memo_selector "0x95777d59"

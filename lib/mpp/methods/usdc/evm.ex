@@ -9,9 +9,6 @@ defmodule MPP.Methods.USDC.EVM do
 
   @behaviour MPP.Methods.USDC.Profile
 
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
-  alias Cartouche.Typed.Type
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
@@ -26,6 +23,9 @@ defmodule MPP.Methods.USDC.EVM do
   alias Onchain.Contract
   alias Onchain.RPC
   alias Onchain.Transfer
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
+  alias Onchain.Typed.Type
 
   require Logger
 

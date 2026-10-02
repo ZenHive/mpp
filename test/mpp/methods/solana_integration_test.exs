@@ -15,13 +15,14 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
   use ExUnit.Case, async: false
 
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.RPC
-  alias Cartouche.Solana.SystemProgram
-  alias Cartouche.Solana.Transaction
   alias MPP.Intents.Charge
   alias MPP.Methods.Solana
   alias MPP.Receipt
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.RPC
+  alias Onchain.Solana.SystemProgram
+  alias Onchain.Solana.Transaction
 
   @moduletag :integration
 
@@ -84,7 +85,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
     assert receipt.method == "solana"
     assert is_binary(receipt.reference)
-    assert {:ok, <<_::binary-64>>} = Cartouche.Base58.decode(receipt.reference)
+    assert {:ok, <<_::binary-64>>} = Base58.decode(receipt.reference)
   end
 
   test "push mode verifies a confirmed SOL transfer signature", context do
@@ -179,7 +180,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
       assert receipt.method == "solana"
       assert receipt.extensions == %{"delivery" => "pending"}
-      assert {:ok, <<_::binary-64>>} = Cartouche.Base58.decode(receipt.reference)
+      assert {:ok, <<_::binary-64>>} = Base58.decode(receipt.reference)
     end
 
     test "rejects a real confidential bundle whose credited amount differs", context do
@@ -225,7 +226,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
 
   defp send_with_memo!(context, recipient, memo) do
     {:ok, %{blockhash: blockhash}} = RPC.get_latest_blockhash(context.rpc_opts)
-    {:ok, memo_program} = Cartouche.Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+    {:ok, memo_program} = Base58.decode("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 
     ixs = [
       SystemProgram.transfer(context.payer, recipient, @lamports),
@@ -435,7 +436,7 @@ defmodule MPP.Methods.SolanaIntegrationTest do
         decode_hex_seed!(trimmed)
 
       true ->
-        case Cartouche.Base58.decode(trimmed) do
+        case Base58.decode(trimmed) do
           {:ok, <<seed::binary-32>>} -> seed
           {:ok, <<seed::binary-32, _pub::binary-32>>} -> seed
           other -> flunk("SOLANA_PRIVATE_KEY is not a valid hex, base58, or JSON key: #{inspect(other)}")

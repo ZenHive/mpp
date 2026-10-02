@@ -13,8 +13,6 @@ defmodule MPP.Methods.EVM.Permit2 do
   overload of `permitWitnessTransferFrom`, not `permitBatchWitnessTransferFrom`.
   """
 
-  alias Cartouche.Hash
-  alias Cartouche.Recover
   alias MPP.DID
   alias MPP.Errors
   alias MPP.Intents.Charge
@@ -22,7 +20,9 @@ defmodule MPP.Methods.EVM.Permit2 do
   alias MPP.Methods.EVM.Permit2.Settlement
   alias MPP.Receipt
   alias Onchain.Address
+  alias Onchain.Hash
   alias Onchain.Hex
+  alias Onchain.Recover
   alias Onchain.Signer
 
   @address "0x000000000022D473030F116dDEE9F6B43aC78BA3"
@@ -69,7 +69,7 @@ defmodule MPP.Methods.EVM.Permit2 do
       }
 
       with {:ok, digest} <- digest(payload, charge, spender),
-           {:ok, signature} <- Cartouche.Signer.Secp256k1.sign_payload(digest, key),
+           {:ok, signature} <- Onchain.Signer.Secp256k1.sign_payload(digest, key),
            signature = Recover.normalize_low_s(signature),
            {:ok, owner_bin} <- address(owner),
            {:ok, recid} <- Recover.find_recid_from_digest(digest, signature, owner_bin) do
@@ -181,7 +181,7 @@ defmodule MPP.Methods.EVM.Permit2 do
       permissions = if batch?, do: parsed.permitted, else: hd(parsed.permitted)
       transfers = if batch?, do: parsed.transfers, else: hd(parsed.transfers)
 
-      Onchain.ABI.encode_call(if(batch?, do: @batch, else: @single), [
+      Onchain.ABI.encode_hex_call(if(batch?, do: @batch, else: @single), [
         {permissions, parsed.nonce, parsed.deadline},
         transfers,
         owner_bin,
@@ -336,7 +336,7 @@ defmodule MPP.Methods.EVM.Permit2 do
 
   defp recover(digest, signature) do
     with {:ok, <<r::256, s::256, v>>} <- signature_bytes(signature) do
-      sig = %Cartouche.Signature{r: r, s: s, recid: v - 27}
+      sig = %Onchain.Signature{r: r, s: s, recid: v - 27}
       {:ok, Hex.encode(Recover.recover_eth_from_digest(digest, sig))}
     end
   rescue

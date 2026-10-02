@@ -1,9 +1,9 @@
 defmodule MPP.Test.SessionSigning do
   @moduledoc false
 
-  alias Cartouche.Recover
-  alias Cartouche.Signer.Secp256k1
   alias MPP.Session.Voucher
+  alias Onchain.Recover
+  alias Onchain.Signer.Secp256k1
 
   # Anvil account 0 — the well-known dev key; its address is the
   # authorized_signer used across session tests.

@@ -407,7 +407,7 @@ defmodule MPP.Methods.EVM do
   end
 
   defp fetch_transaction(hash, rpc_url, config) do
-    case Onchain.RPC.get_transaction_by_hash(hash, EvmRPC.rpc_opts(rpc_url, config)) do
+    case EvmRPC.transaction_by_hash(hash, EvmRPC.rpc_opts(rpc_url, config)) do
       {:ok, nil} ->
         {:error, Errors.new(:verification_failed, "Transaction not found on-chain")}
 
@@ -415,7 +415,7 @@ defmodule MPP.Methods.EVM do
         {:ok, tx}
 
       {:error, reason} ->
-        Logger.warning("MPP.Methods.EVM: RPC get_transaction_by_hash failed: #{inspect(reason)}")
+        Logger.warning("MPP.Methods.EVM: RPC eth_getTransactionByHash failed: #{inspect(reason)}")
         {:error, Errors.new(:verification_failed, @evm_rpc_error_detail)}
     end
   end

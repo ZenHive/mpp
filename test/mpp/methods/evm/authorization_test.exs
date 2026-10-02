@@ -1,13 +1,13 @@
 defmodule MPP.Methods.EVM.AuthorizationTest do
   use ExUnit.Case, async: true
 
-  alias Cartouche.Typed
-  alias Cartouche.Typed.Domain
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
   alias MPP.Test.EVMAuthorization
   alias Onchain.Address
+  alias Onchain.Typed
+  alias Onchain.Typed.Domain
 
   @rpc_url "https://mainnet.infura.io/v3/test"
   @chain_id 1
@@ -43,7 +43,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
   end
 
   describe "Sepolia USDC EIP-712 domain" do
-    test "Cartouche domain separator matches the live Circle DOMAIN_SEPARATOR" do
+    test "Onchain domain separator matches the live Circle DOMAIN_SEPARATOR" do
       {:ok, verifying} = Address.validate(@sepolia_usdc)
 
       typed = %Typed{
@@ -53,7 +53,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
           chain_id: 11_155_111,
           verifying_contract: verifying
         },
-        types: %{"TransferWithAuthorization" => %Cartouche.Typed.Type{fields: [{"from", :address}]}},
+        types: %{"TransferWithAuthorization" => %Onchain.Typed.Type{fields: [{"from", :address}]}},
         value: %{"from" => verifying}
       }
 

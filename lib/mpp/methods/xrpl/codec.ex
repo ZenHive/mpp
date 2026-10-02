@@ -9,7 +9,7 @@ defmodule MPP.Methods.XRPL.Codec do
   PaymentChannelClaim for local signing.
   """
 
-  alias Cartouche.Base58
+  alias Onchain.Solana.Base58
 
   @bitcoin ~c"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
   # https://xrpl.org/docs/references/protocol/data-types/base58-encodings

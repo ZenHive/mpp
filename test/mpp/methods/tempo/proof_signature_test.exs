@@ -1,9 +1,9 @@
 defmodule MPP.Methods.Tempo.ProofSignatureTest do
   use ExUnit.Case, async: true
 
-  alias Cartouche.Hash
   alias MPP.Methods.Tempo.Proof
   alias MPP.Methods.Tempo.ProofSignature
+  alias Onchain.Hash
 
   @order 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
   @account "0x" <> String.duplicate("12", 20)
@@ -87,7 +87,7 @@ defmodule MPP.Methods.Tempo.ProofSignatureTest do
 
   test "legacy signer extraction delegates without changing secp256k1 signatures" do
     private = :binary.copy(<<1>>, 32)
-    {:ok, address} = Cartouche.Signer.Secp256k1.get_address(private)
+    {:ok, address} = Onchain.Signer.Secp256k1.get_address(private)
     digest = Proof.hash(@params)
     signature = MPP.Test.TempoAccessKey.sign_proof!(digest, private, address)
     assert {:ok, envelope} = ProofSignature.deserialize(signature)

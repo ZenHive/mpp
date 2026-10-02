@@ -30,7 +30,7 @@ defmodule MPP.Methods.XRPL.ClaimTest do
 
   test "rejects a high-S secp256k1 encoding of an otherwise valid claim" do
     {:ok, der} = Base.decode16(@secp["signature"], case: :mixed)
-    {:ok, %Cartouche.Signature{r: r, s: s}} = Cartouche.Signature.from_der(der)
+    {:ok, %Onchain.Signature{r: r, s: s}} = Onchain.Signature.from_der(der)
     n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
     high = MPP.Methods.XRPL.Wallet.der(r, n - s)
 

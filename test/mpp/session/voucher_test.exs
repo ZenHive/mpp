@@ -3,9 +3,9 @@ defmodule MPP.Session.VoucherTest do
 
   import Bitwise, only: [<<<: 2]
 
-  alias Cartouche.Typed.Domain
   alias MPP.Session.Voucher
   alias Onchain.Hex
+  alias Onchain.Typed.Domain
 
   @channel_id "0x57e629663a75a0a49f8dc65c9f62ee38ab5dfa9124d7316d160766e4ecbc1227"
   @cumulative_amount 50

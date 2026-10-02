@@ -9,11 +9,11 @@ defmodule MPP.Methods.USDC.Binding do
   encoding; hex with a `0x` prefix matches the nonce field's own encoding.
   """
 
-  alias Cartouche.Hash
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.JCS
   alias MPP.Receipt
+  alias Onchain.Hash
   alias Onchain.Hex
 
   @profile_types ~w(evm solana stacks gateway)

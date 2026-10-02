@@ -49,7 +49,7 @@ defmodule MPP.Methods.Solana do
       optional `memo`, optional `ataCreationRequired`)
     * `"store"` — (optional) replay-dedup store, **on by default** (see
       `MPP.Methods.EVM` for the same contract). Pass `store: false` to opt out
-    * `"req_options"` — (optional) merged into `Cartouche.Solana.RPC` calls
+    * `"req_options"` — (optional) merged into `Onchain.Solana.RPC` calls
       (e.g. `[plug: {Req.Test, MyMod}]`) for testing stubs
     * `"wait_for_confirmation"` — (optional) when `false`, pull mode broadcasts
       without waiting for confirmation. Default `true`
@@ -126,17 +126,13 @@ defmodule MPP.Methods.Solana do
 
   ## Dependencies
 
-  Uses `Cartouche.Solana` (RPC, legacy transaction codec, System/Token/ATA
+  Uses `Onchain.Solana` (RPC, legacy transaction codec, System/Token/ATA
   programs) already in the on-chain stack.
   """
 
   use MPP.Method
   use Descripex, namespace: "/methods"
 
-  alias Cartouche.Solana.Keys
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.RPC
-  alias Cartouche.Solana.Transaction
   alias MPP.Errors
   alias MPP.Hex
   alias MPP.Intents.Charge
@@ -146,6 +142,11 @@ defmodule MPP.Methods.Solana do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Keys
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.RPC
+  alias Onchain.Solana.Transaction
 
   require Logger
 
@@ -262,6 +263,7 @@ defmodule MPP.Methods.Solana do
   end
 
   def verify(%{"type" => "bundle"} = payload, %Charge{} = charge) do
+    # --- signature (push) ---
     config = charge.method_details || %{}
 
     with :ok <- reject_zero_amount(charge),
@@ -279,6 +281,7 @@ defmodule MPP.Methods.Solana do
   end
 
   api(
+    # --- transaction (pull) ---
     :challenge_method_details,
     "Return Solana-specific fields (`network`, `credentialTypes`, `feePayer`, optional decimals/tokenProgram/splits) for the 402 challenge.",
     params: [
@@ -316,8 +319,6 @@ defmodule MPP.Methods.Solana do
     |> maybe_put_push_binding(config)
   end
 
-  # --- signature (push) ---
-
   defp verify_signature_credential(payload, charge, config, push_mode) do
     store = Store.resolve(config["store"])
 
@@ -325,6 +326,7 @@ defmodule MPP.Methods.Solana do
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Solana"),
          :ok <- require_recipient(charge),
          {:ok, expected_memo} <- expected_push_memo(push_mode, config),
+         # --- confidential bundle ---
          :ok <- check_signature_unused(store, signature),
          {:ok, rpc_tx} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Instructions.verify_parsed(rpc_tx, charge, instruction_opts(charge, config)),
@@ -334,8 +336,6 @@ defmodule MPP.Methods.Solana do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
   end
-
-  # --- transaction (pull) ---
 
   defp verify_transaction_credential(payload, charge, config) do
     store = Store.resolve(config["store"])
@@ -382,8 +382,6 @@ defmodule MPP.Methods.Solana do
       {:ok, signature}
     end
   end
-
-  # --- confidential bundle ---
 
   defp verify_bundle_credential(payload, charge, config) do
     store = Store.resolve(config["store"])
@@ -520,7 +518,7 @@ defmodule MPP.Methods.Solana do
   end
 
   defp extract_signature(%{"signature" => signature}) when is_binary(signature) do
-    case Cartouche.Base58.decode(signature) do
+    case Base58.decode(signature) do
       {:ok, <<_::binary-size(@signature_bytes)>>} ->
         {:ok, signature}
 
@@ -594,9 +592,10 @@ defmodule MPP.Methods.Solana do
 
   defp transaction_signature(%Transaction{signatures: [signature | _]}) do
     if signature == @empty_signature do
+      # --- challenge details ---
       {:error, Errors.new(:verification_failed, "Transaction is missing a required signature")}
     else
-      {:ok, Cartouche.Base58.encode(signature)}
+      {:ok, Base58.encode(signature)}
     end
   end
 
@@ -637,6 +636,8 @@ defmodule MPP.Methods.Solana do
     end
   end
 
+  # --- config / keys ---
+
   defp broadcast_transaction(tx, rpc_url, config, false) do
     case RPC.send_transaction(tx, rpc_opts(rpc_url, config)) do
       {:ok, signature} ->
@@ -671,8 +672,6 @@ defmodule MPP.Methods.Solana do
         {:error, Errors.new(:verification_failed, @solana_rpc_error_detail)}
     end
   end
-
-  # --- challenge details ---
 
   defp maybe_put_decimals(details, %Charge{currency: currency}, config) do
     if native_sol?(currency) do
@@ -716,8 +715,6 @@ defmodule MPP.Methods.Solana do
   defp maybe_put_confidential(details, %{"confidential" => true}), do: Map.put(details, "confidential", true)
 
   defp maybe_put_confidential(details, _config), do: details
-
-  # --- config / keys ---
 
   defp network(%{"network" => network}) when network in @networks, do: network
   defp network(_config), do: "mainnet"
@@ -890,13 +887,15 @@ defmodule MPP.Methods.Solana do
       token_program: token_program_key(charge, config),
       allow_primary_ata: config["allow_primary_ata"] == true
     }
+
+    # --- validate_config! ---
   end
 
   defp spl_mint(%Charge{currency: currency} = _charge) do
     if native_sol?(currency) do
       nil
     else
-      case Cartouche.Base58.decode(currency) do
+      case Base58.decode(currency) do
         {:ok, <<mint::binary-32>>} -> mint
         _other -> nil
       end
@@ -908,11 +907,12 @@ defmodule MPP.Methods.Solana do
 
     case program do
       value when is_binary(value) ->
-        case Cartouche.Base58.decode(value) do
+        case Base58.decode(value) do
           {:ok, <<key::binary-32>>} -> key
           _other -> Programs.token_program()
         end
 
+      # --- replay ---
       _other ->
         Programs.token_program()
     end
@@ -944,7 +944,7 @@ defmodule MPP.Methods.Solana do
   defp fee_payer_pubkey!(config) do
     case fee_payer_key(config) do
       {:ok, address} ->
-        case Cartouche.Base58.decode(address) do
+        case Base58.decode(address) do
           {:ok, <<key::binary-32>>} -> key
           _other -> <<0::256>>
         end
@@ -990,7 +990,7 @@ defmodule MPP.Methods.Solana do
   end
 
   defp decode_base58_seed(value) do
-    case Cartouche.Base58.decode(value) do
+    case Base58.decode(value) do
       {:ok, <<seed::binary-32>>} -> {:ok, seed}
       {:ok, <<seed::binary-32, _pub::binary-32>>} -> {:ok, seed}
       _other -> {:error, Errors.new(:verification_failed, "Invalid fee_payer_private_key")}
@@ -1013,8 +1013,6 @@ defmodule MPP.Methods.Solana do
       _other -> opts
     end
   end
-
-  # --- validate_config! ---
 
   defp validate_network!(nil), do: :ok
 
@@ -1039,8 +1037,6 @@ defmodule MPP.Methods.Solana do
       :ok
     end
   end
-
-  # --- replay ---
 
   defp check_signature_unused(nil, _signature), do: :ok
 

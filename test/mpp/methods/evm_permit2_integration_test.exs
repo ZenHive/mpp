@@ -60,11 +60,11 @@ defmodule MPP.Methods.EVMPermit2IntegrationTest do
     }
 
     on_exit(fn ->
-      {:ok, data} = Onchain.ABI.encode_call("approve(address,uint256)", [permit_bin, allowance])
+      {:ok, data} = Onchain.ABI.encode_hex_call("approve(address,uint256)", [permit_bin, allowance])
       assert {:ok, _} = Settlement.submit(@token, data, config)
     end)
 
-    {:ok, data} = Onchain.ABI.encode_call("approve(address,uint256)", [permit_bin, 4])
+    {:ok, data} = Onchain.ABI.encode_hex_call("approve(address,uint256)", [permit_bin, 4])
     assert {:ok, _} = Settlement.submit(@token, data, config)
     {:ok, config: config, key: key, owner: owner, opts: opts}
   end

@@ -4,7 +4,7 @@ defmodule MPP.Methods.Solana.Instructions do
 
   Two input shapes are supported:
 
-    * compiled legacy transactions (`Cartouche.Solana.Transaction`) for pull-mode
+    * compiled legacy transactions (`Onchain.Solana.Transaction`) for pull-mode
       pre-broadcast checks (instruction allow-list + payment legs)
     * `jsonParsed` `getTransaction` results for push-mode and post-confirm
       payment matching
@@ -14,15 +14,15 @@ defmodule MPP.Methods.Solana.Instructions do
   field names used here.
   """
 
-  use Cartouche.Base58
+  use Onchain.Solana.Base58
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Solana.Transaction.CompiledInstruction
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Shared
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.Transaction
+  alias Onchain.Solana.Transaction.CompiledInstruction
 
   @max_splits 8
   @memo_program ~B58[MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr]
@@ -118,6 +118,9 @@ defmodule MPP.Methods.Solana.Instructions do
   Return the payment legs implied by a charge (primary remainder + splits).
   """
   @spec payment_legs(Charge.t()) :: {:ok, [map()]} | {:error, Errors.t()}
+
+  # --- compiled classification ---
+
   def payment_legs(%Charge{} = charge) do
     with {:ok, total} <- Shared.parse_charge_amount(charge.amount),
          {:ok, splits} <- normalize_splits(charge),
@@ -156,8 +159,6 @@ defmodule MPP.Methods.Solana.Instructions do
     raise ArgumentError, "MPP.Methods.Solana splits must be a list of maps"
   end
 
-  # --- compiled classification ---
-
   defp classify_compiled_ix(%CompiledInstruction{} = ix, keys) do
     with {:ok, program} <- at_index(keys, ix.program_id_index),
          {:ok, accounts} <- resolve_accounts(ix.accounts, keys) do
@@ -193,6 +194,8 @@ defmodule MPP.Methods.Solana.Instructions do
         {:unknown, program}
     end
   end
+
+  # --- jsonParsed classification ---
 
   defp classify_token_ix(
          program,
@@ -238,8 +241,6 @@ defmodule MPP.Methods.Solana.Instructions do
   defp classify_compute_budget(<<@cu_set_price_ix, price::little-unsigned-64>>), do: {:set_price, price}
   defp classify_compute_budget(<<disc, _rest::binary>>), do: {:other, disc}
   defp classify_compute_budget(_data), do: {:other, nil}
-
-  # --- jsonParsed classification ---
 
   defp classify_parsed_ix(ix) when is_map(ix) do
     program_id = ix["programId"]
@@ -379,6 +380,8 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
+  # --- payment matching ---
+
   defp reject_ata_for_native_sol(charge) do
     if native_sol?(charge.currency) do
       {:error, Errors.new(:verification_failed, "ATA creation is not allowed for native SOL payments")}
@@ -443,13 +446,12 @@ defmodule MPP.Methods.Solana.Instructions do
 
   defp reject_fee_payer_source(_classified, _opts), do: :ok
 
-  # --- payment matching ---
-
   defp match_payment_legs(classified, charge, opts) do
     native? = native_sol?(charge.currency)
 
     with {:ok, legs} <- payment_legs(charge) do
       classified
+      # --- splits / charge ---
       |> payment_transfers(native?)
       |> then(&consume_legs(legs, &1, charge, opts, native?))
       |> finish_payment_match()
@@ -524,8 +526,6 @@ defmodule MPP.Methods.Solana.Instructions do
     transfer.destination == dest and transfer.amount == amount and transfer.mint == mint
   end
 
-  # --- splits / charge ---
-
   defp normalize_splits(%Charge{method_details: details}) do
     details
     |> splits_from_details()
@@ -539,6 +539,8 @@ defmodule MPP.Methods.Solana.Instructions do
       {:error, %Errors{}} = error -> {:halt, error}
     end
   end
+
+  # --- primitives ---
 
   defp reverse_splits({:ok, splits}), do: {:ok, Enum.reverse(splits)}
   defp reverse_splits({:error, %Errors{}} = error), do: error
@@ -628,8 +630,6 @@ defmodule MPP.Methods.Solana.Instructions do
 
   defp decode_mint(currency) when is_binary(currency), do: decode_pubkey(currency)
 
-  # --- primitives ---
-
   defp parsed_sol_transfer(info) when is_map(info) do
     sol_transfer(decode_key(info["source"]), decode_key(info["destination"]), parse_integer(info["lamports"]))
   end
@@ -671,7 +671,7 @@ defmodule MPP.Methods.Solana.Instructions do
     if byte_size(value) == 32 do
       {:ok, value}
     else
-      case Cartouche.Base58.decode(value) do
+      case Onchain.Solana.Base58.decode(value) do
         {:ok, <<key::binary-32>>} -> {:ok, key}
         _other -> {:error, Errors.new(:verification_failed, "Invalid Solana public key")}
       end

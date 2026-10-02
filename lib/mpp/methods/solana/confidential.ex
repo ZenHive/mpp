@@ -1,20 +1,21 @@
 defmodule MPP.Methods.Solana.Confidential do
   @moduledoc false
 
-  use Cartouche.Base58
+  use Onchain.Solana.Base58
 
   import Bitwise
 
-  alias Cartouche.Solana.ATA
-  alias Cartouche.Solana.Programs
-  alias Cartouche.Solana.RPC
-  alias Cartouche.Solana.Transaction
-  alias Cartouche.Solana.Transaction.CompiledInstruction
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Shared
   alias MPP.Methods.Solana.Instructions
   alias MPP.Methods.Solana.Ristretto255
+  alias Onchain.Solana.ATA
+  alias Onchain.Solana.Base58
+  alias Onchain.Solana.Programs
+  alias Onchain.Solana.RPC
+  alias Onchain.Solana.Transaction
+  alias Onchain.Solana.Transaction.CompiledInstruction
 
   @token_2022_address "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
   @zk_proof_program ~B58[ZkE1Gama1Proof11111111111111111111111111111]
@@ -174,8 +175,8 @@ defmodule MPP.Methods.Solana.Confidential do
   end
 
   defp validate_confidential_charge!(%Charge{currency: currency, recipient: recipient}, config) do
-    with {:ok, <<_::binary-32>>} <- Cartouche.Base58.decode(currency),
-         {:ok, <<_::binary-32>>} <- Cartouche.Base58.decode(recipient),
+    with {:ok, <<_::binary-32>>} <- Base58.decode(currency),
+         {:ok, <<_::binary-32>>} <- Base58.decode(recipient),
          decimals when is_integer(decimals) and decimals in 0..9 <- config["decimals"] do
       :ok
     else
@@ -217,8 +218,8 @@ defmodule MPP.Methods.Solana.Confidential do
   end
 
   defp payment_accounts(%Charge{currency: currency, recipient: recipient}) do
-    with {:ok, <<mint::binary-32>>} <- Cartouche.Base58.decode(currency),
-         {:ok, <<owner::binary-32>>} <- Cartouche.Base58.decode(recipient) do
+    with {:ok, <<mint::binary-32>>} <- Base58.decode(currency),
+         {:ok, <<owner::binary-32>>} <- Base58.decode(recipient) do
       {destination, _bump} = ATA.find_address(owner, mint, token_program: Programs.token_2022_program())
       {:ok, mint, destination}
     else

@@ -1015,7 +1015,7 @@ defmodule MPP.Methods.EVMTest do
   end
 
   # Reads and decodes a JSON-RPC request from the stub conn, returning the
-  # method, the request id (which the response MUST echo — Onchain.RPC/Cartouche
+  # method, the request id (which the response MUST echo — Onchain.RPC
   # matches the response id against the random request id), and the conn.
   defp read_request(conn) do
     {:ok, body, conn} = Plug.Conn.read_body(conn)
