@@ -4283,7 +4283,7 @@ shipped_in = "0dfeafa996bda15b70f02beab20c709ab0639322"
 id = "155"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "in_progress"
 title = "Make the opt-in and Tempo chain mutants fail on their security assertions"
 scores = { d = 3, b = 5, u = 3 }
 markers = ["parallel"]
@@ -4294,6 +4294,7 @@ assignee = "codex"
 model = "gpt-6-astra"
 body = "The Task 141 campaign refresh kills every payment-security mutant, but two only die by accident. `evm-transaction-opt-in-bypassed` reaches broadcast and crashes in `canonicalize_hash(nil)` on the stub's nil hash; `tempo-chain-match-bypassed` reaches `simulate` with no Req stub instead of returning the chain-mismatch error. Each kill depends on a stub's incidental shape, not on the property the test encodes. Tighten those tests so a bypass fails the security assertion itself (an unoffered transaction credential is rejected with no RPC call; a wrong chain is rejected before simulation, including the generated non-Moderato property), then refresh the ledger with `MIX_ENV=test mix mutation.security --refresh`. Evidence: ledger `campaign.observation` tails for both mutants (transaction_test.exs:334, tempo_test.exs:1026)."
 created_at = "2026-10-02"
+started_at = "2026-10-02"
 scored_at = "2026-10-02"
 
 [bundles.testnet-funding]
