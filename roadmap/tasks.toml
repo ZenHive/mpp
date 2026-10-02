@@ -3985,7 +3985,7 @@ scored_at = "2026-10-02"
 id = "146"
 phase = 1
 bundle = "core-protocol"
-status = "in_progress"
+status = "done"
 title = "Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485)"
 scores = { d = 3, b = 4, u = 4 }
 acceptance_criteria = ['Accept-Payment: method tokens follow the challenge method grammar; Q=0 is honoured as an opt-out; a valueless q parameter is rejected; only qvalues matching ^(0(\.\d{0,3})?|1(\.0{0,3})?)$ are accepted', 'Protocol amounts accept only ^[0-9]+$ in charge parsing, intent validation and the client Tempo provider; +100, -5, 1e3 and " 100" are rejected with tests']
@@ -4001,9 +4001,16 @@ mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #48
 
 Port both, checking against refs/mpp-rs and refs/mppx.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1790936982989-a167c29b, ad20c1b3905dd8c1773ee6eef86f2800f0c3dc2e)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1790936982989-a167c29b"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "ad20c1b3905dd8c1773ee6eef86f2800f0c3dc2e"
 
 [[task]]
 id = "147"
