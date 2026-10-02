@@ -1337,7 +1337,7 @@ defmodule MPP.Methods.TempoTest do
       # no longer a per-call eth_call that could target the wrong call in the batch.
       dex_address = dex_address()
       approve_call = build_call(@token_address, approve_calldata(dex_address, 1_000_000))
-      swap_call = build_call(dex_address, swap_calldata())
+      swap_call = build_call(dex_address, swap_calldata(@token_address, @token_address, 1_000_000, 1_000_000))
       transfer_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
 
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: 42_431)
@@ -3345,6 +3345,61 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "binds the approve/swap prefix to the payment", %{charge: charge} do
+      dex = dex_address()
+      other_token = "0x20C0000000000000000000000000000000000001"
+      transfer_call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+
+      Req.Test.stub(Tempo, fn _conn -> flunk("RPC called for an unbound swap prefix") end)
+
+      cases = [
+        {other_token, 1_000_000, {@token_address, @token_address, 1_000_000, 1_000_000}, "approve target"},
+        {@token_address, 9_999_999, {@token_address, @token_address, 1_000_000, 1_000_000}, "approve amount"},
+        {@token_address, 1_000_000, {@token_address, other_token, 1_000_000, 1_000_000}, "output token"},
+        {@token_address, 1_000_000, {@token_address, @token_address, 999_999, 1_000_000}, "output does not match"}
+      ]
+
+      for {approve_target, approve_amount, {token_in, token_out, amount_out, max_in}, detail} <- cases do
+        calls = [
+          build_call(approve_target, approve_calldata(dex, approve_amount)),
+          build_call(dex, swap_calldata(token_in, token_out, amount_out, max_in)),
+          transfer_call
+        ]
+
+        payload = %{
+          "type" => "transaction",
+          "signature" => build_tempo_tx(calls: calls, chain_id: 42_431, fee_payer: true)
+        }
+
+        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert error.detail =~ detail
+      end
+
+      malformed = [
+        build_call(@token_address, approve_calldata(dex, 1_000_000)),
+        build_call(dex, swap_calldata()),
+        transfer_call
+      ]
+
+      payload = %{
+        "type" => "transaction",
+        "signature" => build_tempo_tx(calls: malformed, chain_id: 42_431, fee_payer: true)
+      }
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "approve target"
+
+      bound = [
+        build_call(@token_address, approve_calldata(dex, 1_000_000)),
+        build_call(dex, swap_calldata(@token_address, @token_address, 1_000_000, 1_000_000)),
+        transfer_call
+      ]
+
+      stub_broadcast_and_receipt(success_receipt())
+      payload = %{"type" => "transaction", "signature" => build_tempo_tx(calls: bound, chain_id: 42_431, fee_payer: true)}
       assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
     end
 

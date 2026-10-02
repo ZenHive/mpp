@@ -251,7 +251,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       # simulated via eth_simulateV1 — there is no per-call eth_call to mis-target.
       dex = dex_address()
       approve_call = build_call(@token_address, approve_calldata(dex, 1_000_000))
-      swap_call = build_call(dex, swap_calldata())
+      swap_call = build_call(dex, swap_calldata(@token_address, @token_address, 1_000_000, 1_000_000))
       transfer_call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo))
       tx_hex = build_tempo_tx(calls: [approve_call, swap_call, transfer_call], chain_id: @chain_id)
 

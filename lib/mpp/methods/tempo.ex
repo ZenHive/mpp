@@ -180,6 +180,7 @@ defmodule MPP.Methods.Tempo do
   require Logger
 
   @moderato_chain_id 42_431
+  @swap_exact_amount_out_selector Onchain.Tempo.TIP20.swap_exact_amount_out_selector()
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
   @attribution_memo_length 32
@@ -341,7 +342,7 @@ defmodule MPP.Methods.Tempo do
            :ok <- verify_chain_id(tx, expected_chain_id),
            :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
            {:ok, payment} <- find_transaction_payment(tx, charge, config, memo),
-           :ok <- maybe_validate_call_scope(tx, config, payment),
+           :ok <- maybe_validate_call_scope(tx, charge, config, payment),
            {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id) do
         verify_transaction_after_budget(tx, payment, charge, config, memo, store, wait?, budget)
       end
@@ -936,11 +937,59 @@ defmodule MPP.Methods.Tempo do
   # Machine-token `[approve, swapTo]` is an allowed sponsored route (mpp-rs
   # `validate_transaction_transfers_with_machine_token` skips DEX call-scope when
   # the canonical route matches). No-op when fee_payer is falsy.
-  defp maybe_validate_call_scope(_tx, _config, %{machine_token?: true}), do: :ok
+  defp maybe_validate_call_scope(_tx, _charge, _config, %{machine_token?: true}), do: :ok
 
-  defp maybe_validate_call_scope(tx, config, _payment) do
-    if fee_payer_enabled?(config), do: Transaction.validate_call_scope(tx), else: :ok
+  defp maybe_validate_call_scope(tx, charge, config, _payment) do
+    if fee_payer_enabled?(config) do
+      with :ok <- Transaction.validate_call_scope(tx) do
+        validate_swap_prefix(tx.calls, charge)
+      end
+    else
+      :ok
+    end
   end
+
+  # A sponsored `[approve, swapExactAmountOut, transfer]` prefix may only buy the
+  # payment: approve the swap's tokenIn for exactly its maxAmountIn, and swap out
+  # exactly the charge amount of the charge currency (mppx fee-payer.ts,
+  # mpp-rs #473). `swapExactAmountOut(tokenIn, tokenOut, uint128 amountOut,
+  # uint128 maxAmountIn)`; `approve(spender, uint256 amount)`.
+  defp validate_swap_prefix(
+         [
+           %{to: approve_target, input: <<_::binary-size(4), _spender::binary-size(32), approve_amount::unsigned-256>>},
+           %{
+             input:
+               <<@swap_exact_amount_out_selector::binary, 0::96, token_in::binary-size(20), 0::96,
+                 token_out::binary-size(20), amount_out::unsigned-256, max_amount_in::unsigned-256>>
+           },
+           _transfer
+         ],
+         charge
+       ) do
+    cond do
+      not Onchain.Address.equal?(approve_target, token_in) ->
+        {:error, "Fee-sponsored approve target does not match the swap tokenIn"}
+
+      approve_amount != max_amount_in ->
+        {:error, "Fee-sponsored approve amount does not match the swap max input"}
+
+      not Onchain.Address.equal?(token_out, charge.currency) ->
+        {:error, "Fee-sponsored swap output token is not the payment currency"}
+
+      Shared.parse_charge_amount(charge.amount) != {:ok, amount_out} ->
+        {:error, "Fee-sponsored swap output does not match the payment amount"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_swap_prefix(
+         [_approve, %{input: <<@swap_exact_amount_out_selector::binary, _::binary>>}, _transfer],
+         _charge
+       ), do: {:error, "Fee-sponsored swap calldata is malformed"}
+
+  defp validate_swap_prefix(_calls, _charge), do: :ok
 
   defp find_transaction_payment(tx, charge, config, memo) do
     case maybe_match_machine_token_route(tx, charge, config, memo) do

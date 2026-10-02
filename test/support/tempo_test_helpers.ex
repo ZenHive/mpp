@@ -171,6 +171,14 @@ defmodule MPP.Test.TempoTestHelpers do
     TIP20.swap_exact_amount_out_selector() <> :binary.copy(<<0>>, 128)
   end
 
+  @doc "Builds ABI-encoded calldata for swapExactAmountOut(tokenIn, tokenOut, uint128 amountOut, uint128 maxAmountIn)."
+  def swap_calldata(token_in_hex, token_out_hex, amount_out, max_amount_in) do
+    TIP20.swap_exact_amount_out_selector() <>
+      <<0::96>> <>
+      TIP20.decode_address(token_in_hex) <>
+      <<0::96>> <> TIP20.decode_address(token_out_hex) <> <<amount_out::unsigned-256, max_amount_in::unsigned-256>>
+  end
+
   @doc "Decodes a hex address (with or without 0x prefix) to a 20-byte binary."
   def decode_address(hex), do: TIP20.decode_address(hex)
 
