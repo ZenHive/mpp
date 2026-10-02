@@ -6149,7 +6149,7 @@
       "id": "145",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447)",
       "scores": {
         "d": 5,
@@ -6188,6 +6188,7 @@
       ],
       "body": "A batch of mpp-rs fixes to WWW-Authenticate challenge encoding and parsing. They are coupled: they share lib/mpp/headers.ex and lib/mpp/challenge.ex, and #450 and #489 must ship together or our own server's output decodes as mojibake.\n\n- #450 (b7c3803): escape every byte outside HTAB and 0x20-0x7E as `\\uXXXX`. Today `escape_codepoint` (headers.ex ~324-335) passes U+0080-U+00FF through as raw UTF-8 and C0 controls/DEL through unescaped. Upstream also refuses to format a challenge that would not round-trip.\n- #489 (c7acafa): the client decodes WWW-Authenticate values as Latin-1, so mppx servers sending 0xE9 work. Today `MPP.Client.Transport.HTTP` parses raw bytes (client/transport/http.ex ~119-123), and the resulting invalid UTF-8 later crashes `Jason.encode!` in `MPP.Credential` (credential.ex ~102).\n- #505 (f4c2dc5): an empty unquoted auth-param (`description=` at the end or before a comma) is a valid empty token, not a parse error (headers.ex `parse_value` ~426-434).\n- #453 (cb18bfc): `Challenge.create`/format must never emit a `header` other than (case-insensitive) `Payment-Authorization` (spec draft-httpauth-payment-01 ~585-590). `credential_header/1` falls back to `Authorization` for any other value, and `payable?` compares case-insensitively.\n- #490 (6272fcc): accept an echoed `opaque` in the legacy object form from older mppx clients by re-encoding it as base64url(JCS) before validation (credential.ex ~192-202).\n- #447 (2109d5b): in MCP, one malformed challenge in `error.data.challenges` no longer discards the whole list. Keep the parseable ones, and error only when none parse (lib/mpp/mcp.ex ~612-619).\n- The comment at headers.ex ~264-269 claims mpp-rs's old `>=` 16 KiB check behaved like `>`. mpp-rs #540 shows it did not. Correct the comment (our `>` behavior is right).\n\nGround truth is refs/mpp-rs and refs/mppx (tier 2). Cross-validate round-trips against mppx via the existing QuickBEAM harness where practical.\n",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     },
