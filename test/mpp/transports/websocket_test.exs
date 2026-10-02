@@ -636,8 +636,11 @@ defmodule MPP.Transports.WebSocketTest do
         WebSocket.handle_text(credential_text(challenge, session_voucher_payload(100)), sess)
 
       voucher_frames = decode_all(voucher_texts)
-      assert Enum.map(voucher_frames, & &1["type"]) == ["message", "receipt"]
-      assert hd(voucher_frames)["data"] == "chunk-2"
+      assert Enum.map(voucher_frames, & &1["type"]) == ["receipt", "message", "receipt"]
+      assert hd(voucher_frames)["receipt"]["action"] == "voucher"
+      assert hd(voucher_frames)["receipt"]["acceptedCumulative"] == "100"
+      assert hd(voucher_frames)["receipt"]["spent"] == "50"
+      assert Enum.at(voucher_frames, 1)["data"] == "chunk-2"
       session_receipt = List.last(voucher_frames)["receipt"]
       assert session_receipt["intent"] == "session"
       assert session_receipt["channelId"] == @channel_id
@@ -654,6 +657,88 @@ defmodule MPP.Transports.WebSocketTest do
       {_sess, [message_text]} = WebSocket.handle_text(Jason.encode!(%{"type" => "message", "data" => rpc}), sess)
       {:ok, message_frame} = WebSocket.decode_frame(message_text)
       assert Jason.decode!(message_frame["data"]) == %{"jsonrpc" => "2.0", "id" => 1, "result" => "0xa61"}
+    end
+
+    for {key, minimum} <- [{"minVoucherDelta", "120"}, {"min_voucher_delta", 120}] do
+      @minimum_key key
+      @minimum_value minimum
+      test "needVoucher honours #{@minimum_key} and acknowledges each signed top-up before resuming" do
+        store = session_store()
+        opts = session_options(store)
+        config = Map.put(opts[:method_config], @minimum_key, @minimum_value)
+
+        {sess, [challenge_text]} =
+          WebSocket.open(meter_session(store, method_config: config, generate: ~w(a b c d e f)))
+
+        {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+        {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+
+        {sess, texts} = WebSocket.handle_text(credential_text(challenge, session_open_payload(75)), sess)
+        [open_receipt, message, need] = decode_all(texts)
+        assert open_receipt["receipt"]["action"] == "open"
+        assert message == %{"type" => "message", "data" => "a"}
+        assert sess.status == :awaiting_voucher
+
+        assert need == %{
+                 "type" => "needVoucher",
+                 "channelId" => @channel_id,
+                 "requiredCumulative" => "195",
+                 "acceptedCumulative" => "75",
+                 "deposit" => "1000"
+               }
+
+        amount = String.to_integer(need["requiredCumulative"])
+
+        {rejected, [error_text]} =
+          WebSocket.handle_text(credential_text(challenge, session_voucher_payload(amount - 1)), sess)
+
+        assert rejected.status == :awaiting_voucher
+        assert {:ok, %{"type" => "error", "error" => "Delta Too Small"}} = WebSocket.decode_frame(error_text)
+        assert {:ok, unchanged} = Store.get(store, @channel_id)
+        assert unchanged.cumulative_amount == 75
+
+        {sess, texts} = WebSocket.handle_text(credential_text(challenge, session_voucher_payload(amount)), sess)
+        [ack, b, c, need] = decode_all(texts)
+        assert ack["type"] == "receipt"
+        assert ack["receipt"]["action"] == "voucher"
+        assert ack["receipt"]["acceptedCumulative"] == "195"
+        assert ack["receipt"]["spent"] == "50"
+        assert [b["data"], c["data"]] == ~w(b c)
+        assert need["type"] == "needVoucher"
+        assert need["requiredCumulative"] == "315"
+        assert need["acceptedCumulative"] == "195"
+        assert sess.status == :awaiting_voucher
+
+        amount = String.to_integer(need["requiredCumulative"])
+        {sess, texts} = WebSocket.handle_text(credential_text(challenge, session_voucher_payload(amount)), sess)
+        [ack, d, e, f, final_receipt] = decode_all(texts)
+        assert ack["type"] == "receipt"
+        assert ack["receipt"]["action"] == "voucher"
+        assert ack["receipt"]["acceptedCumulative"] == "315"
+        assert ack["receipt"]["spent"] == "150"
+        assert [d["data"], e["data"], f["data"]] == ~w(d e f)
+        assert final_receipt["receipt"]["spent"] == "300"
+        assert final_receipt["receipt"]["units"] == 6
+        assert sess.status == :complete
+      end
+    end
+
+    test "an authorized session acknowledges each unsolicited voucher" do
+      store = session_store()
+      {sess, [challenge_text]} = WebSocket.open(meter_session(store, generate: nil))
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+      {sess, [_receipt]} = WebSocket.handle_text(credential_text(challenge, session_open_payload(50)), sess)
+
+      Enum.reduce([100, 150], sess, fn amount, sess ->
+        {sess, [text]} = WebSocket.handle_text(credential_text(challenge, session_voucher_payload(amount)), sess)
+        assert {:ok, %{"type" => "receipt", "receipt" => receipt}} = WebSocket.decode_frame(text)
+        assert receipt["action"] == "voucher"
+        assert receipt["acceptedCumulative"] == Integer.to_string(amount)
+        assert receipt["spent"] == "0"
+        assert sess.status == :authorized
+        sess
+      end)
     end
 
     test "an unmetered session retains its one-time handshake charge" do

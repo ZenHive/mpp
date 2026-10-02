@@ -80,6 +80,12 @@ defmodule MPP.Session.Actions do
     dispatch(payload, opts_from_session(session))
   end
 
+  @doc "Return the effective minimum voucher delta for a session intent."
+  @spec minimum_voucher_delta(Session.t()) :: non_neg_integer()
+  def minimum_voucher_delta(%Session{} = session) do
+    session |> opts_from_session() |> min_voucher_delta()
+  end
+
   @doc "Apply a parsed session payload to the channel store."
   @spec handle(Payload.t(), opts()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def handle(%Payload{action: :open} = payload, opts), do: handle_open(payload, opts)

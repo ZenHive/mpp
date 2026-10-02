@@ -215,10 +215,19 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       {:continue, retry} = Retry.transition(retry, :credential_sent)
       assert retry.awaiting_receipt?
 
+      {voucher_receipt, client} = recv_frame!(client)
+      assert voucher_receipt["type"] == "receipt"
+      assert voucher_receipt["receipt"]["action"] == "voucher"
+      assert voucher_receipt["receipt"]["acceptedCumulative"] == "100"
+      assert voucher_receipt["receipt"]["spent"] == "50"
+      {:continue, retry} = Retry.transition(retry, :receipt)
+      refute retry.voucher_in_flight?
+      refute retry.awaiting_receipt?
+
       {resumed, client} = recv_frame!(client)
       assert resumed["type"] == "message"
       assert resumed["data"] == "chunk-2"
-      refute Retry.should_pay?(retry)
+      assert Retry.should_pay?(retry)
 
       {session_receipt, client} = recv_frame!(client)
       assert session_receipt["type"] == "receipt"

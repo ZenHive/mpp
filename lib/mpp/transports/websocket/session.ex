@@ -7,6 +7,7 @@ defmodule MPP.Transports.WebSocket.Session do
 
   alias MPP.Intents.Session, as: SessionIntent
   alias MPP.Plug.Config
+  alias MPP.Session.Actions
   alias MPP.Session.Channel
   alias MPP.Session.Store
   alias MPP.Transports.WebSocket
@@ -166,7 +167,7 @@ defmodule MPP.Transports.WebSocket.Session do
         {:ok, session}
 
       {:error, :insufficient_balance} ->
-        {:need_voucher, session, need_voucher_frame(meter)}
+        {:need_voucher, session, need_voucher_frame(session)}
 
       {:error, {:invalid_transition, :closed, _to}} ->
         {:error, %{session | status: :complete}, Frame.error_frame("session channel is closed")}
@@ -183,12 +184,17 @@ defmodule MPP.Transports.WebSocket.Session do
     {%{session | meter: %{meter | remaining: rest}}, [Frame.message_frame(item)]}
   end
 
-  defp need_voucher_frame(%Meter{} = meter) do
+  defp need_voucher_frame(%WebSocket{meter: meter, config: config}) do
     case Store.get(meter.store, meter.channel_id) do
       {:ok, channel} ->
+        [entry | _] = config.method_entries
+        details = Map.merge(entry.charge.method_details || %{}, entry.method_config)
+        min_delta = Actions.minimum_voucher_delta(%{entry.charge | method_details: details})
+        required = max(channel.spent + meter.tick_cost, channel.cumulative_amount + min_delta)
+
         Frame.need_voucher_frame(
           channel_id: channel.channel_id,
-          required_cumulative: Integer.to_string(channel.spent + meter.tick_cost),
+          required_cumulative: Integer.to_string(required),
           accepted_cumulative: Integer.to_string(channel.cumulative_amount),
           deposit: Integer.to_string(channel.deposit)
         )

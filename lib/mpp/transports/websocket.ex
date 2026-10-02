@@ -292,16 +292,12 @@ defmodule MPP.Transports.WebSocket do
 
       %{"_meta" => meta} ->
         receipt = Map.get(meta, JsonRpc.receipt_meta_key(), %{})
-        receipt_frames = verification_receipt_frames(session, receipt)
         session = %{session | status: :authorized}
         session = Session.bind_channel(session, credential.payload)
         {session, drain_frames} = Session.drain(session)
-        {session, receipt_frames ++ drain_frames}
+        {session, [Frame.receipt_frame(receipt) | drain_frames]}
     end
   end
-
-  defp verification_receipt_frames(%{status: :awaiting_voucher}, _receipt), do: []
-  defp verification_receipt_frames(_session, receipt), do: [Frame.receipt_frame(receipt)]
 
   defp drop_meter_opts(opts) do
     Keyword.drop(opts, [:generate, :tick_cost])
