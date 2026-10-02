@@ -3937,6 +3937,7 @@ acceptance_criteria = ["An RPC/store/internal failure in Tempo and EVM verificat
 out_of_scope = ["Changing which failures are retried client-side", "New problem types not in the spec"]
 assignee = "codex"
 model = "gpt-6-astra"
+touches = ["lib/mpp/verifier.ex", "lib/mpp/errors.ex", "lib/mpp/challenge.ex", "lib/mpp/mcp.ex", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/stripe.ex", "test/mpp/verifier_test.exs", "test/mpp/errors_test.exs", "test/mpp/challenge_test.exs", "test/mpp/methods/"]
 body = """
 mpp-rs #496 (597ff33) and #430 (e072551) corrected how payment failures map to RFC 9457 problem types. Our mapping diverges in three places, each confirmed by reading the code on 2026-10-02:
 
@@ -3962,6 +3963,7 @@ acceptance_criteria = ["Formatting a challenge with realm/description containing
 out_of_scope = ["Problem-type mapping (separate task)", "Accept-Payment grammar (separate task)"]
 assignee = "grok"
 model = "grok-4.7"
+touches = ["lib/mpp/headers.ex", "lib/mpp/headers/", "lib/mpp/client/transport/http.ex", "lib/mpp/client/transport/mcp.ex", "lib/mpp/client/mcp.ex", "test/mpp/headers_test.exs", "test/mpp/client/"]
 body = '''
 A batch of mpp-rs fixes to WWW-Authenticate challenge encoding and parsing. They are coupled: they share lib/mpp/headers.ex and lib/mpp/challenge.ex, and #450 and #489 must ship together or our own server's output decodes as mojibake.
 
@@ -3989,6 +3991,7 @@ acceptance_criteria = ['Accept-Payment: method tokens follow the challenge metho
 out_of_scope = ["Human-readable amount parsing (MPP.Amount.parse_units) — already strict per mpp-rs #413"]
 assignee = "cursor"
 model = "cursor-grok-4.6-high"
+touches = ["lib/mpp/accept_payment.ex", "lib/mpp/amount.ex", "lib/mpp/intents/", "test/mpp/accept_payment_test.exs", "test/mpp/amount_test.exs", "test/mpp/intents/"]
 body = """
 mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #485 (0dcefc2) accepts only ASCII digits in protocol amounts. Our current behavior, read on 2026-10-02:
 
@@ -4010,6 +4013,7 @@ scores = { d = 3, b = 5, u = 4 }
 acceptance_criteria = ["With min_voucher_delta greater than the tick cost, a client that signs exactly requiredCumulative is accepted and the stream continues (test)", "Every accepted voucher frame, including one received while awaiting a voucher, is answered with a receipt frame (test)"]
 assignee = "codex"
 model = "gpt-6-astra"
+touches = ["lib/mpp/transports/websocket.ex", "lib/mpp/transports/websocket/", "test/mpp/transports/"]
 body = """
 Two WS session fixes from mpp-rs:
 
@@ -4031,6 +4035,7 @@ scores = { d = 4, b = 5, u = 5 }
 acceptance_criteria = ["Session receipts for open/voucher/topUp/close include intent and challengeId (and txHash where an on-chain tx exists); field names match refs/mpp-rs and refs/mppx", "An open credential with an invalid voucher signature or a deposit below the request is rejected without invoking verify_open (test asserts the callback was not called)", "A StreamData property test over random open/voucher/topUp/close/spend sequences asserts each listed invariant and passes"]
 assignee = "grok"
 model = "grok-4.7"
+touches = ["lib/mpp/session/", "lib/mpp/methods/tempo/session_receipt.ex", "test/mpp/session/", "test/mpp/methods/tempo/"]
 body = """
 Three session-layer parity items from mpp-rs:
 
@@ -4052,6 +4057,7 @@ acceptance_criteria = ["A Tempo or EVM method entry can declare an ordered curre
 out_of_scope = ["Session-intent multi-currency"]
 assignee = "codex"
 model = "gpt-6-astra"
+touches = ["lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/plug.ex", "lib/mpp/plug/", "lib/mpp/receipt.ex", "test/mpp/methods/", "test/mpp/plug_test.exs", "test/mpp/receipt_test.exs"]
 body = """
 mppx #933 (e4f0e02) lets a server offer an ordered `currencies` list for Tempo and EVM. A single route expands into one challenge per currency (mainnet default: OUSD then USDC.e; Moderato: OUSD then pathUSD). mppx #915 (c7968ca) adds an optional `fundingCurrency` receipt field derived from the payment route.
 
@@ -4074,6 +4080,7 @@ scores = { d = 3, b = 4, u = 3 }
 acceptance_criteria = ["A caller-supplied valid_before later than the challenge expiry is capped to the expiry (test)", "Tempo challenges can advertise supportedModes; the server rejects a credential type outside them, and the client provider declines such a challenge (tests)"]
 assignee = "cursor"
 model = "cursor-grok-4.6-high"
+touches = ["lib/mpp/client/providers/tempo.ex", "test/mpp/client/providers/"]
 body = """
 mpp-rs #470 (8ad3b8d) checks chain, modes and expiry before the client signs a charge. Chain pinning and the default validBefore cap are already in `MPP.Client.Providers.Tempo` (client/providers/tempo.ex ~111-112, ~429-436). Two gaps remain:
 
