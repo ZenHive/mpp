@@ -6110,7 +6110,7 @@
       },
       "eff": 1.63,
       "dep_layer": 0,
-      "unlocks": 0,
+      "unlocks": 1,
       "markers": [],
       "depends_on": [],
       "assignee": "codex",
@@ -6408,6 +6408,57 @@
       "verified": true,
       "verified_by": "claude",
       "verification_ref": "harness-run:run-1790936986733-6c68f1da",
+      "cross_repo": []
+    },
+    {
+      "id": "151",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Map remaining method infrastructure failures to internal-payment-error",
+      "scores": {
+        "d": 5,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.3,
+      "dep_layer": 1,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [
+        144
+      ],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "Each of Solana, USDC (EVM + Solana), Stellar, XRPL and Near Intents has a test where an RPC/transport error returns status 500, type https://paymentauth.org/problems/internal-payment-error, detail \"An internal payment error occurred.\", and no WWW-Authenticate challenge",
+        "Stripe subscription transport/5xx failures during activation return internal-payment-error and keep the activation claim's existing uncertain-outcome handling",
+        "Session store failures return internal-payment-error and the detail no longer contains inspect(reason)",
+        "A reverted, declined or mismatched payment in each method still returns 402 verification-failed (regression tests)"
+      ],
+      "out_of_scope": [
+        "Tempo, EVM and Stripe charge (done in Task 144)",
+        "Changing which client-fault outcomes are 402"
+      ],
+      "touches": [
+        "lib/mpp/methods/solana.ex",
+        "lib/mpp/methods/solana/",
+        "lib/mpp/methods/stellar.ex",
+        "lib/mpp/methods/stellar/",
+        "lib/mpp/methods/xrpl.ex",
+        "lib/mpp/methods/xrpl/",
+        "lib/mpp/methods/usdc/",
+        "lib/mpp/methods/near_intents.ex",
+        "lib/mpp/methods/near_intents/",
+        "lib/mpp/methods/stripe/subscription.ex",
+        "lib/mpp/session/",
+        "test/mpp/"
+      ],
+      "body": "Task 144 mapped Tempo, EVM and Stripe-charge infrastructure failures (RPC, transport, store) to internal-payment-error: HTTP 500, fixed detail, no WWW-Authenticate. The other methods still answer the same failures with verification-failed (402), which re-issues a challenge after a broadcast may already have succeeded, so the client can pay twice.\n\nRemaining sites found by the task 144 reviewer (run-1790940990496-832fb80e): \"RPC request failed\" verification-failed results in Solana, USDC (EVM and Solana profiles), Stellar, XRPL and Near Intents; Stripe subscription transport/uncertain API failures while the activation claim is held (`{:uncertain, Errors.new(:verification_failed, ...)}`); session store failures that return verification-failed with `inspect(reason)` in the detail.\n\nApply the same mapping Task 144 introduced, reusing its helper rather than adding a parallel one. Client-fault outcomes (reverted or declined payment, wrong amount/recipient, malformed credential) stay verification-failed or payment-action-required. Authority: the spec error table and mpp-rs #496 / mppx Errors.ts, as in Task 144.\n",
+      "created_at": "2026-10-02",
+      "scored_at": "2026-10-02",
       "cross_repo": []
     }
   ]
