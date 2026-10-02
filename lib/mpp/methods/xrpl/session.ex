@@ -268,7 +268,6 @@ defmodule MPP.Methods.XRPL.Session do
     else
       {:error, {:invalid_channel_id, _}} -> malformed()
       {:error, %Errors{}} = error -> error
-      _ -> failed()
     end
   end
 
@@ -658,9 +657,6 @@ defmodule MPP.Methods.XRPL.Session do
 
       {:error, %Errors{}} = error ->
         error
-
-      _ ->
-        {:error, Errors.new(:settlement_failed, "XRPL PaymentChannelClaim submit failed")}
     end
   end
 
@@ -762,9 +758,6 @@ defmodule MPP.Methods.XRPL.Session do
 
       {:error, %Errors{}} = error ->
         error
-
-      _ ->
-        :error
     end
   end
 
