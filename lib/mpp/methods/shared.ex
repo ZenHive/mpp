@@ -41,7 +41,7 @@ defmodule MPP.Methods.Shared do
   @doc """
   Parse a charge amount string into an integer.
 
-  The string must be one or more ASCII digits (`^[0-9]+$`). Signs, exponents,
+  The string must consist entirely of one or more ASCII digits. Signs, exponents,
   and surrounding whitespace are rejected (mpp-rs #485).
 
   Returns `{:ok, integer}`, or a `:verification_failed` error when `amount` is

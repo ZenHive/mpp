@@ -675,18 +675,20 @@ defmodule MPP.Methods.Tempo do
     uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != ""
   end
 
-  defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}, "proof"), do: :ok
+  defp reject_non_proof_for_zero_amount(_charge, "proof"), do: :ok
 
-  defp reject_non_proof_for_zero_amount(%Charge{amount: "0"}, _type) do
-    {:error, Errors.new(:verification_failed, "Zero-amount challenges require a proof credential")}
+  defp reject_non_proof_for_zero_amount(%Charge{amount: amount}, _type) do
+    case Shared.parse_charge_amount(amount) do
+      {:ok, 0} -> {:error, Errors.new(:verification_failed, "Zero-amount challenges require a proof credential")}
+      _ -> :ok
+    end
   end
 
-  defp reject_non_proof_for_zero_amount(_charge, _type), do: :ok
-
-  defp require_zero_amount(%Charge{amount: "0"}), do: :ok
-
-  defp require_zero_amount(_charge) do
-    {:error, Errors.new(:verification_failed, "Proof credentials are only valid for zero-amount challenges")}
+  defp require_zero_amount(%Charge{amount: amount}) do
+    case Shared.parse_charge_amount(amount) do
+      {:ok, 0} -> :ok
+      _ -> {:error, Errors.new(:verification_failed, "Proof credentials are only valid for zero-amount challenges")}
+    end
   end
 
   defp extract_proof_signature(%{"signature" => sig}) when is_binary(sig) and byte_size(sig) > 0 do
@@ -1182,7 +1184,6 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Co-signs transaction as fee payer when fee_payer is enabled locally.
-  # No-op when fee_payer is falsy — passes transaction through unchanged.
   defp maybe_cosign_fee_payer(tx, %{"fee_payer" => true} = config) do
     with {:ok, key} <- decode_hex_key(config["fee_payer_private_key"]),
          {:ok, token} <- decode_hex_address(config["fee_token"]),
@@ -1193,6 +1194,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
+  # No local or hosted fee payer is configured.
   defp maybe_cosign_fee_payer(tx, _config), do: {:ok, tx}
 
   defp maybe_validate_fee_payer_envelope(tx, config) do
@@ -1390,8 +1392,8 @@ defmodule MPP.Methods.Tempo do
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
-  # Re-encode a deserialized 0x76 envelope so every accepted signature encoding
-  # and every non-canonical RLP integer maps to one byte string: a high-s
+  # Re-encode a deserialized 0x76 envelope so accepted signature encodings
+  # map to one byte string: a high-s
   # secp256k1 sender signature is flipped to low-s, then tempo-primitives
   # serializes the named fields. Runs before FeePayerPolicy, reserve, or any
   # RPC (mppx #818 / adcf3b5; ox Transaction.serialize).

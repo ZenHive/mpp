@@ -36,7 +36,7 @@ defmodule MPP.AcceptPayment do
   @max_token_len 16 * 1024
 
   # RFC 9110 qvalue: 0 or 1, optional `.` and up to three digits (only zeros
-  # after 1). ASCII `[0-9]` — Elixir `\d` is Unicode. Cited: mpp-rs #488
+  # after 1). `[0-9]` makes the ASCII digit restriction explicit. Cited: mpp-rs #488
   # `parse_q_value` and mppx `parseHeaderQ` (`src/internal/AcceptPayment.ts`).
   @qvalue ~r/\A(0(\.[0-9]{0,3})?|1(\.0{0,3})?)\z/
   @intent_token ~r/\A[a-z0-9-]+\z/

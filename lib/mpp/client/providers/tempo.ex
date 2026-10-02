@@ -116,12 +116,12 @@ defmodule MPP.Client.Providers.Tempo do
     with {:ok, charge} <- Shared.parse_charge(challenge, "tempo"),
          {:ok, provider} <- parse_config(config),
          {:ok, details} <- method_details(charge),
-         :ok <- ensure_pull_supported(charge, details),
+         {:ok, amount} <- parse_amount(charge.amount),
+         :ok <- ensure_pull_supported(amount, details),
          :ok <- pin_recipients(charge, details, provider.expected_recipients),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
-         {:ok, address} <- Signer.address_from_key(provider.private_key),
-         {:ok, amount} <- parse_amount(charge.amount) do
+         {:ok, address} <- Signer.address_from_key(provider.private_key) do
       create_credential(challenge, charge, details, amount, chain_id, address, provider)
     end
   end
@@ -439,9 +439,9 @@ defmodule MPP.Client.Providers.Tempo do
 
   # This client only answers non-zero charges with a signed transaction (pull).
   # Omitted / null `supportedModes` allows every mode (draft-tempo-charge-00).
-  defp ensure_pull_supported(%Charge{amount: "0"}, _details), do: :ok
+  defp ensure_pull_supported(0, _details), do: :ok
 
-  defp ensure_pull_supported(_charge, details) do
+  defp ensure_pull_supported(_amount, details) do
     case details["supportedModes"] do
       nil ->
         :ok
@@ -461,10 +461,10 @@ defmodule MPP.Client.Providers.Tempo do
     default = System.os_time(:second) + @expiring_validity_seconds
     requested = requested || default
 
-    case challenge_expires_unix(challenge) do
-      nil -> requested
-      expires when requested == 0 -> expires
-      expires -> min(requested, expires)
+    case {challenge_expires_unix(challenge), requested} do
+      {nil, requested} -> requested
+      {expires, 0} -> expires
+      {expires, requested} -> min(requested, expires)
     end
   end
 

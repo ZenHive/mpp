@@ -3440,6 +3440,17 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
     end
 
+    test "accepts a valid proof for a zero amount with leading zeros", %{charge: charge} do
+      charge = %{
+        charge
+        | amount: "000",
+          method_details: Map.put(charge.method_details, "supported_modes", ["push"])
+      }
+
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+    end
+
     test "proof credentials ignore supportedModes", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
       payload = %{"type" => "proof", "signature" => @proof_signature}
@@ -3458,8 +3469,10 @@ defmodule MPP.Methods.TempoTest do
     test "rejects hash credential for zero-amount charge", %{charge: charge} do
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail =~ "proof credential"
+      for amount <- ["0", "000"] do
+        assert {:error, %Errors{} = error} = Tempo.verify(payload, %{charge | amount: amount})
+        assert error.detail =~ "proof credential"
+      end
     end
 
     test "rejects proof without source", %{charge: charge} do

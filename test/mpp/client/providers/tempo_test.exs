@@ -285,11 +285,13 @@ defmodule MPP.Client.Providers.TempoTest do
     end
 
     test "pays a zero-amount challenge even when supportedModes is push-only" do
-      challenge =
-        challenge(amount: "0", method_details: %{"chainId" => @chain_id, "supportedModes" => ["push"]})
+      for amount <- ["0", "00", "000"] do
+        challenge =
+          challenge(amount: amount, method_details: %{"chainId" => @chain_id, "supportedModes" => ["push"]})
 
-      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
-      assert credential.payload["type"] == "proof"
+        assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+        assert credential.payload["type"] == "proof"
+      end
     end
 
     test "rejects an advertised chain that disagrees with the explicit pin" do
