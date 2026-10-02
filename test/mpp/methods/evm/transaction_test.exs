@@ -318,7 +318,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
       Req.Test.stub(EVM, fn conn ->
         {method, id, conn} = read_request(conn)
         send(caller, {:rpc_call, method})
-        rpc_json(conn, id, "result", nil)
+        rpc_json(conn, id, "error", %{"code" => -32_000, "message" => "Unexpected RPC call"})
       end)
 
       disabled_configs = [
@@ -331,11 +331,15 @@ defmodule MPP.Methods.EVM.TransactionTest do
         unoffered = %{charge | method_details: config}
         refute "transaction" in EVM.challenge_method_details(unoffered)["credentialTypes"]
 
-        assert {:error, %Errors{} = error} = EVM.verify(signed.payload, unoffered)
+        result = EVM.verify(signed.payload, unoffered)
+
+        refute_received {:rpc_call, _method},
+                        "EVM transaction credential type was not offered: must reject without any RPC call"
+
+        assert {:error, %Errors{} = error} = result
         assert error.type =~ "verification-failed"
         assert error.detail == "EVM transaction credential type was not offered"
         assert Transaction.validate(signed.payload, unoffered) == {:error, error}
-        refute_received {:rpc_call, _method}
       end
     end
 

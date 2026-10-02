@@ -1017,18 +1017,26 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "returns error on chain_id mismatch", %{charge: charge} do
+      record_chain_mismatch_rpc_calls()
+
       # Build tx with wrong chain_id
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
       wrong_chain_tx = build_tempo_tx(calls: [call], chain_id: 9999)
 
       payload = %{"type" => "transaction", "signature" => wrong_chain_tx}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      result = Tempo.verify(payload, charge)
+
+      refute_received {:rpc_call, _method}, "Chain ID mismatch: must reject before simulation or any RPC call"
+
+      assert {:error, %Errors{} = error} = result
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Chain ID mismatch"
     end
 
     property "rejects every generated non-Moderato transaction chain", %{charge: charge} do
+      record_chain_mismatch_rpc_calls()
+
       check all(
               chain_id <- 1..100_000 |> StreamData.integer() |> StreamData.filter(&(&1 != 42_431)),
               max_runs: @property_runs
@@ -1036,9 +1044,12 @@ defmodule MPP.Methods.TempoTest do
         calldata = transfer_calldata(@recipient, 1_000_000)
         tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: chain_id)
 
-        assert {:error, %Errors{} = error} =
-                 Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+        result = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
+        refute_received {:rpc_call, _method}, "Chain ID mismatch: must reject before simulation or any RPC call"
+
+        assert {:error, %Errors{} = error} = result
+        assert error.type =~ "verification-failed"
         assert error.detail =~ "Chain ID mismatch"
       end
     end
@@ -3614,6 +3625,22 @@ defmodule MPP.Methods.TempoTest do
         "eth_sendRawTransaction" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => tx_hash, "id" => 1})
       end
+    end)
+  end
+
+  defp record_chain_mismatch_rpc_calls do
+    caller = self()
+
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+      send(caller, {:rpc_call, request["method"]})
+
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "error" => %{"code" => -32_000, "message" => "Unexpected RPC call"}
+      })
     end)
   end
 
