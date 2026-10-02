@@ -90,6 +90,12 @@ defmodule MPP.Methods.Tempo do
       `type="transaction"` credential presenters to prove control of the transfer's
       sender wallet via a `"presenterSignature"` payload field (see *Presenter
       binding* below). Defaults to `false`.
+    * `"supported_modes"` — (optional) non-empty list of `"pull"` and/or `"push"`.
+      Advertised as `methodDetails.supportedModes`. `"pull"` is `type="transaction"`
+      (server broadcasts); `"push"` is `type="hash"` (client already broadcast).
+      When set, a credential whose mode is not listed is rejected before RPC.
+      Omitted (the default) allows both modes. Zero-amount `type="proof"`
+      credentials ignore this field (draft-tempo-charge-00; mpp-rs #455).
 
   ## Credential Payload
 
@@ -177,6 +183,7 @@ defmodule MPP.Methods.Tempo do
   @required_config_keys ~w(rpc_url)
   @memo_hex_length 64
   @attribution_memo_length 32
+  @submission_modes ~w(pull push)
   @attribution_tag binary_part(Onchain.Hash.keccak("mpp"), 0, 4)
   @attribution_version 1
   @attribution_server_fingerprint_length 10
@@ -230,6 +237,7 @@ defmodule MPP.Methods.Tempo do
     validate_fee_payer_allowed_tokens!(config)
     validate_presenter_binding!(config["require_presenter_binding"])
     validate_machine_token!(config)
+    validate_supported_modes!(config["supported_modes"])
     if config["intent"] == "subscription", do: TempoSubscription.validate_config!(config)
     :ok
   end
@@ -255,6 +263,7 @@ defmodule MPP.Methods.Tempo do
     config = charge.method_details || %{}
 
     with :ok <- reject_non_proof_for_zero_amount(charge, "hash"),
+         :ok <- ensure_submission_mode_allowed(config, "hash"),
          :ok <- reject_hash_when_fee_payer(config) do
       verify_hash_credential(payload, charge, config)
     end
@@ -265,7 +274,8 @@ defmodule MPP.Methods.Tempo do
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- reject_non_proof_for_zero_amount(charge, "transaction") do
+    with :ok <- reject_non_proof_for_zero_amount(charge, "transaction"),
+         :ok <- ensure_submission_mode_allowed(config, "transaction") do
       verify_transaction_credential(payload, charge, config)
     end
   end
@@ -345,17 +355,18 @@ defmodule MPP.Methods.Tempo do
 
   api(
     :challenge_method_details,
-    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `machineTokenEnabled`, `presenterBinding`) for the 402 challenge.",
+    "Return Tempo-specific fields (`chainId`, `feePayer`, `memo`, `machineTokenEnabled`, `presenterBinding`, `supportedModes`) for the 402 challenge.",
     params: [
       charge: [
         kind: :value,
-        description: "Charge struct with method_details containing `chain_id`, `fee_payer`, and optionally `memo`"
+        description:
+          "Charge struct with method_details containing `chain_id`, `fee_payer`, and optionally `memo` / `supported_modes`"
       ]
     ],
     returns: %{
       type: :map,
       description:
-        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, `machineTokenEnabled` (present and `true` only when enabled), and `presenterBinding` (present and `true` only when required)"
+        "Map with `chainId` (default 42431), `feePayer` (default false), optional `memo`, `machineTokenEnabled` (present and `true` only when enabled), `presenterBinding` (present and `true` only when required), and `supportedModes` (present only when configured)"
     }
   )
 
@@ -373,6 +384,12 @@ defmodule MPP.Methods.Tempo do
       case config["memo"] do
         nil -> details
         memo -> Map.put(details, "memo", memo)
+      end
+
+    details =
+      case config["supported_modes"] do
+        nil -> details
+        modes -> Map.put(details, "supportedModes", modes)
       end
 
     details =
@@ -585,6 +602,49 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp valid_fee_token_address?(_), do: false
+
+  # `type="hash"` is push mode and `type="transaction"` is pull mode.
+  # `methodDetails.supportedModes` (or method_config `"supported_modes"`), when
+  # present, lists the allowed modes. Proof credentials are exempt: zero-amount
+  # charges have no submission mode (refs/mpp-rs #455; draft-tempo-charge-00).
+  defp ensure_submission_mode_allowed(config, type) do
+    {mode, kind} = submission_mode(type)
+
+    case advertised_supported_modes(config) do
+      nil ->
+        :ok
+
+      modes ->
+        if is_list(modes) and mode in modes do
+          :ok
+        else
+          {:error, Errors.new(:verification_failed, "#{kind} credentials are not supported for this challenge.")}
+        end
+    end
+  end
+
+  defp submission_mode("hash"), do: {"push", "Hash"}
+  defp submission_mode("transaction"), do: {"pull", "Transaction"}
+
+  defp advertised_supported_modes(%{"supported_modes" => modes}) when not is_nil(modes), do: modes
+  defp advertised_supported_modes(%{"supportedModes" => modes}) when not is_nil(modes), do: modes
+  defp advertised_supported_modes(_config), do: nil
+
+  defp validate_supported_modes!(nil), do: :ok
+
+  defp validate_supported_modes!(modes) when is_list(modes) do
+    if modes == [] or Enum.any?(modes, &(&1 not in @submission_modes)) do
+      raise ArgumentError,
+            ~s{MPP.Methods.Tempo "supported_modes" must be a non-empty list of "pull" and/or "push"}
+    else
+      :ok
+    end
+  end
+
+  defp validate_supported_modes!(other) do
+    raise ArgumentError,
+          ~s{MPP.Methods.Tempo "supported_modes" must be a non-empty list of "pull" and/or "push", got: #{inspect(other)}}
+  end
 
   defp reject_hash_when_fee_payer(config) do
     # --- Presenter binding helpers (hash/transaction paths) ---

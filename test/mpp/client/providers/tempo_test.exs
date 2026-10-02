@@ -226,6 +226,72 @@ defmodule MPP.Client.Providers.TempoTest do
                )
     end
 
+    test "caps a caller-supplied valid_before at the challenge expiry" do
+      challenge = challenge(expires: Expires.seconds(5))
+      {:ok, expires_dt, _offset} = DateTime.from_iso8601(challenge.expires)
+      expires_unix = DateTime.to_unix(expires_dt)
+
+      config = Map.put(provider_config(), :valid_before, expires_unix + 600)
+
+      assert {:ok, credential} = Tempo.pay(challenge, config)
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert tx_valid_before(tx) == expires_unix
+    end
+
+    test "keeps a caller-supplied valid_before inside the challenge expiry" do
+      requested = System.os_time(:second) + 12
+      config = Map.put(provider_config(), :valid_before, requested)
+
+      assert {:ok, credential} = Tempo.pay(challenge(), config)
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert tx_valid_before(tx) == requested
+    end
+
+    test "treats valid_before 0 as the challenge expiry" do
+      challenge = challenge(expires: Expires.seconds(30))
+      {:ok, expires_dt, _offset} = DateTime.from_iso8601(challenge.expires)
+      expires_unix = DateTime.to_unix(expires_dt)
+
+      config = Map.put(provider_config(), :valid_before, 0)
+
+      assert {:ok, credential} = Tempo.pay(challenge, config)
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert tx_valid_before(tx) == expires_unix
+    end
+
+    test "declines a non-zero challenge whose supportedModes omit pull" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "supportedModes" => ["push"]})
+
+      assert {:error, :unsupported_pull_mode} = Tempo.pay(challenge, provider_config())
+    end
+
+    test "declines a non-zero challenge whose supportedModes is empty" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "supportedModes" => []})
+
+      assert {:error, :unsupported_pull_mode} = Tempo.pay(challenge, provider_config())
+    end
+
+    test "declines a non-zero challenge whose supportedModes is not a list" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "supportedModes" => "pull"})
+
+      assert {:error, :unsupported_pull_mode} = Tempo.pay(challenge, provider_config())
+    end
+
+    test "pays a non-zero challenge whose supportedModes includes pull" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "supportedModes" => ["pull"]})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert credential.payload["type"] == "transaction"
+    end
+
+    test "pays a zero-amount challenge even when supportedModes is push-only" do
+      challenge =
+        challenge(amount: "0", method_details: %{"chainId" => @chain_id, "supportedModes" => ["push"]})
+
+      assert {:ok, credential} = Tempo.pay(challenge, provider_config())
+      assert credential.payload["type"] == "proof"
+    end
+
     test "rejects an advertised chain that disagrees with the explicit pin" do
       challenge = challenge(method_details: %{"chainId" => 1})
 
@@ -553,6 +619,7 @@ defmodule MPP.Client.Providers.TempoTest do
     amount = Keyword.get(opts, :amount, "1250")
     details = Keyword.get(opts, :method_details, %{"chainId" => @chain_id})
     recipient = Keyword.get(opts, :recipient, @recipient)
+    expires = Keyword.get(opts, :expires, Expires.minutes(5))
 
     {:ok, charge} =
       Charge.new(
@@ -570,7 +637,7 @@ defmodule MPP.Client.Providers.TempoTest do
       method: "tempo",
       intent: "charge",
       request: request,
-      expires: Expires.minutes(5)
+      expires: expires
     }
   end
 
@@ -646,6 +713,8 @@ defmodule MPP.Client.Providers.TempoTest do
       recipient: @recipient
     )
   end
+
+  defp tx_valid_before(%Transaction{valid_before: valid_before}), do: valid_before
 
   defp stub_chain_id(chain_id) do
     Req.Test.stub(__MODULE__, fn conn ->

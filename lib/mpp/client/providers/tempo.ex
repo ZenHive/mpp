@@ -27,6 +27,14 @@ defmodule MPP.Client.Providers.Tempo do
   Transaction tuning options accepted by `onchain_tempo` (`:gas_limit`,
   `:nonce`, `:nonce_key`, `:valid_before`, and `:valid_after`) may also be
   supplied. Charge transactions use Tempo's expiring nonce lane by default.
+  A caller-supplied `:valid_before` is still capped at the challenge `expires`
+  (mpp-rs #470): `0` means "unset" and becomes the expiry rather than an
+  uncapped envelope.
+
+  Non-zero charges always produce a `type="transaction"` (pull) credential.
+  A challenge whose `methodDetails.supportedModes` is present and does not
+  list `"pull"` is declined before any RPC or signing (mpp-rs #455 / #470).
+  Zero-amount charges use `type="proof"` and ignore `supportedModes`.
   """
 
   use MPP.Client.PaymentProvider
@@ -107,6 +115,7 @@ defmodule MPP.Client.Providers.Tempo do
     with {:ok, charge} <- Shared.parse_charge(challenge, "tempo"),
          {:ok, provider} <- parse_config(config),
          {:ok, details} <- method_details(charge),
+         :ok <- ensure_pull_supported(charge, details),
          :ok <- pin_recipients(charge, details, provider.expected_recipients),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
@@ -191,7 +200,7 @@ defmodule MPP.Client.Providers.Tempo do
       provider.transaction_options
       |> Map.put_new(:nonce, 0)
       |> Map.put_new(:nonce_key, @expiring_nonce_key)
-      |> Map.put_new(:valid_before, valid_before(challenge))
+      |> Map.put(:valid_before, valid_before(challenge, provider.transaction_options[:valid_before]))
       |> Map.merge(%{
         private_key: provider.private_key,
         calls: calls,
@@ -427,12 +436,43 @@ defmodule MPP.Client.Providers.Tempo do
   defp req_options(value) when is_list(value), do: {:ok, value}
   defp req_options(_value), do: {:error, {:invalid_config, :req_options}}
 
-  defp valid_before(%Challenge{expires: expires}) do
-    window_end = System.os_time(:second) + @expiring_validity_seconds
+  # This client only answers non-zero charges with a signed transaction (pull).
+  # Omitted / null `supportedModes` allows every mode (draft-tempo-charge-00).
+  defp ensure_pull_supported(%Charge{amount: "0"}, _details), do: :ok
 
-    case expires do
-      nil -> window_end
-      timestamp -> min(window_end, timestamp |> DateTime.from_iso8601() |> elem(1) |> DateTime.to_unix())
+  defp ensure_pull_supported(_charge, details) do
+    case details["supportedModes"] do
+      nil ->
+        :ok
+
+      modes when is_list(modes) ->
+        if "pull" in modes, do: :ok, else: {:error, :unsupported_pull_mode}
+
+      _other ->
+        {:error, :unsupported_pull_mode}
+    end
+  end
+
+  # Cap every `validBefore` at challenge `expires`, including a caller-supplied
+  # value. `0` encodes "unset" and would otherwise outlive the challenge
+  # (refs/mpp-rs/src/client/tempo/charge/mod.rs `resolve_valid_before`).
+  defp valid_before(challenge, requested) do
+    default = System.os_time(:second) + @expiring_validity_seconds
+    requested = requested || default
+
+    case challenge_expires_unix(challenge) do
+      nil -> requested
+      expires when requested == 0 -> expires
+      expires -> min(requested, expires)
+    end
+  end
+
+  defp challenge_expires_unix(%Challenge{expires: nil}), do: nil
+
+  defp challenge_expires_unix(%Challenge{expires: expires}) do
+    case DateTime.from_iso8601(expires) do
+      {:ok, datetime, _offset} -> DateTime.to_unix(datetime)
+      {:error, _reason} -> nil
     end
   end
 end

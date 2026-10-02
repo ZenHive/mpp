@@ -239,6 +239,26 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
+    test "accepts supported_modes lists of pull and/or push" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => ["pull"]})
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => ["push"]})
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => ["push", "pull"]})
+    end
+
+    test "raises on empty or invalid supported_modes" do
+      assert_raise ArgumentError, ~r/"supported_modes" must be a non-empty list/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => []})
+      end
+
+      assert_raise ArgumentError, ~r/"supported_modes" must be a non-empty list/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => ["Pull"]})
+      end
+
+      assert_raise ArgumentError, ~r/"supported_modes" must be a non-empty list/, fn ->
+        Tempo.validate_config!(%{"rpc_url" => @rpc_url, "supported_modes" => "pull"})
+      end
+    end
+
     test "rejects malformed sponsorship store references and policy containers" do
       sponsor_config = %{
         "rpc_url" => @rpc_url,
@@ -265,6 +285,7 @@ defmodule MPP.Methods.TempoTest do
       assert details["chainId"] == 42_431
       assert details["feePayer"] == false
       refute Map.has_key?(details, "memo")
+      refute Map.has_key?(details, "supportedModes")
     end
 
     test "uses configured chain_id", %{charge: charge} do
@@ -325,6 +346,16 @@ defmodule MPP.Methods.TempoTest do
 
       charge = %{charge | method_details: %{"machine_token_enabled" => true}}
       assert Tempo.challenge_method_details(charge)["machineTokenEnabled"] == true
+    end
+
+    test "includes supportedModes only when configured", %{charge: charge} do
+      refute Map.has_key?(Tempo.challenge_method_details(charge), "supportedModes")
+
+      charge = %{charge | method_details: %{"supported_modes" => ["push", "pull"]}}
+      assert Tempo.challenge_method_details(charge)["supportedModes"] == ["push", "pull"]
+
+      charge = %{charge | method_details: %{"supported_modes" => ["pull"]}}
+      assert Tempo.challenge_method_details(charge)["supportedModes"] == ["pull"]
     end
   end
 
@@ -844,6 +875,13 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
+    end
+
+    test "accepts a transaction credential when supported_modes includes pull", %{charge: charge, tx_hex: tx_hex} do
+      stub_broadcast_and_receipt(success_receipt())
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
     end
 
     test "preserves external_id in transaction receipt", %{charge: charge, tx_hex: tx_hex} do
@@ -2630,6 +2668,67 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — supportedModes" do
+    @hash_unsupported "Hash credentials are not supported for this challenge."
+    @tx_unsupported "Transaction credentials are not supported for this challenge."
+
+    test "rejects a hash credential when supported_modes is pull-only before RPC", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail == @hash_unsupported
+    end
+
+    test "rejects a hash credential when advertised supportedModes omits push", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", ["pull"])}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail == @hash_unsupported
+    end
+
+    test "rejects a transaction credential when supported_modes is push-only before RPC", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["push"])}
+
+      assert {:error, %Errors{} = error} =
+               Tempo.verify(%{"type" => "transaction", "signature" => "0x76"}, charge)
+
+      assert error.type =~ "verification-failed"
+      assert error.detail == @tx_unsupported
+    end
+
+    test "rejects hash and transaction credentials when supportedModes is empty", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", [])}
+
+      assert {:error, %Errors{} = hash} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert hash.detail == @hash_unsupported
+
+      assert {:error, %Errors{} = tx} = Tempo.verify(%{"type" => "transaction", "signature" => "0x76"}, charge)
+      assert tx.detail == @tx_unsupported
+    end
+
+    test "rejects a hash credential when supportedModes is not a list", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", "push")}
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert error.detail == @hash_unsupported
+    end
+
+    test "accepts a hash credential when supported_modes includes push", %{charge: charge} do
+      stub_receipt(success_receipt())
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["push"])}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
+    test "accepts a hash credential when supported_modes lists both modes", %{charge: charge} do
+      stub_receipt(success_receipt())
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull", "push"])}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+  end
+
   describe "verify/2 — hash + fee_payer rejection" do
     test "rejects type=hash when fee_payer is true", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", true)}
@@ -3336,6 +3435,13 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "accepts a valid proof credential for zero-amount charge", %{charge: charge} do
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+    end
+
+    test "proof credentials ignore supportedModes", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
       assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
