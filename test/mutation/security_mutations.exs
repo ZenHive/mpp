@@ -272,18 +272,23 @@ defmodule MPP.Test.SecurityMutationCampaign do
 
   @output_tail_lines 20
 
-  @spec run(Path.t()) :: :ok | {:error, term()}
-  def run(root) do
+  @spec run(Path.t(), keyword()) :: :ok | {:error, term()}
+  def run(root, opts \\ []) do
     ledger_path = Path.join(root, "test/mutation/payment_security_ledger.json")
     ledger = ledger_path |> File.read!() |> Jason.decode!()
 
-    with :ok <- SecurityMutations.validate_ledger(ledger, root) do
+    validation = SecurityMutations.validate_ledger(ledger, root)
+    refresh? = Keyword.get(opts, :refresh, false)
+
+    with :ok <- allow_refresh(validation, refresh?) do
       sandbox = create_sandbox(root)
 
       try do
-        with :ok <- run_baseline(sandbox),
-             {:ok, results} <- run_mutations(sandbox) do
-          validate_results(results, ledger)
+        with {:ok, baseline} <- run_baseline(sandbox),
+             {:ok, results} <- run_mutations(sandbox),
+             :ok <- validate_results(results, ledger) do
+          if refresh?, do: record_results(ledger_path, ledger, root, baseline, results)
+          :ok
         end
       after
         File.rm_rf!(sandbox)
@@ -298,16 +303,42 @@ defmodule MPP.Test.SecurityMutationCampaign do
       |> get_in(["campaign", "mutations"])
       |> Map.new(&{&1["id"], &1["status"]})
 
+    expected_ids = Enum.map(SecurityMutations.all(), & &1.id)
+    result_ids = Enum.map(results, & &1.id)
     survivors = Enum.filter(results, &(&1.status == "survived"))
     invalid = Enum.filter(results, &(expected[&1.id] != &1.status))
     surviving_canaries = Enum.filter(survivors, & &1.canary)
 
     cond do
+      result_ids != expected_ids -> {:error, {:result_ids, expected_ids, result_ids}}
       surviving_canaries != [] -> {:error, {:surviving_canaries, Enum.map(surviving_canaries, & &1.id)}}
       survivors != [] -> {:error, {:unclassified_survivors, Enum.map(survivors, & &1.id)}}
       invalid != [] -> {:error, {:ledger_result_mismatch, invalid}}
       true -> :ok
     end
+  end
+
+  defp allow_refresh({:error, :fingerprint_mismatch}, true), do: :ok
+  defp allow_refresh(validation, _refresh?), do: validation
+
+  defp record_results(path, ledger, root, baseline, results) do
+    {revision, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
+
+    observation = %{
+      "command" => "MIX_ENV=test mix mutation.security --refresh",
+      "revision" => String.trim(revision),
+      "recorded_at" => DateTime.to_iso8601(DateTime.utc_now()),
+      "elixir" => System.version(),
+      "erlang_otp" => System.otp_release(),
+      "baseline" => baseline,
+      "results" => results
+    }
+
+    ledger
+    |> put_in(["campaign", "fingerprint_sha256"], SecurityMutations.fingerprint(root))
+    |> put_in(["campaign", "observation"], observation)
+    |> Jason.encode!(pretty: true)
+    |> then(&File.write!(path, &1 <> "\n"))
   end
 
   defp create_sandbox(root) do
@@ -352,7 +383,7 @@ defmodule MPP.Test.SecurityMutationCampaign do
     tests = SecurityMutations.all() |> Enum.flat_map(& &1.tests) |> Enum.uniq()
 
     case command(sandbox, ["test", "--seed", "0" | tests]) do
-      {_, 0} -> :ok
+      {output, 0} -> {:ok, tail(output)}
       {output, status} -> {:error, {:baseline_failed, status, tail(output)}}
     end
   end

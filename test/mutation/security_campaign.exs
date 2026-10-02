@@ -1,6 +1,8 @@
 Code.require_file("security_mutations.exs", __DIR__)
 
-case MPP.Test.SecurityMutationCampaign.run(File.cwd!()) do
+{opts, [], []} = OptionParser.parse(System.argv(), strict: [refresh: :boolean])
+
+case MPP.Test.SecurityMutationCampaign.run(File.cwd!(), opts) do
   :ok ->
     IO.puts("Mutation campaign passed: every payment-security mutant was killed")
 

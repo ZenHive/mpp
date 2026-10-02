@@ -31,6 +31,9 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     ledger = @ledger_path |> File.read!() |> Jason.decode!()
 
     assert :ok = SecurityMutations.validate_ledger(ledger, File.cwd!())
+
+    stale = put_in(ledger, ["campaign", "fingerprint_sha256"], "stale")
+    assert {:error, :fingerprint_mismatch} = SecurityMutations.validate_ledger(stale, File.cwd!())
     assert get_in(ledger, ["campaign", "survivors"]) == []
     assert Enum.all?(get_in(ledger, ["campaign", "mutations"]), &(&1["status"] == "killed"))
   end
@@ -68,6 +71,35 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
 
     assert {:error, {:unclassified_survivors, [^id]}} =
              SecurityMutationCampaign.validate_results(campaign_results(id, "survived"), ledger)
+  end
+
+  test "incomplete, duplicate and unknown results cannot certify a campaign" do
+    ledger = @ledger_path |> File.read!() |> Jason.decode!()
+    results = campaign_results(nil, "survived")
+    expected_ids = Enum.map(results, & &1.id)
+
+    for invalid <- [[], tl(results), results ++ [hd(results)], [%{hd(results) | id: "unknown"} | tl(results)]] do
+      assert {:error, {:result_ids, ^expected_ids, _}} =
+               SecurityMutationCampaign.validate_results(invalid, ledger)
+    end
+  end
+
+  test "refresh does not bypass invalid ledger statuses or overwrite the ledger" do
+    root = Path.join(System.tmp_dir!(), "mpp-invalid-ledger-#{System.unique_integer([:positive])}")
+    path = Path.join(root, "test/mutation/payment_security_ledger.json")
+    File.mkdir_p!(Path.dirname(path))
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    ledger = @ledger_path |> File.read!() |> Jason.decode!()
+    [first | rest] = get_in(ledger, ["campaign", "mutations"])
+    invalid = put_in(ledger, ["campaign", "mutations"], [%{first | "status" => "survived"} | rest])
+    original = Jason.encode!(invalid)
+    File.write!(path, original)
+
+    assert {:error, {:unexpected_statuses, ["survived" | _]}} =
+             SecurityMutationCampaign.run(root, refresh: true)
+
+    assert File.read!(path) == original
   end
 
   test "mix precommit.full does not fold in the mutation campaign" do
