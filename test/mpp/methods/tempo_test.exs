@@ -1576,6 +1576,25 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "already used"
     end
 
+    test "hash path dedups every spelling of one hash and reports the canonical reference",
+         %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "memo", @test_memo)}
+      stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
+      "0x" <> hex = @tx_hash
+
+      assert {:ok, %Receipt{reference: reference}} =
+               Tempo.verify(%{"type" => "hash", "hash" => "0x" <> String.upcase(hex)}, charge)
+
+      assert reference == "0x" <> String.downcase(hex)
+
+      for spelling <- [hex, String.upcase(hex), @tx_hash] do
+        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => spelling}, charge),
+               "spelling #{inspect(spelling)} was not deduplicated"
+
+        assert error.detail =~ "already used"
+      end
+    end
+
     test "hash path allows retry after transient RPC failure", %{charge: charge} do
       # First attempt: RPC returns error (transient failure)
       stub_receipt_response(%{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "timeout"}, "id" => 1})

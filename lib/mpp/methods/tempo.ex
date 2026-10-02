@@ -1446,12 +1446,14 @@ defmodule MPP.Methods.Tempo do
           "memo must be a 32-byte hex string (#{@memo_hex_length} hex chars), got: #{inspect(other)}"
   end
 
-  # Extracts and validates the tx hash from a hash credential payload.
+  # Extracts and validates the tx hash from a hash credential payload, returning
+  # the canonical `0x`-prefixed lowercase form so every spelling of one hash
+  # shares one dedup key, receipt lookup and receipt reference (mpp-rs #484).
   defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
     hex = Hex.strip_0x(hash)
 
     if byte_size(hex) == 64 and Hex.hex_string?(hex) do
-      {:ok, hash}
+      {:ok, "0x" <> String.downcase(hex)}
     else
       {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
     end

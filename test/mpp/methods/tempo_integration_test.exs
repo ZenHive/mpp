@@ -289,6 +289,23 @@ defmodule MPP.Methods.TempoIntegrationTest do
       body = Jason.decode!(conn2.resp_body)
       assert body["type"] =~ "verification-failed"
       assert body["detail"] =~ "already used"
+
+      # Moderato resolves the receipt for an unprefixed / uppercase hash too, so
+      # each alternate spelling must hit the same dedup key.
+      "0x" <> hex = tx_hash
+
+      for spelling <- [hex, String.upcase(hex), "0x" <> String.upcase(hex)] do
+        credential = %Credential{challenge: challenge1, payload: %{"type" => "hash", "hash" => spelling}}
+
+        conn =
+          :get
+          |> Plug.Test.conn("/api/data")
+          |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+          |> MPP.Plug.call(config_with_store)
+
+        assert conn.status == 402, "spelling #{inspect(spelling)} was redeemed twice"
+        assert Jason.decode!(conn.resp_body)["detail"] =~ "already used"
+      end
     end
   end
 
