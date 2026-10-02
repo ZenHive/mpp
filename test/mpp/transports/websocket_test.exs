@@ -62,6 +62,64 @@ defmodule MPP.Transports.WebSocketTest do
     end
   end
 
+  describe "Tempo charge offers" do
+    @ousd "0x20c0000000000000000000006a37DA5C996874BE"
+    @path_usd "0x20c0000000000000000000000000000000000000"
+
+    test "offers every currency in order and reissues the same challenges before payment" do
+      for currency_opts <- [[], [currencies: [@path_usd, @ousd]]] do
+        sess = tempo_session(currency_opts)
+        expected = if currency_opts == [], do: [@ousd, @path_usd], else: [@path_usd, @ousd]
+        {opened, texts} = WebSocket.open(sess)
+
+        challenges =
+          Enum.map(texts, fn text ->
+            assert {:ok, frame} = WebSocket.decode_frame(text)
+            assert {:ok, [challenge]} = ClientTransport.get_challenges(frame)
+            assert challenge.method == "tempo"
+            challenge
+          end)
+
+        assert Enum.map(challenges, fn challenge ->
+                 challenge.request |> Base.url_decode64!(padding: false) |> Jason.decode!() |> Map.fetch!("currency")
+               end) == expected
+
+        assert opened.challenges == challenges
+        assert opened.challenge == hd(challenges)
+        message = Jason.encode!(%{"type" => "message", "data" => %{}})
+        assert {^opened, ^texts} = WebSocket.handle_text(message, opened)
+        {unopened, initial_texts} = WebSocket.handle_text(message, sess)
+        assert length(initial_texts) == 2
+        assert Enum.map(unopened.challenges, & &1.request) == Enum.map(challenges, & &1.request)
+      end
+    end
+
+    test "rejects an altered second offer before payment verification" do
+      {sess, [first, second]} = WebSocket.open(tempo_session([]))
+      assert {:ok, [first_challenge]} = ClientTransport.get_challenges(Jason.decode!(first))
+      assert {:ok, [second_challenge]} = ClientTransport.get_challenges(Jason.decode!(second))
+      altered = %{second_challenge | request: first_challenge.request}
+
+      {rejected, [text]} = WebSocket.handle_text(credential_text(altered, %{}), sess)
+      assert rejected.status == :open
+      assert Jason.decode!(text) == %{"type" => "error", "error" => "Invalid Challenge"}
+    end
+
+    defp tempo_session(currency_opts) do
+      WebSocket.init(
+        [
+          handler: fn _ -> "paid" end,
+          secret_key: @secret_key,
+          realm: @realm,
+          method: MPP.Methods.Tempo,
+          amount: "1000",
+          method_config: %{"rpc_url" => "https://rpc.example", "chain_id" => 42_431},
+          store: false
+        ] ++ currency_opts
+      )
+    end
+  end
+
   describe "handle_text/2" do
     test "pay-and-retry: credential then JSON-RPC message" do
       {sess, [challenge_text]} = WebSocket.open(session())

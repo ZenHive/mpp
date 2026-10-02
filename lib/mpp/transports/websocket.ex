@@ -7,8 +7,8 @@ defmodule MPP.Transports.WebSocket do
   JSON strings ready to push.
 
   Payment challenges ride on the subscription handshake: `open/1` emits a
-  `challenge` frame before application traffic. The client answers with a
-  `credential` frame (`Payment <base64url>`). A successful verify yields a
+  `challenge` frame per payment offer before application traffic. The client
+  answers with a `credential` frame (`Payment <base64url>`). A successful verify yields a
   `receipt` frame; JSON-RPC then travels in `message` frames.
 
   Session-intent sockets can run the mpp-rs metering loop (`ws_session.rs`):
@@ -46,11 +46,12 @@ defmodule MPP.Transports.WebSocket do
           handler: (map() -> term()),
           status: status(),
           challenge: Challenge.t() | nil,
+          challenges: [Challenge.t()],
           meter: Session.Meter.t() | nil
         }
 
   @enforce_keys [:config, :handler]
-  defstruct [:config, :handler, status: :open, challenge: nil, meter: nil]
+  defstruct [:config, :handler, status: :open, challenge: nil, challenges: [], meter: nil]
 
   api(:init, "Build a WebSocket session from the same endpoint options as `MPP.Plug`, plus a JSON-RPC `:handler`.",
     params: [
@@ -76,7 +77,7 @@ defmodule MPP.Transports.WebSocket do
     %__MODULE__{config: config, handler: handler, meter: meter}
   end
 
-  api(:open, "Emit the subscription-handshake challenge frame for a newly accepted socket.",
+  api(:open, "Emit the subscription-handshake challenge frames in payment offer order.",
     params: [
       session: [kind: :value, description: "Session from init/1"]
     ],
@@ -85,9 +86,9 @@ defmodule MPP.Transports.WebSocket do
 
   @spec open(t()) :: {t(), [String.t()]}
   def open(%__MODULE__{} = session) do
-    challenge = handshake_challenge(session)
-    frame = Frame.challenge_frame(challenge)
-    {%{session | challenge: challenge, status: :open}, [Frame.encode(frame)]}
+    {challenges, session} = generate_handshake_challenges(session)
+    texts = Enum.map(challenges, &(&1 |> Frame.challenge_frame() |> Frame.encode()))
+    {%{session | status: :open}, texts}
   end
 
   api(:handle_text, "Handle one inbound WebSocket text frame and return outbound frames to push.",
@@ -270,8 +271,8 @@ defmodule MPP.Transports.WebSocket do
   end
 
   defp handle_message(_frame, session) do
-    {challenge, session} = ensure_challenge(session)
-    {session, [Frame.challenge_frame(challenge)]}
+    {challenges, session} = ensure_challenges(session)
+    {session, Enum.map(challenges, &Frame.challenge_frame/1)}
   end
 
   defp verify_and_receipt(session, credential) do
@@ -323,15 +324,12 @@ defmodule MPP.Transports.WebSocket do
     |> Adapter.wrap_handler_response(request)
   end
 
-  defp ensure_challenge(%{challenge: %Challenge{} = challenge} = session), do: {challenge, session}
+  defp ensure_challenges(%{challenges: [_ | _] = challenges} = session), do: {challenges, session}
 
-  defp ensure_challenge(session) do
-    challenge = handshake_challenge(session)
-    {challenge, %{session | challenge: challenge}}
-  end
+  defp ensure_challenges(session), do: generate_handshake_challenges(session)
 
-  defp handshake_challenge(%{config: %Config{} = config}) do
-    [entry | _] = config.method_entries
-    Plug.generate_challenge(config, entry)
+  defp generate_handshake_challenges(%{config: %Config{} = config} = session) do
+    challenges = Enum.map(config.method_entries, &Plug.generate_challenge(config, &1))
+    {challenges, %{session | challenge: hd(challenges), challenges: challenges}}
   end
 end
