@@ -33,6 +33,19 @@ defmodule MPP.Session.StoreTest do
       assert :not_found = Store.get(store, channel.channel_id)
     end
 
+    test "fills fields added since a channel was persisted", %{store: store} do
+      channel = channel()
+      assert :ok = Store.put(store, Map.delete(channel, :closing))
+
+      assert {:ok, %Channel{closing: false}} = Store.get(store, channel.channel_id)
+
+      assert {:ok, %Channel{status: :active, closing: false}} =
+               Store.update(store, channel.channel_id, fn current ->
+                 assert %Channel{closing: false} = current
+                 Channel.activate(current)
+               end)
+    end
+
     test "dispatches bare store modules through their default instance" do
       channel = %{channel() | channel_id: "0x" <> String.duplicate("44", 32)}
 

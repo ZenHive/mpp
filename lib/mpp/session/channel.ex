@@ -79,6 +79,15 @@ defmodule MPP.Session.Channel do
     proof: nil
   ]
 
+  @doc """
+  Rebuild a channel struct so fields added in later releases carry their
+  defaults. Stores that persist `%Channel{}` terms (e.g. via `term_to_binary/1`)
+  can hand back structs written by an earlier version; `MPP.Session.Store`
+  applies this on every read.
+  """
+  @spec upgrade(t()) :: t()
+  def upgrade(%__MODULE__{} = channel), do: struct(__MODULE__, Map.from_struct(channel))
+
   @doc "Create validated channel state in the `:open` status."
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   def new(opts) when is_list(opts) do

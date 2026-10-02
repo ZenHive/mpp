@@ -498,6 +498,19 @@ defmodule MPP.Session.ActionsTest do
       assert %{amount: 80, signature: ^signature, tx_hash: @close_tx_hash} = proof
     end
 
+    test "closes a channel persisted by a release without the closing field", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      {:ok, stored} = Store.get(store, @channel_id)
+      legacy = Map.delete(stored, :closing)
+      assert :ok = Store.put(store, legacy)
+
+      settle = fn _payload, _channel, _opts -> {:ok, %{tx_hash: @close_tx_hash}} end
+
+      assert {:ok, receipt} = Actions.dispatch(close_payload(80), Keyword.put(opts, :settle_close, settle))
+      assert receipt.reference == @close_tx_hash
+      assert {:ok, %Channel{status: :closed, closing: false}} = Store.get(store, @channel_id)
+    end
+
     test "rejects an invalid close before calling the settlement callback", %{opts: opts} do
       opts = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("settlement called") end)
 

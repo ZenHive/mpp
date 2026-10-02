@@ -7,6 +7,10 @@ defmodule MPP.Session.Store do
   same channel interleaving between those steps.
 
   `MPP.Session.ETSStore` is the application-started single-node default.
+
+  Channels read through `get/2` and `update/3` pass through
+  `MPP.Session.Channel.upgrade/1`, so a channel persisted by an earlier release
+  gains the defaults of fields added since.
   """
 
   alias MPP.Session.Channel
@@ -36,8 +40,7 @@ defmodule MPP.Session.Store do
   @doc "Look up a channel through a store reference."
   @spec get(store_ref(), String.t()) ::
           {:ok, Channel.t()} | :not_found | {:error, term()}
-  def get({ETSStore, opts}, channel_id), do: ETSStore.get(channel_id, opts)
-  def get(store, channel_id), do: store.get(channel_id)
+  def get(store, channel_id), do: store |> raw_get(channel_id) |> upgrade_result()
 
   @doc "Insert or replace a channel through a store reference."
   @spec put(store_ref(), Channel.t()) :: :ok | {:error, term()}
@@ -47,11 +50,26 @@ defmodule MPP.Session.Store do
   @doc "Atomically update a channel through a store reference."
   @spec update(store_ref(), String.t(), update_fun()) ::
           {:ok, Channel.t()} | {:error, term()}
-  def update({ETSStore, opts}, channel_id, fun), do: ETSStore.update(channel_id, fun, opts)
-  def update(store, channel_id, fun), do: store.update(channel_id, fun)
+  def update(store, channel_id, fun) do
+    store
+    |> raw_update(channel_id, fn current -> current |> upgrade_current() |> fun.() end)
+    |> upgrade_result()
+  end
 
   @doc "Delete a channel through a store reference."
   @spec delete(store_ref(), String.t()) :: :ok | {:error, term()}
   def delete({ETSStore, opts}, channel_id), do: ETSStore.delete(channel_id, opts)
   def delete(store, channel_id), do: store.delete(channel_id)
+
+  defp raw_get({ETSStore, opts}, channel_id), do: ETSStore.get(channel_id, opts)
+  defp raw_get(store, channel_id), do: store.get(channel_id)
+
+  defp raw_update({ETSStore, opts}, channel_id, fun), do: ETSStore.update(channel_id, fun, opts)
+  defp raw_update(store, channel_id, fun), do: store.update(channel_id, fun)
+
+  defp upgrade_current(%Channel{} = channel), do: Channel.upgrade(channel)
+  defp upgrade_current(other), do: other
+
+  defp upgrade_result({:ok, %Channel{} = channel}), do: {:ok, Channel.upgrade(channel)}
+  defp upgrade_result(other), do: other
 end
