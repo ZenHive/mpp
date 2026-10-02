@@ -353,7 +353,7 @@ defmodule MPP.Methods.Tempo do
 
   defp hash_funding_currency(hash, transfer, charge, config, %{settlement_senders: senders}, sender) do
     if settlement_sender?(transfer.from, senders) do
-      MachineToken.token(config["chain_id"] || @moderato_chain_id)
+      MachineToken.funding_token(config["chain_id"] || @moderato_chain_id, transfer.from)
     else
       hash_direct_funding_currency(hash, charge, config, sender)
     end
@@ -393,8 +393,8 @@ defmodule MPP.Methods.Tempo do
 
   defp direct_route_funding_currency(_tx, _charge), do: nil
 
-  defp transaction_funding_currency(_tx, %{machine_token?: true}, _charge, config) do
-    MachineToken.token(config["chain_id"] || @moderato_chain_id)
+  defp transaction_funding_currency(_tx, %{machine_token?: true, settlement_sender: sender}, _charge, config) do
+    MachineToken.funding_token(config["chain_id"] || @moderato_chain_id, sender)
   end
 
   defp transaction_funding_currency(%Transaction{calls: [_call]}, _payment, charge, _config), do: charge.currency
@@ -445,6 +445,7 @@ defmodule MPP.Methods.Tempo do
   @spec challenge_method_details(Charge.t()) :: map()
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
+    reject_machine_token_currency!(charge.currency, config["chain_id"] || @moderato_chain_id)
 
     details = %{
       "chainId" => config["chain_id"] || @moderato_chain_id,
@@ -833,7 +834,18 @@ defmodule MPP.Methods.Tempo do
   defp machine_token_enabled?(%{"machine_token_enabled" => true}), do: true
   defp machine_token_enabled?(_config), do: false
 
+  defp reject_machine_token_currency!(currency, chain_id) do
+    if MachineToken.machine_token?(chain_id, currency) do
+      raise ArgumentError,
+            "Machine tokens cannot be advertised as charge currency; configure the settlement currency with machine_token_enabled: true"
+    end
+  end
+
   defp validate_machine_token!(config) do
+    chain_id = config["chain_id"] || @moderato_chain_id
+
+    reject_machine_token_currency!(config["currency"], chain_id)
+
     case config["machine_token_enabled"] do
       nil ->
         :ok
@@ -1697,17 +1709,17 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp hash_sender_policy(hash, rpc_url, config) do
-    settlement_sender_policy(config, fn swapper ->
+    settlement_sender_policy(config, fn swappers ->
       with {:ok, from} <- rpc_fetch_transaction_from(hash, rpc_url, rpc_options(config)) do
-        {:ok, %{transaction_sender: from, settlement_senders: [swapper]}}
+        {:ok, %{transaction_sender: from, settlement_senders: swappers}}
       end
     end)
   end
 
   defp transaction_sender_policy(tx, config) do
-    settlement_sender_policy(config, fn swapper ->
+    settlement_sender_policy(config, fn swappers ->
       case Transaction.sender(tx) do
-        {:ok, sender} -> {:ok, %{transaction_sender: sender, settlement_senders: [swapper]}}
+        {:ok, sender} -> {:ok, %{transaction_sender: sender, settlement_senders: swappers}}
         {:error, reason} -> {:error, Errors.new(:verification_failed, reason)}
       end
     end)
@@ -1722,9 +1734,9 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp resolve_settlement_sender(chain_id, fun) do
-    case MachineToken.settlement_sender(chain_id) do
-      nil -> {:error, Errors.new(:verification_failed, "Machine tokens are not supported on chain ID #{chain_id}")}
-      swapper -> fun.(swapper)
+    case MachineToken.deployments(chain_id) do
+      [] -> {:error, Errors.new(:verification_failed, "Machine tokens are not supported on chain ID #{chain_id}")}
+      deployments -> fun.(Enum.map(deployments, & &1.swapper))
     end
   end
 

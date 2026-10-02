@@ -430,6 +430,22 @@ defmodule MPP.PlugTest do
       end
     end
 
+    test "Tempo refuses MACH and machineUSD charge currencies at boot" do
+      for chain <- [4217, 42_431],
+          deployment <- MPP.Methods.Tempo.MachineToken.deployments(chain),
+          currencies <- [[currency: deployment.token], [currencies: [@path_usd, deployment.token]]] do
+        opts = [
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: Tempo,
+          amount: "100",
+          method_config: %{"rpc_url" => "https://rpc.example", "chain_id" => chain}
+        ]
+
+        assert_raise ArgumentError, ~r/machine_token_enabled/, fn -> PaymentPlug.init(opts ++ currencies) end
+      end
+    end
+
     test "Tempo defaults are chain-aware and explicit currency restricts offers" do
       for {chain, currencies} <- [
             {4217, [@ousd, "0x20C000000000000000000000b9537d11c60E8b50"]},

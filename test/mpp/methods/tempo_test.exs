@@ -190,6 +190,19 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
+    test "rejects either machine token as charge currency regardless of opt-in" do
+      for chain_id <- [4217, 42_431], deployment <- MachineToken.deployments(chain_id), enabled <- [true, false] do
+        assert_raise ArgumentError, ~r/settlement currency.*machine_token_enabled/, fn ->
+          Tempo.validate_config!(%{
+            "rpc_url" => @rpc_url,
+            "chain_id" => chain_id,
+            "currency" => String.downcase(deployment.token),
+            "machine_token_enabled" => enabled
+          })
+        end
+      end
+    end
+
     test "accepts machine_token_enabled true on Moderato (default chain)" do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "machine_token_enabled" => true})
     end
@@ -821,6 +834,47 @@ defmodule MPP.Methods.TempoTest do
 
       assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert receipt.funding_currency == MachineToken.token(42_431)
+    end
+
+    test "MACH hash receipts bind payer and challenge memo", %{charge: charge} do
+      [mach, _legacy] = MachineToken.deployments(42_431)
+      charge = enable_machine_token(charge)
+
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"realm" => @realm, "challenge_id" => @challenge_id})
+      }
+
+      charge = %{
+        charge
+        | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:42431:#{@payer}")
+      }
+
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+
+      receipt =
+        success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: attribution_memo(@realm, @challenge_id))])
+
+      stub_receipt_and_transaction_from(receipt, @payer)
+      assert {:ok, %Receipt{funding_currency: funding}} = Tempo.verify(payload, charge)
+      assert funding == mach.token
+
+      stub_receipt_and_transaction_from(receipt, "0x2222222222222222222222222222222222222222")
+      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, charge)
+      assert detail =~ "No matching Transfer"
+
+      stub_receipt_and_transaction_from(
+        success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: "0x" <> String.duplicate("ff", 32))]),
+        @payer
+      )
+
+      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, charge)
+      assert detail =~ "No matching Transfer"
+
+      stub_receipt_and_transaction_from(receipt, @payer)
+      disabled = %{charge | method_details: Map.put(charge.method_details, "machine_token_enabled", false)}
+      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, disabled)
+      assert detail =~ "No matching Transfer"
     end
 
     test "accepts an ordinary payer Transfer when machine tokens are enabled", %{charge: charge} do
@@ -1463,6 +1517,39 @@ defmodule MPP.Methods.TempoTest do
 
       assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
       assert receipt.funding_currency == MachineToken.token(42_431)
+    end
+
+    test "MACH transaction route preserves funding currency and memo checks", %{charge: charge} do
+      [mach, _legacy] = MachineToken.deployments(42_431)
+      charge = enable_machine_token(charge)
+
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"realm" => @realm, "challenge_id" => @challenge_id})
+      }
+
+      for {memo, expected} <- [
+            {attribution_memo(@realm, @challenge_id), :ok},
+            {"0x" <> String.duplicate("ff", 32), :error}
+          ] do
+        calls = [
+          build_call(mach.token, approve_calldata(mach.swapper, 1_000_000)),
+          build_call(mach.swapper, swap_to_calldata(mach.token, 1_000_000, @token_address, @recipient, memo))
+        ]
+
+        tx_hex = build_tempo_tx(calls: calls, chain_id: 42_431)
+        stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: memo)]))
+        result = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+        case expected do
+          :ok ->
+            assert {:ok, %Receipt{funding_currency: funding}} = result
+            assert funding == mach.token
+
+          :error ->
+            assert {:error, %Errors{detail: "Payment memo is not bound to this challenge"}} = result
+        end
+      end
     end
 
     test "falls through to TIP-20 transfer matching when the route does not match", %{charge: charge} do

@@ -21,6 +21,9 @@ defmodule MPP.Client.Providers.Tempo do
       A list that does not include the challenge's primary recipient is
       rejected before any signing.
     * `:client_id` — optional attribution client identifier
+    * `:machine_token_deployment` — `:mach` (default) or `:machine_usd` for
+      servers that only accept the legacy route. `machineTokenEnabled` alone
+      does not advertise which deployment a server accepts.
     * `:fee_token` — optional fee token; defaults to the charge currency
     * `:req_options` — optional Req options for the chain-ID check
 
@@ -130,8 +133,12 @@ defmodule MPP.Client.Providers.Tempo do
 
   def pay(%Challenge{}, _config), do: {:error, {:invalid_config, :expected_map}}
 
+  defp machine_token_deployment(name) when name in [nil, :mach, :machine_usd], do: :ok
+  defp machine_token_deployment(_name), do: {:error, {:invalid_config, :machine_token_deployment}}
+
   defp parse_config(config) do
-    with {:ok, private_key} <- private_key(config[:private_key]),
+    with :ok <- machine_token_deployment(config[:machine_token_deployment]),
+         {:ok, private_key} <- private_key(config[:private_key]),
          {:ok, rpc_url} <- Shared.required_config(config, :rpc_url),
          {:ok, req_options} <- req_options(config[:req_options]),
          {:ok, expected_chain_id} <- optional_chain_id(config[:expected_chain_id]),
@@ -145,6 +152,7 @@ defmodule MPP.Client.Providers.Tempo do
          expected_recipients: expected_recipients,
          client_id: client_id,
          fee_token: config[:fee_token],
+         machine_token_deployment: config[:machine_token_deployment] || :mach,
          req_options: req_options,
          transaction_options: Map.take(config, @transaction_option_keys)
        }}
@@ -164,7 +172,7 @@ defmodule MPP.Client.Providers.Tempo do
 
   defp create_credential(challenge, charge, details, amount, chain_id, address, provider) do
     with {:ok, memo} <- payment_memo(challenge, details, provider.client_id),
-         {:ok, calls} <- payment_calls(charge, details, amount, chain_id, memo),
+         {:ok, calls} <- payment_calls(charge, details, amount, chain_id, memo, provider.machine_token_deployment),
          {:ok, signature} <- build_transaction(calls, challenge, charge, details, chain_id, provider),
          {:ok, payload} <-
            transaction_payload(signature, challenge, details, chain_id, address, provider.private_key) do
@@ -177,22 +185,22 @@ defmodule MPP.Client.Providers.Tempo do
     end
   end
 
-  defp payment_calls(charge, %{"machineTokenEnabled" => true}, amount, chain_id, memo) do
+  defp payment_calls(charge, %{"machineTokenEnabled" => true}, amount, chain_id, memo, deployment) do
     with {:ok, _currency} <- Address.validate(charge.currency),
          {:ok, _recipient} <- Address.validate(charge.recipient) do
-      machine_token_calls(chain_id, charge.currency, amount, charge.recipient, memo)
+      machine_token_calls(chain_id, charge.currency, amount, charge.recipient, memo, deployment)
     end
   end
 
-  defp payment_calls(charge, _details, amount, _chain_id, memo) do
+  defp payment_calls(charge, _details, amount, _chain_id, memo, _deployment) do
     with {:ok, token} <- Address.validate(charge.currency),
          {:ok, recipient} <- Address.validate(charge.recipient) do
       {:ok, [%{to: token, value: 0, input: TIP20.transfer_with_memo_calldata(recipient, amount, memo)}]}
     end
   end
 
-  defp machine_token_calls(chain_id, currency, amount, recipient, memo) do
-    case MachineToken.settlement_calls(chain_id, currency, amount, recipient, memo) do
+  defp machine_token_calls(chain_id, currency, amount, recipient, memo, deployment) do
+    case MachineToken.settlement_calls(chain_id, currency, amount, recipient, memo, deployment) do
       {:ok, calls} -> {:ok, calls}
       :error -> {:error, :unsupported_machine_token_chain}
     end

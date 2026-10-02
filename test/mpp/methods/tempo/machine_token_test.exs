@@ -51,6 +51,113 @@ defmodule MPP.Methods.Tempo.MachineTokenTest do
     end
   end
 
+  test "both chains recognize MACH and machineUSD without mixing deployments" do
+    for {chain_id, mach_swapper} <- [
+          {4217, "0xF72E5107c32C655ffA7539a3C8e97B7C3cE16A3F"},
+          {42_431, "0xd05f8EdFBB54Da0d765C9fE9b2B3f7d2E3a8C466"}
+        ] do
+      assert [mach, legacy] = MachineToken.deployments(chain_id)
+      assert mach.token == "0x20c000000000000000000000f37de3740ADec032"
+      assert mach.swapper == mach_swapper
+      assert legacy.token == MachineToken.token(chain_id)
+      assert legacy.swapper == MachineToken.settlement_sender(chain_id)
+
+      for {name, deployment} <- [mach: mach, machine_usd: legacy] do
+        assert MachineToken.machine_token?(chain_id, String.downcase(deployment.token))
+        assert MachineToken.funding_token(chain_id, String.downcase(deployment.swapper)) == deployment.token
+
+        assert {:ok, calls} =
+                 MachineToken.settlement_calls(
+                   chain_id,
+                   @live_currency,
+                   @live_amount,
+                   @live_recipient,
+                   decode_memo(@live_memo),
+                   name
+                 )
+
+        assert {:ok, route} =
+                 MachineToken.match_route(
+                   calls,
+                   chain_id,
+                   @live_currency,
+                   "#{@live_amount}",
+                   @live_recipient,
+                   @live_memo
+                 )
+
+        assert route.settlement_sender == deployment.swapper
+
+        assert :error =
+                 MachineToken.match_route(
+                   calls,
+                   chain_id,
+                   @live_currency,
+                   "#{@live_amount + 1}",
+                   @live_recipient,
+                   @live_memo
+                 )
+
+        assert :error =
+                 MachineToken.match_route(
+                   calls,
+                   chain_id,
+                   @live_currency,
+                   "#{@live_amount}",
+                   @live_recipient,
+                   "0x" <> String.duplicate("ff", 32)
+                 )
+
+        [approve, swap] = calls
+
+        assert :error =
+                 MachineToken.match_route(
+                   [approve, %{swap | value: 1}],
+                   chain_id,
+                   @live_currency,
+                   "#{@live_amount}",
+                   @live_recipient,
+                   @live_memo
+                 )
+      end
+
+      assert {:ok, [mach_approve, _]} =
+               MachineToken.settlement_calls(
+                 chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 decode_memo(@live_memo),
+                 :mach
+               )
+
+      assert {:ok, [_, legacy_swap]} =
+               MachineToken.settlement_calls(
+                 chain_id,
+                 @live_currency,
+                 @live_amount,
+                 @live_recipient,
+                 decode_memo(@live_memo),
+                 :machine_usd
+               )
+
+      assert :error =
+               MachineToken.match_route(
+                 [mach_approve, legacy_swap],
+                 chain_id,
+                 @live_currency,
+                 "#{@live_amount}",
+                 @live_recipient,
+                 @live_memo
+               )
+    end
+
+    assert MachineToken.deployments(1) == []
+    refute MachineToken.machine_token?(42_431, @live_currency)
+    refute MachineToken.machine_token?(42_431, nil)
+    assert MachineToken.funding_token(42_431, @live_recipient) == nil
+  end
+
   describe "settlement_calls/5" do
     test "builds the canonical [approve, swapTo] route that match_route accepts" do
       assert {:ok, calls} =

@@ -74,7 +74,7 @@ defmodule MPP.Client.Providers.TempoTest do
       assert tx.chain_id == @chain_id
 
       assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil)
-      assert route.settlement_sender == MachineToken.settlement_sender(@chain_id)
+      assert route.settlement_sender == "0xd05f8EdFBB54Da0d765C9fE9b2B3f7d2E3a8C466"
 
       assert {:ok, memo} = Base.decode16(String.trim_leading(route.memo, "0x"), case: :mixed)
       tag = @attribution_tag
@@ -91,6 +91,20 @@ defmodule MPP.Client.Providers.TempoTest do
                )
 
       assert reason =~ "No matching transfer"
+    end
+
+    test "supports the machineUSD route for legacy servers" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
+      config = Map.put(provider_config(), :machine_token_deployment, :machine_usd)
+      assert {:ok, credential} = Tempo.pay(challenge, config)
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert {:ok, route} = MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil)
+      assert route.settlement_sender == MachineToken.settlement_sender(@chain_id)
+    end
+
+    test "rejects unknown machine-token deployment configuration" do
+      assert {:error, {:invalid_config, :machine_token_deployment}} =
+               Tempo.pay(challenge(), Map.put(provider_config(), :machine_token_deployment, :unknown))
     end
 
     test "ignores an advertised memo on the machine-token route and pins the chain" do
