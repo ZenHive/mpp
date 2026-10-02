@@ -6242,7 +6242,7 @@
       "id": "147",
       "phase": 17,
       "bundle": "transport-ws",
-      "status": "in_progress",
+      "status": "done",
       "title": "WebSocket session metering: honour min voucher delta in needVoucher and acknowledge every accepted voucher (mpp-rs #479, #480)",
       "scores": {
         "d": 3,
@@ -6265,10 +6265,17 @@
         "lib/mpp/transports/websocket/",
         "test/mpp/transports/"
       ],
+      "shipped_in": "050a2a9e97b267aaa3d698091b26bf73693324fb",
       "body": "Two WS session fixes from mpp-rs:\n\n- #479 (4bb3e40): the needVoucher frame's `requiredCumulative` is `spent + tick_cost` (lib/mpp/transports/websocket/session.ex ~186-194). `MPP.Session.Actions` rejects a voucher whose delta is below `min_voucher_delta` (actions.ex ~230-240). When the minimum delta exceeds the tick cost, the voucher the client signs gets `delta_too_small` and the stream stalls. Request `max(spent + tick, cumulative_amount + min_voucher_delta)`.\n- #480 (7f6809a): a voucher accepted while the session is `:awaiting_voucher` gets no `receipt` frame (websocket.ex ~303). mpp-rs and mppx acknowledge every accepted credential frame.\n\nVerify the frame shapes against refs/mpp-rs/src/server/ws_session.rs and metered.rs.\n",
       "created_at": "2026-10-02",
       "started_at": "2026-10-02",
+      "done_at": "2026-10-02",
       "scored_at": "2026-10-02",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1790936985019-dd43d7d1, 050a2a9e97b267aaa3d698091b26bf73693324fb).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1790936985019-dd43d7d1",
       "cross_repo": []
     },
     {
