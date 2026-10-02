@@ -91,10 +91,15 @@ defmodule MPP.Methods.XRPL.SessionTest do
   test "open, voucher and close update the session store atomically", context do
     stub(context, @hash)
 
+    session = %{
+      context.session
+      | method_details: Map.put(context.session.method_details, "challenge_id", "xrpl-challenge")
+    }
+
     assert {:ok, open} =
              XRPLSession.verify(
                %{"action" => "open", "transaction" => @blob, "amount" => "100000", "signature" => @open_sig},
-               context.session
+               session
              )
 
     assert open.method == "xrpl"
@@ -104,6 +109,8 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert open.extensions["cumulative"] == "100000"
     assert open.extensions["acceptedCumulative"] == "100000"
     assert open.extensions["spent"] == "100000"
+    assert open.extensions["intent"] == "session"
+    assert open.extensions["challengeId"] == "xrpl-challenge"
     assert open.extensions["txHash"] == @hash
     assert {:ok, channel} = Store.get(context.store, @channel_id)
     assert channel.token == "XRP"
@@ -124,10 +131,12 @@ defmodule MPP.Methods.XRPL.SessionTest do
                  "amount" => "200000",
                  "signature" => @voucher_sig
                },
-               context.session
+               session
              )
 
     assert voucher.extensions["action"] == "voucher"
+    assert voucher.extensions["intent"] == "session"
+    assert voucher.extensions["challengeId"] == "xrpl-challenge"
     refute Map.has_key?(voucher.extensions, "txHash")
     assert voucher.extensions["cumulative"] == "200000"
     assert {:ok, after_voucher} = Store.get(context.store, @channel_id)
@@ -140,10 +149,12 @@ defmodule MPP.Methods.XRPL.SessionTest do
     assert {:ok, closed} =
              XRPLSession.verify(
                %{"action" => "close", "channelId" => @channel_id, "amount" => "200000", "signature" => @voucher_sig},
-               context.session
+               session
              )
 
     assert closed.extensions["action"] == "close"
+    assert closed.extensions["intent"] == "session"
+    assert closed.extensions["challengeId"] == "xrpl-challenge"
     refute Map.has_key?(closed.extensions, "txHash")
 
     assert {:ok, %Channel{status: :closed, cumulative_amount: 200_000, proof: ^highest}} =

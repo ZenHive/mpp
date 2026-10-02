@@ -24,8 +24,14 @@ defmodule MPP.Session.Actions do
         close_requested: boolean(),      # a close is pending on-chain
         finalized: boolean(),            # the channel is closed on-chain
         payer: String.t(),               # open only, optional
-        authorized_signer: String.t()    # open only, optional
+        authorized_signer: String.t(),   # open only, optional
+        tx_hash: String.t()              # optional; this action's receipt txHash
       }}
+
+  A reported `tx_hash` is copied onto that action's receipt only. It is not
+  stored on the channel, so a later voucher does not inherit it. `verify_top_up`
+  MUST confirm the transaction calldata is an escrow `topUp` for this
+  `channelId` and `additionalDeposit`. Actions does not decode the calldata.
 
   `deposit`, `settled`, `close_requested`, and `finalized` are all required;
   a result missing any of them, or of any other shape, is a verification
@@ -56,16 +62,25 @@ defmodule MPP.Session.Actions do
   The highest accepted voucher signature is kept on the channel as its
   settlement proof.
 
+  Local open checks run before `verify_open` broadcasts. The channel must be
+  absent, and the voucher's cumulative amount must cover the request. When
+  payer, recipient, and token are already known, the signature must recover
+  to the locally resolved signer, and a descriptor or credential signer that
+  already disagrees with server configuration is rejected. A missing payer
+  may still be supplied by the callback. The on-chain deposit is known only
+  after `verify_open`. When that callback names a different signer, the
+  signature is checked again against it.
+
   `close` requires a settlement callback, passed as the `:settle_close` option
   or the server-only `"settle_close"` method-config key. Once the close voucher
   has been validated, `close` calls `settle.(payload, closing_channel, opts)`.
   The callback MUST submit the escrow close (or settle) for that voucher, wait
   for the transaction to succeed at the finality the server requires, and
   return `{:ok, %{tx_hash: "0x" <> 64 hex}}` or `{:error, %MPP.Errors{}}`. Only
-  then is the channel marked closed; the hash is recorded on its proof and
-  returned as the receipt reference. Before the callback runs, the channel is
-  reserved as closing: it accepts no vouchers, spends, top-ups or competing
-  closes. `{:error, %MPP.Errors{}}` must mean the close definitively did not
+  then is the channel marked closed. The hash is recorded on its proof and
+  returned as the receipt `txHash`; the receipt reference stays the channel id.
+  Before the callback runs, the channel is reserved as closing: it accepts no
+  vouchers, spends, top-ups or competing closes. `{:error, %MPP.Errors{}}` must mean the close definitively did not
   settle; it releases the reservation and the channel stays active. Any other
   result (or a raise) leaves the outcome unknown, so the close is rejected and
   the channel stays reserved for the operator to reconcile. Methods
@@ -114,6 +129,8 @@ defmodule MPP.Session.Actions do
 
   defp handle_open(payload, opts) do
     with :ok <- ensure_channel_absent(payload, opts),
+         :ok <- ensure_voucher_covers_request(payload, opts),
+         :ok <- precheck_local_open(payload, opts),
          {:ok, verified} <- verify_open(payload, opts),
          :ok <- ensure_open_within_escrow(payload, verified),
          :ok <-
@@ -123,9 +140,9 @@ defmodule MPP.Session.Actions do
              request_amount(opts)
            ),
          {:ok, identity_opts} <- apply_verified_identity(opts, verified),
-         {:ok, identity} <- fetch_open_identity(payload, identity_opts),
-         :ok <- maybe_verify_signature(payload, identity.authorized_signer, opts) do
-      update_channel(payload, opts, fn
+         {:ok, identity} <- require_open_identity(payload, identity_opts),
+         :ok <- reverify_open_signature(payload, identity, opts) do
+      update_channel(payload, put_tx_hash(opts, verified), fn
         :not_found ->
           open_channel(payload, identity, verified, opts)
 
@@ -142,7 +159,7 @@ defmodule MPP.Session.Actions do
     with {:ok, current} <- fetch_live_channel(payload, opts),
          :ok <- require_positive_top_up(payload),
          {:ok, verified} <- verify_top_up(payload, current, opts) do
-      update_channel(payload, opts, fn
+      update_channel(payload, put_tx_hash(opts, verified), fn
         :not_found ->
           {:error, Errors.new(:channel_not_found, "channel not found")}
 
@@ -170,6 +187,8 @@ defmodule MPP.Session.Actions do
 
   # The claimed additionalDeposit is never trusted: the deposit ceiling only
   # moves to the escrow total the configured verifier confirms on-chain.
+  # The callback MUST confirm the calldata is an escrow `topUp` for this
+  # channelId and additionalDeposit. Actions does not decode the transaction.
   defp verify_top_up(payload, channel, opts) do
     case Keyword.get(opts, :verify_top_up) do
       fun when is_function(fun, 3) ->
@@ -271,18 +290,15 @@ defmodule MPP.Session.Actions do
   end
 
   defp finalize_close(payload, tx_hash, opts) do
-    result =
-      update_channel(payload, opts, fn
-        %Channel{status: :active, closing: true} = channel ->
-          with {:ok, closed} <- channel |> Channel.clear_closing() |> close_channel(payload, opts) do
-            {:ok, put_close_tx_hash(closed, tx_hash)}
-          end
+    update_channel(payload, opts, fn
+      %Channel{status: :active, closing: true} = channel ->
+        with {:ok, closed} <- channel |> Channel.clear_closing() |> close_channel(payload, opts) do
+          {:ok, put_close_tx_hash(closed, tx_hash)}
+        end
 
-        _other ->
-          {:error, Errors.new(:verification_failed, "channel is no longer pending close")}
-      end)
-
-    with {:ok, receipt} <- result, do: {:ok, %{receipt | reference: tx_hash}}
+      _other ->
+        {:error, Errors.new(:verification_failed, "channel is no longer pending close")}
+    end)
   end
 
   defp put_close_tx_hash(%Channel{proof: proof} = channel, tx_hash) when is_map(proof),
@@ -576,7 +592,7 @@ defmodule MPP.Session.Actions do
   defp build_open_identity(payload, payer, recipient, token, signer) do
     cond do
       not (is_binary(payer) and is_binary(recipient) and is_binary(token)) ->
-        {:error, Errors.new(:invalid_payload, "payer, recipient, and token required to open a channel")}
+        {:error, :identity_incomplete}
 
       is_binary(payload.authorized_signer) and
           not same_address?(resolve_signer(payload.authorized_signer, payer), signer) ->
@@ -636,6 +652,52 @@ defmodule MPP.Session.Actions do
 
   defp same_address?(a, b) when is_binary(a) and is_binary(b), do: a == b or Address.equal?(a, b)
   defp same_address?(_a, _b), do: false
+
+  # A missing payer can still arrive from verify_open. Definitive local
+  # identity failures and a signature the local signer did not produce are
+  # rejected before that callback broadcasts.
+  defp precheck_local_open(payload, opts) do
+    case fetch_open_identity(payload, opts) do
+      {:ok, identity} -> maybe_verify_signature(payload, identity.authorized_signer, opts)
+      {:error, :identity_incomplete} -> :ok
+      {:error, %Errors{}} = error -> error
+    end
+  end
+
+  defp require_open_identity(payload, opts) do
+    case fetch_open_identity(payload, opts) do
+      {:error, :identity_incomplete} ->
+        {:error, Errors.new(:invalid_payload, "payer, recipient, and token required to open a channel")}
+
+      other ->
+        other
+    end
+  end
+
+  # Checked once against the local signer. Run again only when the escrow names another.
+  defp reverify_open_signature(payload, identity, opts) do
+    case fetch_open_identity(payload, opts) do
+      {:ok, local} ->
+        if same_address?(local.authorized_signer, identity.authorized_signer) do
+          :ok
+        else
+          maybe_verify_signature(payload, identity.authorized_signer, opts)
+        end
+
+      _other ->
+        maybe_verify_signature(payload, identity.authorized_signer, opts)
+    end
+  end
+
+  defp ensure_voucher_covers_request(%Payload{cumulative_amount: cumulative}, opts) do
+    request = request_amount(opts)
+
+    if request > 0 and cumulative < request do
+      {:error, Errors.new(:verification_failed, "voucher amount is less than request amount")}
+    else
+      :ok
+    end
+  end
 
   defp ensure_covers_request(_cumulative, _deposit, 0), do: :ok
 
@@ -707,19 +769,37 @@ defmodule MPP.Session.Actions do
     end
   end
 
+  # Wire fields follow mpp-rs `SessionReceipt::to_base_receipt` and mppx
+  # `SessionReceipt`. `reference` stays the channel id; `txHash` is separate.
   defp receipt(%Channel{} = channel, opts) do
     Receipt.new(
       method: Keyword.get(opts, :method_name, "session"),
       reference: channel.channel_id,
-      extensions: %{
-        "action" => Channel.action_to_wire(Keyword.fetch!(opts, :action)),
-        "channelId" => channel.channel_id,
-        "acceptedCumulative" => Integer.to_string(channel.cumulative_amount),
-        "spent" => Integer.to_string(channel.spent),
-        "units" => channel.units
-      }
+      extensions:
+        %{
+          "action" => Channel.action_to_wire(Keyword.fetch!(opts, :action)),
+          "intent" => "session",
+          "channelId" => channel.channel_id,
+          "acceptedCumulative" => Integer.to_string(channel.cumulative_amount),
+          "spent" => Integer.to_string(channel.spent),
+          "units" => channel.units
+        }
+        |> maybe_put_extension("challengeId", optional_binary(Keyword.get(opts, :challenge_id)))
+        |> maybe_put_extension("txHash", receipt_tx_hash(channel, opts))
     )
   end
+
+  defp receipt_tx_hash(%Channel{proof: %{tx_hash: hash}}, _opts) when is_binary(hash) and hash != "", do: hash
+  defp receipt_tx_hash(_channel, opts), do: optional_binary(Keyword.get(opts, :tx_hash))
+
+  defp put_tx_hash(opts, %{tx_hash: hash}) when is_binary(hash) and hash != "", do: Keyword.put(opts, :tx_hash, hash)
+  defp put_tx_hash(opts, _verified), do: opts
+
+  defp optional_binary(value) when is_binary(value) and value != "", do: value
+  defp optional_binary(_value), do: nil
+
+  defp maybe_put_extension(map, _key, nil), do: map
+  defp maybe_put_extension(map, key, value), do: Map.put(map, key, value)
 
   defp opts_from_session(%Session{} = session) do
     details = session.method_details || %{}
@@ -735,6 +815,7 @@ defmodule MPP.Session.Actions do
       min_voucher_delta: Map.get(details, "minVoucherDelta") || Map.get(details, "min_voucher_delta", 1),
       request_amount: Map.get(details, "request_amount", session.amount),
       method_name: Map.get(details, "method", "session"),
+      challenge_id: optional_binary(Map.get(details, "challenge_id") || Map.get(details, "challengeId")),
       verify_open: Map.get(details, "verify_open"),
       verify_top_up: Map.get(details, "verify_top_up"),
       settle_close: Map.get(details, "settle_close")

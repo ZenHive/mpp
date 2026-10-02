@@ -337,8 +337,16 @@ defmodule MPP.Methods.XRPL.Session do
       # Closed XRPL channels are redeemed by `redeem/2`.
       settle_close: :caller,
       method_name: "xrpl",
+      challenge_id: challenge_id(params.config),
       proof: %{public_key: params.public_key}
     ]
+  end
+
+  defp challenge_id(config) when is_map(config) do
+    case config["challenge_id"] || config["challengeId"] do
+      id when is_binary(id) and id != "" -> id
+      _ -> nil
+    end
   end
 
   defp finish_receipt(receipt, channel_id, extra) do

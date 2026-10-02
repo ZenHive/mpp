@@ -3,6 +3,7 @@ defmodule MPP.Session.ActionsTest do
 
   alias MPP.Errors
   alias MPP.Intents.Session
+  alias MPP.Receipt
   alias MPP.Session.Actions
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
@@ -50,9 +51,12 @@ defmodule MPP.Session.ActionsTest do
       assert {:ok, open_receipt} = Actions.dispatch(open_payload(100), opts)
       assert open_receipt.reference == @channel_id
       assert open_receipt.extensions["action"] == "open"
+      assert open_receipt.extensions["intent"] == "session"
+      assert open_receipt.extensions["challengeId"] == "challenge-1"
       assert open_receipt.extensions["acceptedCumulative"] == "100"
       assert open_receipt.extensions["spent"] == "10"
       assert open_receipt.extensions["units"] == 1
+      refute Map.has_key?(open_receipt.extensions, "txHash")
 
       assert {:ok, channel} = Store.get(store, @channel_id)
       assert channel.status == :active
@@ -65,19 +69,28 @@ defmodule MPP.Session.ActionsTest do
 
       assert {:ok, voucher_receipt} = Actions.dispatch(voucher_payload(250), opts)
       assert voucher_receipt.extensions["action"] == "voucher"
+      assert voucher_receipt.extensions["intent"] == "session"
+      assert voucher_receipt.extensions["challengeId"] == "challenge-1"
       assert voucher_receipt.extensions["acceptedCumulative"] == "250"
       assert voucher_receipt.extensions["spent"] == "20"
+      refute Map.has_key?(voucher_receipt.extensions, "txHash")
 
       top_up_opts = Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> {:ok, state(%{deposit: 1_400})} end)
       assert {:ok, top_up_receipt} = Actions.dispatch(top_up_payload(400), top_up_opts)
       assert top_up_receipt.extensions["action"] == "topUp"
+      assert top_up_receipt.extensions["intent"] == "session"
+      assert top_up_receipt.extensions["challengeId"] == "challenge-1"
+      refute Map.has_key?(top_up_receipt.extensions, "txHash")
       assert {:ok, topped} = Store.get(store, @channel_id)
       assert topped.deposit == 1_400
       assert topped.cumulative_amount == 250
 
       assert {:ok, close_receipt} = Actions.dispatch(close_payload(250), opts)
       assert close_receipt.extensions["action"] == "close"
-      assert close_receipt.reference == @close_tx_hash
+      assert close_receipt.extensions["intent"] == "session"
+      assert close_receipt.extensions["challengeId"] == "challenge-1"
+      assert close_receipt.reference == @channel_id
+      assert close_receipt.extensions["txHash"] == @close_tx_hash
       assert {:ok, closed} = Store.get(store, @channel_id)
       assert closed.status == :closed
       assert closed.proof.tx_hash == @close_tx_hash
@@ -100,13 +113,16 @@ defmodule MPP.Session.ActionsTest do
             "method" => "mocksession",
             "escrowContract" => @tip1034_escrow,
             "chainId" => 42_431,
-            "authorizedSigner" => @signer
+            "authorizedSigner" => @signer,
+            "challenge_id" => "challenge-1"
           }
         )
 
       assert {:ok, receipt} = Actions.verify(open_payload(50), session)
       assert receipt.method == "mocksession"
       assert receipt.extensions["spent"] == "10"
+      assert receipt.extensions["intent"] == "session"
+      assert receipt.extensions["challengeId"] == "challenge-1"
     end
 
     test "verify/2 honors the server-only request amount override", %{store: store} do
@@ -470,7 +486,8 @@ defmodule MPP.Session.ActionsTest do
       send(settler, :settled)
 
       assert {:ok, receipt} = Task.await(close)
-      assert receipt.reference == @close_tx_hash
+      assert receipt.reference == @channel_id
+      assert receipt.extensions["txHash"] == @close_tx_hash
 
       assert {:ok, %Channel{status: :closed, closing: false, spent: ^spent, cumulative_amount: 50}} =
                Store.get(store, @channel_id)
@@ -486,7 +503,8 @@ defmodule MPP.Session.ActionsTest do
       end
 
       assert {:ok, receipt} = Actions.dispatch(close_payload(80), Keyword.put(opts, :settle_close, settle))
-      assert receipt.reference == @close_tx_hash
+      assert receipt.reference == @channel_id
+      assert receipt.extensions["txHash"] == @close_tx_hash
       assert receipt.extensions["acceptedCumulative"] == "80"
 
       signature = sign(@channel_id, 80)
@@ -507,7 +525,8 @@ defmodule MPP.Session.ActionsTest do
       settle = fn _payload, _channel, _opts -> {:ok, %{tx_hash: @close_tx_hash}} end
 
       assert {:ok, receipt} = Actions.dispatch(close_payload(80), Keyword.put(opts, :settle_close, settle))
-      assert receipt.reference == @close_tx_hash
+      assert receipt.reference == @channel_id
+      assert receipt.extensions["txHash"] == @close_tx_hash
       assert {:ok, %Channel{status: :closed, closing: false}} = Store.get(store, @channel_id)
     end
 
@@ -834,9 +853,17 @@ defmodule MPP.Session.ActionsTest do
     end
 
     test "open deposit must cover the request amount", %{opts: opts} do
-      opts = Keyword.merge(opts, verify_open: funded(50), request_amount: 80)
-      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
+      test_pid = self()
+
+      verify = fn _, _ ->
+        send(test_pid, :verify_open)
+        {:ok, state(%{deposit: 100, settled: 30})}
+      end
+
+      opts = Keyword.merge(opts, verify_open: verify, request_amount: 80)
+      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(80), opts)
       assert detail =~ "open deposit is less than request amount"
+      assert_received :verify_open
     end
   end
 
@@ -913,6 +940,64 @@ defmodule MPP.Session.ActionsTest do
       assert :not_found = Store.get(store, @channel_id)
     end
 
+    test "rejects an invalid open signature before broadcasting", %{opts: opts, store: store} do
+      never = Keyword.put(opts, :verify_open, fn _, _ -> flunk("verify_open called") end)
+
+      for signature <- [other_voucher("open", @channel_id, 50)["signature"], "0x01"] do
+        payload = Map.put(open_payload(50), "signature", signature)
+        assert {:error, %Errors{} = error} = Actions.dispatch(payload, never)
+        assert String.contains?(error.type, "invalid-signature")
+      end
+
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
+    test "rejects an open voucher below the request before broadcasting", %{opts: opts, store: store} do
+      never =
+        opts
+        |> Keyword.put(:verify_open, fn _, _ -> flunk("verify_open called") end)
+        |> Keyword.put(:request_amount, 80)
+
+      assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), never)
+      assert detail =~ "voucher amount is less than request amount"
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
+    test "session receipts carry intent, challengeId, and the funding txHash", %{opts: opts} do
+      open_tx = "0x" <> String.duplicate("11", 32)
+      top_up_tx = "0x" <> String.duplicate("22", 32)
+
+      verify_open = fn _, _ -> {:ok, state(%{deposit: 1_000, tx_hash: open_tx})} end
+
+      assert {:ok, open_receipt} =
+               Actions.dispatch(open_payload(100), Keyword.put(opts, :verify_open, verify_open))
+
+      assert open_receipt.reference == @channel_id
+      assert open_receipt.extensions["txHash"] == open_tx
+      assert open_receipt.extensions["intent"] == "session"
+      assert open_receipt.extensions["challengeId"] == "challenge-1"
+
+      verify_top_up = fn _, _, _ -> {:ok, state(%{deposit: 1_400, tx_hash: top_up_tx})} end
+
+      assert {:ok, top_up_receipt} =
+               Actions.dispatch(top_up_payload(400), Keyword.put(opts, :verify_top_up, verify_top_up))
+
+      assert top_up_receipt.reference == @channel_id
+      assert top_up_receipt.extensions["action"] == "topUp"
+      assert top_up_receipt.extensions["txHash"] == top_up_tx
+      assert top_up_receipt.extensions["intent"] == "session"
+      assert top_up_receipt.extensions["challengeId"] == "challenge-1"
+
+      {:ok, decoded} = top_up_receipt |> Receipt.encode() |> Receipt.decode()
+      assert decoded.reference == @channel_id
+      assert decoded.extensions["intent"] == "session"
+      assert decoded.extensions["challengeId"] == "challenge-1"
+      assert decoded.extensions["txHash"] == top_up_tx
+      assert decoded.extensions["channelId"] == @channel_id
+      assert decoded.extensions["acceptedCumulative"] == top_up_receipt.extensions["acceptedCumulative"]
+      assert decoded.extensions["spent"] == top_up_receipt.extensions["spent"]
+    end
+
     test "does not call the verifier for an existing or closed channel", %{opts: opts} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
       never = Keyword.put(opts, :verify_open, fn _, _ -> flunk("verifier called") end)
@@ -969,8 +1054,16 @@ defmodule MPP.Session.ActionsTest do
       assert {:error, %Errors{} = error} = Actions.dispatch(open_payload(50), opts)
       assert String.contains?(error.type, "invalid-signature")
 
-      payload = Map.put(open_payload(50), "signature", other_voucher("open", @channel_id, 50)["signature"])
-      assert {:ok, _} = Actions.dispatch(payload, opts)
+      # A voucher the local signer did not produce is rejected before broadcast.
+      foreign = Map.put(open_payload(50), "signature", other_voucher("open", @channel_id, 50)["signature"])
+      never = Keyword.put(opts, :verify_open, fn _, _ -> flunk("verify_open called") end)
+      assert {:error, %Errors{} = rejected} = Actions.dispatch(foreign, never)
+      assert String.contains?(rejected.type, "invalid-signature")
+      assert :not_found = Store.get(store, @channel_id)
+
+      # The escrow signer is stored when the server already authorizes that key.
+      authorized = Keyword.put(opts, :authorized_signer, other)
+      assert {:ok, _} = Actions.dispatch(foreign, authorized)
       assert {:ok, %Channel{authorized_signer: ^other}} = Store.get(store, @channel_id)
 
       {channel_id, descriptor} = bound_descriptor(@signer)
@@ -1329,6 +1422,7 @@ defmodule MPP.Session.ActionsTest do
       escrow_contract: @tip1034_escrow,
       chain_id: 42_431,
       authorized_signer: @signer,
+      challenge_id: "challenge-1",
       settle_close: fn _payload, _channel, _opts -> {:ok, %{tx_hash: @close_tx_hash}} end
     ]
   end

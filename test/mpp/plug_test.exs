@@ -1771,28 +1771,39 @@ defmodule MPP.PlugTest do
       {:ok, open_receipt} = Headers.parse_receipt(get_resp_header(open_conn, "payment-receipt"))
       assert open_receipt.method == "mocksession"
       assert open_receipt.extensions["action"] == "open"
+      assert open_receipt.extensions["intent"] == "session"
+      assert is_binary(open_receipt.extensions["challengeId"])
       assert open_receipt.extensions["acceptedCumulative"] == "80"
       assert open_receipt.extensions["spent"] == "10"
+      refute Map.has_key?(open_receipt.extensions, "txHash")
 
       voucher_conn = session_call(config, session_voucher_payload(200))
       refute voucher_conn.halted
       voucher_conn = send_success(voucher_conn)
       {:ok, voucher_receipt} = Headers.parse_receipt(get_resp_header(voucher_conn, "payment-receipt"))
       assert voucher_receipt.extensions["action"] == "voucher"
+      assert voucher_receipt.extensions["intent"] == "session"
+      assert is_binary(voucher_receipt.extensions["challengeId"])
       assert voucher_receipt.extensions["spent"] == "20"
+      refute Map.has_key?(voucher_receipt.extensions, "txHash")
 
       top_up_conn = session_call(config, session_top_up_payload(100))
       refute top_up_conn.halted
       top_up_conn = send_success(top_up_conn)
       {:ok, top_up_receipt} = Headers.parse_receipt(get_resp_header(top_up_conn, "payment-receipt"))
       assert top_up_receipt.extensions["action"] == "topUp"
+      assert top_up_receipt.extensions["intent"] == "session"
+      assert is_binary(top_up_receipt.extensions["challengeId"])
 
       close_conn = session_call(config, session_close_payload(200))
       refute close_conn.halted
       close_conn = send_success(close_conn)
       {:ok, close_receipt} = Headers.parse_receipt(get_resp_header(close_conn, "payment-receipt"))
       assert close_receipt.extensions["action"] == "close"
-      assert close_receipt.reference == "0x" <> String.duplicate("cd", 32)
+      assert close_receipt.extensions["intent"] == "session"
+      assert is_binary(close_receipt.extensions["challengeId"])
+      assert close_receipt.reference == @session_channel_id
+      assert close_receipt.extensions["txHash"] == "0x" <> String.duplicate("cd", 32)
     end
 
     test "equal session vouchers return delta-too-small through HTTP, MCP, and JSON-RPC", %{config: config} do
