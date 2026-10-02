@@ -108,7 +108,7 @@ defmodule MPP.MixProject do
       # Onchain.Tempo.RPC.simulate/3, which the fee-payer pre-broadcast
       # simulation (MPP.Methods.Tempo) calls directly. Two-segment for the
       # same reason as onchain above.
-      {:onchain_tempo, "~> 0.13"},
+      {:onchain_tempo, "~> 0.13.1"},
 
       # ETS-based dedup store with TTL (ConCacheStore)
       {:con_cache, "~> 1.1.1"},
