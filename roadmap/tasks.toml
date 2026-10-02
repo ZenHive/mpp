@@ -3985,14 +3985,14 @@ scored_at = "2026-10-02"
 id = "146"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "in_progress"
 title = "Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485)"
 scores = { d = 3, b = 4, u = 4 }
 acceptance_criteria = ['Accept-Payment: method tokens follow the challenge method grammar; Q=0 is honoured as an opt-out; a valueless q parameter is rejected; only qvalues matching ^(0(\.\d{0,3})?|1(\.0{0,3})?)$ are accepted', 'Protocol amounts accept only ^[0-9]+$ in charge parsing, intent validation and the client Tempo provider; +100, -5, 1e3 and " 100" are rejected with tests']
 out_of_scope = ["Human-readable amount parsing (MPP.Amount.parse_units) — already strict per mpp-rs #413"]
+touches = ["lib/mpp/accept_payment.ex", "lib/mpp/amount.ex", "lib/mpp/intents/", "test/mpp/accept_payment_test.exs", "test/mpp/amount_test.exs", "test/mpp/intents/"]
 assignee = "cursor"
 model = "cursor-grok-4.6-high"
-touches = ["lib/mpp/accept_payment.ex", "lib/mpp/amount.ex", "lib/mpp/intents/", "test/mpp/accept_payment_test.exs", "test/mpp/amount_test.exs", "test/mpp/intents/"]
 body = """
 mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #485 (0dcefc2) accepts only ASCII digits in protocol amounts. Our current behavior, read on 2026-10-02:
 
@@ -4002,6 +4002,7 @@ mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #48
 Port both, checking against refs/mpp-rs and refs/mppx.
 """
 created_at = "2026-10-02"
+started_at = "2026-10-02"
 scored_at = "2026-10-02"
 
 [[task]]

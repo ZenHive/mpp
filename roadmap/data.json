@@ -6196,7 +6196,7 @@
       "id": "146",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485)",
       "scores": {
         "d": 3,
@@ -6227,6 +6227,7 @@
       ],
       "body": "mpp-rs #488 (29e4e37) parses Accept-Payment weights as RFC 9110 qvalues, and #485 (0dcefc2) accepts only ASCII digits in protocol amounts. Our current behavior, read on 2026-10-02:\n\n- `MPP.AcceptPayment` (~267-311): the method token regex `[a-z0-9-]` rejects `:` and `_`, which the method grammar in challenge.ex (~201) allows. The `q` parameter name is case-sensitive, so `Q=0` is ignored and the client's opt-out is lost. A `;q` with no value is ignored instead of rejected. `Float.parse` accepts `1e-1` and `+0.5`.\n- Amounts: `Integer.parse` in `MPP.Methods.Shared.parse_charge_amount` (~47-52) accepts `+100` and `-5`. `MPP.Intents.Shared` `validate_amount` (~11) accepts any non-empty string, and so does the client Tempo provider (~385-390). The server pins the amount, so this is a strictness fix, not an exploit.\n\nPort both, checking against refs/mpp-rs and refs/mppx.\n",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     },

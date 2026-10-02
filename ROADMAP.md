@@ -42,7 +42,7 @@
 | Task 138 | ✅ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯 |
 | Task 144 | ⬜ | 🎁 **core-protocol** · Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 145 | 🔄 | 🎁 **core-protocol** · Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447) [D:5/B:6/U:5 → Eff:1.1] 📋 |
-| Task 146 | ⬜ | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33] 📋 |
+| Task 146 | 🔄 | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
