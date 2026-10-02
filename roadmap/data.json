@@ -6339,7 +6339,7 @@
       "id": "149",
       "phase": 4,
       "bundle": "tempo",
-      "status": "in_progress",
+      "status": "done",
       "title": "Ordered multi-currency charge offers across Tempo and EVM, with fundingCurrency in receipts (mppx #933, #915)",
       "scores": {
         "d": 6,
@@ -6372,10 +6372,17 @@
         "test/mpp/plug_test.exs",
         "test/mpp/receipt_test.exs"
       ],
+      "shipped_in": "bcc232a41b1ba40a845168d6fd5283953fa60ddb",
       "body": "mppx #933 (e4f0e02) lets a server offer an ordered `currencies` list for Tempo and EVM. A single route expands into one challenge per currency (mainnet default: OUSD then USDC.e; Moderato: OUSD then pathUSD). mppx #915 (c7968ca) adds an optional `fundingCurrency` receipt field derived from the payment route.\n\nWe support one currency per method entry, and `MPP.Plug` rejects duplicate method names at init (lib/mpp/plug.ex ~394-400), so a route cannot offer two currencies under one method. A grep on 2026-10-02 found no `fundingCurrency` in lib/.\n\nDesign note from mppx #936 (3a23894): once several entries share a method name, verification must pick the entry by request binding (matching currency/amount), never by first match. Port that disambiguation with this change.\n\nVerify the OUSD token addresses and default ordering against refs/mppx and docs.tempo.xyz. Pin them with a live Moderato integration test: one real success and one relevant real error.\n",
       "created_at": "2026-10-02",
       "started_at": "2026-10-02",
+      "done_at": "2026-10-02",
       "scored_at": "2026-10-02",
+      "implemented": "Landed by codex via merge-train; reviewer-approved (run run-1790943364323-8d413f2d, bcc232a41b1ba40a845168d6fd5283953fa60ddb).",
+      "delivered_by": "codex",
+      "verified": true,
+      "verified_by": "cursor",
+      "verification_ref": "harness-run:run-1790943364323-8d413f2d",
       "cross_repo": []
     },
     {

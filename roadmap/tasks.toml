@@ -4090,7 +4090,7 @@ shipped_in = "154db8fe153b285474cf120e4816d0458d74c837"
 id = "149"
 phase = 4
 bundle = "tempo"
-status = "in_progress"
+status = "done"
 title = "Ordered multi-currency charge offers across Tempo and EVM, with fundingCurrency in receipts (mppx #933, #915)"
 scores = { d = 6, b = 5, u = 4 }
 acceptance_criteria = ["A Tempo or EVM method entry can declare an ordered currencies list; the 402 carries one challenge per currency in that order", "A credential is verified against the entry whose currency matches its echoed request; with two same-named entries, the wrong entry is never used (test)", "Tempo charge receipts include fundingCurrency (direct: the currency; machine-token route: the funding token) and it round-trips through MPP.Receipt", "OUSD addresses are confirmed against refs/mppx + Tempo docs and pinned by a live :integration test on Moderato"]
@@ -4107,9 +4107,16 @@ Design note from mppx #936 (3a23894): once several entries share a method name, 
 
 Verify the OUSD token addresses and default ordering against refs/mppx and docs.tempo.xyz. Pin them with a live Moderato integration test: one real success and one relevant real error.
 """
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1790943364323-8d413f2d, bcc232a41b1ba40a845168d6fd5283953fa60ddb)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1790943364323-8d413f2d"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "bcc232a41b1ba40a845168d6fd5283953fa60ddb"
 
 [[task]]
 id = "150"
