@@ -6598,7 +6598,7 @@
       "id": "154",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "in_progress",
+      "status": "done",
       "title": "Map Tempo subscription infrastructure failures to internal-payment-error",
       "scores": {
         "d": 3,
@@ -6627,10 +6627,17 @@
         "lib/mpp/methods/tempo/subscription.ex",
         "test/mpp/methods/tempo/"
       ],
+      "shipped_in": "0dfeafa996bda15b70f02beab20c709ab0639322",
       "body": "Tasks 151 and 152 moved infrastructure failures to `internal-payment-error` (HTTP 500, no challenge, via `MPP.Methods.Shared.internal_payment_error/0`) so a client is not re-challenged when the server cannot tell whether payment state changed. `MPP.Methods.Tempo.Subscription` was left out: its subscription-store errors (`authorize/2`, `renew/2` via `fetch_record` and the renewal claim/complete updates), its activation dedup-store errors (`claim_activation`, `release_activation_store`) and its RPC/broadcast transport failures all surface as `verification_failed`, a 402 with a fresh challenge. Route those through `internal_payment_error/0`, keeping the existing semantics of held claims (a broadcast whose outcome is unknown keeps its claim). Client-attributable outcomes stay 402: not found, expired, already used / renewal in flight, key-authorization and signature failures, on-chain reverts.",
       "created_at": "2026-10-02",
       "started_at": "2026-10-02",
+      "done_at": "2026-10-02",
       "scored_at": "2026-10-02",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1790981620539-f8fa0214, 0dfeafa996bda15b70f02beab20c709ab0639322).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1790981620539-f8fa0214",
       "cross_repo": []
     }
   ]
