@@ -609,12 +609,14 @@ defmodule MPP.Mcp do
   defp extract_challenges_from_data(%{"challenges" => _}), do: {:error, :invalid_challenge}
   defp extract_challenges_from_data(%{}), do: {:error, :no_challenges}
 
+  # One malformed entry must not discard the rest (mpp-rs #447). Error only
+  # when nothing in the list parses.
   defp extract_challenges_from_list(challenges) do
     results = Enum.map(challenges, &challenge_from_map/1)
 
-    case Enum.split_with(results, &match?({:ok, _}, &1)) do
-      {oks, []} -> {:ok, Enum.map(oks, fn {:ok, c} -> c end)}
-      {_, [{:error, reason} | _]} -> {:error, reason}
+    case for {:ok, challenge} <- results, do: challenge do
+      [] -> Enum.find(results, {:error, :invalid_challenge}, &match?({:error, _}, &1))
+      parsed -> {:ok, parsed}
     end
   end
 

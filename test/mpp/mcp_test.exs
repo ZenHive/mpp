@@ -827,6 +827,36 @@ defmodule MPP.McpTest do
       assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
     end
 
+    test "keeps parseable challenges when one entry is malformed (mpp-rs #447)" do
+      valid = %{
+        "id" => "ch_bin",
+        "realm" => "api.example.com",
+        "method" => "tempo",
+        "intent" => "charge",
+        "request" => "eyJ0ZXN0IjoxfQ"
+      }
+
+      error = %{
+        "data" => %{
+          "challenges" => [%{"not" => "a valid challenge"}, valid, %{"id" => 1}]
+        }
+      }
+
+      assert {:ok, [parsed]} = Mcp.extract_challenges(error)
+      assert parsed.id == "ch_bin"
+      assert parsed.request == "eyJ0ZXN0IjoxfQ"
+    end
+
+    test "returns error when every challenge in the list is malformed" do
+      error = %{
+        "data" => %{
+          "challenges" => [%{"not" => "a valid challenge"}, %{"id" => 1}]
+        }
+      }
+
+      assert {:error, :invalid_challenge} = Mcp.extract_challenges(error)
+    end
+
     test "returns error when request is a non-map/non-binary value" do
       error = %{
         "data" => %{

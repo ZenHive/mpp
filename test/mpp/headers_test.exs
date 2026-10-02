@@ -93,17 +93,30 @@ defmodule MPP.HeadersTest do
       end
     end
 
-    test "escapes non-Latin-1 characters as \\uXXXX, matching mppx (#813)" do
-      # mppx test fixture: refs/mppx/src/Challenge.test.ts (mppx #813) —
-      # "1 × Classmatic — General Admission" escapes only the em dash (U+2014);
-      # × (U+00D7) is within Latin-1 and stays raw.
+    test "escapes every code point outside HTAB and printable ASCII as \\uXXXX (mpp-rs #450)" do
+      # mppx #813 left Latin-1 raw (× U+00D7) and escaped only U+0100+.
+      # mpp-rs #450 escapes both, so a Latin-1 client does not read UTF-8 as mojibake.
       challenge = make_challenge(description: "1 × Classmatic — General Admission")
       header = Headers.format_challenge(challenge)
 
-      assert header =~ ~s(description="1 × Classmatic \\u2014 General Admission")
-      # Header bytes must all be <= 0xFF (ByteString-safe), same invariant mppx
-      # added the escape to guarantee.
-      assert header |> String.to_charlist() |> Enum.all?(&(&1 <= 0xFF))
+      assert header =~ ~s(description="1 \\u00d7 Classmatic \\u2014 General Admission")
+      assert ascii_header?(header)
+    end
+
+    test "escapes Latin-1, a C0 control, and DEL, and parse(format(x)) == x" do
+      text = "caf\u00E9\u0007\u007F"
+      description = text <> "\t"
+      challenge = make_challenge(realm: text, description: description)
+      header = Headers.format_challenge(challenge)
+
+      assert ascii_header?(header)
+      assert header =~ ~s(realm="caf\\u00e9\\u0007\\u007f")
+      assert header =~ ~s(description="caf\\u00e9\\u0007\\u007f\t")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.realm == text
+      assert parsed.description == description
+      assert parsed.id == challenge.id
     end
 
     test "escapes code points outside the BMP as a UTF-16 surrogate pair, matching mppx (#813)" do
@@ -177,14 +190,25 @@ defmodule MPP.HeadersTest do
       assert parsed.id == original.id
     end
 
-    test "roundtrips a non-payable header value without paying it" do
-      original = make_challenge(header: "X-Custom")
-      header = Headers.format_challenge(original)
+    test "keeps a parsed header other than Payment-Authorization but does not emit or pay it" do
+      original = make_challenge()
+      header = Headers.format_challenge(original) <> ~s(, header="Cookie")
 
-      assert header =~ ~s(header="X-Custom")
       assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.header == "X-Custom"
+      assert parsed.header == "Cookie"
       refute Challenge.payable?(parsed)
+      assert Challenge.credential_header(parsed) == "Authorization"
+      refute Headers.format_challenge(parsed) =~ "header="
+    end
+
+    test "parsed payment-authorization is payable in any ASCII case" do
+      original = make_challenge()
+      header = Headers.format_challenge(original) <> ~s(, header="payment-authorization")
+
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert parsed.header == "payment-authorization"
+      assert Challenge.payable?(parsed)
+      assert Challenge.credential_header(parsed) == "payment-authorization"
     end
 
     test "parses header=Payment-Authorization from a foreign server" do
@@ -304,6 +328,32 @@ defmodule MPP.HeadersTest do
     test "rejects param without equals sign" do
       assert {:error, :invalid_auth_params} =
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", opaque))
+    end
+
+    test "accepts an empty unquoted description at the end or before a comma (mpp-rs #505)" do
+      base = ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", description=)
+
+      assert {:ok, trailing} = Headers.parse_challenge(base)
+      assert trailing.description == ""
+
+      assert {:ok, before_comma} =
+               Headers.parse_challenge(base <> ~s(, digest="sha-256=abc"))
+
+      assert before_comma.description == ""
+      assert before_comma.digest == "sha-256=abc"
+
+      assert {:ok, before_tab} =
+               Headers.parse_challenge(
+                 ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", description=,\tdigest="sha-256=abc")
+               )
+
+      assert before_tab.description == ""
+      assert before_tab.digest == "sha-256=abc"
+    end
+
+    test "still rejects an empty id token" do
+      assert {:error, :empty_id} =
+               Headers.parse_challenge(~s(Payment id=, realm="b", method="c", intent="d", request="eyJhIjoxfQ"))
     end
 
     test "rejects unterminated quoted string" do
@@ -978,5 +1028,21 @@ defmodule MPP.HeadersTest do
 
       assert mppx_parsed["header"] == "Payment-Authorization"
     end
+
+    test "we escape Latin-1, a C0 control, and DEL to ASCII and mppx parses them back", %{rt: rt} do
+      description = "caf\u00E9\u0007\u007F"
+      challenge = make_challenge(method: "tempo", description: description)
+      header = Headers.format_challenge(challenge)
+
+      assert ascii_header?(header)
+
+      {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
+
+      assert mppx_parsed["description"] == description
+    end
+  end
+
+  defp ascii_header?(header) do
+    header |> :binary.bin_to_list() |> Enum.all?(&(&1 == 9 or &1 in 0x20..0x7E))
   end
 end

@@ -32,8 +32,11 @@ defmodule MPP.Challenge do
     * `description` — (optional) human-readable description
     * `digest` — (optional) content digest per RFC 9530
     * `expires` — (optional) RFC 3339 expiration timestamp
-    * `header` — (optional) credential HTTP field; only `"Payment-Authorization"`
-      is payable. `Authorization` (the default) is never stored or advertised.
+    * `header` — (optional) credential HTTP field. `create/2` stores only
+      `Payment-Authorization` (any ASCII case, spelling preserved).
+      `Authorization` is the default and is never stored. Any other value is
+      dropped on create; a parsed challenge may still carry it, and
+      `payable?/1` refuses it.
     * `opaque` — (optional) base64url-encoded JSON server correlation data
   """
 
@@ -77,7 +80,7 @@ defmodule MPP.Challenge do
     challenge =
       params
       |> Keyword.delete(:id)
-      |> Keyword.update(:header, nil, &normalize_header/1)
+      |> Keyword.update(:header, nil, &bound_header/1)
       |> then(&struct!(__MODULE__, &1))
 
     %{challenge | id: compute_id(challenge, secret_key)}
@@ -254,21 +257,23 @@ defmodule MPP.Challenge do
     ],
     returns: %{
       type: :string,
-      description: "`Payment-Authorization` when advertised, otherwise `Authorization`"
+      description:
+        "The advertised `Payment-Authorization` spelling, or `Authorization` for the default and for any other value"
     }
   )
 
   @doc """
   Return the HTTP field a client must use for this challenge's Payment credential.
 
-  `Authorization` is the implicit default and is never advertised. An advertised
-  `header` other than `Payment-Authorization` is not payable (`payable?/1`).
+  `Payment-Authorization` matches in any ASCII case and the stored spelling is
+  returned. Every other value, including `Cookie`, falls back to `Authorization`
+  so a challenge cannot steer the credential into another field (mpp-rs #453).
   """
   @spec credential_header(t()) :: String.t()
   def credential_header(%__MODULE__{header: header}) do
-    case advertised_header(header) do
+    case bound_header(header) do
       nil -> @authorization_header
-      advertised -> advertised
+      name -> name
     end
   end
 
@@ -278,30 +283,53 @@ defmodule MPP.Challenge do
     ],
     returns: %{
       type: :boolean,
-      description: "false when `header` is present and is not `Payment-Authorization`"
+      description: "false when `header` is present and is not `Payment-Authorization`, compared case-insensitively"
     }
   )
 
   @doc """
   Return whether a client may send a Payment credential for this challenge.
 
-  The draft allows only `Payment-Authorization` as a non-default `header` value.
-  Any other advertised value is an unrecognized challenge (draft-01 § Credentials).
+  The draft allows only `Payment-Authorization` as a non-default `header` value,
+  compared case-insensitively. Any other advertised value is an unrecognized
+  challenge (draft-01 § Credentials) and must not be paid.
   """
   @spec payable?(t()) :: boolean()
   def payable?(%__MODULE__{header: header}) do
     case advertised_header(header) do
       nil -> true
-      @payment_authorization_header -> true
-      _other -> false
+      name -> payment_authorization_header?(name)
     end
   end
 
-  # `Authorization` (any ASCII case) and empty string are the implicit default
-  # and are never stored — matching mppx `isDefaultCredentialHeader` and
-  # mpp-rs `advertised_credential_header`.
-  defp normalize_header(header) when is_binary(header) or is_nil(header) do
-    advertised_header(header)
+  api(
+    :bound_header,
+    "Return the credential field name create/format HMAC-bind and emit. Only `Payment-Authorization` (any ASCII case) is returned, with the caller's spelling preserved; every other value is nil.",
+    params: [header: [kind: :value, description: "Candidate `header` auth-param or nil"]],
+    returns: %{
+      type: :string,
+      description: "The `Payment-Authorization` spelling to bind, or nil"
+    }
+  )
+
+  @doc """
+  Return the credential field name `create/2` stores and `format_challenge/1` emits.
+
+  Only `Payment-Authorization` (any ASCII case) is kept, with its spelling
+  preserved so the HMAC binds the bytes the server chose. `Authorization`,
+  `Cookie`, and any other value return nil (draft-httpauth-payment-01
+  § Credentials; mpp-rs #453).
+  """
+  @spec bound_header(String.t() | nil) :: String.t() | nil
+  def bound_header(nil), do: nil
+  def bound_header(""), do: nil
+
+  def bound_header(header) when is_binary(header) do
+    if payment_authorization_header?(header), do: header
+  end
+
+  defp payment_authorization_header?(header) when is_binary(header) do
+    String.downcase(header, :ascii) == String.downcase(@payment_authorization_header, :ascii)
   end
 
   api(

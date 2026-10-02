@@ -161,6 +161,22 @@ defmodule MPP.Client.Transport.HTTPTest do
 
       assert {:error, :missing_www_authenticate} = HTTP.get_challenges(response)
     end
+
+    test "decodes a Latin-1 description byte 0xE9 as é and encodes a credential from it" do
+      prefix =
+        ~s(Payment id="latin1", realm="api.example.com", method="tempo", intent="charge", request="#{@request}", description=")
+
+      header = prefix <> <<0xE9>> <> "\""
+      response = response_with_challenges([header])
+
+      assert {:ok, [parsed]} = HTTP.get_challenges(response)
+      assert parsed.description == "é"
+
+      credential = %Credential{challenge: parsed, payload: %{"type" => "hash"}, source: nil}
+      encoded = Credential.encode(credential)
+      assert {:ok, decoded} = Credential.decode(encoded)
+      assert decoded.challenge.description == "é"
+    end
   end
 
   describe "get_challenges/2 x402 resource URL" do

@@ -48,6 +48,7 @@ defmodule MPP.Credential do
 
   alias MPP.Challenge
   alias MPP.Codec
+  alias MPP.JCS
 
   @type t :: %__MODULE__{
           challenge: Challenge.t(),
@@ -159,6 +160,8 @@ defmodule MPP.Credential do
   # bad digest) at parse time with a distinct atom rather than deferring to a
   # downstream HMAC mismatch.
   defp challenge_from_map(map) do
+    map = normalize_legacy_opaque(map)
+
     if Enum.all?(@challenge_required_keys, &is_binary(map[&1])) do
       challenge = %Challenge{
         id: map["id"],
@@ -183,12 +186,35 @@ defmodule MPP.Credential do
     end
   end
 
+  # Older mppx clients echo `opaque` as a flat string→string object rather than
+  # base64url(JCS). Re-encode that shape before the string check so it verifies
+  # against a challenge whose opaque is that encoding (mpp-rs #490). Nested
+  # maps, numbers, and lists are left for `validate_optional_challenge_fields/1`
+  # to reject.
+  defp normalize_legacy_opaque(%{"opaque" => opaque} = map) when is_map(opaque) do
+    if flat_string_map?(opaque) do
+      encoded = opaque |> JCS.canonicalize() |> Base.url_encode64(padding: false)
+      Map.put(map, "opaque", encoded)
+    else
+      map
+    end
+  end
+
+  defp normalize_legacy_opaque(map), do: map
+
+  defp flat_string_map?(map) do
+    Enum.all?(map, fn
+      {key, value} when is_binary(key) and is_binary(value) -> true
+      _ -> false
+    end)
+  end
+
   # Optional echoed-challenge fields (and the top-level `source`) must be absent
-  # or strings. A non-string value (map, list, number) is never emitted by a
-  # compliant server and would otherwise flow into the HMAC input join /
-  # ISO-8601 parse downstream and crash the verifier on attacker-supplied wire
-  # bytes. mppx (`z.optional(z.string())`) and mpp-rs (`Option<String>` via
-  # serde) both reject these shapes at deserialization.
+  # or strings, except the legacy `opaque` object handled above. A non-string
+  # value would otherwise flow into the HMAC input join / ISO-8601 parse and
+  # crash the verifier on attacker-supplied wire bytes. mppx
+  # (`z.optional(z.string())`) and mpp-rs (`Option<String>`, plus the #490
+  # object-opaque exception) reject every other shape at deserialization.
   defp validate_optional_challenge_fields(map) do
     Enum.reduce_while(@challenge_optional_keys, :ok, fn key, :ok ->
       case validate_optional_string(map[key]) do

@@ -81,12 +81,35 @@ defmodule MPP.ChallengeTest do
       assert Challenge.payable?(explicit)
     end
 
-    test "a non-Payment-Authorization header is not payable" do
-      challenge = Challenge.create(@base_params ++ [header: "X-Custom"], @secret_key)
+    test "create drops a header other than Payment-Authorization and does not HMAC-bind it" do
+      implicit = Challenge.create(@base_params, @secret_key)
+      challenge = Challenge.create(@base_params ++ [header: "Cookie"], @secret_key)
 
-      assert challenge.header == "X-Custom"
+      assert challenge.header == nil
+      assert challenge.id == implicit.id
+      assert Challenge.credential_header(challenge) == "Authorization"
+      assert Challenge.payable?(challenge)
+      refute MPP.Headers.format_challenge(challenge) =~ "header="
+    end
+
+    test "Payment-Authorization matches case-insensitively and preserves spelling" do
+      canonical = Challenge.create(@base_params ++ [header: "Payment-Authorization"], @secret_key)
+      lower = Challenge.create(@base_params ++ [header: "payment-authorization"], @secret_key)
+
+      assert lower.header == "payment-authorization"
+      assert Challenge.payable?(lower)
+      assert Challenge.credential_header(lower) == "payment-authorization"
+      refute lower.id == canonical.id
+      assert :ok = Challenge.verify(lower, @secret_key)
+      assert MPP.Headers.format_challenge(lower) =~ ~s(header="payment-authorization")
+    end
+
+    test "a stored header other than Payment-Authorization is not emitted or paid" do
+      challenge = %{Challenge.create(@base_params, @secret_key) | header: "Cookie"}
+
+      assert Challenge.credential_header(challenge) == "Authorization"
       refute Challenge.payable?(challenge)
-      assert Challenge.credential_header(challenge) == "X-Custom"
+      refute MPP.Headers.format_challenge(challenge) =~ "header="
     end
 
     test "ID is valid base64url without padding" do

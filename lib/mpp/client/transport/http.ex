@@ -118,8 +118,23 @@ defmodule MPP.Client.Transport.HTTP do
 
   defp native_challenges(response) do
     case Req.Response.get_header(response, "www-authenticate") do
-      [] -> {:error, :missing_www_authenticate}
-      values -> values |> Enum.join(", ") |> Headers.parse_challenges()
+      [] ->
+        {:error, :missing_www_authenticate}
+
+      values ->
+        # RFC 9110 §5.5: field values are ISO-8859-1. Mint stores the raw
+        # bytes; a Latin-1 0xE9 is "é". ASCII, including our `\uXXXX` escapes,
+        # is unchanged (mpp-rs #489). Decode here, before parse — callers that
+        # already hold an Elixir string must not be re-decoded.
+        values
+        |> Enum.map_join(", ", &decode_latin1/1)
+        |> Headers.parse_challenges()
+    end
+  end
+
+  defp decode_latin1(value) when is_binary(value) do
+    case :unicode.characters_to_binary(value, :latin1, :utf8) do
+      utf8 when is_binary(utf8) -> utf8
     end
   end
 

@@ -205,6 +205,46 @@ defmodule MPP.CredentialTest do
       assert {:error, :invalid_optional_field} = Credential.decode(encoded)
     end
 
+    test "re-encodes a legacy object-form opaque as base64url(JCS) and verifies it (mpp-rs #490)" do
+      object = %{"pi" => "pi_3abc123XYZ"}
+      encoded_opaque = object |> MPP.JCS.canonicalize() |> Base.url_encode64(padding: false)
+      assert encoded_opaque == "eyJwaSI6InBpXzNhYmMxMjNYWVoifQ"
+
+      challenge = Challenge.create(@challenge_params ++ [opaque: encoded_opaque], @secret_key)
+
+      wire = %{
+        "challenge" => %{
+          "id" => challenge.id,
+          "realm" => challenge.realm,
+          "method" => challenge.method,
+          "intent" => challenge.intent,
+          "request" => challenge.request,
+          "opaque" => object
+        },
+        "payload" => %{"proof" => "0x"}
+      }
+
+      encoded = wire |> Jason.encode!() |> Base.url_encode64(padding: false)
+      assert {:ok, decoded} = Credential.decode(encoded)
+      assert decoded.challenge.opaque == encoded_opaque
+      assert :ok = Challenge.verify(decoded.challenge, @secret_key)
+
+      sorted = %{"z" => "9", "a" => "1"}
+      sorted_opaque = sorted |> MPP.JCS.canonicalize() |> Base.url_encode64(padding: false)
+      assert {:ok, sorted_decoded} = Credential.decode(encode_credential(opaque: sorted))
+      assert sorted_decoded.challenge.opaque == sorted_opaque
+
+      assert {:ok, empty} = Credential.decode(encode_credential(opaque: %{}))
+      assert empty.challenge.opaque == Base.url_encode64("{}", padding: false)
+    end
+
+    test "rejects a legacy opaque object that is not a flat string map" do
+      assert {:error, :invalid_optional_field} = Credential.decode(encode_credential(opaque: %{"pi" => 123}))
+
+      assert {:error, :invalid_optional_field} =
+               Credential.decode(encode_credential(opaque: %{"pi" => %{"id" => "x"}}))
+    end
+
     test "validates the optional credential header" do
       for value <- [42, true, [], %{}] do
         assert {:error, :invalid_optional_field} = Credential.decode(encode_credential(header: value))

@@ -205,13 +205,18 @@ defmodule MPP.Client.ReqTest do
     test "does not pay a challenge whose header is not Payment-Authorization" do
       challenge =
         Challenge.create(
-          [realm: "api.example.com", method: "tempo", intent: "charge", request: @request, header: "X-Custom"],
+          [realm: "api.example.com", method: "tempo", intent: "charge", request: @request],
           @secret_key
         )
 
+      # `create/2` drops anything but Payment-Authorization, so the foreign
+      # name has to arrive on the wire. A parsed `Cookie` stays stored and
+      # `payable?/1` refuses it.
+      header = Headers.format_challenge(challenge) <> ~s(, header="Cookie")
+
       plug = fn conn ->
         conn
-        |> Plug.Conn.put_resp_header("www-authenticate", Headers.format_challenge(challenge))
+        |> Plug.Conn.put_resp_header("www-authenticate", header)
         |> Plug.Conn.send_resp(402, "pay")
       end
 

@@ -83,7 +83,7 @@ defmodule MPP.Headers do
           {"expires", challenge.expires},
           {"digest", challenge.digest},
           {"description", challenge.description},
-          {"header", Challenge.advertised_header(challenge.header)},
+          {"header", Challenge.bound_header(challenge.header)},
           {"opaque", challenge.opaque}
         ],
         fn {_k, v} -> is_nil(v) end
@@ -261,12 +261,13 @@ defmodule MPP.Headers do
   # challenge is built (the request payload is base64url/JCS-decoded downstream
   # during verification). Other params are small by construction.
   #
-  # Boundary: `>` (at-limit passes, over-limit rejected). This matches mpp-rs's
-  # quoted-value path (`refs/mpp-rs/src/protocol/core/headers.rs:161`): its `>=`
-  # is tested against the running accumulator *before* the current byte is pushed,
-  # so it only fires on the (MAX+1)th content byte — a net `> MAX_TOKEN_LEN`,
-  # identical to this guard and to mppx `request.length > maxRequestParameterLength`
-  # (`refs/mppx/src/Challenge.ts:352`). All three accept exactly 16 KiB, reject 16 KiB + 1.
+  # Boundary: `>` (at-limit passes, over-limit rejected). mppx uses
+  # `request.length > maxRequestParameterLength` (`refs/mppx/src/Challenge.ts`).
+  # mpp-rs's quoted-value accumulator compared with `>=` and rejected a `request`
+  # of exactly 16 KiB — that check did not behave like `>`. mpp-rs #540 changed
+  # it to `>` so quoted and unquoted values share this boundary. Our guard was
+  # already `>`; that is the behavior all three share: accept exactly 16 KiB,
+  # reject 16 KiB + 1.
   @spec check_request_size(%{optional(String.t()) => String.t()}) :: :ok | {:error, :request_too_large}
   defp check_request_size(%{"request" => request}) when byte_size(request) > @max_token_len,
     do: {:error, :request_too_large}
@@ -297,10 +298,11 @@ defmodule MPP.Headers do
   # Escapes a value for use inside a quoted-string (RFC 9110 Section 5.6.4).
   # Rejects CR/LF which would produce invalid header text or break HMAC binding.
   #
-  # Code points above U+00FF (non-Latin-1) are additionally escaped as
-  # `\uXXXX`, matching mppx (refs/mppx/src/Challenge.ts:333-343, mppx #813):
-  # header values must be byte-safe, and a raw em dash, smart quote, or emoji
-  # in a `description` would otherwise produce an invalid header value.
+  # Every code point outside HTAB and printable ASCII (0x20-0x7E) is escaped
+  # as `\uXXXX`, matching mpp-rs #450. Raw Latin-1 (U+00E9 as UTF-8) and C0
+  # controls are not legal header field content, and a client that decodes the
+  # field as Latin-1 (mpp-rs #489) would read our UTF-8 bytes as mojibake.
+  # mppx #813 escapes only U+0100 and above; we still decode that form.
   defp escape_quoted(value) do
     if String.contains?(value, ["\r", "\n"]) do
       raise ArgumentError,
@@ -310,25 +312,27 @@ defmodule MPP.Headers do
     value
     |> String.replace("\\", "\\\\")
     |> String.replace("\"", "\\\"")
-    |> escape_non_latin1()
+    |> escape_non_ascii()
   end
 
-  # Escapes code points above U+00FF as `\uXXXX` (lowercase hex, zero-padded
-  # to 4 digits — matches mppx's `charCodeAt(0).toString(16).padStart(4, '0')`,
-  # refs/mppx/src/Challenge.ts:343 / mppx #813 test fixture `—`).
+  # Escapes every code point outside HTAB and 0x20-0x7E as `\uXXXX`
+  # (lowercase hex, zero-padded to 4 digits — mpp-rs #450;
+  # mppx's `charCodeAt(0).toString(16).padStart(4, '0')` for the code points
+  # it escapes, refs/mppx/src/Challenge.ts).
   #
   # mppx's regex operates per UTF-16 code unit, so a code point outside the
   # Basic Multilingual Plane (e.g. an emoji) is escaped as two separate
   # `\uXXXX` sequences — the UTF-16 surrogate pair. We split the same way so
   # the wire bytes match exactly.
-  defp escape_non_latin1(value) do
+  defp escape_non_ascii(value) do
     value
     |> String.to_charlist()
     |> Enum.map(&escape_codepoint/1)
     |> IO.iodata_to_binary()
   end
 
-  defp escape_codepoint(codepoint) when codepoint <= 0xFF, do: <<codepoint::utf8>>
+  defp escape_codepoint(0x09), do: "\t"
+  defp escape_codepoint(codepoint) when codepoint in 0x20..0x7E, do: <<codepoint>>
 
   defp escape_codepoint(codepoint) when codepoint <= 0xFFFF do
     "\\u" <> (codepoint |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(4, "0"))
@@ -421,16 +425,14 @@ defmodule MPP.Headers do
   end
 
   # Parses a value — either a quoted string or an unquoted token.
+  # An empty unquoted token (`description=` at the end of the header, or
+  # `description=,`) is a valid empty value (mpp-rs #505). mppx's
+  # `readAuthParamValue` returns that trimmed slice, which may be empty.
   defp parse_value("\"" <> rest), do: parse_quoted_string(rest, [])
 
   defp parse_value(input) do
     {token, rest} = take_token(input)
-
-    if token == "" do
-      {:error, :invalid_auth_params}
-    else
-      {:ok, token, rest}
-    end
+    {:ok, token, rest}
   end
 
   defguardp hex_digit?(c) when c in ?0..?9 or c in ?a..?f or c in ?A..?F
@@ -527,8 +529,9 @@ defmodule MPP.Headers do
 
   # Builds a Challenge struct from parsed auth-params.
   # `header="Authorization"` (the implicit default) is stored as nil so it is
-  # never advertised, matching mppx / mpp-rs. Other values are kept so a
-  # non-payable header still round-trips; `Challenge.payable?/1` refuses them.
+  # never advertised. Any other value is kept, including one this draft does
+  # not allow: `Challenge.payable?/1` refuses it and `format_challenge/1`
+  # will not emit it (`Challenge.bound_header/1`).
   defp params_to_challenge(params) do
     %Challenge{
       id: params["id"],
