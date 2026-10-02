@@ -164,10 +164,14 @@ defmodule MPP.Session.Voucher do
   defp validate_chain_id(chain_id) when is_integer(chain_id) and chain_id >= 0 and chain_id <= @max_chain_id, do: :ok
   defp validate_chain_id(_chain_id), do: {:error, :invalid_chain_id}
 
+  # Only low-s signatures are accepted: the escrow settles canonical signatures
+  # only (mpp-rs voucher.rs `canonical_voucher_signature`).
   defp decode_signature(signature_hex) when is_binary(signature_hex) do
     with {:ok, <<r::binary-size(32), s::binary-size(32), v>> = signature} <- Hex.decode(signature_hex),
-         true <- v in [27, 28] do
-      {:ok, Hex.encode(signature), signature_struct(r, s, v)}
+         true <- v in [27, 28],
+         %Signature{} = decoded <- signature_struct(r, s, v),
+         true <- decoded.s > 0 and Signature.normalize(decoded) == decoded do
+      {:ok, Hex.encode(signature), decoded}
     else
       _error -> {:error, :invalid_signature}
     end

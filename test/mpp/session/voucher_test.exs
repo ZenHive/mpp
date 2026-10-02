@@ -147,6 +147,23 @@ defmodule MPP.Session.VoucherTest do
       end
     end
 
+    test "rejects the high-s twin of a valid signature, which the escrow cannot settle" do
+      assert :ok = Voucher.verify_signature(voucher(), @escrow_contract, @chain_id, @signer)
+
+      high_s = high_s_twin(@tip1034_signature)
+
+      assert {:error, :invalid_signature} =
+               Voucher.new(channel_id: @channel_id, cumulative_amount: @cumulative_amount, signature: high_s)
+
+      assert {:error, :invalid_signature} =
+               Voucher.verify_signature(%{voucher() | signature: high_s}, @escrow_contract, @chain_id, @signer)
+
+      zero_s = "0x" <> String.duplicate("11", 32) <> String.duplicate("00", 32) <> "1b"
+
+      assert {:error, :invalid_signature} =
+               Voucher.new(channel_id: @channel_id, cumulative_amount: @cumulative_amount, signature: zero_s)
+    end
+
     test "returns typed errors for invalid verification inputs" do
       assert {:error, :invalid_escrow_contract} =
                Voucher.hash(voucher(), "0xdead", @chain_id)
@@ -160,7 +177,7 @@ defmodule MPP.Session.VoucherTest do
       assert {:error, :invalid_signature} =
                Voucher.verify_signature(%{voucher() | signature: nil}, @escrow_contract, @chain_id, @signer)
 
-      unrecoverable = "0x" <> String.duplicate("00", 64) <> "1b"
+      unrecoverable = "0x" <> String.duplicate("00", 63) <> "01" <> "1b"
 
       assert {:error, :signature_recovery_failed} =
                Voucher.verify_signature(
@@ -189,4 +206,13 @@ defmodule MPP.Session.VoucherTest do
   end
 
   defp uppercase_hex("0x" <> hex), do: "0x" <> String.upcase(hex)
+
+  @secp256k1_n 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+
+  # Same (r, digest) and recovered signer, with s' = n - s and the parity flipped.
+  defp high_s_twin("0x" <> hex) do
+    <<r::binary-size(32), s::unsigned-256, v>> = Base.decode16!(hex, case: :mixed)
+    twin = <<r::binary, @secp256k1_n - s::unsigned-256, 55 - v>>
+    "0x" <> Base.encode16(twin, case: :lower)
+  end
 end
