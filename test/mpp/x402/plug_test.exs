@@ -339,7 +339,7 @@ defmodule MPP.X402.PlugTest do
         Keyword.take(overrides, [:extensions, :route_binding])
 
     PaymentPlug.init(
-      secret_key: "x402-plug-secret",
+      secret_key: "x402-plug-secret-xxxxxxxxxxxxxxx",
       realm: "example.com",
       method: MockMethod,
       amount: "1000",

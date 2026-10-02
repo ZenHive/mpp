@@ -7,7 +7,7 @@ defmodule MPP.Transports.JsonRpcTest do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Transports.JsonRpc
 
-  @secret_key "test-secret-key-for-jsonrpc"
+  @secret_key "test-secret-key-for-jsonrpc-xxxx"
   @realm "rpc.example.com"
 
   defp server_config(overrides \\ []) do

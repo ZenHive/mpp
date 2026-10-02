@@ -33,7 +33,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
   @tx_hash "0x" <> String.duplicate("ab", 32)
   @chain_id 42_431
   @amount "1000000"
-  @hmac_secret "test-secret-for-full-flow"
+  @hmac_secret "test-secret-for-full-flow-of-32-bytes"
   @realm "full-flow-test.example.com"
 
   # Event topics

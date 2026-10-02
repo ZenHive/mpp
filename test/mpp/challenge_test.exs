@@ -3,7 +3,7 @@ defmodule MPP.ChallengeTest do
 
   alias MPP.Challenge
 
-  @secret_key "test-secret-key-for-hmac"
+  @secret_key "test-secret-key-for-hmac-xxxxxxx"
   @base_params [
     realm: "api.example.com",
     method: "stripe",

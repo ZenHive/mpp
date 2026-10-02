@@ -91,7 +91,7 @@ defmodule MPP.VerifierTest do
     end
   end
 
-  @secret_key "test-secret-key-for-verifier"
+  @secret_key "test-secret-key-for-verifier-xxx"
   @realm "api.test.com"
 
   defp build_charge(overrides \\ []) do
@@ -228,7 +228,7 @@ defmodule MPP.VerifierTest do
   describe "verify/2 HMAC failure" do
     test "wrong secret key returns invalid_challenge" do
       credential = build_credential()
-      opts = verify_opts(secret_key: "wrong-secret")
+      opts = verify_opts(secret_key: "wrong-secret-xxxxxxxxxxxxxxxxxxx")
 
       assert {:error, %Errors{} = error} = Verifier.verify(credential, opts)
       assert error.status == 402

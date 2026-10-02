@@ -11,7 +11,7 @@ defmodule MPP.CredentialTest do
     request: "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
   ]
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
 
   defp build_credential(opts \\ []) do
     challenge = Challenge.create(@challenge_params, @secret_key)

@@ -6,7 +6,7 @@ XRPL JSON-RPC. It accepts signed `transaction`/`blob` credentials and submitted
 
 ```elixir
 plug MPP.Plug,
-  secret_key: "server-secret",
+  secret_key: "a-random-secret-of-at-least-32-bytes",
   realm: "api.example.com",
   method: MPP.Methods.XRPL,
   amount: "1000",

@@ -8,7 +8,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
   alias MPP.Headers
   alias MPP.Mcp
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 
   defp make_challenge do

@@ -11,7 +11,7 @@ defmodule MPP.Transports.WebSocketTest do
   alias MPP.Transports.WebSocket
   alias MPP.Transports.WebSocket.Session
 
-  @secret_key "test-secret-key-for-websocket"
+  @secret_key "test-secret-key-for-websocket-xx"
   @realm "ws.example.com"
 
   defp session(overrides \\ []) do

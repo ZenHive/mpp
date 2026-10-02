@@ -48,7 +48,7 @@ defmodule MPP.TelemetryTest do
     def verify(_payload, _charge), do: {:error, :some_unknown_reason}
   end
 
-  @secret_key "telemetry-test-secret"
+  @secret_key "telemetry-test-secret-xxxxxxxxxx"
   @realm "api.telemetry.test"
 
   setup do

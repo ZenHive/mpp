@@ -13,7 +13,7 @@ defmodule MPP.Verifier do
   ## Usage
 
       opts = [
-        secret_key: "hmac-secret",
+        secret_key: "a-random-secret-of-at-least-32-bytes",
         realm: "api.example.com",
         method: MyApp.Payments.Stripe,
         charge: charge,

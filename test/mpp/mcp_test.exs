@@ -66,7 +66,7 @@ defmodule MPP.McpTest do
   end
 
   # Shared test fixtures
-  @secret_key "test-secret-key-for-mcp"
+  @secret_key "test-secret-key-for-mcp-xxxxxxxx"
   @realm "api.example.com"
 
   defp sample_challenge do

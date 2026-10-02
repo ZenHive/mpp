@@ -177,7 +177,7 @@ defmodule MPP.X402.LocalnetTest do
 
   defp plug_opts(agent) do
     PaymentPlug.init(
-      secret_key: "x402-localnet-secret",
+      secret_key: "x402-localnet-secret-xxxxxxxxxxx",
       realm: "example.com",
       method: MockMethod,
       amount: "1000",

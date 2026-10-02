@@ -7,7 +7,7 @@ defmodule MPP.Client.Transport.JsonRpcTest do
   alias MPP.Mcp
   alias MPP.Transports.JsonRpc
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 
   defp make_challenge do

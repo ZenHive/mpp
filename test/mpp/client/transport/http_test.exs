@@ -12,7 +12,7 @@ defmodule MPP.Client.Transport.HTTPTest do
   alias MPP.X402
   alias MPP.X402.Headers, as: X402Headers
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 
   # -- Mock providers -------------------------------------------------------------

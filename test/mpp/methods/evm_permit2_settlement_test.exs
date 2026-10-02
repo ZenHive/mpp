@@ -11,7 +11,7 @@ defmodule MPP.Methods.EVMPermit2SettlementTest do
   @token "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
   @recipient "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   @split "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-  @secret "permit2-test-secret"
+  @secret "permit2-test-secret-of-at-least-32-bytes"
   @realm "permit2.integration"
 
   setup do

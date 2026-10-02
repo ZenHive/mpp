@@ -41,7 +41,7 @@ defmodule MyAppWeb.Router do
 
   pipeline :paid do
     plug MPP.Plug,
-      secret_key: "your-hmac-secret",
+      secret_key: "a-random-secret-of-at-least-32-bytes",
       realm: "api.example.com",
       method: MPP.Methods.Stripe,
       amount: "5000",
@@ -65,7 +65,7 @@ end
 ```elixir
 pipeline :paid_tempo do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     method: MPP.Methods.Tempo,
     amount: "1000000",
@@ -100,7 +100,7 @@ end
 ```elixir
 pipeline :paid_evm do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     method: MPP.Methods.EVM,
     amount: "1000000",
@@ -122,7 +122,7 @@ The transaction flag gates acceptance and advertisement together. [draft-evm-cha
 ```elixir
 pipeline :paid_solana do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     method: MPP.Methods.Solana,
     amount: "10000000",
@@ -149,7 +149,7 @@ Circle-published USDC address or mint for that chain.
 ```elixir
 pipeline :paid_usdc do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     method: MPP.Methods.USDC,
     amount: "1000000",
@@ -176,7 +176,7 @@ source account and the server rebuilds, signs and submits.
 ```elixir
 pipeline :paid_stellar do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     method: MPP.Methods.Stellar,
     amount: "10000000",
@@ -234,7 +234,7 @@ Hash-only charges. Call `MPP.Methods.NearIntents.quote/1` to mint a wet `EXACT_O
   })
 
 plug MPP.Plug,
-  secret_key: "your-hmac-secret",
+  secret_key: "a-random-secret-of-at-least-32-bytes",
   realm: "api.example.com",
   method: MPP.Methods.NearIntents,
   amount: quote.amount,
@@ -261,7 +261,7 @@ Offer multiple payment options in a single 402 response — the agent picks whic
 ```elixir
 pipeline :paid_multi do
   plug MPP.Plug,
-    secret_key: "your-hmac-secret",
+    secret_key: "a-random-secret-of-at-least-32-bytes",
     realm: "api.example.com",
     methods: [
       [

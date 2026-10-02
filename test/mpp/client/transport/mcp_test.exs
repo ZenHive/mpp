@@ -6,7 +6,7 @@ defmodule MPP.Client.Transport.MCPTest do
   alias MPP.Credential
   alias MPP.Mcp
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 
   defp make_challenge(method \\ "tempo") do

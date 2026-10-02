@@ -12,7 +12,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
 
   @moduletag :websocket
 
-  @secret_key "test-secret-key-for-ws-e2e"
+  @secret_key "test-secret-key-for-ws-e2e-xxxxx"
   @realm "ws-e2e.example.com"
   @channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
   @payer "0x1111111111111111111111111111111111111111"

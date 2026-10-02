@@ -4,13 +4,11 @@ defmodule MPP.PlugTest do
   alias MPP.Challenge
   alias MPP.Client.Transport.HTTP
   alias MPP.Credential
+  # --- Mock Methods ---
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
   alias MPP.Intents.Session
-
-  # --- Mock Methods ---
-
   alias MPP.Plug, as: PaymentPlug
   alias MPP.Receipt
   alias MPP.Session.ETSStore
@@ -146,7 +144,7 @@ defmodule MPP.PlugTest do
     end
   end
 
-  @secret_key "test-secret-key-for-plug"
+  @secret_key "test-secret-key-for-plug-xxxxxxx"
   @session_channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
   @session_escrow "0x4d50500000000000000000000000000000000000"
   @session_payer "0x1111111111111111111111111111111111111111"
@@ -224,6 +222,7 @@ defmodule MPP.PlugTest do
       |> DateTime.shift(second: expires_in)
       |> DateTime.to_iso8601()
 
+    # --- init/1 (single-method, backwards compat) ---
     challenge =
       Challenge.create(
         [
@@ -243,8 +242,6 @@ defmodule MPP.PlugTest do
   defp decode_json_body(conn) do
     Jason.decode!(conn.resp_body)
   end
-
-  # --- init/1 (single-method, backwards compat) ---
 
   defp get_resp_header(conn, header) do
     case Plug.Conn.get_resp_header(conn, header) do
@@ -282,8 +279,24 @@ defmodule MPP.PlugTest do
       end
 
       assert_raise ArgumentError, ~r/:method/, fn ->
-        PaymentPlug.init(secret_key: "x", realm: "x", amount: "1", currency: "usd")
+        PaymentPlug.init(secret_key: "x-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", realm: "x", amount: "1", currency: "usd")
       end
+    end
+
+    test "rejects a secret key shorter than 32 bytes" do
+      base = [realm: "x", method: MockMethod, amount: "1", currency: "usd"]
+
+      for key <- ["", "x", String.duplicate("k", 31), :not_a_binary] do
+        assert_raise ArgumentError, ~r/:secret_key must be a binary of at least 32 bytes/, fn ->
+          PaymentPlug.init([secret_key: key] ++ base)
+        end
+
+        assert_raise ArgumentError, ~r/:secret_key/, fn -> MPP.Mcp.init([secret_key: key] ++ base) end
+        assert_raise ArgumentError, ~r/:secret_key/, fn -> JsonRpc.init([secret_key: key] ++ base) end
+      end
+
+      key = String.duplicate("k", 32)
+      assert %PaymentPlug.Config{secret_key: ^key} = PaymentPlug.init([secret_key: key] ++ base)
     end
 
     test "accepts optional fields" do

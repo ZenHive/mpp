@@ -201,7 +201,7 @@ defmodule MPP.VerifierPinnedConformanceTest do
       credential = credential_from_echo(base_echo_params(charge))
 
       assert {:error, %Errors{} = error} =
-               Verifier.verify(credential, verify_opts(charge, secret_key: "wrong-secret"))
+               Verifier.verify(credential, verify_opts(charge, secret_key: "wrong-secret-xxxxxxxxxxxxxxxxxxx"))
 
       assert String.contains?(error.type, "invalid-challenge")
       refute String.contains?(error.type, "credential-mismatch")

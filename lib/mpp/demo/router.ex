@@ -13,7 +13,7 @@ defmodule MPP.Demo.Router do
 
   alias MPP.Demo.Method, as: DemoMethod
 
-  @secret_key "mpp-demo-secret-key"
+  @secret_key "mpp-demo-secret-key-not-for-production"
   @realm "localhost"
   @amount "100"
   @currency "usd"

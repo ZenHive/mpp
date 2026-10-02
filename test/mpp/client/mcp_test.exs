@@ -9,7 +9,7 @@ defmodule MPP.Client.MCPTest do
   alias MPP.Demo.Method, as: DemoMethod
   alias MPP.Mcp
 
-  @secret_key "test-secret-key-for-mcp-client"
+  @secret_key "test-secret-key-for-mcp-client-x"
   @realm "api.example.com"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 

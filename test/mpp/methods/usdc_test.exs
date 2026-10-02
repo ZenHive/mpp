@@ -153,7 +153,7 @@ defmodule MPP.Methods.USDCTest do
     test "advertises only the nested EVM profile" do
       config =
         MPP.Plug.init(
-          secret_key: "test-secret",
+          secret_key: "test-secret-xxxxxxxxxxxxxxxxxxxx",
           realm: @realm,
           method: USDC,
           amount: @amount,
@@ -370,7 +370,7 @@ defmodule MPP.Methods.USDCTest do
     test "advertises the legacy devnet profile" do
       config =
         MPP.Plug.init(
-          secret_key: "test-secret",
+          secret_key: "test-secret-xxxxxxxxxxxxxxxxxxxx",
           realm: @realm,
           method: USDC,
           amount: "1",

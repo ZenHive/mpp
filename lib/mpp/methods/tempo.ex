@@ -14,7 +14,7 @@ defmodule MPP.Methods.Tempo do
   Pass Tempo-specific config via `:method_config` in `MPP.Plug` opts:
 
       plug MPP.Plug,
-        secret_key: "hmac-secret",
+        secret_key: "a-random-secret-of-at-least-32-bytes",
         realm: "api.example.com",
         method: MPP.Methods.Tempo,
         amount: "1000000",

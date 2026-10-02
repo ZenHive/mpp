@@ -8,7 +8,7 @@ defmodule MPP.Plug do
   ## Single-Method Usage
 
       plug MPP.Plug,
-        secret_key: "your-hmac-secret",
+        secret_key: "a-random-secret-of-at-least-32-bytes",
         realm: "api.example.com",
         method: MyApp.Payments.Stripe,
         amount: "1000",
@@ -21,7 +21,7 @@ defmodule MPP.Plug do
   per method; the agent picks whichever it can pay with.
 
       plug MPP.Plug,
-        secret_key: "your-hmac-secret",
+        secret_key: "a-random-secret-of-at-least-32-bytes",
         realm: "api.example.com",
         methods: [
           [method: MyApp.Payments.Stripe, amount: "1000", currency: "usd",
@@ -109,6 +109,7 @@ defmodule MPP.Plug do
   alias MPP.X402.Plug, as: X402Plug
 
   @default_expires_in_seconds 300
+  @min_secret_key_bytes 32
 
   defmodule MethodEntry do
     @moduledoc """
@@ -186,7 +187,7 @@ defmodule MPP.Plug do
     validate_unique_method_names!(entries)
 
     %Config{
-      secret_key: require_opt!(opts, :secret_key),
+      secret_key: opts |> require_opt!(:secret_key) |> validate_secret_key!(),
       realm: require_opt!(opts, :realm),
       method_entries: entries,
       expires_in: expires_in,
@@ -198,6 +199,16 @@ defmodule MPP.Plug do
       requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false)),
       x402: X402Plug.configure(Keyword.get(opts, :x402))
     }
+  end
+
+  # A guessable key lets anyone mint challenge ids, so keys shorter than 32
+  # bytes are rejected (mppx and mpp-rs #491 use the same minimum).
+  defp validate_secret_key!(key) when is_binary(key) and byte_size(key) >= @min_secret_key_bytes, do: key
+
+  defp validate_secret_key!(_key) do
+    raise ArgumentError,
+          "MPP.Plug: :secret_key must be a binary of at least #{@min_secret_key_bytes} bytes " <>
+            "(generate one with `openssl rand -base64 32`)"
   end
 
   defp validate_intent!(intent) when intent in ["charge", "session", "subscription"], do: intent

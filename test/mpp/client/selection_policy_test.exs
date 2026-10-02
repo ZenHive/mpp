@@ -9,7 +9,7 @@ defmodule MPP.Client.SelectionPolicyTest do
   alias MPP.Client.Transport
   alias MPP.Credential
 
-  @secret_key "test-secret-key"
+  @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
 
   defmodule TempoProvider do
