@@ -43,8 +43,9 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   challenge)** instead of `verification-failed` with a fresh 402, matching
   mpp-rs. This covers RPC broadcast and receipt fetch, dedup-store and sponsor
   budget errors, Stripe 5xx and transport errors, unclassified EVM node
-  errors, credential replay-store errors, Stripe subscription and NEAR Intents
-  settlement-state store errors, and XRPL close-redeem transport errors.
+  errors, credential replay-store errors, Stripe and Tempo subscription and
+  NEAR Intents settlement-state store errors, Tempo subscription broadcast and
+  settlement-lookup errors, and XRPL close-redeem transport errors.
   Because the server cannot tell whether a broadcast went through, the
   client is not invited to pay again. Reverts, used hashes or authorizations,
   and token rejections stay 402.

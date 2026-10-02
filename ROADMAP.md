@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) on 2026-10-02
 
-**Up next:** Task 134 — Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋
+**Up next:** Task 155 — Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -46,6 +46,7 @@
 | Task 151 `[P]` | ✅ | 🎁 **core-protocol** · Map remaining method infrastructure failures to internal-payment-error [D:5/B:7/U:6 → Eff:1.3] 📋 |
 | Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
+| Task 155 `[P]` | ⬜ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
