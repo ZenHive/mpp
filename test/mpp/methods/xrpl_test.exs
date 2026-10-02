@@ -406,6 +406,28 @@ defmodule MPP.Methods.XRPLTest do
     end
   end
 
+  for {rpc_method, credential_type} <- [{"submit", "transaction"}, {"tx", "hash"}] do
+    test "#{rpc_method} transport failure remains internal-payment-error after network validation", context do
+      rpc_method = unquote(rpc_method)
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "server_info" ->
+            Req.Test.json(conn, %{"result" => %{"info" => %{"network_id" => 1}}})
+
+          ^rpc_method ->
+            send(context.owner, {:failed_rpc, rpc_method})
+            Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      InternalPaymentError.assert_error(XRPL.verify(payload(unquote(credential_type)), context.charge))
+      assert_received {:failed_rpc, ^rpc_method}
+    end
+  end
+
   test "RPC transport error returns internal-payment-error without a challenge", context do
     Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :timeout) end)
 
