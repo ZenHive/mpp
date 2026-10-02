@@ -20,6 +20,18 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   settles.
 - **Tempo hash credentials are canonicalized** to the lowercase `0x` form before
   dedup, receipt lookup and the receipt reference.
+- **Breaking: `MPP.Plug.init/1` (and the MCP / JSON-RPC / WebSocket transports)
+  rejects a `secret_key` shorter than 32 bytes.** Generate one with
+  `openssl rand -base64 32`.
+- **Tempo transaction credentials bind `source` to the transaction sender** on
+  every credential, before any co-sign or broadcast.
+- **Sponsored Tempo `[approve, swapExactAmountOut, transfer]` prefixes are bound
+  to the charge:** approve target and amount must match the swap's `tokenIn` and
+  `maxAmountIn`, and the swap must buy exactly the charge amount of the charge
+  currency.
+- **Fee-payer pre-broadcast simulation falls back to a sender-context
+  `eth_call`** when the node lacks `eth_simulateV1`, and rejects a revert,
+  instead of skipping the check.
 
 - **Requires onchain `~> 0.16`, onchain_tempo `~> 0.13` and onchain_solana `~> 0.1`;
   `cartouche` and `curvy` are gone from the dependency tree.** secp256k1 runs on
