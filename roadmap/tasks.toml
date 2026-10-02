@@ -4008,13 +4008,13 @@ scored_at = "2026-10-02"
 id = "147"
 phase = 17
 bundle = "transport-ws"
-status = "pending"
+status = "in_progress"
 title = "WebSocket session metering: honour min voucher delta in needVoucher and acknowledge every accepted voucher (mpp-rs #479, #480)"
 scores = { d = 3, b = 5, u = 4 }
 acceptance_criteria = ["With min_voucher_delta greater than the tick cost, a client that signs exactly requiredCumulative is accepted and the stream continues (test)", "Every accepted voucher frame, including one received while awaiting a voucher, is answered with a receipt frame (test)"]
+touches = ["lib/mpp/transports/websocket.ex", "lib/mpp/transports/websocket/", "test/mpp/transports/"]
 assignee = "codex"
 model = "gpt-6-astra"
-touches = ["lib/mpp/transports/websocket.ex", "lib/mpp/transports/websocket/", "test/mpp/transports/"]
 body = """
 Two WS session fixes from mpp-rs:
 
@@ -4024,6 +4024,7 @@ Two WS session fixes from mpp-rs:
 Verify the frame shapes against refs/mpp-rs/src/server/ws_session.rs and metered.rs.
 """
 created_at = "2026-10-02"
+started_at = "2026-10-02"
 scored_at = "2026-10-02"
 
 [[task]]
