@@ -4225,7 +4225,7 @@ shipped_in = "cdf773d32de6fb87a1c7083353127e156c1e2072"
 id = "153"
 phase = 17
 bundle = "transport-ws"
-status = "in_progress"
+status = "done"
 title = "Offer every Tempo charge currency on the WebSocket handshake"
 scores = { d = 4, b = 4, u = 4 }
 markers = ["parallel"]
@@ -4235,9 +4235,16 @@ touches = ["lib/mpp/transports/websocket.ex", "lib/mpp/transports/websocket/", "
 assignee = "codex"
 model = "gpt-6-astra"
 body = "Since Task 149 a Tempo charge with no currency (or with :currencies) expands into one method entry per currency, but MPP.Transports.WebSocket builds its handshake challenge from the first entry only, so a socket offers OUSD alone and a client holding only pathUSD / USDC.e cannot pay. HTTP and JSON-RPC already offer every entry and select the credential's entry via MPP.Plug.find_method_entry/2. Make the WebSocket handshake present the same offer set in offer order; credential verification already routes through the JSON-RPC adapter."
+implemented = "Landed by codex via merge-train; reviewer-approved (run run-1790979888099-5e9da031, 987c38b4bf801fb169d5460c47f0526ac6bab1f8)."
+delivered_by = "codex"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1790979888099-5e9da031"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "987c38b4bf801fb169d5460c47f0526ac6bab1f8"
 
 [bundles.testnet-funding]
 phase = 1
