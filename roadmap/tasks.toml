@@ -3930,14 +3930,14 @@ done_at = "2026-09-25"
 id = "144"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "in_progress"
 title = "Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514)"
 scores = { d = 4, b = 7, u = 6 }
 acceptance_criteria = ["An RPC/store/internal failure in Tempo and EVM verification returns internal-payment-error with HTTP 500, no WWW-Authenticate challenge, and a fixed detail that leaks no internals; tests pin this for both methods", "A non-%MPP.Errors{} error from a method's verify/2 surfaces as internal-payment-error (500), not verification_failed", "Echoed-challenge field mismatch returns the spec's invalid-challenge problem type; credential-mismatch is no longer emitted (or is documented as an alias if a spec reference requires it)", "Stripe requires_action returns payment_action_required; test/mpp/methods/stripe_test.exs updated", "Challenge parsing rejects a malformed intent, a non-base64url opaque, a malformed sha-256 digest, and a header other than Payment-Authorization, each with a distinct error", "MCP and JSON-RPC error-code mapping (MPP.Mcp.error_code/1) stays consistent with the new problem types"]
 out_of_scope = ["Changing which failures are retried client-side", "New problem types not in the spec"]
+touches = ["lib/mpp/verifier.ex", "lib/mpp/errors.ex", "lib/mpp/challenge.ex", "lib/mpp/mcp.ex", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/stripe.ex", "test/mpp/verifier_test.exs", "test/mpp/errors_test.exs", "test/mpp/challenge_test.exs", "test/mpp/methods/"]
 assignee = "codex"
 model = "gpt-6-astra"
-touches = ["lib/mpp/verifier.ex", "lib/mpp/errors.ex", "lib/mpp/challenge.ex", "lib/mpp/mcp.ex", "lib/mpp/methods/tempo.ex", "lib/mpp/methods/evm.ex", "lib/mpp/methods/stripe.ex", "test/mpp/verifier_test.exs", "test/mpp/errors_test.exs", "test/mpp/challenge_test.exs", "test/mpp/methods/"]
 body = """
 mpp-rs #496 (597ff33) and #430 (e072551) corrected how payment failures map to RFC 9457 problem types. Our mapping diverges in three places, each confirmed by reading the code on 2026-10-02:
 
@@ -3950,6 +3950,7 @@ Also port the parse-time field-grammar checks from #496: intent token grammar, b
 Verify the problem-type names and status codes against refs/mpp-rs/src/error.rs and refs/mppx/src/Errors.ts. Where they disagree, the spec text wins.
 """
 created_at = "2026-10-02"
+started_at = "2026-10-02"
 scored_at = "2026-10-02"
 
 [[task]]

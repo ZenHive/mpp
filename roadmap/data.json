@@ -6101,7 +6101,7 @@
       "id": "144",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514)",
       "scores": {
         "d": 4,
@@ -6142,6 +6142,7 @@
       ],
       "body": "mpp-rs #496 (597ff33) and #430 (e072551) corrected how payment failures map to RFC 9457 problem types. Our mapping diverges in three places, each confirmed by reading the code on 2026-10-02:\n\n1. `MPP.Verifier` turns any non-`%MPP.Errors{}` `{:error, reason}` into `verification_failed`: a 402 with a fresh challenge (lib/mpp/verifier.ex:146-148). Tempo and EVM RPC failures also become `verification_failed` (methods/tempo.ex `rpc_fetch_receipt`, evm.ex ~405-419). A 402 re-challenge tells the client to pay again. When a broadcast succeeded but the receipt fetch failed, the client double-pays. Upstream answers infrastructure failures (RPC, store, upstream provider) with `internal-payment-error`: 500, a fixed detail and no challenge.\n2. A mismatch in an echoed challenge field maps to `credential-mismatch`, which is not in the spec's problem table (refs/mpp-specs/specs/core/draft-httpauth-payment-01.md problem registry). Upstream uses `invalid-challenge`.\n3. Stripe `requires_action` maps to `verification_failed` (lib/mpp/methods/stripe.ex ~437), but `MPP.Errors` already defines `payment_action_required`.\n\nAlso port the parse-time field-grammar checks from #496: intent token grammar, base64url `opaque`, base64 after `sha-256=` in `digest`, and `header` limited to `Payment-Authorization`. Then no field that feeds the HMAC id can contain the `|` separator.\n\nVerify the problem-type names and status codes against refs/mpp-rs/src/error.rs and refs/mppx/src/Errors.ts. Where they disagree, the spec text wins.\n",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     },
