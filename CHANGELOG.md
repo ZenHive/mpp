@@ -8,6 +8,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-10-02
+
 ### Changed
 
 - **Breaking: session methods built on `MPP.Session.Method` require a
@@ -53,6 +55,22 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 - **EVM receipts and transactions are decoded strictly** (`%Onchain.Receipt{}`,
   `%Onchain.Transaction.Info{}`). A receipt missing fields a node always returns
   (e.g. `blockNumber`) fails verification instead of being accepted.
+
+### Fixed
+
+- **`WWW-Authenticate` challenges match the reference SDKs on the wire:** quoted
+  values escape to ASCII only, the client decodes Latin-1 header bytes, empty
+  auth-params are accepted, a `header` auth-param other than
+  `Payment-Authorization` is dropped, and credentials from older clients that
+  echo `opaque` as a flat object verify against the encoded challenge.
+- **Accept-Payment q-values and protocol amounts use the strict grammar**
+  (whole-string digits, at most three q-value decimals); equivalent zero
+  amounts are handled the same way by the Tempo client and server.
+- **WebSocket session metering honours the minimum voucher delta** in
+  `needVoucher` and acknowledges every accepted voucher.
+- **The Tempo client provider caps a caller-supplied `valid_before` at the
+  challenge expiry** and only uses modes the challenge lists in
+  `supportedModes`.
 
 ## [0.19.1] — 2026-09-29
 
