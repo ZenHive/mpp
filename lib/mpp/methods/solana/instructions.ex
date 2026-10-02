@@ -118,9 +118,6 @@ defmodule MPP.Methods.Solana.Instructions do
   Return the payment legs implied by a charge (primary remainder + splits).
   """
   @spec payment_legs(Charge.t()) :: {:ok, [map()]} | {:error, Errors.t()}
-
-  # --- compiled classification ---
-
   def payment_legs(%Charge{} = charge) do
     with {:ok, total} <- Shared.parse_charge_amount(charge.amount),
          {:ok, splits} <- normalize_splits(charge),
@@ -159,6 +156,8 @@ defmodule MPP.Methods.Solana.Instructions do
     raise ArgumentError, "MPP.Methods.Solana splits must be a list of maps"
   end
 
+  # --- compiled classification ---
+
   defp classify_compiled_ix(%CompiledInstruction{} = ix, keys) do
     with {:ok, program} <- at_index(keys, ix.program_id_index),
          {:ok, accounts} <- resolve_accounts(ix.accounts, keys) do
@@ -194,8 +193,6 @@ defmodule MPP.Methods.Solana.Instructions do
         {:unknown, program}
     end
   end
-
-  # --- jsonParsed classification ---
 
   defp classify_token_ix(
          program,
@@ -241,6 +238,8 @@ defmodule MPP.Methods.Solana.Instructions do
   defp classify_compute_budget(<<@cu_set_price_ix, price::little-unsigned-64>>), do: {:set_price, price}
   defp classify_compute_budget(<<disc, _rest::binary>>), do: {:other, disc}
   defp classify_compute_budget(_data), do: {:other, nil}
+
+  # --- jsonParsed classification ---
 
   defp classify_parsed_ix(ix) when is_map(ix) do
     program_id = ix["programId"]
@@ -380,8 +379,6 @@ defmodule MPP.Methods.Solana.Instructions do
     end
   end
 
-  # --- payment matching ---
-
   defp reject_ata_for_native_sol(charge) do
     if native_sol?(charge.currency) do
       {:error, Errors.new(:verification_failed, "ATA creation is not allowed for native SOL payments")}
@@ -446,12 +443,13 @@ defmodule MPP.Methods.Solana.Instructions do
 
   defp reject_fee_payer_source(_classified, _opts), do: :ok
 
+  # --- payment matching ---
+
   defp match_payment_legs(classified, charge, opts) do
     native? = native_sol?(charge.currency)
 
     with {:ok, legs} <- payment_legs(charge) do
       classified
-      # --- splits / charge ---
       |> payment_transfers(native?)
       |> then(&consume_legs(legs, &1, charge, opts, native?))
       |> finish_payment_match()
@@ -525,6 +523,8 @@ defmodule MPP.Methods.Solana.Instructions do
   defp transfer_matches?(transfer, dest, amount, mint, false) do
     transfer.destination == dest and transfer.amount == amount and transfer.mint == mint
   end
+
+  # --- splits / charge ---
 
   defp normalize_splits(%Charge{method_details: details}) do
     details

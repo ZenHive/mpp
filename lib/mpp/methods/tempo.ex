@@ -648,18 +648,6 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp reject_hash_when_fee_payer(config) do
-    # --- Presenter binding helpers (hash/transaction paths) ---
-    #
-    # Deliberate hardening divergence, opt-in via "require_presenter_binding": neither
-    # reference SDK binds the credential presenter to the transfer sender on the hash
-    # path — both default the expected sender to the receipt's `from` with no presenter
-    # proof (refs/mpp-rs/src/protocol/methods/tempo/method.rs verify_hash, expected_sender
-    # fallback; refs/mppx/src/tempo/server/Charge.ts hash branch, `source?.address ??
-    # receipt.from`). The signature envelope reuses the proof path's EIP-712 typed data
-    # (MPP domain v3 {account, challengeId, realm}, refs/mppx/src/tempo/internal/proof.ts),
-    # so no new wire format is introduced and existing proof-capable clients can satisfy
-    # the requirement. challengeId inside the signed digest makes a captured presenter
-    # signature useless against any other challenge.
     if fee_payer_enabled?(config) do
       {:error, Errors.new(:invalid_payload, ~s(type="hash" is not allowed when feePayer is true))}
     else
@@ -762,6 +750,19 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:verification_failed, mismatch_detail)}
     end
   end
+
+  # --- Presenter binding helpers (hash/transaction paths) ---
+  #
+  # Deliberate hardening divergence, opt-in via "require_presenter_binding": neither
+  # reference SDK binds the credential presenter to the transfer sender on the hash
+  # path — both default the expected sender to the receipt's `from` with no presenter
+  # proof (refs/mpp-rs/src/protocol/methods/tempo/method.rs verify_hash, expected_sender
+  # fallback; refs/mppx/src/tempo/server/Charge.ts hash branch, `source?.address ??
+  # receipt.from`). The signature envelope reuses the proof path's EIP-712 typed data
+  # (MPP domain v3 {account, challengeId, realm}, refs/mppx/src/tempo/internal/proof.ts),
+  # so no new wire format is introduced and existing proof-capable clients can satisfy
+  # the requirement. challengeId inside the signed digest makes a captured presenter
+  # signature useless against any other challenge.
 
   defp presenter_binding_required?(config), do: config["require_presenter_binding"] == true
 

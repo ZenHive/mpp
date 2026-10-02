@@ -263,7 +263,6 @@ defmodule MPP.Methods.Solana do
   end
 
   def verify(%{"type" => "bundle"} = payload, %Charge{} = charge) do
-    # --- signature (push) ---
     config = charge.method_details || %{}
 
     with :ok <- reject_zero_amount(charge),
@@ -318,6 +317,8 @@ defmodule MPP.Methods.Solana do
     |> maybe_put_confidential(config)
     |> maybe_put_push_binding(config)
   end
+
+  # --- signature (push) ---
 
   defp verify_signature_credential(payload, charge, config, push_mode) do
     store = Store.resolve(config["store"])
