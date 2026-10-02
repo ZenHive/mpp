@@ -3,7 +3,6 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
 
   import MPP.Test.TempoTestHelpers
 
-  alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
@@ -28,6 +27,13 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       |> Transaction.deserialize()
 
     tx
+  end
+
+  # Re-encodes `tx` with one RLP envelope field replaced, then deserializes it.
+  defp corrupt_field(%Transaction{raw: "0x76" <> hex}, fun) do
+    fields = hex |> Base.decode16!(case: :mixed) |> ExRLP.decode()
+    raw = "0x76" <> (fields |> fun.() |> ExRLP.encode() |> Base.encode16(case: :lower))
+    Transaction.deserialize(raw)
   end
 
   describe "resolve/2" do
@@ -152,15 +158,24 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     end
   end
 
-  describe "validate/2 — malformed input fails closed" do
-    test "rejects a non-binary (malformed RLP scalar) gas field" do
-      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      tx = valid_tx()
-      # Corrupt max_fee_per_gas (field index 2) into a list — not a valid RLP scalar.
-      corrupted = %{tx | fields: List.replace_at(tx.fields, 2, [<<1>>])}
+  describe "malformed envelopes never reach the policy" do
+    test "a list in a scalar field (max_fee_per_gas, RLP index 2) fails to deserialize" do
+      assert {:error, _reason} = corrupt_field(valid_tx(), &List.replace_at(&1, 2, [<<1>>]))
+    end
 
-      assert {:error, reason} = FeePayerPolicy.validate(corrupted, policy)
-      assert reason =~ "malformed"
+    test "a scalar in the access-list field (RLP index 5) fails to deserialize" do
+      assert {:error, _reason} = corrupt_field(valid_tx(), &List.replace_at(&1, 5, <<1>>))
+    end
+
+    test "a scalar in the authorization-list field (RLP index 12) fails to deserialize" do
+      assert {:error, _reason} = corrupt_field(valid_tx(), &List.replace_at(&1, 12, <<1>>))
+    end
+
+    test "a 16-field envelope fails to deserialize" do
+      tx = valid_tx(valid_before: @now + 60)
+
+      assert {:error, _reason} =
+               corrupt_field(tx, fn fields -> Enum.take(fields, 13) ++ [[], []] ++ Enum.drop(fields, 13) end)
     end
   end
 
@@ -241,16 +256,6 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     test "accepts an empty access list" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
       assert FeePayerPolicy.validate(valid_tx(access_list: []), policy) == :ok
-    end
-
-    test "fails closed when the access-list field is malformed (non-list scalar)" do
-      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      # Access list lives at RLP index 5; a scalar there is a malformed envelope.
-      tx = valid_tx()
-      corrupted = %{tx | fields: List.replace_at(tx.fields, 5, <<1>>)}
-
-      assert {:error, reason} = FeePayerPolicy.validate(corrupted, policy)
-      assert reason =~ "malformed access_list"
     end
   end
 
@@ -405,13 +410,28 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
   end
 
   describe "validate/2 — authorization list" do
-    # One EIP-7702 entry: [chain_id, address, nonce, y_parity, r, s]. The policy
-    # rejects on presence alone, so the entry contents are irrelevant.
-    defp authorization_entry, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>]
+    # One Tempo authorization-list entry. The policy rejects on presence alone,
+    # so the entry contents are irrelevant.
+    defp authorization_entry do
+      %{
+        chain_id: @moderato_chain_id,
+        address: <<0::160>>,
+        nonce: 0,
+        signature: {:secp256k1, %{r: 1, s: 1, y_parity: 0}}
+      }
+    end
+
+    # Rebuilds a valid tx with `entries` in its authorization list, round-tripped
+    # through tempo-primitives so the list is what a decoded envelope carries.
+    defp with_authorization_list(entries) do
+      {:ok, raw} = Transaction.serialize(%{valid_tx() | tempo_authorization_list: entries})
+      {:ok, tx} = Transaction.deserialize(raw)
+      tx
+    end
 
     test "rejects a transaction with a single-entry authorization list" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      tx = valid_tx(authorization_list: [authorization_entry()])
+      tx = with_authorization_list([authorization_entry()])
 
       assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
       assert reason =~ "authorization list (1 entries)"
@@ -419,7 +439,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
 
     test "rejects a transaction with a multi-entry authorization list" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      tx = valid_tx(authorization_list: for(_ <- 1..7, do: authorization_entry()))
+      tx = with_authorization_list(for(_ <- 1..7, do: authorization_entry()))
 
       assert {:error, reason} = FeePayerPolicy.validate(tx, policy)
       assert reason =~ "authorization list (7 entries)"
@@ -428,15 +448,6 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     test "accepts an empty authorization list" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
       assert FeePayerPolicy.validate(valid_tx(authorization_list: []), policy) == :ok
-    end
-
-    test "fails closed when the authorization-list field is malformed (non-list scalar)" do
-      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      tx = valid_tx()
-      corrupted = %{tx | fields: List.replace_at(tx.fields, TxFields.aa_authorization_list(), <<1>>)}
-
-      assert {:error, reason} = FeePayerPolicy.validate(corrupted, policy)
-      assert reason =~ "malformed aa_authorization_list"
     end
   end
 
@@ -455,7 +466,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
     test "rejects a transaction carrying a key authorization by default" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
       tx = key_auth_tx(verified_authorization())
-      assert length(tx.fields) == TxFields.signed_with_key_auth_field_count()
+      assert tx.key_authorization
 
       assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)
       assert reason =~ "must not carry a key authorization"
@@ -496,26 +507,10 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
         |> FeePayerPolicy.expect_key_authorization(verified_authorization())
 
       tx = valid_tx(valid_before: @now + 60)
-      assert length(tx.fields) == TxFields.signed_field_count()
+      assert tx.key_authorization == nil
 
       assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)
       assert reason =~ "missing the expected key authorization"
-    end
-
-    test "rejects an envelope with an unexpected field count" do
-      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
-      tx = valid_tx(valid_before: @now + 60)
-      extra = List.duplicate([], 2)
-      oversized = %{tx | fields: Enum.take(tx.fields, 13) ++ extra ++ Enum.drop(tx.fields, 13)}
-      assert Enum.count_until(oversized.fields, 17) == 16
-
-      # 16 fields is neither the plain nor the key-authorization envelope shape,
-      # so the answer is the same whether or not a key authorization is expected.
-      assert {:error, reason} = FeePayerPolicy.validate(oversized, policy, @now)
-      assert reason =~ "unexpected 0x76 field count (16)"
-
-      pinned = FeePayerPolicy.expect_key_authorization(policy, verified_authorization())
-      assert {:error, ^reason} = FeePayerPolicy.validate(oversized, pinned, @now)
     end
 
     test "expect_key_authorization/2 with nil clears a pinned authorization" do
@@ -543,7 +538,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       pinned = FeePayerPolicy.expect_key_authorization(policy, authorization)
 
       cases = [
-        {valid_tx(authorization_list: [authorization_entry()]), policy},
+        {with_authorization_list([authorization_entry()]), policy},
         {key_auth_tx(authorization), policy},
         {valid_tx(valid_before: @now + 60), pinned}
       ]

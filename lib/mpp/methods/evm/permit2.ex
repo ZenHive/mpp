@@ -167,7 +167,8 @@ defmodule MPP.Methods.EVM.Permit2 do
          {:ok, data} <- calldata(payload, owner),
          {:ok, receipt} <- Settlement.submit(contract, data, config),
          :ok <- match_logs(receipt, parsed, owner) do
-      {:ok, Receipt.new(method: "evm", reference: receipt.transaction_hash, external_id: charge.external_id)}
+      {:ok,
+       Receipt.new(method: "evm", reference: Hex.encode_hex(receipt.transaction_hash), external_id: charge.external_id)}
     end
   end
 

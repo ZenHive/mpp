@@ -249,7 +249,7 @@ defmodule MPP.Client.Providers.TempoTest do
           retry: false
         )
 
-      assert {:error, {:rpc_error, %{message: message}}} = Tempo.pay(challenge(), config)
+      assert {:error, message} = Tempo.pay(challenge(), config)
       assert message =~ "econnrefused"
     end
 

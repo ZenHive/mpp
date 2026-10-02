@@ -103,7 +103,7 @@ The user is language-agnostic, has no Elixir preference and does not read most c
 **Assume web, desktop and mobile will be wanted** unless the user explicitly rules them out. Never pick a stack that silently forecloses a platform.
 
 Decide in this order:
-1. **Platforms → UI stack.** Multi-platform → TypeScript (React + Expo + Tauri/Electron) or Flutter. Elixir/LiveView only for explicitly web-only.
+1. **Platforms → UI stack.** Multi-platform → TypeScript (React + Expo + Tauri/Electron) or Flutter. Elixir/LiveView only for explicitly web-only. Per-platform native (SwiftUI, Compose, WinUI, GTK) only when OS integration is the product (widgets, background execution, share/system extensions, platform UX a cross-platform stack can't reach) **and** harness has the native verification loop for that platform. Reason: for agents the bottleneck is verification, not writing code — N native codebases mean N toolchains, N test frameworks and N reviews per feature, and WinUI/GTK are thin in training data.
 2. **Official SDKs.** Use maintained official libraries (ccxt, viem, alloy, go-ethereum, protocol SDKs) in their language. Never port them.
 3. **Known over own.** Product code sits directly on libraries AI agents know from training. Every library the user would own needs explicit approval, with the reason nothing known solves it stated in the task.
 4. **Backend by main workload:**
@@ -714,7 +714,7 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 - `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
 - `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
-- `cartouche` — Solana RPC, legacy transaction codec, and System/Token/ATA instruction builders (Solana method)
+- `onchain_solana` — Solana RPC, legacy transaction codec, Base58, and System/Token/ATA instruction builders (Solana method; Base58 also used by the XRPL codec)
 - `stellar_base` — Stellar XDR used by the Stellar method to decode envelopes and rebuild sponsored transactions
 - `ed25519` — Ed25519 signing for sponsored Stellar fee-payer envelopes
 - `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store

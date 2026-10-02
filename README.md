@@ -394,7 +394,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 | `MPP.Methods.EVM.Authorization` | EIP-3009 `transferWithAuthorization` settlement for Circle USDC/EURC |
 | `MPP.Methods.EVM.Permit2` | Permit2 witness credentials, gas-sponsored settlement, and ordered splits |
 | `MPP.Methods.EVM.Transaction` | Client-signed EIP-1559 ERC-20 transfer validated against the charge, then server-broadcast |
-| `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `cartouche` |
+| `MPP.Methods.Solana` | Solana native SOL and SPL token charge verification via `onchain_solana` |
 | `MPP.Methods.XRPL` | XRPL signed-blob and hash charge verification via JSON-RPC |
 | `MPP.Methods.XRPL.Session` | XRPL payment-channel session verification (open / voucher / close) |
 | `MPP.Methods.NearIntents` | NEAR Intents hash-credential charges via 1Click Swap + origin RPC |
@@ -526,7 +526,7 @@ end
 
 ### Native hashing dependency
 
-Keccak hashing uses `Cartouche.Hash`, backed by the Rust-based `ex_keccak` NIF.
+Keccak hashing uses `Onchain.Hash`, backed by the Rust-based `ex_keccak` NIF.
 On supported platforms, the build downloads a precompiled binary from GitHub;
 you do not need Rust or Cargo installed. Offline builds need the matching
 binary cached in advance (Rustler Precompiled supports

@@ -15,7 +15,6 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   alias Onchain.Tempo.Transaction
 
   @tempo_transaction_type 0x76
-  @fee_payer_domain 0x78
   @keychain_v2_type 0x04
   @default_max_priority_fee_per_gas 1_000_000_000
   @default_max_fee_per_gas 25_000_000_000
@@ -24,8 +23,6 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   @signature_component_bits 256
   @recovery_id_offset 27
   @expiring_nonce_key (1 <<< 256) - 1
-  @fee_token_index 10
-  @fee_payer_signature_index 11
 
   @doc "Build an access-key-signed Tempo subscription payment transaction."
   @spec build(Subscription.t(), KeyAuthorization.t() | nil, String.t(), map(), String.t()) ::
@@ -51,7 +48,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          fields = base_fields ++ [sender_signature],
          {:ok, tx} <- deserialize(fields),
          :ok <- validate_sponsor_policy(tx, config, sponsored?, now, authorization),
-         {:ok, tx} <- maybe_cosign(tx, source_address, config) do
+         {:ok, tx} <- maybe_cosign(tx, config) do
       {:ok, tx, hex(memo)}
     else
       {:error, %ArgumentError{} = error} -> {:error, Exception.message(error)}
@@ -112,7 +109,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     end
   end
 
-  defp maybe_cosign(tx, source_address, %{"fee_payer" => true} = config) do
+  defp maybe_cosign(tx, %{"fee_payer" => true} = config) do
     with {:ok, private_key} <- decode_key(config["fee_payer_private_key"]),
          {:ok, fee_token} <- Address.validate(config["fee_token"]),
          true <-
@@ -121,7 +118,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
              config["fee_token"],
              config["fee_payer_allowed_fee_tokens"]
            ),
-         {:ok, signed} <- cosign(tx, source_address, private_key, fee_token) do
+         {:ok, signed} <- Transaction.cosign_fee_payer(tx, private_key, fee_token) do
       {:ok, signed}
     else
       false -> {:error, "fee token is not allowed for sponsorship"}
@@ -129,37 +126,10 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     end
   end
 
-  defp maybe_cosign(tx, _source_address, config) do
+  defp maybe_cosign(tx, config) do
     if is_binary(config["fee_payer_url"]),
       do: {:error, "hosted fee payer does not support subscription keychain transactions"},
       else: {:ok, tx}
-  end
-
-  defp cosign(%Transaction{fields: fields} = tx, source_address, private_key, fee_token) do
-    sender_signature = List.last(fields)
-    base_fields = Enum.take(fields, length(fields) - 1)
-
-    fee_payer_preimage =
-      base_fields
-      |> List.replace_at(@fee_token_index, fee_token)
-      |> List.replace_at(@fee_payer_signature_index, source_address)
-
-    payload = <<@fee_payer_domain>> <> ExRLP.encode(fee_payer_preimage)
-
-    with {:ok, signature} <- Secp256k1.sign(payload, private_key),
-         signature = Recover.normalize_low_s(signature),
-         {:ok, fee_payer_address} <- Secp256k1.get_address(private_key),
-         {:ok, recovery_id} <- Recover.find_recid(payload, signature, fee_payer_address) do
-      tuple = [encode_uint(recovery_id), encode_uint(signature.r), encode_uint(signature.s)]
-
-      signed_fields =
-        base_fields
-        |> List.replace_at(@fee_token_index, fee_token)
-        |> List.replace_at(@fee_payer_signature_index, tuple)
-        |> Kernel.++([sender_signature])
-
-      {:ok, %{tx | fields: signed_fields, raw: encode_transaction(signed_fields)}}
-    end
   end
 
   defp validate_sponsor_policy(_tx, _config, false, _now, _authorization), do: :ok

@@ -7,6 +7,7 @@ defmodule MPP.Test.TempoTestHelpers do
   alias Onchain.Recover
   alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.TIP20
+  alias Onchain.Tempo.Transaction
 
   # Fixed test sender key — fixtures are signed with it so the recovered sender is
   # deterministic and pre-broadcast simulation (which recovers the sender) succeeds.
@@ -109,6 +110,26 @@ defmodule MPP.Test.TempoTestHelpers do
 
   @doc "Builds a single call tuple [to, value, input] with an explicit native value."
   def build_call(to_hex, value, input), do: [TIP20.decode_address(to_hex), rlp_uint(value), input]
+
+  @doc "Converts an RLP call `[to, value, input]` to the typed call map `Onchain.Tempo.Transaction.Builder` takes."
+  def typed_call([to, value, input]), do: %{to: to, value: :binary.decode_unsigned(value), input: input}
+
+  @doc """
+  Builds the canonical RLP authorization-list field with `count` structurally
+  valid entries (zero address, dummy signature), serialized through onchain_tempo
+  so the strict 0.13 decoder accepts it and only the policy can reject it.
+  """
+  def authorization_list_field(count) do
+    entry = %{chain_id: 42_431, address: <<0::160>>, nonce: 0, signature: {:secp256k1, %{r: 1, s: 1, y_parity: 0}}}
+
+    {:ok, tx} =
+      Transaction.deserialize(build_tempo_tx(calls: [build_call("0x20C0000000000000000000000000000000000000", <<>>)]))
+
+    {:ok, "0x76" <> hex} =
+      Transaction.serialize(%{tx | tempo_authorization_list: List.duplicate(entry, count)})
+
+    hex |> Base.decode16!(case: :mixed) |> ExRLP.decode() |> Enum.at(12)
+  end
 
   @doc "Builds ABI-encoded calldata for transfer(address,uint256)."
   def transfer_calldata(recipient_hex, amount) do

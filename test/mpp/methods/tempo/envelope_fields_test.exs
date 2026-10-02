@@ -2,6 +2,8 @@ defmodule MPP.Methods.Tempo.EnvelopeFieldsTest do
   use ExUnit.Case, async: true
 
   alias MPP.Methods.Tempo.EnvelopeFields
+  alias MPP.Methods.Tempo.SubscriptionTransaction
+  alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -10,25 +12,7 @@ defmodule MPP.Methods.Tempo.EnvelopeFieldsTest do
   @recipient "0x1234567890AbcdEF1234567890aBcDeF12345678"
   @client_private_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-  test "field indices match onchain_tempo 0x76 wire layout" do
-    assert EnvelopeFields.chain_id() == 0
-    assert EnvelopeFields.max_priority_fee_per_gas() == 1
-    assert EnvelopeFields.max_fee_per_gas() == 2
-    assert EnvelopeFields.gas_limit() == 3
-    assert EnvelopeFields.calls() == 4
-    assert EnvelopeFields.access_list() == 5
-    assert EnvelopeFields.nonce_key() == 6
-    assert EnvelopeFields.nonce() == 7
-    assert EnvelopeFields.valid_before() == 8
-    assert EnvelopeFields.valid_after() == 9
-    assert EnvelopeFields.fee_token() == 10
-    assert EnvelopeFields.fee_payer_signature() == 11
-    assert EnvelopeFields.aa_authorization_list() == 12
-    assert EnvelopeFields.key_authorization() == 13
-    assert EnvelopeFields.sender_signature() == 14
-  end
-
-  test "signed fee-payer transfer has the expected field count" do
+  test "a transaction without key authorization has no key authorization field" do
     {:ok, tx_hex} =
       TempoTxBuilder.build_fee_payer_transfer(
         private_key: @client_private_key,
@@ -43,7 +27,28 @@ defmodule MPP.Methods.Tempo.EnvelopeFieldsTest do
         valid_before: System.os_time(:second) + 900
       )
 
-    {:ok, %Transaction{fields: fields}} = Transaction.deserialize(tx_hex)
-    assert length(fields) == EnvelopeFields.signed_field_count()
+    {:ok, %Transaction{key_authorization: nil} = tx} = Transaction.deserialize(tx_hex)
+
+    assert {:error, "transaction does not carry a key authorization field"} =
+             EnvelopeFields.key_authorization_field(tx)
+  end
+
+  test "returns the canonical RLP item of a carried key authorization" do
+    subscription = SubscriptionHelpers.subscription()
+    {_serialized, authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+    config = %{
+      "chain_id" => SubscriptionHelpers.chain_id(),
+      "rpc_url" => "https://moderato.invalid",
+      "subscription_access_key_private_key" => SubscriptionHelpers.access_private_key(),
+      "subscription_nonce" => 0,
+      "fee_token" => SubscriptionHelpers.token()
+    }
+
+    {:ok, tx, _memo} =
+      SubscriptionTransaction.build(subscription, authorization, SubscriptionHelpers.root_address(), config, "c1")
+
+    assert {:ok, field} = EnvelopeFields.key_authorization_field(tx)
+    assert field == authorization.field
   end
 end

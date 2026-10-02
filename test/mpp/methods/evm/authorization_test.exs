@@ -5,6 +5,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
   alias MPP.Test.EVMAuthorization
+  alias MPP.Test.RPCShapes
   alias Onchain.Address
   alias Onchain.Typed
   alias Onchain.Typed.Domain
@@ -428,14 +429,19 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
             rpc_json(conn, id, "result", @tx_hash)
 
           "eth_getTransactionReceipt" ->
-            rpc_json(conn, id, "result", %{
-              "transactionHash" => @tx_hash,
-              "blockNumber" => "0x1",
-              "status" => "0x0",
-              "from" => EVMAuthorization.signer_address(),
-              "to" => @token,
-              "logs" => []
-            })
+            rpc_json(
+              conn,
+              id,
+              "result",
+              RPCShapes.receipt(%{
+                "transactionHash" => @tx_hash,
+                "blockNumber" => "0x1",
+                "status" => "0x0",
+                "from" => EVMAuthorization.signer_address(),
+                "to" => @token,
+                "logs" => []
+              })
+            )
         end
       end)
 
@@ -797,7 +803,7 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
 
     padded_recipient = "0x" <> String.duplicate("0", 24) <> String.replace_prefix(String.downcase(@recipient), "0x", "")
 
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
@@ -813,6 +819,6 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
           "logIndex" => "0x0"
         }
       ]
-    }
+    })
   end
 end

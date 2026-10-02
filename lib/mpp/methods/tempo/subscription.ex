@@ -467,22 +467,21 @@ defmodule MPP.Methods.Tempo.Subscription do
   defp simulate_sponsored(tx, source, key_type, config) do
     rpc_url = config["rpc_url"]
     [call] = tx.calls
-    fields = tx.fields
 
     request = %{
       "from" => source,
       "to" => hex(call.to),
       "value" => hex_quantity(call.value),
       "input" => hex(call.input),
-      "gas" => field_quantity(fields, 3),
-      "nonce" => field_quantity(fields, 7),
-      "maxFeePerGas" => field_quantity(fields, 2),
-      "maxPriorityFeePerGas" => field_quantity(fields, 1),
-      "chainId" => field_quantity(fields, 0),
+      "gas" => hex_quantity(tx.gas_limit),
+      "nonce" => hex_quantity(tx.nonce),
+      "maxFeePerGas" => hex_quantity(tx.max_fee_per_gas),
+      "maxPriorityFeePerGas" => hex_quantity(tx.max_priority_fee_per_gas),
+      "chainId" => hex_quantity(tx.chain_id),
       "type" => "0x76",
       "keyType" => KeyAuthorization.key_type_name(key_type),
       "keyId" => elem(access_key(config), 1),
-      "feeToken" => hex(Enum.at(fields, 10))
+      "feeToken" => hex(tx.fee_token)
     }
 
     payload = %{
@@ -584,7 +583,6 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   defp subscription_id, do: @subscription_id_bytes |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
   defp req_options(config), do: [req_options: config["req_options"] || []]
-  defp field_quantity(fields, index), do: fields |> Enum.at(index) |> :binary.decode_unsigned() |> hex_quantity()
   defp hex_quantity(0), do: "0x0"
   defp hex_quantity(value), do: "0x" <> String.downcase(Integer.to_string(value, 16))
   defp hex(value), do: "0x" <> Base.encode16(value, case: :lower)

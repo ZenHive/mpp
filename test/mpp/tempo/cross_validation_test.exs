@@ -199,7 +199,11 @@ defmodule MPP.Tempo.CrossValidationTest do
               data: '0x'
             }]
           };
-          TxET.serialize(envelope);
+          const signature = OxSecp256k1.sign({
+            payload: TxET.getSignPayload(envelope),
+            privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+          });
+          TxET.serialize({ ...envelope, signature });
         """)
 
       assert String.starts_with?(hex, "0x76"),
@@ -283,7 +287,7 @@ defmodule MPP.Tempo.CrossValidationTest do
     test "empty calls list: both parsers reject", %{rt: rt} do
       hex = build_empty_calls_hex(chain_id: 42_431)
 
-      assert {:error, "Calls list cannot be empty"} = Transaction.deserialize(hex)
+      assert {:error, "calls list cannot be empty"} = Transaction.deserialize(hex)
 
       {:ok, error_name} =
         QuickBEAM.eval(rt, """
@@ -438,7 +442,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       assert message =~ "0x76", "Expected error mentioning 0x76, got: #{message}"
     end
 
-    test "keyAuthorization field: 14-field RLP accepted by Elixir parser", %{rt: rt} do
+    test "malformed keyAuthorization field: both parsers reject", %{rt: rt} do
       token = decode_hex!("0xdec0000000000000000000000000000000000000")
       recipient = decode_hex!("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
       selector = <<0xA9, 0x05, 0x9C, 0xBB>>
@@ -462,16 +466,12 @@ defmodule MPP.Tempo.CrossValidationTest do
         [<<1>>, <<2>>, <<3>>]
       ]
 
-      hex = "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+      hex = signed_hex(fields)
 
-      # Elixir parser should accept it (14 fields)
-      {:ok, elixir_tx} = Transaction.deserialize(hex)
-      assert elixir_tx.chain_id == 42_431
-      assert [_] = elixir_tx.calls
+      # Both parsers validate the keyAuthorization tuple at index 13: the typed
+      # onchain_tempo decoder rejects the dummy entry just as ox/tempo does.
+      assert {:error, _reason} = Transaction.deserialize(hex)
 
-      # ox/tempo rejects dummy keyAuthorization data (validates key type).
-      # This documents the asymmetry: Elixir accepts any RLP at index 13,
-      # while JS validates the key type field within the tuple.
       {:ok, error_name} =
         QuickBEAM.eval(rt, """
           try {
@@ -722,7 +722,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       []
     ]
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
 
   # Builds a 0x76 tx with fee_payer_signature = 0x00 placeholder.
@@ -754,7 +754,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       []
     ]
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
 
   # Builds a 0x76 tx with two calls (multi-call).
@@ -788,7 +788,7 @@ defmodule MPP.Tempo.CrossValidationTest do
 
     # --- Helpers: Elixir RLP transaction builders ---
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
 
   # transferWithMemo selector
@@ -825,7 +825,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       []
     ]
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
 
   # Builds a 0x76 tx with empty calls list.
@@ -848,7 +848,7 @@ defmodule MPP.Tempo.CrossValidationTest do
       []
     ]
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
 
   # Builds a 0x76 tx with a non-empty fee_token field.
@@ -880,8 +880,15 @@ defmodule MPP.Tempo.CrossValidationTest do
       []
     ]
 
-    "0x76" <> Base.encode16(ExRLP.encode(fields), case: :lower)
+    signed_hex(fields)
   end
+
+  # onchain_tempo decodes only signed envelopes, so every fixture carries a
+  # 65-byte secp256k1 sender signature (r || s || v). Neither parser verifies it.
+  @sender_signature <<0x615DBF067064B0803A9B5BF59518DFCD030B47C2EB57C1758336D77EC115E445::256,
+                      0x472BB4CB93434E95429DEDC3FE5B8EBC57B66AC43FE9C8367C4EC6FE15832091::256, 27>>
+
+  defp signed_hex(fields), do: "0x76" <> Base.encode16(ExRLP.encode(fields ++ [@sender_signature]), case: :lower)
 
   # Encodes an unsigned integer to minimal big-endian bytes (RLP convention).
   defp encode_uint(0), do: <<>>

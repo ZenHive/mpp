@@ -4,8 +4,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
   import MPP.Test.TempoTestHelpers
 
   alias MPP.Methods.Tempo
-  alias MPP.Methods.Tempo.EnvelopeFields
   alias MPP.Methods.Tempo.HostedFeePayer
+  alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
@@ -115,30 +115,6 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
 
     assert {:error, "policy rejected"} =
              HostedFeePayer.fill(tx, @hosted_url, req_options: [plug: {Req.Test, Tempo}])
-  end
-
-  test "build_fill_request rejects unexpected field counts" do
-    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
-    {:ok, tx} = Transaction.deserialize(tx_hex)
-    truncated = %{tx | fields: Enum.take(tx.fields, 10)}
-
-    assert {:error, reason} = HostedFeePayer.build_fill_request(truncated)
-    assert reason =~ "unexpected 0x76 field count"
-  end
-
-  test "build_fill_request rejects malformed key_authorization on 15-field envelopes" do
-    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
-    {:ok, tx} = Transaction.deserialize(tx_hex)
-
-    padded_fields =
-      tx.fields
-      |> Enum.take(EnvelopeFields.signed_field_count() - 1)
-      |> Kernel.++([<<>>, List.last(tx.fields)])
-
-    tx = %{tx | fields: padded_fields}
-
-    assert {:error, reason} = HostedFeePayer.build_fill_request(tx)
-    assert reason =~ "malformed key_authorization"
   end
 
   test "fill surfaces transport failures" do
@@ -268,7 +244,9 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
 
   test "build_fill_request includes non-empty access lists" do
     calldata = transfer_calldata(@recipient, 1_000_000)
-    access = [[<<0x01, 0x02>>, [<<0x03>>]]]
+    address = <<0x01::160>>
+    key = <<0x03::256>>
+    access = [[address, [key]]]
 
     tx_hex =
       build_tempo_tx(
@@ -279,7 +257,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
       )
 
     {:ok, tx} = Transaction.deserialize(tx_hex)
-    assert {:ok, %{"accessList" => ^access}} = HostedFeePayer.build_fill_request(tx)
+    assert {:ok, %{"accessList" => [entry]}} = HostedFeePayer.build_fill_request(tx)
+    assert entry == %{"address" => hex(address), "storageKeys" => [hex(key)]}
   end
 
   test "build_fill_request omits empty call targets and data" do
@@ -294,8 +273,10 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     assert {:ok, %{"calls" => [%{"value" => "0x0"}]}} = HostedFeePayer.build_fill_request(tx)
   end
 
-  test "build_fill_request hex-encodes a non-empty key_authorization on 15-field envelopes" do
-    auth = <<0x01, 0x02, 0x03>>
+  test "build_fill_request hex-encodes the key_authorization RLP item" do
+    {_serialized, authorization, _rpc} =
+      SubscriptionHelpers.signed_authorization(SubscriptionHelpers.subscription())
+
     calldata = transfer_calldata(@recipient, 1_000_000)
 
     tx_hex =
@@ -303,23 +284,16 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
         calls: [build_call(@token_address, calldata)],
         chain_id: 42_431,
         fee_payer: true,
-        key_authorization: auth
+        key_authorization: authorization.field
       )
 
     {:ok, tx} = Transaction.deserialize(tx_hex)
-    assert length(tx.fields) == EnvelopeFields.signed_with_key_auth_field_count()
+    assert tx.key_authorization
     assert {:ok, request} = HostedFeePayer.build_fill_request(tx)
-    assert request["keyAuthorization"] == "0x" <> Base.encode16(auth, case: :lower)
+    assert request["keyAuthorization"] == hex(ExRLP.encode(authorization.field))
   end
 
-  test "build_fill_request treats a non-binary quantity field as zero" do
-    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
-    {:ok, tx} = Transaction.deserialize(tx_hex)
-    tx = %{tx | fields: List.replace_at(tx.fields, EnvelopeFields.nonce(), 0)}
-
-    assert {:ok, request} = HostedFeePayer.build_fill_request(tx)
-    assert request["nonce"] == "0x0"
-  end
+  defp hex(bytes), do: "0x" <> Base.encode16(bytes, case: :lower)
 
   test "fill rejects a feePayerSignature that has neither yParity nor v" do
     {:ok, tx_hex} = build_unsigned_fee_payer_tx()
@@ -444,15 +418,15 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     fee_token = Base.decode16!(String.replace_prefix(@token_address, "0x", ""), case: :mixed)
 
     {:ok, cosigned} = Transaction.cosign_fee_payer(tx, fee_payer_key, fee_token)
-    [y_parity, r_bin, s_bin] = Enum.at(cosigned.fields, 11)
+    %{r: r, s: s, y_parity: y_parity} = cosigned.fee_payer_signature
 
     %{
       "feeToken" => @token_address,
       "feePayerSignature" => %{
-        "yParity" => if(y_parity == <<1>>, do: 1, else: 0),
-        "v" => if(y_parity == <<1>>, do: "0x1c", else: "0x1b"),
-        "r" => "0x" <> Base.encode16(r_bin, case: :lower),
-        "s" => "0x" <> Base.encode16(s_bin, case: :lower)
+        "yParity" => y_parity,
+        "v" => if(y_parity == 1, do: "0x1c", else: "0x1b"),
+        "r" => "0x" <> Integer.to_string(r, 16),
+        "s" => "0x" <> Integer.to_string(s, 16)
       }
     }
   end

@@ -212,7 +212,7 @@ Our code defaults to `42431` (Moderato testnet) — see `@moderato_chain_id` in 
 - `descripex` — Self-describing API metadata (`api()` macro, `Discoverable`)
 - `onchain` — Ethereum RPC, address validation, and ERC-20 transfer parsing
 - `onchain_tempo` — Tempo chain primitives: 0x76 transaction handling, TIP-20 calldata, Tempo RPC, TransferWithMemo event parsing
-- `cartouche` — Solana RPC, legacy transaction codec, and System/Token/ATA instruction builders (Solana method)
+- `onchain_solana` — Solana RPC, legacy transaction codec, Base58, and System/Token/ATA instruction builders (Solana method; Base58 also used by the XRPL codec)
 - `stellar_base` — Stellar XDR used by the Stellar method to decode envelopes and rebuild sponsored transactions
 - `ed25519` — Ed25519 signing for sponsored Stellar fee-payer envelopes
 - `con_cache` — ETS-based TTL cache for `MPP.Tempo.ConCacheStore` dedup store

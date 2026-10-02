@@ -171,12 +171,12 @@ defmodule MPP.Test.SecurityMutations do
         "sponsor-intrinsic-gas",
         "lib/mpp/methods/tempo/fee_payer_policy.ex",
         """
-              list when is_list(list) ->
-                {:error, "fee-payer transaction must not declare an authorization list (\#{length(list)} entries)"}
+          defp check_authorization_list(%Transaction{tempo_authorization_list: list}),
+            do: {:error, "fee-payer transaction must not declare an authorization list (\#{length(list)} entries)"}
         """,
         """
-              list when is_list(list) ->
-                :ok
+          defp check_authorization_list(%Transaction{tempo_authorization_list: _list}),
+            do: :ok
         """,
         ["test/mpp/methods/tempo/fee_payer_policy_test.exs", "test/mpp/methods/tempo_test.exs"],
         false
@@ -186,12 +186,12 @@ defmodule MPP.Test.SecurityMutations do
         "sponsor-intrinsic-gas",
         "lib/mpp/methods/tempo/fee_payer_policy.ex",
         """
-              is_nil(expected) ->
-                {:error, "fee-payer transaction must not carry a key authorization"}
+          defp check_key_authorization(_tx, %{expected_key_authorization: nil}),
+            do: {:error, "fee-payer transaction must not carry a key authorization"}
         """,
         """
-              is_nil(expected) ->
-                :ok
+          defp check_key_authorization(_tx, %{expected_key_authorization: nil}),
+            do: :ok
         """,
         ["test/mpp/methods/tempo/fee_payer_policy_test.exs", "test/mpp/methods/tempo_test.exs"],
         false
@@ -201,18 +201,12 @@ defmodule MPP.Test.SecurityMutations do
         "tempo-canonical-reserve",
         "lib/mpp/methods/tempo.ex",
         """
-            canonical_fields = canonicalize_fields(fields)
-            binary = <<0x76>> <> ExRLP.encode(canonical_fields)
-            hex = "0x" <> Base.encode16(binary, case: :lower)
-            hash = "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
-            {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
+                raw = "0x" <> String.downcase(hex)
+                {:ok, %{tx | raw: raw}, transaction_hash(raw)}
         """,
         """
-            canonical_fields = canonicalize_fields(fields)
-            binary = <<0x76>> <> ExRLP.encode(canonical_fields)
-            _hex = "0x" <> Base.encode16(binary, case: :lower)
-            hash = transaction_hash(tx)
-            {:ok, %{tx | fields: canonical_fields, raw: tx.raw}, hash}
+                _raw = "0x" <> String.downcase(hex)
+                {:ok, tx, transaction_hash(tx)}
         """,
         ["test/mpp/methods/tempo_test.exs"],
         true

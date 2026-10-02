@@ -13,17 +13,13 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   require Logger
 
-  @tempo_tx_type 0x76
-  @signed_field_count TxFields.signed_field_count()
-  @signed_with_key_auth_field_count TxFields.signed_with_key_auth_field_count()
   @default_fill_error "hosted fee payer failed to sponsor transaction"
   @fill_request_failed_detail "hosted fee payer request failed"
-  @unexpected_field_count_detail "hosted fee payer transaction has unexpected 0x76 field count"
 
   @doc """
   Co-signs a client transaction via a hosted `eth_fillTransaction` endpoint.
 
-  Returns `{:ok, tx}` with updated `raw` hex, or `{:error, reason}`.
+  Returns `{:ok, tx}` re-decoded from the filled envelope, or `{:error, reason}`.
   """
   @spec fill(Transaction.t(), String.t(), keyword()) :: {:ok, Transaction.t()} | {:error, String.t()}
   def fill(%Transaction{} = tx, url, opts \\ []) when is_binary(url) do
@@ -38,60 +34,46 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   @doc "Build the `eth_fillTransaction` request map for a client-signed sponsorship envelope."
   @spec build_fill_request(Transaction.t()) :: {:ok, map()} | {:error, String.t()}
-  def build_fill_request(%Transaction{fields: fields, calls: calls} = tx) do
-    with :ok <- validate_field_count(fields),
-         {:ok, from} <- Transaction.sender(tx) do
+  def build_fill_request(%Transaction{calls: calls} = tx) do
+    with {:ok, from} <- Transaction.sender(tx) do
       request =
         %{
           "type" => "0x76",
           "feePayer" => true,
           "from" => hex_data(from),
-          "nonce" => field_quantity(fields, TxFields.nonce()),
+          "nonce" => hex_quantity(tx.nonce),
           "calls" => Enum.map(calls, &call_to_request/1)
         }
-        |> maybe_put_quantity("gas", field_int(fields, TxFields.gas_limit()))
-        |> maybe_put_quantity("maxFeePerGas", field_int(fields, TxFields.max_fee_per_gas()))
-        |> maybe_put_quantity("maxPriorityFeePerGas", field_int(fields, TxFields.max_priority_fee_per_gas()))
-        |> maybe_put_quantity("nonceKey", field_int(fields, TxFields.nonce_key()))
-        |> maybe_put_quantity("validBefore", field_int(fields, TxFields.valid_before()))
-        |> maybe_put_quantity("validAfter", field_int(fields, TxFields.valid_after()))
-        |> maybe_put_access_list(fields)
+        |> maybe_put_quantity("gas", tx.gas_limit)
+        |> maybe_put_quantity("maxFeePerGas", tx.max_fee_per_gas)
+        |> maybe_put_quantity("maxPriorityFeePerGas", tx.max_priority_fee_per_gas)
+        |> maybe_put_quantity("nonceKey", tx.nonce_key)
+        |> maybe_put_quantity("validBefore", tx.valid_before)
+        |> maybe_put_quantity("validAfter", tx.valid_after)
+        |> maybe_put_access_list(tx.access_list)
 
-      maybe_put_key_authorization(request, fields)
+      maybe_put_key_authorization(request, tx)
     end
   end
 
-  @spec validate_field_count([term()]) :: :ok | {:error, String.t()}
-  defp validate_field_count(fields) do
-    count = length(fields)
+  defp maybe_put_access_list(request, []), do: request
 
-    if count in [@signed_field_count, @signed_with_key_auth_field_count],
-      do: :ok,
-      else: {:error, "#{@unexpected_field_count_detail} (#{count})"}
+  defp maybe_put_access_list(request, access_list) do
+    Map.put(
+      request,
+      "accessList",
+      Enum.map(access_list, fn %{address: address, storage_keys: keys} ->
+        %{"address" => hex_data(address), "storageKeys" => Enum.map(keys, &hex_data/1)}
+      end)
+    )
   end
 
-  defp maybe_put_access_list(request, fields) do
-    case Enum.at(fields, TxFields.access_list()) do
-      list when is_list(list) and list != [] -> Map.put(request, "accessList", list)
-      _ -> request
-    end
-  end
+  # The key authorization travels as the hex of its canonical RLP item.
+  defp maybe_put_key_authorization(request, %Transaction{key_authorization: nil}), do: {:ok, request}
 
-  # Field-count is already gated by validate_field_count/1; the catch-all
-  # that used to live here was unreachable.
-  defp maybe_put_key_authorization(request, fields) do
-    case length(fields) do
-      @signed_field_count ->
-        {:ok, request}
-
-      @signed_with_key_auth_field_count ->
-        case Enum.at(fields, TxFields.key_authorization()) do
-          auth when is_binary(auth) and auth != <<>> ->
-            {:ok, Map.put(request, "keyAuthorization", hex_data(auth))}
-
-          _ ->
-            {:error, "hosted fee payer transaction has malformed key_authorization field"}
-        end
+  defp maybe_put_key_authorization(request, tx) do
+    with {:ok, field} <- TxFields.key_authorization_field(tx) do
+      {:ok, Map.put(request, "keyAuthorization", field |> ExRLP.encode() |> hex_data())}
     end
   end
 
@@ -103,10 +85,10 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     |> maybe_put_hex("data", input)
   end
 
-  defp maybe_put_hex(map, _key, <<>>), do: map
+  defp maybe_put_hex(map, _key, value) when value in [nil, <<>>], do: map
   defp maybe_put_hex(map, key, bin) when is_binary(bin), do: Map.put(map, key, hex_data(bin))
 
-  defp maybe_put_quantity(map, _key, 0), do: map
+  defp maybe_put_quantity(map, _key, value) when value in [nil, 0], do: map
   defp maybe_put_quantity(map, key, value) when is_integer(value), do: Map.put(map, key, hex_quantity(value))
 
   defp post_fill(url, request, opts) do
@@ -144,7 +126,7 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     with {:ok, y} <- parse_y_parity(sig),
          {:ok, r} <- decode_quantity(r_hex),
          {:ok, s} <- decode_quantity(s_hex) do
-      {:ok, [if(y == 1, do: <<1>>, else: <<>>), encode_uint(r), encode_uint(s)]}
+      {:ok, %{r: r, s: s, y_parity: y}}
     else
       _ -> {:error, "hosted fee payer returned an invalid feePayerSignature"}
     end
@@ -152,20 +134,12 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   defp parse_fee_payer_signature(_), do: {:error, "hosted fee payer returned an invalid feePayerSignature"}
 
-  defp apply_fill(%Transaction{fields: fields} = tx, fee_token, fp_sig_tuple) do
-    sender_sig_raw = List.last(fields)
-    base_fields = Enum.take(fields, length(fields) - 1)
+  defp apply_fill(%Transaction{} = tx, fee_token, fee_payer_signature) do
+    filled = %{tx | fee_token: fee_token, fee_payer_signature: fee_payer_signature}
 
-    signed_fields =
-      base_fields
-      |> List.replace_at(TxFields.fee_token(), fee_token)
-      |> List.replace_at(TxFields.fee_payer_signature(), fp_sig_tuple)
-      |> Kernel.++([sender_sig_raw])
-
-    signed_raw = <<@tempo_tx_type>> <> ExRLP.encode(signed_fields)
-    new_hex = "0x" <> Base.encode16(signed_raw, case: :lower)
-
-    {:ok, %{tx | raw: new_hex, fields: signed_fields}}
+    with {:ok, raw} <- Transaction.serialize(filled) do
+      Transaction.deserialize(raw)
+    end
   end
 
   defp decode_address(hex) do
@@ -175,21 +149,10 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     end
   end
 
-  defp field_int(fields, idx) do
-    case Enum.at(fields, idx) do
-      bin when is_binary(bin) -> :binary.decode_unsigned(bin)
-      _ -> 0
-    end
-  end
-
-  defp field_quantity(fields, idx), do: hex_quantity(field_int(fields, idx))
-
   defp hex_data(bin) when is_binary(bin), do: "0x" <> Base.encode16(bin, case: :lower)
 
   defp hex_quantity(0), do: "0x0"
   defp hex_quantity(n) when is_integer(n) and n > 0, do: "0x" <> String.downcase(Integer.to_string(n, 16))
-
-  defp encode_uint(n) when is_integer(n) and n >= 0, do: :binary.encode_unsigned(n)
 
   defp parse_y_parity(%{"yParity" => y}) when is_integer(y), do: validate_recovery_id(y)
 

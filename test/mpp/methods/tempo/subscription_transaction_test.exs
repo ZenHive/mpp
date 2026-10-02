@@ -1,6 +1,7 @@
 defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
   use ExUnit.Case, async: true
 
+  alias MPP.Methods.Tempo.EnvelopeFields
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.SubscriptionTransaction
   alias MPP.Test.SubscriptionHelpers
@@ -20,12 +21,12 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "challenge_1"
              )
 
-    assert %Transaction{chain_id: 42_431, fields: fields} = tx
-    assert Enum.count_until(fields, 16) == 15
-    assert Enum.at(fields, 13) == authorization.field
+    assert %Transaction{chain_id: 42_431} = tx
+    assert tx.key_authorization
+    assert EnvelopeFields.key_authorization_field(tx) == {:ok, authorization.field}
 
     {:ok, source} = Address.validate(SubscriptionHelpers.root_address())
-    assert <<0x04, ^source::binary-size(20), _inner::binary-size(65)>> = List.last(fields)
+    assert {:keychain, 2, ^source, {:secp256k1, _inner}} = tx.signature
 
     assert {:ok, %{memo: ^memo}} =
              Transaction.find_payment_call(tx, subscription.currency,
@@ -47,9 +48,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "renewal:sub_1:1"
              )
 
-    assert Enum.count_until(tx.fields, 15) == 14
-    assert Enum.at(tx.fields, 10) == decode_address(subscription.currency)
-    assert Enum.at(tx.fields, 11) == <<>>
+    assert tx.key_authorization == nil
+    assert tx.fee_token == decode_address(subscription.currency)
+    assert tx.fee_payer_signature == nil
   end
 
   test "locally co-signs the subscription transaction for fee sponsorship" do
@@ -66,13 +67,13 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "challenge_sponsored"
              )
 
-    assert Enum.at(tx.fields, 10) == decode_address(subscription.currency)
-    assert [recovery_id, r, s] = Enum.at(tx.fields, 11)
-    assert recovery_id in [<<>>, <<1>>]
-    assert byte_size(r) in 1..32
-    assert byte_size(s) in 1..32
+    assert tx.fee_token == decode_address(subscription.currency)
+    assert %{r: r, s: s, y_parity: y_parity} = tx.fee_payer_signature
+    assert y_parity in [0, 1]
+    assert r in 1..(Bitwise.bsl(1, 256) - 1)
+    assert s in 1..(Bitwise.bsl(1, 256) - 1)
     refute Transaction.has_fee_payer_placeholder?(tx)
-    assert :binary.decode_unsigned(Enum.at(tx.fields, 8)) <= System.os_time(:second) + 24
+    assert tx.valid_before <= System.os_time(:second) + 24
   end
 
   test "rejects invalid signing and sponsorship configuration" do
@@ -145,7 +146,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                  "renewal"
                )
 
-      assert Enum.at(tx.fields, 10) == decode_address(subscription.currency)
+      assert tx.fee_token == decode_address(subscription.currency)
     end
   end
 
@@ -173,7 +174,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "renewal"
              )
 
-    assert :binary.decode_unsigned(Enum.at(tx.fields, 7)) == 7
+    assert tx.nonce == 7
     assert_received {:rpc, %{"method" => "eth_getTransactionCount"}}
   end
 
@@ -231,8 +232,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "sponsored"
              )
 
-    assert Enum.count_until(tx.fields, 16) == 15
-    assert Enum.at(tx.fields, 13) == authorization.field
+    assert EnvelopeFields.key_authorization_field(tx) == {:ok, authorization.field}
 
     # The same envelope is exactly what the activation policy accepts and what
     # the renewal policy (no authorization expected) refuses to sponsor.
@@ -257,7 +257,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
                "renewal:sub_1:2"
              )
 
-    assert Enum.count_until(renewal.fields, 15) == 14
+    assert renewal.key_authorization == nil
 
     policy = FeePayerPolicy.resolve(sponsored["chain_id"], sponsored["fee_payer_policy"])
     assert :ok = FeePayerPolicy.validate(renewal, policy, System.os_time(:second))

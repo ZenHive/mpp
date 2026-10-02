@@ -9,6 +9,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
   alias MPP.Receipt
   alias MPP.Tempo.Store
   alias MPP.Test.EVMTransaction
+  alias MPP.Test.RPCShapes
 
   @rpc_url "https://mainnet.infura.io/v3/test"
   @chain_id 1
@@ -353,14 +354,15 @@ defmodule MPP.Methods.EVM.TransactionTest do
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{
           "eth_sendRawTransaction" => signed.hash,
-          "eth_getTransactionReceipt" => %{
-            "transactionHash" => signed.hash,
-            "blockNumber" => "0x1",
-            "status" => "0x1",
-            "from" => @sender,
-            "to" => @token,
-            "logs" => []
-          }
+          "eth_getTransactionReceipt" =>
+            RPCShapes.receipt(%{
+              "transactionHash" => signed.hash,
+              "blockNumber" => "0x1",
+              "status" => "0x1",
+              "from" => @sender,
+              "to" => @token,
+              "logs" => []
+            })
         })
       end)
 
@@ -552,7 +554,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
     sender_hex = strip_0x(@sender)
     recipient_hex = strip_0x(@recipient)
 
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
@@ -572,7 +574,7 @@ defmodule MPP.Methods.EVM.TransactionTest do
           "logIndex" => "0x0"
         }
       ]
-    }
+    })
   end
 
   defp read_request(conn) do

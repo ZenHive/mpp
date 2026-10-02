@@ -7,6 +7,7 @@ defmodule MPP.Methods.NearIntentsTest do
   alias MPP.Methods.NearIntents.Origin
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.RPCShapes
 
   @one_click_url "https://1click.example"
   @origin_rpc_url "https://origin-rpc.example"
@@ -795,7 +796,7 @@ defmodule MPP.Methods.NearIntentsTest do
     padded_recipient = "0x" <> String.duplicate("0", 24) <> strip_0x(@deposit_address)
 
     Map.merge(
-      %{
+      RPCShapes.receipt(%{
         "transactionHash" => @origin_hash,
         "blockNumber" => "0x1",
         "status" => "0x1",
@@ -811,30 +812,30 @@ defmodule MPP.Methods.NearIntentsTest do
             "logIndex" => "0x0"
           }
         ]
-      },
+      }),
       overrides
     )
   end
 
   defp native_receipt do
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @origin_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
       "from" => @sender,
       "to" => @deposit_address,
       "logs" => []
-    }
+    })
   end
 
   defp native_transaction do
-    %{
+    RPCShapes.transaction(%{
       "hash" => @origin_hash,
       "from" => @sender,
       "to" => @deposit_address,
       "value" => "0x" <> Integer.to_string(24_499_630_000, 16),
       "blockNumber" => "0x1"
-    }
+    })
   end
 
   defp assert_error({:error, %Errors{} = error}, type_suffix, detail) do

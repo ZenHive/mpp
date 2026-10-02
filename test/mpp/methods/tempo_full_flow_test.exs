@@ -305,7 +305,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_multicall(
           private_key: @client_private_key,
-          calls: [call],
+          calls: [typed_call(call)],
           chain_id: @chain_id,
           rpc_url: @rpc_url,
           # Pin gas so the builder skips eth_estimateGas — this suite is offline

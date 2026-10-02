@@ -167,16 +167,15 @@ defmodule MPP.Client.Providers.Tempo do
 
   defp payment_calls(charge, %{"machineTokenEnabled" => true}, amount, chain_id, memo) do
     with {:ok, _currency} <- Address.validate(charge.currency),
-         {:ok, _recipient} <- Address.validate(charge.recipient),
-         {:ok, calls} <- machine_token_calls(chain_id, charge.currency, amount, charge.recipient, memo) do
-      {:ok, Enum.map(calls, &rlp_call/1)}
+         {:ok, _recipient} <- Address.validate(charge.recipient) do
+      machine_token_calls(chain_id, charge.currency, amount, charge.recipient, memo)
     end
   end
 
   defp payment_calls(charge, _details, amount, _chain_id, memo) do
     with {:ok, token} <- Address.validate(charge.currency),
          {:ok, recipient} <- Address.validate(charge.recipient) do
-      {:ok, [[token, <<>>, TIP20.transfer_with_memo_calldata(recipient, amount, memo)]]}
+      {:ok, [%{to: token, value: 0, input: TIP20.transfer_with_memo_calldata(recipient, amount, memo)}]}
     end
   end
 
@@ -186,8 +185,6 @@ defmodule MPP.Client.Providers.Tempo do
       :error -> {:error, :unsupported_machine_token_chain}
     end
   end
-
-  defp rlp_call(%{to: to, value: 0, input: input}), do: [to, <<>>, input]
 
   defp build_transaction(calls, challenge, charge, details, chain_id, provider) do
     opts =

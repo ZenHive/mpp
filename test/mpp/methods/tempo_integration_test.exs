@@ -125,7 +125,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
     {:ok, memo_tx} =
       TempoTxBuilder.build_signed_multicall(
         private_key: fixture_wallet.private_key,
-        calls: [memo_call],
+        calls: typed_calls([memo_call]),
         chain_id: @chain_id,
         rpc_url: rpc_url,
         fee_token: @path_usd,
@@ -496,7 +496,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_multicall(
           private_key: sender.private_key,
-          calls: [memo_call],
+          calls: typed_calls([memo_call]),
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
@@ -735,7 +735,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       {:ok, signed_tx} =
         TempoTxBuilder.build_signed_multicall(
           private_key: sender.private_key,
-          calls: [harmless_call, payment_call],
+          calls: typed_calls([harmless_call, payment_call]),
           chain_id: @chain_id,
           rpc_url: rpc_url,
           fee_token: @path_usd,
@@ -1069,7 +1069,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       {:ok, signed_tx} =
         TempoTxBuilder.build_fee_payer_multicall(
           private_key: sender.private_key,
-          calls: [valid_call, rogue_call],
+          calls: typed_calls([valid_call, rogue_call]),
           chain_id: @chain_id,
           rpc_url: rpc_url,
           # Pin gas_limit — the rogue (0xDEADBEEF) call reverts under
@@ -1209,7 +1209,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       balance_before = fee_token_balance!(fee_payer_address, rpc_url)
 
       challenge = request_challenge!(config)
-      entries = for _ <- 1..7, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>]
+      entries = TempoTestHelpers.authorization_list_field(7)
 
       tx_hex =
         TempoTestHelpers.build_tempo_tx(
@@ -1677,7 +1677,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   defp build_bound_signed_tx(sender, recipient_address, amount, rpc_url, challenge, opts \\ []) do
     [
       private_key: sender.private_key,
-      calls: [bound_payment_call(recipient_address, amount, challenge)],
+      calls: typed_calls([bound_payment_call(recipient_address, amount, challenge)]),
       chain_id: @chain_id,
       rpc_url: rpc_url,
       fee_token: @path_usd,
@@ -1690,7 +1690,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   defp build_bound_fee_payer_tx(sender, recipient_address, amount, rpc_url, challenge, opts) do
     [
       private_key: sender.private_key,
-      calls: [bound_payment_call(recipient_address, amount, challenge)],
+      calls: typed_calls([bound_payment_call(recipient_address, amount, challenge)]),
       chain_id: @chain_id,
       rpc_url: rpc_url,
       nonce: 0,
@@ -1700,6 +1700,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
     |> Keyword.merge(opts)
     |> TempoTxBuilder.build_fee_payer_multicall()
   end
+
+  defp typed_calls(calls), do: Enum.map(calls, &TempoTestHelpers.typed_call/1)
 
   defp bound_payment_call(recipient_address, amount, challenge) do
     TempoTestHelpers.build_call(

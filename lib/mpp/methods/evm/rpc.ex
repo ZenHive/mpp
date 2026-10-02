@@ -5,7 +5,6 @@ defmodule MPP.Methods.EVM.RPC do
 
   alias MPP.Errors
   alias MPP.Hex
-  alias Onchain.Transaction.Info
 
   @doc "Require a non-negative integer `chain_id` in method config."
   @spec require_chain_id(map()) :: {:ok, non_neg_integer()} | {:error, Errors.t()}
@@ -25,27 +24,50 @@ defmodule MPP.Methods.EVM.RPC do
   @doc """
   Fetch a transaction's recipient and value by hash (`eth_getTransactionByHash`).
 
-  Legacy transactions carry `to`/`value`, typed ones `destination`/`amount`;
-  both come back as `%{to: <<_::160>> | nil, value: non_neg_integer()}`.
+  Reads only `to` and `value` from the raw result rather than decoding a full
+  Ethereum signing envelope, so chain-specific transaction types (OP Stack
+  deposits, zkSync, Celo) still verify. Both fields are validated strictly:
+  `to` is `nil` or a 20-byte address, `value` a hex quantity.
   An unknown hash is `{:ok, nil}`.
   """
   @spec transaction_by_hash(String.t(), keyword()) ::
           {:ok, %{to: binary() | nil, value: non_neg_integer()} | nil} | {:error, term()}
   def transaction_by_hash(hash, opts) when is_binary(hash) and is_list(opts) do
-    case Onchain.RPC.eth_get_transaction_by_hash(hash, opts) do
-      {:ok, %Info{transaction: %Onchain.Transaction.V1{to: to, value: value}}} ->
-        {:ok, %{to: to, value: value}}
-
-      {:ok, %Info{transaction: %{destination: to, amount: value}}} ->
-        {:ok, %{to: to, value: value}}
-
-      {:error, :not_found} ->
-        {:ok, nil}
-
-      {:error, reason} ->
-        {:error, reason}
+    case Onchain.RPC.call("eth_getTransactionByHash", [hash], opts) do
+      {:ok, nil} -> {:ok, nil}
+      {:ok, %{} = tx} -> decode_transfer(tx)
+      {:ok, other} -> {:error, {:invalid_transaction, other}}
+      {:error, reason} -> {:error, reason}
     end
   end
+
+  defp decode_transfer(%{"value" => value} = tx) when is_binary(value) do
+    with {:ok, to} <- decode_to(Map.get(tx, "to")),
+         {:ok, amount} <- decode_quantity(value) do
+      {:ok, %{to: to, value: amount}}
+    end
+  end
+
+  defp decode_transfer(tx), do: {:error, {:invalid_transaction, tx}}
+
+  defp decode_to(nil), do: {:ok, nil}
+
+  defp decode_to("0x" <> hex = to) when byte_size(hex) == 40 do
+    case Base.decode16(hex, case: :mixed) do
+      {:ok, address} -> {:ok, address}
+      :error -> {:error, {:invalid_transaction_to, to}}
+    end
+  end
+
+  defp decode_to(to), do: {:error, {:invalid_transaction_to, to}}
+
+  defp decode_quantity("0x" <> digits = value) do
+    if digits =~ ~r/\A[0-9a-fA-F]+\z/,
+      do: {:ok, String.to_integer(digits, 16)},
+      else: {:error, {:invalid_transaction_value, value}}
+  end
+
+  defp decode_quantity(value), do: {:error, {:invalid_transaction_value, value}}
 
   @doc "Build Onchain.RPC options from an RPC URL and optional Req overrides."
   @spec rpc_opts(String.t(), map()) :: keyword()

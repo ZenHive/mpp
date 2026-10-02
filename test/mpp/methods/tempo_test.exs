@@ -1497,12 +1497,10 @@ defmodule MPP.Methods.TempoTest do
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> alternate_hash)
     end
 
-    test "padded zero integers of the same signed tx share the canonical reserve key", %{charge: charge} do
+    test "a padded-zero re-encoding of a signed tx is rejected before it can claim a reserve key", %{charge: charge} do
       calldata = transfer_calldata(@recipient, 1_000_000)
       call = build_call(@token_address, calldata)
-      # A 2-element call is valid RLP; canonicalize leaves it unchanged.
-      short_call = [decode_address(@token_address), <<>>]
-      canonical_hex = build_tempo_tx(calls: [call, short_call], chain_id: 42_431)
+      canonical_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
       padded_hex = with_padded_zero_nonce(canonical_hex)
       canonical_hash = keccak256_hex(canonical_hex)
 
@@ -1511,13 +1509,16 @@ defmodule MPP.Methods.TempoTest do
 
       stub_broadcast_and_receipt(success_receipt())
 
-      assert {:ok, %Receipt{}} =
+      assert {:error, %Errors{} = error} =
                Tempo.verify(%{"type" => "transaction", "signature" => padded_hex}, charge)
 
-      assert {:error, %Errors{} = error} =
+      assert error.detail =~ "leading zero"
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:" <> keccak256_hex(padded_hex))
+
+      assert {:ok, %Receipt{}} =
                Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
-      assert error.detail =~ "already used"
       assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
     end
 
@@ -2848,27 +2849,18 @@ defmodule MPP.Methods.TempoTest do
       # (client shouldn't set fee_token when requesting fee sponsorship)
       calldata = transfer_calldata(@recipient, 1_000_000)
       call_rlp = build_call(@token_address, calldata)
-      token_bytes = decode_address(@token_address)
 
-      body = [
-        :binary.encode_unsigned(42_431),
-        :binary.encode_unsigned(1_000_000_000),
-        :binary.encode_unsigned(1_000_000_000),
-        :binary.encode_unsigned(51_299),
-        [call_rlp],
-        [],
-        expiring_nonce_key(),
-        <<>>,
-        :binary.encode_unsigned(future_valid_before()),
-        <<>>,
-        token_bytes,
-        <<0x00>>,
-        [],
-        <<1::512>>
-      ]
-
-      raw = <<0x76>> <> ExRLP.encode(body)
-      tx_hex = "0x" <> Base.encode16(raw, case: :lower)
+      tx_hex =
+        build_tempo_tx(
+          calls: [call_rlp],
+          chain_id: 42_431,
+          fee_payer: true,
+          fee_token: decode_address(@token_address),
+          gas_limit: 51_299,
+          max_fee_per_gas: 1_000_000_000,
+          nonce_key: expiring_nonce_key(),
+          valid_before: future_valid_before()
+        )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -3094,8 +3086,8 @@ defmodule MPP.Methods.TempoTest do
       end)
     end
 
-    defp authorization_list_entries(count), do: for(_ <- 1..count, do: [<<>>, <<0::160>>, <<>>, <<>>, <<1>>, <<1>>])
-
+    # Wire-encoded authorization-list entries, taken from a tx that onchain_tempo
+    # serialized, so the signed envelope carries entries its decoder accepts.
     defp verified_key_authorization do
       {_serialized, authorization, _rpc} =
         SubscriptionHelpers.signed_authorization(SubscriptionHelpers.subscription())
@@ -3105,7 +3097,7 @@ defmodule MPP.Methods.TempoTest do
 
     test "rejects a transaction with a non-empty authorization list before any RPC call", %{charge: charge} do
       record_rpc_calls()
-      tx_hex = econ_tx(authorization_list: authorization_list_entries(7))
+      tx_hex = econ_tx(authorization_list: authorization_list_field(7))
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -3116,7 +3108,7 @@ defmodule MPP.Methods.TempoTest do
 
     test "rejects a transaction with a single authorization-list entry", %{charge: charge} do
       record_rpc_calls()
-      tx_hex = econ_tx(authorization_list: authorization_list_entries(1))
+      tx_hex = econ_tx(authorization_list: authorization_list_field(1))
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
@@ -3149,7 +3141,7 @@ defmodule MPP.Methods.TempoTest do
       record_rpc_calls()
 
       for {opts, expected_detail} <- [
-            {[authorization_list: authorization_list_entries(3)], "must not declare an authorization list"},
+            {[authorization_list: authorization_list_field(3)], "must not declare an authorization list"},
             {[key_authorization: verified_key_authorization()], "must not carry a key authorization"}
           ] do
         payload = %{"type" => "transaction", "signature" => econ_tx(opts)}
@@ -4037,14 +4029,14 @@ defmodule MPP.Methods.TempoTest do
     fee_payer_key = Base.decode16!(@fee_payer_private_key, case: :mixed)
     fee_token = Base.decode16!(String.replace_prefix(@token_address, "0x", ""), case: :mixed)
     {:ok, cosigned} = Transaction.cosign_fee_payer(tx, fee_payer_key, fee_token)
-    [y_parity, r_bin, s_bin] = Enum.at(cosigned.fields, 11)
+    %{r: r, s: s, y_parity: y_parity} = cosigned.fee_payer_signature
 
     %{
       "feeToken" => @token_address,
       "feePayerSignature" => %{
-        "yParity" => if(y_parity == <<1>>, do: 1, else: 0),
-        "r" => "0x" <> Base.encode16(r_bin, case: :lower),
-        "s" => "0x" <> Base.encode16(s_bin, case: :lower)
+        "yParity" => y_parity,
+        "r" => "0x" <> Integer.to_string(r, 16),
+        "s" => "0x" <> Integer.to_string(s, 16)
       }
     }
   end

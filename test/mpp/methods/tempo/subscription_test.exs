@@ -7,6 +7,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   alias MPP.Subscription.ETSStore
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
+  alias MPP.Test.RPCShapes
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
 
@@ -16,8 +17,6 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   @subscription_amount 1_000_000
   @subscription_duration_days 30
   @subscription_id_encoded_bytes 24
-  @activation_field_count 15
-  @renewal_field_count 14
   @gas_limit 1_000_000
   @max_total_fee 30_000_000_000_000_000
 
@@ -160,8 +159,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       refute Map.has_key?(record.subscription.method_details, "subscription_access_key_private_key")
 
       assert_received {:rpc, "eth_sendRawTransactionSync", [raw]}
-      assert {:ok, %Transaction{fields: fields}} = Transaction.deserialize(raw)
-      assert length(fields) == @activation_field_count
+      assert {:ok, %Transaction{key_authorization: %{}}} = Transaction.deserialize(raw)
 
       assert {:ok, current} = Subscription.authorize(receipt.subscription_id, config)
       assert current.reference == receipt.reference
@@ -195,8 +193,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       assert_received {:rpc, "eth_sendRawTransactionSync", [_activation_raw]}
       assert_received {:rpc, "eth_sendRawTransactionSync", [renewal_raw]}
-      assert {:ok, %Transaction{fields: fields}} = Transaction.deserialize(renewal_raw)
-      assert length(fields) == @renewal_field_count
+      assert {:ok, %Transaction{key_authorization: nil}} = Transaction.deserialize(renewal_raw)
 
       assert {:ok, current} = Subscription.renew(activation.subscription_id, config)
       assert current.reference == renewal.reference
@@ -455,7 +452,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       assert request["keyId"] == SubscriptionHelpers.access_address()
       assert_received {:rpc, "eth_sendRawTransactionSync", [raw]}
       assert {:ok, tx} = Transaction.deserialize(raw)
-      assert [_recovery_id, _r, _s] = Enum.at(tx.fields, 11)
+      assert %{r: _r, s: _s, y_parity: _y_parity} = tx.fee_payer_signature
       refute Transaction.has_fee_payer_placeholder?(tx)
     end
 
@@ -653,13 +650,18 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   defp chain_result(request, block_timestamp) do
     case request do
       %{"method" => "eth_simulateV1"} ->
-        [%{"calls" => [%{"status" => "0x1"}]}]
+        [%{"calls" => [RPCShapes.receipt(%{"status" => "0x1"})]}]
 
       %{"method" => "eth_sendRawTransactionSync", "params" => [raw]} ->
         successful_receipt(raw)
 
       %{"method" => "eth_getTransactionReceipt"} ->
-        %{"transactionHash" => @tx_hash, "blockNumber" => @block_number, "status" => "0x1", "logs" => []}
+        RPCShapes.receipt(%{
+          "transactionHash" => @tx_hash,
+          "blockNumber" => @block_number,
+          "status" => "0x1",
+          "logs" => []
+        })
 
       %{"method" => "eth_getBlockByNumber"} ->
         %{"number" => @block_number, "timestamp" => hex_quantity(block_timestamp), "transactions" => []}
@@ -706,7 +708,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       request = request(conn)
 
       "eth_sendRawTransactionSync" = request["method"]
-      result = %{"transactionHash" => @tx_hash, "status" => "0x0", "logs" => []}
+      result = RPCShapes.receipt(%{"transactionHash" => @tx_hash, "status" => "0x0", "logs" => []})
       Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
     end)
   end
@@ -726,15 +728,20 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       result =
         case request do
           %{"method" => "eth_sendRawTransactionSync"} ->
-            %{
+            RPCShapes.receipt(%{
               "transactionHash" => @tx_hash,
               "blockNumber" => @block_number,
               "status" => "0x1",
               "logs" => []
-            }
+            })
 
           %{"method" => "eth_getTransactionReceipt"} ->
-            %{"transactionHash" => @tx_hash, "blockNumber" => @block_number, "status" => "0x1", "logs" => []}
+            RPCShapes.receipt(%{
+              "transactionHash" => @tx_hash,
+              "blockNumber" => @block_number,
+              "status" => "0x1",
+              "logs" => []
+            })
 
           %{"method" => "eth_getBlockByNumber"} ->
             %{"number" => @block_number, "timestamp" => hex_quantity(System.os_time(:second)), "transactions" => []}
@@ -747,7 +754,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   defp successful_receipt(raw) do
     memo = SubscriptionHelpers.memo_from_transaction(raw)
 
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @tx_hash,
       "blockNumber" => @block_number,
       "status" => "0x1",
@@ -760,7 +767,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
           memo
         )
       ]
-    }
+    })
   end
 
   defp stub_rpc(handler, opts \\ []) do

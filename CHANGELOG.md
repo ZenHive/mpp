@@ -10,12 +10,22 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Changed
 
-- **secp256k1 runs on `ex_secp256k1` (RustCrypto k256); `curvy` is gone from the
-  dependency tree.** Requires cartouche `~> 0.10`, onchain `~> 0.15` and
-  onchain_tempo `~> 0.11`. Signatures are `%Cartouche.Signature{}` and signing
-  goes through `Cartouche.Signer.Secp256k1`. XRPL claims verify and sign DER on
+- **Requires onchain `~> 0.16`, onchain_tempo `~> 0.13` and onchain_solana `~> 0.1`;
+  `cartouche` and `curvy` are gone from the dependency tree.** secp256k1 runs on
+  `ex_secp256k1` (RustCrypto k256). Signatures are `%Onchain.Signature{}`, Solana
+  RPC/codec/Base58 come from `Onchain.Solana.*`. XRPL claims verify and sign DER on
   `ex_secp256k1` directly and now reject non-canonical DER encodings. Packed
   Ethereum signatures and wire formats are unchanged.
+- **Tempo transactions are read through onchain_tempo's typed decoder.** Fee-payer
+  policy, hosted fee-payer fill, subscription building and canonicalization use the
+  named `%Onchain.Tempo.Transaction{}` fields; the sender signature is normalized to
+  low-s and re-serialized by onchain_tempo. Envelopes the decoder rejects —
+  unsigned, wrong field count, a list in a scalar slot, non-canonical integers
+  (leading zeros), malformed authorization-list or key-authorization entries — now
+  fail at decode, before the policy, the reserve key or any RPC.
+- **EVM receipts and transactions are decoded strictly** (`%Onchain.Receipt{}`,
+  `%Onchain.Transaction.Info{}`). A receipt missing fields a node always returns
+  (e.g. `blockNumber`) fails verification instead of being accepted.
 
 ## [0.19.1] — 2026-09-29
 

@@ -37,9 +37,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       without changing the decoded intent (ports mppx #602; unknown selectors are
       left to `Transaction.validate_call_scope/1`)
 
-  Any field that is not a well-formed RLP scalar (e.g. a list where a number is
-  expected, or a truncated envelope) is rejected — the policy fails closed on
-  malformed input rather than coercing it to zero.
+  Malformed envelopes (a list where a number is expected, a truncated
+  envelope) never reach the policy: `Onchain.Tempo.Transaction.deserialize/1`
+  rejects them.
 
   The validity window is an absolute `max_validity_window_seconds` cap (matching
   mpp-rs). mppx additionally ties the ceiling to `challengeExpires + 60s`; we do
@@ -277,10 +277,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @spec measure(Transaction.t(), t(), integer()) ::
           {:ok, %{total_fee: pos_integer(), valid_before: pos_integer()}} | {:error, String.t()}
   def measure(%Transaction{} = tx, %__MODULE__{} = policy, now) when is_integer(now) do
-    with {:ok, gas_limit} <- field_int(tx, TxFields.gas_limit(), "gas_limit"),
-         {:ok, max_fee} <- field_int(tx, TxFields.max_fee_per_gas(), "max_fee_per_gas"),
-         {:ok, max_priority} <- field_int(tx, TxFields.max_priority_fee_per_gas(), "max_priority_fee_per_gas"),
-         :ok <- check_gas(gas_limit, policy),
+    %Transaction{gas_limit: gas_limit, max_fee_per_gas: max_fee, max_priority_fee_per_gas: max_priority} = tx
+
+    with :ok <- check_gas(gas_limit, policy),
          :ok <- check_max_fee(max_fee, policy),
          :ok <- check_total_fee(gas_limit, max_fee, policy),
          :ok <- check_priority(max_priority, max_fee, policy),
@@ -330,87 +329,55 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   end
 
   @spec check_nonce_key(Transaction.t()) :: :ok | {:error, String.t()}
-  defp check_nonce_key(tx) do
-    with {:ok, key} <- field_int(tx, TxFields.nonce_key(), "nonce_key") do
-      if key == @expiring_nonce_key,
-        do: :ok,
-        else: {:error, "fee-payer transaction must use the expiring nonce key"}
-    end
-  end
+  defp check_nonce_key(%Transaction{nonce_key: @expiring_nonce_key}), do: :ok
+  defp check_nonce_key(_tx), do: {:error, "fee-payer transaction must use the expiring nonce key"}
 
   @spec check_validity_window(Transaction.t(), t(), integer()) ::
           {:ok, pos_integer()} | {:error, String.t()}
-  defp check_validity_window(tx, %{max_validity_window_seconds: max}, now) do
-    with {:ok, valid_before} <- field_int(tx, TxFields.valid_before(), "valid_before") do
-      cond do
-        valid_before == 0 ->
-          {:error, "fee-payer transaction must declare valid_before"}
+  defp check_validity_window(%Transaction{valid_before: valid_before}, %{max_validity_window_seconds: max}, now) do
+    cond do
+      valid_before in [nil, 0] ->
+        {:error, "fee-payer transaction must declare valid_before"}
 
-        valid_before <= now ->
-          {:error, "fee-payer transaction already expired (valid_before #{valid_before} <= now #{now})"}
+      valid_before <= now ->
+        {:error, "fee-payer transaction already expired (valid_before #{valid_before} <= now #{now})"}
 
-        valid_before - now > max ->
-          {:error, "fee-payer validity window #{valid_before - now}s exceeds maximum #{max}s"}
+      valid_before - now > max ->
+        {:error, "fee-payer validity window #{valid_before - now}s exceeds maximum #{max}s"}
 
-        true ->
-          {:ok, valid_before}
-      end
+      true ->
+        {:ok, valid_before}
     end
   end
 
   @spec check_access_list(Transaction.t()) :: :ok | {:error, String.t()}
-  defp check_access_list(%Transaction{fields: fields}) do
-    case Enum.at(fields, TxFields.access_list()) do
-      [] ->
-        :ok
+  defp check_access_list(%Transaction{access_list: []}), do: :ok
 
-      list when is_list(list) ->
-        {:error, "fee-payer transaction must not declare an access list (#{length(list)} entries)"}
-
-      _ ->
-        {:error, "fee-payer transaction has a malformed access_list field"}
-    end
-  end
+  defp check_access_list(%Transaction{access_list: list}),
+    do: {:error, "fee-payer transaction must not declare an access list (#{length(list)} entries)"}
 
   @spec check_authorization_list(Transaction.t()) :: :ok | {:error, String.t()}
-  defp check_authorization_list(%Transaction{fields: fields}) do
-    case Enum.at(fields, TxFields.aa_authorization_list()) do
-      [] ->
-        :ok
+  defp check_authorization_list(%Transaction{tempo_authorization_list: []}), do: :ok
 
-      list when is_list(list) ->
-        {:error, "fee-payer transaction must not declare an authorization list (#{length(list)} entries)"}
+  defp check_authorization_list(%Transaction{tempo_authorization_list: list}),
+    do: {:error, "fee-payer transaction must not declare an authorization list (#{length(list)} entries)"}
 
-      _ ->
-        {:error, "fee-payer transaction has a malformed aa_authorization_list field"}
-    end
-  end
-
-  # Key-authorization presence is signalled by envelope length, not a tag: a signed
-  # 0x76 envelope has 14 fields, or 15 when the optional key_authorization list is
-  # inserted before sender_signature (Onchain.Tempo.Transaction).
+  # The pin compares the key_authorization RLP item of the canonical envelope byte
+  # for byte with `KeyAuthorization.transaction_field/1` of the verified struct.
   @spec check_key_authorization(Transaction.t(), t()) :: :ok | {:error, String.t()}
-  defp check_key_authorization(%Transaction{fields: fields}, %{expected_key_authorization: expected}) do
-    count = length(fields)
+  defp check_key_authorization(%Transaction{key_authorization: nil}, %{expected_key_authorization: nil}), do: :ok
 
-    cond do
-      count == TxFields.signed_field_count() and is_nil(expected) ->
-        :ok
+  defp check_key_authorization(%Transaction{key_authorization: nil}, _policy),
+    do: {:error, "fee-payer transaction is missing the expected key authorization"}
 
-      count == TxFields.signed_field_count() ->
-        {:error, "fee-payer transaction is missing the expected key authorization"}
+  defp check_key_authorization(_tx, %{expected_key_authorization: nil}),
+    do: {:error, "fee-payer transaction must not carry a key authorization"}
 
-      count != TxFields.signed_with_key_auth_field_count() ->
-        {:error, "fee-payer transaction has an unexpected 0x76 field count (#{count})"}
-
-      is_nil(expected) ->
-        {:error, "fee-payer transaction must not carry a key authorization"}
-
-      Enum.at(fields, TxFields.key_authorization()) == expected ->
-        :ok
-
-      true ->
-        {:error, "fee-payer transaction key authorization does not match the verified authorization"}
+  defp check_key_authorization(tx, %{expected_key_authorization: expected}) do
+    case TxFields.key_authorization_field(tx) do
+      {:ok, ^expected} -> :ok
+      {:ok, _other} -> {:error, "fee-payer transaction key authorization does not match the verified authorization"}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -460,13 +427,4 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
        do: true
 
   defp canonical_call?(_call), do: false
-
-  @spec field_int(Transaction.t(), non_neg_integer(), String.t()) ::
-          {:ok, non_neg_integer()} | {:error, String.t()}
-  defp field_int(%Transaction{fields: fields}, index, name) do
-    case Enum.at(fields, index) do
-      bin when is_binary(bin) -> {:ok, :binary.decode_unsigned(bin)}
-      _ -> {:error, "fee-payer transaction has a malformed #{name} field"}
-    end
-  end
 end

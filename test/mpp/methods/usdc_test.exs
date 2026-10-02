@@ -15,6 +15,7 @@ defmodule MPP.Methods.USDCTest do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
   alias MPP.Test.EVMAuthorization
+  alias MPP.Test.RPCShapes
   alias Onchain.Address
   alias Onchain.Hex
   alias Onchain.Solana.ATA
@@ -587,7 +588,7 @@ defmodule MPP.Methods.USDCTest do
         {request, conn} = read_rpc(conn)
 
         if request["method"] == "eth_getTransactionReceipt" do
-          rpc_json(conn, request["id"], "result", %{"status" => "0x1", "transactionHash" => @tx_hash})
+          rpc_json(conn, request["id"], "result", RPCShapes.receipt(%{"status" => "0x1", "transactionHash" => @tx_hash}))
         else
           data = if request["method"] == "eth_call", do: hd(request["params"])["data"], else: ""
 
@@ -979,7 +980,7 @@ defmodule MPP.Methods.USDCTest do
     from = padded_word(EVMAuthorization.signer_address())
     to = padded_word(@recipient)
 
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
@@ -995,7 +996,7 @@ defmodule MPP.Methods.USDCTest do
           "logIndex" => "0x0"
         }
       ]
-    }
+    })
   end
 
   defp solana_with_accounts(payer, recipient, mode, charge \\ nil) do

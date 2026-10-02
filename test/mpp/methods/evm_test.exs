@@ -10,6 +10,7 @@ defmodule MPP.Methods.EVMTest do
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.RPCShapes
 
   @rpc_url "https://mainnet.infura.io/v3/test"
   @chain_id 1
@@ -25,6 +26,7 @@ defmodule MPP.Methods.EVMTest do
   @amount "1000000"
   # 1_000_000 in hex = 0xF4240 — padded to 32 bytes for log data
   @amount_hex "0x" <> String.duplicate("0", 58) <> "0f4240"
+  # --- Dedup test stores (EVM-scoped names — reuse the MPP.Tempo.Store behaviour) ---
   @property_runs 25
   @evm_address_bytes 20
 
@@ -42,8 +44,6 @@ defmodule MPP.Methods.EVMTest do
       "credentialTypes" => ["permit2"]
     }
   }
-
-  # --- Dedup test stores (EVM-scoped names — reuse the MPP.Tempo.Store behaviour) ---
 
   defmodule MemoryStore do
     @moduledoc false
@@ -423,14 +423,15 @@ defmodule MPP.Methods.EVMTest do
     test "returns error when transaction failed (reverted)", %{charge: charge} do
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{
-          "eth_getTransactionReceipt" => %{
-            "transactionHash" => @tx_hash,
-            "blockNumber" => "0x1",
-            "status" => "0x0",
-            "from" => @sender,
-            "to" => @token_address,
-            "logs" => []
-          }
+          "eth_getTransactionReceipt" =>
+            RPCShapes.receipt(%{
+              "transactionHash" => @tx_hash,
+              "blockNumber" => "0x1",
+              "status" => "0x0",
+              "from" => @sender,
+              "to" => @token_address,
+              "logs" => []
+            })
         })
       end)
 
@@ -442,14 +443,15 @@ defmodule MPP.Methods.EVMTest do
     test "returns error when no matching Transfer event", %{charge: charge} do
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{
-          "eth_getTransactionReceipt" => %{
-            "transactionHash" => @tx_hash,
-            "blockNumber" => "0x1",
-            "status" => "0x1",
-            "from" => @sender,
-            "to" => @token_address,
-            "logs" => []
-          }
+          "eth_getTransactionReceipt" =>
+            RPCShapes.receipt(%{
+              "transactionHash" => @tx_hash,
+              "blockNumber" => "0x1",
+              "status" => "0x1",
+              "from" => @sender,
+              "to" => @token_address,
+              "logs" => []
+            })
         })
       end)
 
@@ -567,6 +569,49 @@ defmodule MPP.Methods.EVMTest do
       assert {:ok, %Receipt{} = receipt} = EVM.verify(payload, charge)
       assert receipt.method == "evm"
       assert receipt.reference == @tx_hash
+    end
+
+    test "verifies a native transfer in a chain-specific transaction type", %{eth_charge: charge} do
+      # OP Stack user deposit (type 0x7e): no Ethereum signature fields, but the
+      # recipient and value are what the charge is checked against.
+      deposit = %{
+        "type" => "0x7e",
+        "hash" => @tx_hash,
+        "from" => @sender,
+        "to" => @recipient,
+        "value" => "0xde0b6b3a7640000",
+        "mint" => "0xde0b6b3a7640000",
+        "sourceHash" => "0x" <> String.duplicate("11", 32),
+        "gas" => "0x186a0",
+        "input" => "0x",
+        "blockNumber" => "0x1",
+        "blockHash" => "0x" <> String.duplicate("22", 32),
+        "transactionIndex" => "0x0"
+      }
+
+      Req.Test.stub(EVM, fn conn ->
+        rpc_dispatch(conn, %{
+          "eth_getTransactionReceipt" => native_receipt(),
+          "eth_getTransactionByHash" => deposit
+        })
+      end)
+
+      assert {:ok, %Receipt{reference: @tx_hash}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+    end
+
+    for {field, bad} <- [{"value", "-0x1"}, {"value", "0x-1"}, {"value", nil}, {"to", "0x1234"}] do
+      test "fails closed on a transaction with malformed #{field} #{inspect(bad)}", %{eth_charge: charge} do
+        tx = Map.put(native_tx(), unquote(field), unquote(bad))
+
+        Req.Test.stub(EVM, fn conn ->
+          rpc_dispatch(conn, %{
+            "eth_getTransactionReceipt" => native_receipt(),
+            "eth_getTransactionByHash" => tx
+          })
+        end)
+
+        assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      end
     end
 
     test "returns error when ETH value does not match", %{eth_charge: charge} do
@@ -817,14 +862,14 @@ defmodule MPP.Methods.EVMTest do
       assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, eth)
     end
 
-    test "tolerates a receipt with a missing blockNumber (nil hex value)", %{charge: charge} do
+    test "fails closed on a receipt missing blockNumber", %{charge: charge} do
       receipt = Map.delete(receipt_with_transfer(), "blockNumber")
 
       Req.Test.stub(EVM, fn conn ->
         rpc_dispatch(conn, %{"eth_getTransactionReceipt" => receipt})
       end)
 
-      assert {:ok, %Receipt{}} = EVM.verify(%{"hash" => @tx_hash}, charge)
+      assert {:error, %Errors{detail: "EVM RPC request failed"}} = EVM.verify(%{"hash" => @tx_hash}, charge)
     end
   end
 
@@ -985,8 +1030,6 @@ defmodule MPP.Methods.EVMTest do
     end
   end
 
-  # --- Test helpers ---
-
   defp required_config(extra \\ %{}) do
     Map.merge(%{"rpc_url" => @rpc_url, "chain_id" => @chain_id}, extra)
   end
@@ -1045,7 +1088,7 @@ defmodule MPP.Methods.EVMTest do
     padded_sender = "0x" <> String.duplicate("0", 24) <> strip_0x(sender)
     padded_recipient = "0x" <> String.duplicate("0", 24) <> strip_0x(recipient)
 
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
@@ -1065,7 +1108,7 @@ defmodule MPP.Methods.EVMTest do
           "logIndex" => "0x0"
         }
       ]
-    }
+    })
   end
 
   defp strip_0x("0x" <> rest), do: rest
@@ -1073,24 +1116,26 @@ defmodule MPP.Methods.EVMTest do
 
   # A successful native-ETH transaction receipt to @recipient.
   defp native_receipt do
-    %{
+    RPCShapes.receipt(%{
       "transactionHash" => @tx_hash,
       "blockNumber" => "0x1",
       "status" => "0x1",
       "from" => @sender,
       "to" => @recipient,
       "logs" => []
-    }
+    })
   end
 
   # A native-ETH transaction of exactly 1 ETH to @recipient.
   defp native_tx do
-    %{
+    RPCShapes.transaction(%{
       "hash" => @tx_hash,
       "from" => @sender,
       "to" => @recipient,
       "value" => "0xde0b6b3a7640000",
       "input" => "0x"
-    }
+    })
   end
+
+  # --- Test helpers ---
 end

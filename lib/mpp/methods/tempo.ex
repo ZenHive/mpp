@@ -156,7 +156,6 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Intents.Subscription
   alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.AccessKey
-  alias MPP.Methods.Tempo.EnvelopeFields, as: TxFields
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.MachineToken
@@ -852,8 +851,8 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp fee_token_hex(%Transaction{fields: fields}) do
-    case Enum.at(fields, TxFields.fee_token()) do
+  defp fee_token_hex(%Transaction{fee_token: fee_token}) do
+    case fee_token do
       <<token::binary-size(20)>> ->
         {:ok, "0x" <> Base.encode16(token, case: :lower)}
 
@@ -1332,91 +1331,38 @@ defmodule MPP.Methods.Tempo do
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
   # Re-encode a deserialized 0x76 envelope so every accepted signature encoding
-  # and every non-canonical RLP integer maps to one byte string.
-  # onchain_tempo 0.10.0 has no public serialize/1 — it only re-encodes inside
-  # cosign_fee_payer — so the charge path does it here before FeePayerPolicy,
-  # reserve, or any RPC (mppx #818 / adcf3b5; ox Transaction.serialize).
-  defp canonicalize_transaction(%Transaction{fields: fields} = tx) when is_list(fields) do
-    canonical_fields = canonicalize_fields(fields)
-    binary = <<0x76>> <> ExRLP.encode(canonical_fields)
-    hex = "0x" <> Base.encode16(binary, case: :lower)
-    hash = "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
-    {:ok, %{tx | fields: canonical_fields, raw: hex}, hash}
+  # and every non-canonical RLP integer maps to one byte string: a high-s
+  # secp256k1 sender signature is flipped to low-s, then tempo-primitives
+  # serializes the named fields. Runs before FeePayerPolicy, reserve, or any
+  # RPC (mppx #818 / adcf3b5; ox Transaction.serialize).
+  defp canonicalize_transaction(%Transaction{} = tx) do
+    tx = normalize_sender_signature(tx)
+
+    case Transaction.serialize(tx) do
+      {:ok, "0x" <> hex} ->
+        raw = "0x" <> String.downcase(hex)
+        {:ok, %{tx | raw: raw}, transaction_hash(raw)}
+
+      {:error, reason} ->
+        {:error, "Transaction could not be re-encoded: #{reason}"}
+    end
   end
+
+  defp normalize_sender_signature(%Transaction{signature: {:secp256k1, %{r: r, s: s, y_parity: parity}}} = tx) do
+    %Signature{s: s, recid: parity} = Signature.normalize(%Signature{r: r, s: s, recid: parity})
+    %{tx | signature: {:secp256k1, %{r: r, s: s, y_parity: parity}}}
+  end
+
+  defp normalize_sender_signature(tx), do: tx
 
   # --- Onchain.Tempo.RPC adapter functions ---
   # Delegates to onchain_tempo and wraps string errors in MPP.Errors structs.
 
-  defp transaction_hash(%Transaction{raw: raw}) when is_binary(raw) do
+  defp transaction_hash(%Transaction{raw: raw}) when is_binary(raw), do: transaction_hash(raw)
+
+  defp transaction_hash(raw) when is_binary(raw) do
     {:ok, binary} = Base.decode16(Hex.strip_0x(raw), case: :mixed)
     "0x" <> Base.encode16(Onchain.Hash.keccak(binary), case: :lower)
-  end
-
-  defp canonicalize_fields(fields) do
-    fields
-    |> canonicalize_uint_fields()
-    |> canonicalize_call_values()
-    |> canonicalize_trailing_sender_signature()
-  end
-
-  defp canonicalize_uint_fields(fields) do
-    uint? = canonical_uint_index_set()
-
-    fields
-    |> Enum.with_index()
-    |> Enum.map(fn {value, idx} ->
-      if is_binary(value) and MapSet.member?(uint?, idx), do: rlp_canonical_uint(value), else: value
-    end)
-  end
-
-  defp canonical_uint_index_set do
-    MapSet.new([
-      TxFields.chain_id(),
-      TxFields.max_priority_fee_per_gas(),
-      TxFields.max_fee_per_gas(),
-      TxFields.gas_limit(),
-      TxFields.nonce_key(),
-      TxFields.nonce(),
-      TxFields.valid_before(),
-      TxFields.valid_after()
-    ])
-  end
-
-  defp canonicalize_call_values(fields) do
-    calls = Enum.at(fields, TxFields.calls())
-    List.replace_at(fields, TxFields.calls(), Enum.map(calls, &canonicalize_call/1))
-  end
-
-  defp canonicalize_call([to, value, input]) when is_binary(value), do: [to, rlp_canonical_uint(value), input]
-  defp canonicalize_call(call), do: call
-
-  defp canonicalize_trailing_sender_signature(fields) do
-    {base, [sender_sig]} = Enum.split(fields, -1)
-    base ++ [canonicalize_sender_signature(sender_sig)]
-  end
-
-  defp canonicalize_sender_signature(<<r::unsigned-big-size(256), s::unsigned-big-size(256), v::8>>)
-       when v in [0, 1, 27, 28] do
-    recid = if v >= 27, do: v - 27, else: v
-
-    %Signature{r: r, s: s, recid: recid}
-    |> Signature.normalize()
-    |> encode_canonical_sender_signature()
-  end
-
-  defp canonicalize_sender_signature(other), do: other
-
-  defp encode_canonical_sender_signature(%Signature{r: r, s: s, recid: recid}) when recid in 0..3 do
-    <<r::unsigned-big-size(256), s::unsigned-big-size(256), recid + 27::8>>
-  end
-
-  defp rlp_canonical_uint(<<>>), do: <<>>
-
-  defp rlp_canonical_uint(bin) when is_binary(bin) do
-    case :binary.decode_unsigned(bin) do
-      0 -> <<>>
-      n -> :binary.encode_unsigned(n)
-    end
   end
 
   # Validates memo format: exactly 32 bytes of hex (64 chars), optional 0x prefix.
