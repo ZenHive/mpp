@@ -6344,7 +6344,7 @@
       "id": "150",
       "phase": 12,
       "bundle": "client-sdk",
-      "status": "in_progress",
+      "status": "done",
       "title": "Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455)",
       "scores": {
         "d": 3,
@@ -6366,10 +6366,17 @@
         "lib/mpp/client/providers/tempo.ex",
         "test/mpp/client/providers/"
       ],
+      "shipped_in": "020abb4656606f47e9445f749618560bee570baa",
       "body": "mpp-rs #470 (8ad3b8d) checks chain, modes and expiry before the client signs a charge. Chain pinning and the default validBefore cap are already in `MPP.Client.Providers.Tempo` (client/providers/tempo.ex ~111-112, ~429-436). Two gaps remain:\n\n- A caller-supplied `transaction_options.valid_before` bypasses the cap, because it is merged with `Map.put_new` (~194). Apply `min(value, challenge expires)` to caller values too.\n- mpp-rs #455 (6f94558) adds a `supportedModes` method detail (pull/push) that servers advertise and enforce. We neither advertise nor enforce it (no hits in lib/). Port both sides: the server advertises the configured modes and rejects a credential type outside them, and the client refuses a challenge whose modes exclude what it can produce.\n\nVerify field names and semantics against refs/mpp-rs and refs/mpp-specs.\n",
       "created_at": "2026-10-02",
       "started_at": "2026-10-02",
+      "done_at": "2026-10-02",
       "scored_at": "2026-10-02",
+      "implemented": "Landed by cursor via merge-train; reviewer-approved (run run-1790936986733-6c68f1da, 020abb4656606f47e9445f749618560bee570baa).",
+      "delivered_by": "cursor",
+      "verified": true,
+      "verified_by": "claude",
+      "verification_ref": "harness-run:run-1790936986733-6c68f1da",
       "cross_repo": []
     }
   ]

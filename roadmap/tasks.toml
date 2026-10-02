@@ -4077,7 +4077,7 @@ scored_at = "2026-10-02"
 id = "150"
 phase = 12
 bundle = "client-sdk"
-status = "in_progress"
+status = "done"
 title = "Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455)"
 scores = { d = 3, b = 4, u = 3 }
 acceptance_criteria = ["A caller-supplied valid_before later than the challenge expiry is capped to the expiry (test)", "Tempo challenges can advertise supportedModes; the server rejects a credential type outside them, and the client provider declines such a challenge (tests)"]
@@ -4092,9 +4092,16 @@ mpp-rs #470 (8ad3b8d) checks chain, modes and expiry before the client signs a c
 
 Verify field names and semantics against refs/mpp-rs and refs/mpp-specs.
 """
+implemented = "Landed by cursor via merge-train; reviewer-approved (run run-1790936986733-6c68f1da, 020abb4656606f47e9445f749618560bee570baa)."
+delivered_by = "cursor"
+verified = true
+verified_by = "claude"
+verification_ref = "harness-run:run-1790936986733-6c68f1da"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "020abb4656606f47e9445f749618560bee570baa"
 
 [bundles.testnet-funding]
 phase = 1
