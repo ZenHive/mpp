@@ -134,9 +134,15 @@ defmodule MPP.Session.Channel do
 
   def activate(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :active}}
 
-  @doc "Move an active channel to the closed state, ending any pending close."
-  @spec close(t()) :: {:ok, t()} | {:error, {:invalid_transition, status(), :closed}}
-  def close(%__MODULE__{status: :active} = channel), do: {:ok, %{channel | status: :closed, closing: false}}
+  @doc """
+  Move an active channel to the closed state.
+
+  A channel reserved by `mark_closing/1` is closed only by the holder of that
+  reservation, which releases it with `clear_closing/1` first.
+  """
+  @spec close(t()) :: {:ok, t()} | {:error, :channel_closing | {:invalid_transition, status(), :closed}}
+  def close(%__MODULE__{status: :active, closing: true}), do: {:error, :channel_closing}
+  def close(%__MODULE__{status: :active} = channel), do: {:ok, %{channel | status: :closed}}
 
   def close(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :closed}}
 

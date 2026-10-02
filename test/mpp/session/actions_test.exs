@@ -430,6 +430,9 @@ defmodule MPP.Session.ActionsTest do
         assert String.contains?(voucher.type, "channel-finalized")
         assert voucher.detail == "channel is closing"
 
+        assert {:error, %Errors{detail: "channel is closing"}} =
+                 Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, :caller))
+
         {:ok, _} = Store.update(store, @channel_id, &{:ok, Channel.clear_closing(&1)})
       end
     end
@@ -453,6 +456,9 @@ defmodule MPP.Session.ActionsTest do
 
       competing = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("second settlement submitted") end)
       assert {:error, %Errors{detail: "channel is closing"}} = Actions.dispatch(close_payload(50), competing)
+
+      caller_managed = Keyword.put(opts, :settle_close, :caller)
+      assert {:error, %Errors{detail: "channel is closing"}} = Actions.dispatch(close_payload(50), caller_managed)
 
       assert {:error, %Errors{detail: "channel is closing"}} =
                Actions.dispatch(

@@ -210,8 +210,9 @@ defmodule MPP.Session.ChannelTest do
       assert {:error, :channel_closing} = Channel.apply_spend(closing, 0)
       assert {:error, {:invalid_transition, :open, :closed}} = channel_opts() |> Channel.new!() |> Channel.mark_closing()
 
+      assert {:error, :channel_closing} = Channel.close(closing)
       assert Channel.clear_closing(closing) == active
-      assert {:ok, %Channel{status: :closed, closing: false}} = Channel.close(closing)
+      assert {:ok, %Channel{status: :closed, closing: false}} = closing |> Channel.clear_closing() |> Channel.close()
     end
 
     test "rejects non-integer balance mutations and treats a zero spend as a no-op" do
