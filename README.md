@@ -95,6 +95,19 @@ pipeline :paid_tempo do
 end
 ```
 
+Tempo and EVM charge routes accept `currencies: [token_a, token_b]` instead of
+`currency:` to offer an ordered list. The amount is in each token's base units;
+use separate method entries for different prices. Duplicate token addresses
+are removed case-insensitively, preserving the first spelling and offer order.
+Tempo routes with neither option offer OUSD then USDC.e on mainnet (4217), or
+OUSD then pathUSD on Moderato (42431, the default chain). Other Tempo chains
+require an explicit currency. EVM routes require `currency:` or `currencies:`.
+
+Tempo charge receipts expose `funding_currency` (wire `fundingCurrency`) when
+the funding token can be identified: the charge token for a direct single-call
+payment, or the machine token for its supported swap route. Other multi-call
+routes omit it.
+
 ### EVM (Ethereum, Base, Polygon, etc.)
 
 ```elixir

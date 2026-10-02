@@ -10,6 +10,7 @@ defmodule MPP.Methods.Shared do
   """
 
   alias MPP.Errors
+  alias MPP.Hex
   alias MPP.Intents.Shared, as: IntentShared
 
   @doc """
@@ -24,6 +25,22 @@ defmodule MPP.Methods.Shared do
       nil -> {:error, Errors.new(:verification_failed, "#{label} method missing required config: #{key}")}
       value -> {:ok, value}
     end
+  end
+
+  @doc "Extract a transaction hash as lowercase, 0x-prefixed hex for lookup, dedup and receipts."
+  @spec extract_hash(map()) :: {:ok, String.t()} | {:error, Errors.t()}
+  def extract_hash(%{"hash" => hash}) when is_binary(hash) do
+    hex = Hex.strip_0x(hash)
+
+    if byte_size(hex) == 64 and Hex.hex_string?(hex) do
+      {:ok, "0x" <> String.downcase(hex)}
+    else
+      {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
+    end
+  end
+
+  def extract_hash(_) do
+    {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
   end
 
   @doc """

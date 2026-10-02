@@ -233,6 +233,19 @@ defmodule MPP.ChallengeTest do
       assert :ok = Challenge.validate_fields(valid_challenge())
     end
 
+    test "rejects non-string intent, opaque and credential header fields" do
+      for value <- [123, [], %{}] do
+        assert {:error, :invalid_intent} = Challenge.validate_fields(%{valid_challenge() | intent: value})
+        assert {:error, :invalid_opaque} = Challenge.validate_fields(%{valid_challenge() | opaque: value})
+        assert {:error, :invalid_header} = Challenge.validate_fields(%{valid_challenge() | header: value})
+      end
+    end
+
+    test "empty credential header validates and creates the default HMAC binding" do
+      assert :ok = Challenge.validate_fields(%{valid_challenge() | header: ""})
+      assert Challenge.create(@base_params ++ [header: ""], @secret_key) == valid_challenge()
+    end
+
     test "accepts an optional sha-256 digest" do
       challenge = %{valid_challenge() | digest: "sha-256=abc123"}
       assert :ok = Challenge.validate_fields(challenge)

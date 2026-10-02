@@ -184,7 +184,7 @@ defmodule MPP.Session.Channel do
   end
 
   @doc "Build the method-specific settlement proof retained for a claim."
-  @spec new_proof(non_neg_integer(), String.t(), String.t()) :: proof()
+  @spec new_proof(non_neg_integer(), String.t(), String.t() | nil) :: proof()
   def new_proof(amount, signature, public_key), do: %{amount: amount, signature: signature, public_key: public_key}
 
   @doc "Raise the accepted cumulative voucher amount. Equal amounts are idempotent."

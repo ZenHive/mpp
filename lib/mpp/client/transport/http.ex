@@ -122,8 +122,9 @@ defmodule MPP.Client.Transport.HTTP do
         {:error, :missing_www_authenticate}
 
       values ->
-        # RFC 9110 §5.5: field values are ISO-8859-1. Mint stores the raw
-        # bytes; a Latin-1 0xE9 is "é". ASCII, including our `\uXXXX` escapes,
+        # Mint stores raw field bytes. Decode them as Latin-1 for mpp-rs #489
+        # compatibility, not as an RFC 9110 charset requirement (see §5.5).
+        # A Latin-1 0xE9 is "é". ASCII, including our `\uXXXX` escapes,
         # is unchanged (mpp-rs #489). Decode here, before parse — callers that
         # already hold an Elixir string must not be re-decoded.
         values

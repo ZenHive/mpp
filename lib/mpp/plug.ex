@@ -118,10 +118,10 @@ defmodule MPP.Plug do
 
   defmodule MethodEntry do
     @moduledoc """
-    Per-method configuration within a multi-method endpoint.
+    Per-offer configuration within a payment endpoint.
 
     Holds the pre-computed charge, base64url request string, and server-only
-    config for a single payment method.
+    config for a single payment offer.
     """
 
     @type t :: %__MODULE__{
@@ -140,7 +140,7 @@ defmodule MPP.Plug do
     Validated configuration for `MPP.Plug`.
 
     Built once at init time from plug opts. Holds shared endpoint settings
-    and a list of `MethodEntry` structs — one per accepted payment method.
+    and a list of `MethodEntry` structs — one per accepted payment offer.
     """
 
     @type t :: %__MODULE__{
@@ -177,7 +177,7 @@ defmodule MPP.Plug do
   Builds validated plug configuration from options at init time.
 
   Normalizes single- or multi-method opts into a `%Config{}` with one
-  `MethodEntry` per accepted payment method. Raises on missing required
+  `MethodEntry` per accepted payment offer. Raises on missing required
   options or ambiguous method request bindings.
   """
   @impl Plug

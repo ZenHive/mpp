@@ -4,6 +4,29 @@ defmodule MPP.Methods.SharedTest do
   alias MPP.Errors
   alias MPP.Methods.Shared
 
+  describe "extract_hash/1" do
+    test "canonicalizes mixed-case hashes with or without the prefix" do
+      digits = String.duplicate("aB", 32)
+      expected = "0x" <> String.downcase(digits)
+
+      for hash <- [digits, "0x" <> digits] do
+        assert {:ok, ^expected} = Shared.extract_hash(%{"hash" => hash})
+      end
+    end
+
+    test "rejects malformed hashes and missing values with distinct errors" do
+      for hash <- ["", String.duplicate("a", 63), String.duplicate("a", 65), String.duplicate("g", 64)] do
+        assert {:error, %Errors{detail: "Invalid transaction hash format"}} =
+                 Shared.extract_hash(%{"hash" => hash})
+      end
+
+      for payload <- [%{}, %{"hash" => nil}, %{"hash" => 123}] do
+        assert {:error, %Errors{detail: "Missing or invalid 'hash' field in credential payload"}} =
+                 Shared.extract_hash(payload)
+      end
+    end
+  end
+
   describe "require_config/3" do
     test "returns the value when the key is present" do
       assert {:ok, "sk_test"} = Shared.require_config(%{"stripe_secret_key" => "sk_test"}, "stripe_secret_key", "Stripe")

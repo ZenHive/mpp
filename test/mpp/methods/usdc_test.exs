@@ -628,7 +628,9 @@ defmodule MPP.Methods.USDCTest do
       end)
 
       assert {:error, receipt_rpc} = USDC.verify(payload, charge)
-      assert receipt_rpc.detail =~ "EVM RPC"
+      assert receipt_rpc.status == 500
+      assert receipt_rpc.type == "https://paymentauth.org/problems/internal-payment-error"
+      assert receipt_rpc.detail == "An internal payment error occurred."
     end
 
     test "a dedup store error is reported and solana profile fields are rejected" do

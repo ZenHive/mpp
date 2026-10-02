@@ -139,7 +139,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent, empty, Authorization or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,

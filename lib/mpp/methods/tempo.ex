@@ -240,6 +240,11 @@ defmodule MPP.Methods.Tempo do
     :ok
   end
 
+  api(:default_currencies, "Ordered charge currencies for Tempo mainnet or Moderato.",
+    params: [chain_id: [kind: :value, description: "Tempo mainnet (4217) or Moderato (42431) chain ID"]],
+    returns: %{type: :list, description: "OUSD followed by USDC.e on mainnet or pathUSD on Moderato"}
+  )
+
   @doc "Ordered charge currencies for Tempo mainnet or Moderato."
   @spec default_currencies(non_neg_integer()) :: [String.t()]
   def default_currencies(chain_id) do
@@ -328,7 +333,7 @@ defmodule MPP.Methods.Tempo do
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
-         {:ok, hash} <- extract_hash(payload),
+         {:ok, hash} <- Shared.extract_hash(payload),
          :ok <- check_hash_unused(store, hash),
          :ok <- verify_hash_presenter_binding(payload, source, expected_chain_id, config),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
@@ -1579,23 +1584,6 @@ defmodule MPP.Methods.Tempo do
   defp validate_memo!(other) do
     raise ArgumentError,
           "memo must be a 32-byte hex string (#{@memo_hex_length} hex chars), got: #{inspect(other)}"
-  end
-
-  # Extracts and validates the tx hash from a hash credential payload, returning
-  # the canonical `0x`-prefixed lowercase form so every spelling of one hash
-  # shares one dedup key, receipt lookup and receipt reference (mpp-rs #484).
-  defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
-    hex = Hex.strip_0x(hash)
-
-    if byte_size(hex) == 64 and Hex.hex_string?(hex) do
-      {:ok, "0x" <> String.downcase(hex)}
-    else
-      {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
-    end
-  end
-
-  defp extract_hash(_) do
-    {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
   end
 
   defp parse_hash_credential_source(nil, _expected_chain_id), do: {:ok, nil}

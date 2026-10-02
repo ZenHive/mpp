@@ -121,7 +121,6 @@ defmodule MPP.Methods.EVM do
   use Descripex, namespace: "/methods"
 
   alias MPP.Errors
-  alias MPP.Hex
   alias MPP.Intents.Charge
   alias MPP.Methods.EVM.Authorization
   alias MPP.Methods.EVM.Permit2
@@ -249,7 +248,7 @@ defmodule MPP.Methods.EVM do
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          :ok <- reject_splits(config, "hash"),
-         {:ok, hash} <- extract_hash(payload),
+         {:ok, hash} <- Shared.extract_hash(payload),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "EVM"),
          :ok <- require_recipient(charge),
          :ok <- check_hash_unused(store, hash),
@@ -430,20 +429,6 @@ defmodule MPP.Methods.EVM do
   end
 
   # --- Shared helpers ---
-
-  defp extract_hash(%{"hash" => hash}) when is_binary(hash) do
-    hex = Hex.strip_0x(hash)
-
-    if byte_size(hex) == 64 and Hex.hex_string?(hex) do
-      {:ok, "0x" <> String.downcase(hex)}
-    else
-      {:error, Errors.new(:invalid_payload, "Invalid transaction hash format")}
-    end
-  end
-
-  defp extract_hash(_) do
-    {:error, Errors.new(:invalid_payload, "Missing or invalid 'hash' field in credential payload")}
-  end
 
   # EVM verification requires a recipient address — fail fast if nil.
   defp require_recipient(%Charge{recipient: nil}),

@@ -1,6 +1,6 @@
 defmodule MPP.Headers do
   @moduledoc """
-  Parse and format the three MPP protocol wire-format headers.
+  Parse and format MPP challenge, credential, and receipt headers.
 
   ## Headers
 
@@ -305,9 +305,9 @@ defmodule MPP.Headers do
   # Rejects CR/LF which would produce invalid header text or break HMAC binding.
   #
   # Every code point outside HTAB and printable ASCII (0x20-0x7E) is escaped
-  # as `\uXXXX`, matching mpp-rs #450. Raw Latin-1 (U+00E9 as UTF-8) and C0
-  # controls are not legal header field content, and a client that decodes the
-  # field as Latin-1 (mpp-rs #489) would read our UTF-8 bytes as mojibake.
+  # as `\uXXXX`, matching mpp-rs #450. RFC 9110 §5.5 permits opaque obs-text
+  # bytes, but a client decoding UTF-8 bytes as Latin-1 (mpp-rs #489) would
+  # read them as mojibake. ASCII escaping also avoids raw C0 controls.
   # mppx #813 escapes only U+0100 and above; we still decode that form.
   defp escape_quoted(value) do
     if String.contains?(value, ["\r", "\n"]) do

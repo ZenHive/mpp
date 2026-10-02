@@ -349,7 +349,7 @@ defmodule MPP.TelemetryTest do
                Verifier.verify(credential, verify_opts(method: MockMethodAtomError))
 
       [{_event, _measurements, metadata}] = TelemetryCollector.metadata_for([:mpp, :verify, :fail])
-      assert metadata[:error_type] =~ "verification-failed"
+      assert metadata[:error_type] == "https://paymentauth.org/problems/internal-payment-error"
     end
   end
 
