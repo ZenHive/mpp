@@ -3956,7 +3956,7 @@ scored_at = "2026-10-02"
 id = "145"
 phase = 1
 bundle = "core-protocol"
-status = "in_progress"
+status = "done"
 title = "Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447)"
 scores = { d = 5, b = 6, u = 5 }
 acceptance_criteria = ["Formatting a challenge with realm/description containing U+00E9, a C0 control and DEL yields only 0x09/0x20-0x7E bytes on the wire, and parse(format(x)) == x", 'The HTTP client parses a WWW-Authenticate whose description is the single Latin-1 byte 0xE9 into the string "é" and can build a credential from it without raising', "A challenge ending in `description=` and one with `description=,` parse successfully with an empty description", 'Challenge.create with header: "Cookie" does not emit or HMAC-bind that header; credential_header/1 returns Authorization for it; Payment-Authorization matches case-insensitively', "A credential echoing a legacy object-form opaque verifies against a challenge whose opaque is the base64url(JCS) of that object", "MCP client keeps valid challenges when one entry in error.data.challenges is malformed, and errors only when all are malformed", "headers.ex 16 KiB comment matches mpp-rs #540", ":cross_validation round-trip test against mppx for the escaping change, or a stated reason it cannot run"]
@@ -3977,9 +3977,16 @@ A batch of mpp-rs fixes to WWW-Authenticate challenge encoding and parsing. They
 
 Ground truth is refs/mpp-rs and refs/mppx (tier 2). Cross-validate round-trips against mppx via the existing QuickBEAM harness where practical.
 '''
+implemented = "Landed by grok via merge-train; reviewer-approved (run run-1790936981255-ccb8a0d3, 64c8b406be36eb6944fa65db53102a94ed65c66c)."
+delivered_by = "grok"
+verified = true
+verified_by = "cursor"
+verification_ref = "harness-run:run-1790936981255-ccb8a0d3"
 created_at = "2026-10-02"
 started_at = "2026-10-02"
 scored_at = "2026-10-02"
+done_at = "2026-10-02"
+shipped_in = "64c8b406be36eb6944fa65db53102a94ed65c66c"
 
 [[task]]
 id = "146"
