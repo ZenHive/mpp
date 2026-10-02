@@ -202,7 +202,7 @@ defmodule MPP.Methods.Tempo.Subscription do
          {:ok, access_key} <- access_key(config),
          record =
            record(subscription, authorization, serialized_authorization, access_key, tx_hash, settled_at),
-         :ok <- Store.put(store(config), record) do
+         :ok <- put_record(store(config), record) do
       {:ok, receipt(record)}
     else
       {:error, "subscription transaction reverted" = reason} -> {:error, {:retryable, reason}}
@@ -551,7 +551,7 @@ defmodule MPP.Methods.Tempo.Subscription do
          {:ok, datetime} <- DateTime.from_unix(timestamp) do
       {:ok, datetime}
     else
-      _ -> {:error, "subscription settlement block timestamp unavailable"}
+      _ -> {:error, Shared.internal_payment_error()}
     end
   end
 
@@ -568,6 +568,13 @@ defmodule MPP.Methods.Tempo.Subscription do
     case Store.get(subscription_store, id) do
       {:ok, record} -> {:ok, record}
       :not_found -> {:error, :subscription_not_found}
+      {:error, _reason} -> store_unavailable()
+    end
+  end
+
+  defp put_record(subscription_store, record) do
+    case Store.put(subscription_store, record) do
+      :ok -> :ok
       {:error, _reason} -> store_unavailable()
     end
   end

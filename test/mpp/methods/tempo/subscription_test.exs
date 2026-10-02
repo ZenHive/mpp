@@ -524,6 +524,19 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
                Subscription.verify(payload, subscription)
     end
 
+    test "keeps the activation claim when persisting a settled subscription fails", %{store: store} do
+      stub_successful_chain()
+      config = store |> config() |> Map.put("subscription_store", FailingStore)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      InternalPaymentError.assert_error(Subscription.verify(payload, subscription))
+
+      assert {:error, %Errors{status: 402, detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
     test "keeps a reverted activation claim when the store cannot release it", %{store: store} do
       DedupOnlyStore.prepare()
       stub_reverted_chain()
@@ -587,11 +600,13 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       stub_missing_settlement()
 
-      assert {:error, %Errors{detail: "subscription settlement block timestamp unavailable"}} =
-               Subscription.verify(
-                 %{"type" => "keyAuthorization", "signature" => missing_signature},
-                 missing_subscription
-               )
+      missing_payload = %{"type" => "keyAuthorization", "signature" => missing_signature}
+      InternalPaymentError.assert_error(Subscription.verify(missing_payload, missing_subscription))
+
+      stub_successful_chain()
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(missing_payload, missing_subscription)
 
       expiry_config = config(store)
       expiry_subscription = subscription(expiry_config)
