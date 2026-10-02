@@ -3776,6 +3776,25 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
 
+    test "binds a credential source to the transaction sender without presenter binding",
+         %{charge: charge, tx_hex: tx_hex, memo: memo} do
+      charge = put_in(charge.method_details["require_presenter_binding"], false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      sender_hex = test_sender_address()
+
+      other = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:0x#{String.duplicate("22", 20)}")
+      assert {:error, %Errors{} = mismatch} = Tempo.verify(payload, other)
+      assert mismatch.detail =~ "Credential source does not match the transaction sender"
+
+      wrong_chain = put_in(charge.method_details["credential_source"], "did:pkh:eip155:4217:#{sender_hex}")
+      assert {:error, %Errors{} = invalid} = Tempo.verify(payload, wrong_chain)
+      assert invalid.detail =~ "source is invalid"
+
+      stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: sender_hex, memo: memo)]))
+      sender = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{sender_hex}")
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, sender)
+    end
+
     test "rejects an invalid provided presenter signature even when binding is not required",
          %{charge: charge, tx_hex: tx_hex} do
       charge = put_in(charge.method_details["require_presenter_binding"], false)

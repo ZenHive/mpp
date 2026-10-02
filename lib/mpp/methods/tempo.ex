@@ -828,11 +828,12 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Transaction path: the account is the sender recovered from the signed 0x76
-  # transaction itself; a credential `source`, when present, must agree.
+  # transaction itself; a credential `source`, when present, must name it on
+  # every transaction credential, before any co-sign or broadcast (mpp-rs #477).
   defp verify_transaction_presenter_binding(payload, tx, expected_chain_id, config) do
     case {payload["presenterSignature"], presenter_binding_required?(config)} do
       {nil, false} ->
-        :ok
+        check_transaction_source(tx, config["credential_source"], expected_chain_id)
 
       {nil, true} ->
         {:error, missing_presenter_signature_error()}
@@ -870,7 +871,15 @@ defmodule MPP.Methods.Tempo do
         {:ok, "0x" <> Base.encode16(addr, case: :lower)}
 
       {:error, _reason} ->
-        {:error, Errors.new(:verification_failed, "Could not recover transaction sender for presenter binding")}
+        {:error, Errors.new(:verification_failed, "Could not recover the transaction sender")}
+    end
+  end
+
+  defp check_transaction_source(_tx, nil, _expected_chain_id), do: :ok
+
+  defp check_transaction_source(tx, source, expected_chain_id) do
+    with {:ok, sender} <- recover_transaction_sender(tx) do
+      check_source_matches_sender(source, sender, expected_chain_id)
     end
   end
 
