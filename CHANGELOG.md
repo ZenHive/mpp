@@ -27,14 +27,25 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
   charge currency for a direct single-call payment, the machine token for a
   machine-token route. It is omitted when the route cannot be attributed
   (mppx `Charge.ts` parity).
+- **Tempo machine-token routes recognize MACH alongside machineUSD.** With
+  `"machine_token_enabled"`, the server accepts settlement from either
+  canonical swapper and either exact `[approve, swapTo]` route (mppx #902).
+  A machine-token address configured as the charge currency raises at
+  `MPP.Plug.init/1`.
 
 ### Changed
 
+- **`MPP.Client.Providers.Tempo` pays machine-token charges through MACH by
+  default**, the route current mppx servers expect. Pass
+  `machine_token_deployment: :machine_usd` for servers that accept only the
+  machineUSD route, such as mpp-rs.
 - **Infrastructure failures return `internal-payment-error` (HTTP 500, no
   challenge)** instead of `verification-failed` with a fresh 402, matching
   mpp-rs. This covers RPC broadcast and receipt fetch, dedup-store and sponsor
-  budget errors, Stripe 5xx and transport errors, and unclassified EVM node
-  errors. Because the server cannot tell whether a broadcast went through, the
+  budget errors, Stripe 5xx and transport errors, unclassified EVM node
+  errors, credential replay-store errors, Stripe subscription and NEAR Intents
+  settlement-state store errors, and XRPL close-redeem transport errors.
+  Because the server cannot tell whether a broadcast went through, the
   client is not invited to pay again. Reverts, used hashes or authorizations,
   and token rejections stay 402.
 - **Pinned-field mismatches report `invalid-challenge`.** `credential_mismatch`

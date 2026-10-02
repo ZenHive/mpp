@@ -6551,7 +6551,7 @@
       "id": "153",
       "phase": 17,
       "bundle": "transport-ws",
-      "status": "done",
+      "status": "superseded",
       "title": "Offer every Tempo charge currency on the WebSocket handshake",
       "scores": {
         "d": 4,

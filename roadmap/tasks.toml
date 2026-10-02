@@ -4225,7 +4225,7 @@ shipped_in = "cdf773d32de6fb87a1c7083353127e156c1e2072"
 id = "153"
 phase = 17
 bundle = "transport-ws"
-status = "done"
+status = "superseded"
 title = "Offer every Tempo charge currency on the WebSocket handshake"
 scores = { d = 4, b = 4, u = 4 }
 markers = ["parallel"]

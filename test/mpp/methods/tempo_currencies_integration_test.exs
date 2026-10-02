@@ -5,16 +5,13 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
   """
   use ExUnit.Case, async: false
 
-  alias MPP.Client.Providers.Tempo, as: TempoProvider
-  alias MPP.Client.Transport.WebSocket, as: ClientTransport
-  alias MPP.Credential
   alias MPP.Errors
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.FaucetWallet
-  alias MPP.Transports.WebSocket
   alias Onchain.Address
   alias Onchain.Tempo.RPC
+  alias Onchain.Tempo.Transaction.Builder
 
   @moduletag :integration
   # docs.tempo.xyz/guide/ousd prints this account in lowercase and deploys it on
@@ -24,45 +21,37 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
   @path_usd "0x20c0000000000000000000000000000000000000"
   @recipient "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
 
-  test "Moderato OUSD payment satisfies the second WebSocket offer but not pathUSD" do
+  test "Moderato OUSD payment succeeds and cannot satisfy the pathUSD offer" do
     rpc_url = System.get_env("TEMPO_RPC_URL") || "https://rpc.moderato.tempo.xyz"
     wallet = FaucetWallet.tempo!(rpc_url)
 
-    opts = [
-      secret_key: String.duplicate("k", 32),
-      realm: "ousd.integration.test",
-      method: Tempo,
-      amount: "1000000",
-      recipient: @recipient,
-      method_config: %{"chain_id" => 42_431, "rpc_url" => rpc_url, "store" => false}
-    ]
-
-    config = MPP.Plug.init(opts)
-
-    {session, [first, second]} =
-      opts
-      |> Keyword.merge(handler: fn _ -> "paid" end, currencies: [@path_usd, @ousd])
-      |> WebSocket.init()
-      |> WebSocket.open()
-
-    assert {:ok, [first_challenge]} = ClientTransport.get_challenges(Jason.decode!(first))
-    assert {:ok, [challenge]} = ClientTransport.get_challenges(Jason.decode!(second))
-
-    assert {:ok, payment} =
-             TempoProvider.pay(challenge, %{
+    assert {:ok, raw} =
+             Builder.build_signed_transfer(
                private_key: wallet.private_key,
+               token: @ousd,
+               recipient: @recipient,
+               amount: 1_000_000,
+               chain_id: 42_431,
                rpc_url: rpc_url,
                fee_token: @path_usd,
-               nonce_key: 0
-             })
+               nonce: 0
+             )
 
-    assert {:ok, hash, %{status: 1}} = RPC.broadcast_sync(payment.payload["signature"], rpc_url)
+    assert {:ok, hash, %{status: 1}} = RPC.broadcast_sync(raw, rpc_url)
+
+    config =
+      MPP.Plug.init(
+        secret_key: String.duplicate("k", 32),
+        realm: "ousd.integration.test",
+        method: Tempo,
+        amount: "1000000",
+        recipient: @recipient,
+        method_config: %{"chain_id" => 42_431, "rpc_url" => rpc_url, "store" => false}
+      )
 
     assert Address.equal?(@ousd, @ousd_docs)
     assert Enum.map(config.method_entries, & &1.charge.currency) == [@ousd, @path_usd]
     [ousd, path_usd] = config.method_entries
-    assert first_challenge.request == path_usd.request
-    assert challenge.request == ousd.request
     payload = %{"type" => "hash", "hash" => hash}
     charge = %{ousd.charge | method_details: ousd.method_config}
     assert {:ok, %Receipt{funding_currency: @ousd} = receipt} = Tempo.verify(payload, charge)
@@ -72,22 +61,5 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
 
     assert {:error, %Errors{detail: "No matching Transfer event found in transaction"}} =
              Tempo.verify(payload, wrong_charge)
-
-    altered = %{challenge | request: first_challenge.request}
-    credential = %Credential{challenge: altered, payload: payload}
-    text = credential |> then(&ClientTransport.set_credential(%{}, &1)) |> Jason.encode!()
-    {rejected, [error]} = WebSocket.handle_text(text, session)
-    assert rejected.status == :open
-    assert Jason.decode!(error) == %{"type" => "error", "error" => "Invalid Challenge"}
-
-    credential = %Credential{challenge: challenge, payload: payload}
-    text = credential |> then(&ClientTransport.set_credential(%{}, &1)) |> Jason.encode!()
-    {authorized, [receipt_text]} = WebSocket.handle_text(text, session)
-    assert authorized.status == :authorized, receipt_text
-    assert %{"type" => "receipt", "receipt" => ws_receipt} = Jason.decode!(receipt_text)
-    assert ws_receipt["status"] == "success"
-    assert ws_receipt["challengeId"] == challenge.id
-    assert ws_receipt["reference"] == hash
-    assert ws_receipt["fundingCurrency"] == @ousd
   end
 end
