@@ -6496,7 +6496,7 @@
       "id": "152",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Map the remaining store and redeem failures to internal-payment-error",
       "scores": {
         "d": 3,
@@ -6529,6 +6529,7 @@
       ],
       "body": "Follow-up to Task 151. Several infrastructure failures still re-challenge the client (402) or answer 503 instead of the mpp-rs-parity 500 internal-payment-error: dedup store errors in MPP.Replay (check_unused / mark_used), the Stripe subscription store sites, the NEAR Intents settlement-state store, and XRPL session close, whose maybe_redeem collapses every redeem error — including RPC transport failures that Task 151 now reports as internal-payment-error — into settlement_failed. Route these through MPP.Methods.Shared.internal_payment_error/0. Genuine rejections (credential already used, settlement definitively failed, a non-terminal 1Click status) keep their current problem types.",
       "created_at": "2026-10-02",
+      "started_at": "2026-10-02",
       "scored_at": "2026-10-02",
       "cross_repo": []
     },
