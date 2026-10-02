@@ -34,9 +34,6 @@ defmodule MPP.Methods.Tempo.Subscription do
   @subscription_id_bytes 18
   @renewal_in_flight_error "subscription renewal is already in flight"
   @activation_already_used "subscription activation credential already used"
-  @activation_store_unavailable "subscription activation store unavailable"
-  @activation_store_cannot_release "subscription activation store cannot release claims; " <>
-                                     "configure a Tempo store that implements update/3"
 
   @doc "Validate Tempo subscription-only method configuration."
   @spec validate_config!(map()) :: :ok
@@ -149,7 +146,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     case Store.get(store(config), subscription_id) do
       {:ok, record} -> authorize_record(record, config)
       :not_found -> {:error, Errors.new(:verification_failed, "subscription not found")}
-      {:error, _reason} -> {:error, Errors.new(:verification_failed, "subscription store unavailable")}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -316,21 +313,28 @@ defmodule MPP.Methods.Tempo.Subscription do
     |> case do
       {:ok, claimed} -> {:ok, claimed}
       {:error, {:already_current, current}} -> {:error, :already_current, current}
-      other -> other
+      {:error, :renewal_in_flight} -> {:error, :renewal_in_flight}
+      {:error, :subscription_not_found} -> {:error, :subscription_not_found}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
   defp finalize_renewal(subscription_store, updated, period_index) do
-    Store.update(subscription_store, updated.subscription_id, fn
-      %Record{in_flight_period: ^period_index} ->
-        {:ok, %{updated | in_flight_period: nil, in_flight_reference: nil}}
+    case Store.update(subscription_store, updated.subscription_id, fn
+           %Record{in_flight_period: ^period_index} ->
+             {:ok, %{updated | in_flight_period: nil, in_flight_reference: nil}}
 
-      %Record{} ->
-        {:error, :renewal_claim_mismatch}
+           %Record{} ->
+             {:error, :renewal_claim_mismatch}
 
-      :not_found ->
-        {:error, :subscription_not_found}
-    end)
+           :not_found ->
+             {:error, :subscription_not_found}
+         end) do
+      {:ok, record} -> {:ok, record}
+      {:error, :renewal_claim_mismatch} -> {:error, :renewal_claim_mismatch}
+      {:error, :subscription_not_found} -> {:error, :subscription_not_found}
+      {:error, _reason} -> store_unavailable()
+    end
   end
 
   defp release_renewal(subscription_store, subscription_id, period_index) do
@@ -357,7 +361,7 @@ defmodule MPP.Methods.Tempo.Subscription do
         case TempoStore.check_and_mark(store, key, System.system_time(:millisecond)) do
           :ok -> :ok
           {:error, :already_exists} -> {:error, @activation_already_used}
-          {:error, _reason} -> {:error, @activation_store_unavailable}
+          {:error, _reason} -> store_unavailable()
         end
     end
   end
@@ -373,10 +377,10 @@ defmodule MPP.Methods.Tempo.Subscription do
     if TempoStore.update_capable?(store) do
       case TempoStore.update(store, activation_dedup_key(config, signature), &release_activation_value/1) do
         {:ok, :ok} -> :ok
-        {:error, _reason} -> {:error, @activation_store_unavailable}
+        {:error, _reason} -> store_unavailable()
       end
     else
-      {:error, @activation_store_cannot_release}
+      store_unavailable()
     end
   end
 
@@ -447,7 +451,10 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   defp broadcast(raw, config) do
     with {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo") do
-      TempoRPC.broadcast_sync(raw, rpc_url, req_options(config))
+      case TempoRPC.broadcast_sync(raw, rpc_url, req_options(config)) do
+        {:ok, _tx_hash, _receipt} = ok -> ok
+        {:error, _reason} -> {:error, Shared.internal_payment_error()}
+      end
     end
   end
 
@@ -561,7 +568,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     case Store.get(subscription_store, id) do
       {:ok, record} -> {:ok, record}
       :not_found -> {:error, :subscription_not_found}
-      {:error, reason} -> {:error, reason}
+      {:error, _reason} -> store_unavailable()
     end
   end
 
@@ -580,6 +587,8 @@ defmodule MPP.Methods.Tempo.Subscription do
   defp callback_arity(:put), do: 1
   defp callback_arity(:update), do: 2
   defp callback_arity(:delete), do: 1
+
+  defp store_unavailable, do: {:error, Shared.internal_payment_error()}
 
   defp subscription_id, do: @subscription_id_bytes |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
   defp req_options(config), do: [req_options: config["req_options"] || []]

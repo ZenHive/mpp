@@ -7,6 +7,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   alias MPP.Subscription.ETSStore
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
+  alias MPP.Test.InternalPaymentError
   alias MPP.Test.RPCShapes
   alias MPP.Test.SubscriptionHelpers
   alias Onchain.Tempo.Transaction
@@ -37,6 +38,15 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     @moduledoc false
 
     def check_and_mark(_key, _value), do: {:error, :unavailable}
+  end
+
+  defmodule FailingUpdateSubscriptionStore do
+    @moduledoc false
+
+    def get(id, opts), do: ETSStore.get(id, opts)
+    def put(record, opts), do: ETSStore.put(record, opts)
+    def update(_id, _fun, _opts), do: {:error, :unavailable}
+    def delete(id, opts), do: ETSStore.delete(id, opts)
   end
 
   defmodule EtsClaimStore do
@@ -216,7 +226,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       stub_reverted_chain()
 
-      assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+      assert {:error, %Errors{status: 402, detail: "subscription transaction reverted"}} =
                Subscription.renew(activation.subscription_id, config)
 
       assert {:ok, held} = Store.get(store, activation.subscription_id)
@@ -300,8 +310,8 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       stub_broadcast_failure()
 
-      assert {:error, %Errors{} = error} = Subscription.renew(activation.subscription_id, config)
-      assert error.detail =~ "RPC request failed"
+      assert {:error, error} = Subscription.renew(activation.subscription_id, config)
+      InternalPaymentError.assert_error(error)
 
       assert {:ok, held} = Store.get(store, activation.subscription_id)
       assert held.in_flight_period == 2
@@ -382,8 +392,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       subscription = subscription(config)
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
 
-      assert {:error, %Errors{detail: "subscription activation store unavailable"}} =
-               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+      InternalPaymentError.assert_error(
+        Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+      )
     end
 
     test "rejects a second renewal while the billing period is in flight", %{store: store} do
@@ -413,16 +424,26 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
                  invalid_key_subscription
                )
 
-      assert {:error, %Errors{} = missing} = Subscription.authorize("missing", config)
-      assert missing.detail == "subscription not found"
+      assert {:error, %Errors{status: 402, detail: "subscription not found"}} =
+               Subscription.authorize("missing", config)
 
-      assert {:error, %Errors{} = renewal_missing} = Subscription.renew("missing", config)
-      assert renewal_missing.detail == "subscription not found"
+      assert {:error, %Errors{status: 402, detail: "subscription not found"}} =
+               Subscription.renew("missing", config)
+    end
+
+    test "maps subscription-store failures to internal-payment-error", %{store: store} do
+      config = config(store)
+      subscription = subscription(config)
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      due = %{record(subscription, now) | subscription_id: "sub_due", in_flight_period: nil, in_flight_reference: nil}
+      assert :ok = Store.put(store, due)
 
       unavailable = Map.put(config, "subscription_store", FailingStore)
-      assert {:error, %Errors{detail: "subscription store unavailable"}} = Subscription.authorize("sub", unavailable)
-      assert {:error, %Errors{detail: detail}} = Subscription.renew("sub", unavailable)
-      assert detail =~ "unavailable"
+      InternalPaymentError.assert_error(Subscription.authorize("sub", unavailable))
+      InternalPaymentError.assert_error(Subscription.renew("sub", unavailable))
+
+      failing_update = Map.put(config, "subscription_store", {FailingUpdateSubscriptionStore, elem(store, 1)})
+      InternalPaymentError.assert_error(Subscription.renew(due.subscription_id, failing_update))
     end
 
     test "rejects an expired persisted subscription", %{store: store} do
@@ -463,7 +484,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:error, %Errors{detail: "subscription transaction reverted"}} =
+      assert {:error, %Errors{status: 402, detail: "subscription transaction reverted"}} =
                Subscription.verify(payload, subscription)
 
       stub_successful_chain()
@@ -494,8 +515,8 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
-      assert error.detail =~ "RPC request failed"
+      assert {:error, error} = Subscription.verify(payload, subscription)
+      InternalPaymentError.assert_error(error)
 
       stub_successful_chain()
 
@@ -511,9 +532,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
-      assert error.detail =~ "cannot release claims"
-      assert error.detail =~ "update/3"
+      InternalPaymentError.assert_error(Subscription.verify(payload, subscription))
 
       stub_successful_chain()
 
@@ -529,8 +548,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
-      assert {:error, %Errors{detail: "subscription activation store unavailable"}} =
-               Subscription.verify(payload, subscription)
+      InternalPaymentError.assert_error(Subscription.verify(payload, subscription))
 
       stub_successful_chain()
 
