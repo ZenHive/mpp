@@ -1122,7 +1122,7 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_sendRawTransaction"}
     end
 
-    test "falls back to a sender eth_call when the node lacks eth_simulateV1 (-32601)", %{
+    test "falls back to a final-envelope eth_call when the node lacks eth_simulateV1 (-32601)", %{
       charge: charge,
       tx_hex: tx_hex
     } do
@@ -1137,13 +1137,23 @@ defmodule MPP.Methods.TempoTest do
       assert Onchain.Address.equal?(call["to"], @token_address)
       assert call["input"] == "0x" <> Base.encode16(transfer_calldata(@recipient, 1_000_000), case: :lower)
       assert call["calls"] == []
-      refute Map.has_key?(call, "feeToken") or Map.has_key?(call, "gas")
+      # The signed gas budget is simulated, so an underfunded envelope fails.
+      assert {:ok, %Transaction{gas_limit: gas_limit, nonce: nonce}} = Transaction.deserialize(tx_hex)
+      assert call["gas"] == "0x" <> String.downcase(Integer.to_string(gas_limit, 16))
+      assert call["nonce"] == "0x" <> String.downcase(Integer.to_string(nonce, 16))
+      assert call["type"] == "0x76"
       assert_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       reverted = %{"code" => 3, "message" => "execution reverted: InsufficientBalance"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => reverted, "id" => 1})
       assert {:error, %Errors{} = rejected} = Tempo.verify(payload, charge)
       assert rejected.detail =~ "Pre-broadcast simulation rejected"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+
+      out_of_gas = %{"code" => -32_003, "message" => "out of gas: gas exhausted during precompiled contract execution"}
+      stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => out_of_gas, "id" => 1})
+      assert {:error, %Errors{} = underfunded} = Tempo.verify(payload, charge)
+      assert underfunded.detail =~ "Pre-broadcast simulation failed"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       unavailable = %{"code" => -32_000, "message" => "header not found"}

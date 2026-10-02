@@ -1562,8 +1562,8 @@ defmodule MPP.Methods.Tempo do
   #   * {:ok, :success}     → would succeed; proceed to broadcast
   #   * {:ok, {:revert, _}} → would fail on-chain; reject before broadcast (the guard)
   #   * {:ok, :unsupported} → node lacks eth_simulateV1 (-32601); fall back to
-  #                           an `eth_call` of the calls from the sender, which
-  #                           fails closed like the simulation (mpp-rs #475)
+  #                           an `eth_call` of the final envelope, which fails
+  #                           closed like the simulation (mpp-rs #475)
   #   * {:error, reason}    → operational RPC failure; fail closed — never
   #                           broadcast a transaction we could not validate
   defp simulate_cosigned_tx(raw_hex, rpc_url, config) do
@@ -1720,16 +1720,16 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Sender-context `eth_call` of the transaction's calls, without fee fields or
-  # signatures (mppx fee-payer.ts `simulationTransaction`, mpp-rs #475): the node
-  # checks call execution only. A revert (JSON-RPC code 3) is rejected; any other
-  # failure fails closed.
+  # `eth_call` of the same final-envelope request eth_simulateV1 receives,
+  # including the signed gas limit, nonce, fees and fee token (mppx fee-payer.ts
+  # `sponsoredSimulationTransaction`). Without `gas` the node would execute under
+  # its own allowance and accept an underfunded envelope; with it, Moderato
+  # answers -32003 "out of gas" (observed live). A revert (JSON-RPC code 3) is
+  # rejected; any other failure fails closed.
   defp simulate_with_eth_call(raw_hex, rpc_url, config) do
     with {:ok, tx} <- Transaction.deserialize(raw_hex),
          {:ok, request} <- Transaction.simulate_request(tx) do
-      call = Map.take(request, ["from", "to", "value", "input", "calls"])
-
-      case rpc_json_request("eth_call", [call, "latest"], rpc_url, rpc_options(config)) do
+      case rpc_json_request("eth_call", [request, "latest"], rpc_url, rpc_options(config)) do
         {:ok, result} when is_binary(result) -> :ok
         {:error, %{"code" => 3}} -> {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
         _other -> {:error, Errors.new(:verification_failed, @simulation_failed_detail)}
