@@ -5697,7 +5697,7 @@
       "id": "134",
       "phase": 5,
       "bundle": "evm",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Support custom EIP-3009 settlement with a live payment-and-distribution batch example",
       "scores": {
         "d": 6,
