@@ -159,7 +159,10 @@ chain and unused authorization state. A callback is trusted executable server
 configuration, but its success is not payment evidence: MPP independently fetches
 the receipt, requires success and the token's matching `AuthorizationUsed` event,
 checks the exact payer/token/recipient/amount `Transfer`, and atomically consumes
-the transaction in its replay store. A pending or unrelated hash grants nothing.
+the transaction in its replay store. A pending, reverted, or unrelated hash grants
+nothing. A reverted receipt is a settlement failure, as with direct submission, and
+can leave the authorization unused. A log marked `removed` does not match; a log
+that omits `removed` still matches.
 Do not disable the replay store; multi-node deployments must share an atomic store.
 
 Concurrent requests can invoke the callback more than once. Deduplicate relayer

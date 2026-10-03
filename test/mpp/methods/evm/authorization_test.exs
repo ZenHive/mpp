@@ -827,19 +827,37 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
     test "AUTH-CUSTOM-EXACT: unconfirmed, reverted and unrelated success cannot grant receipt" do
       c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
 
-      for {receipt, detail} <- [
-            {nil, "not confirmed"},
-            {Map.put(receipt_with_authorization(), "status", "0x0"), "reverted"},
-            {Map.put(receipt_with_authorization(), "blockNumber", nil), "An internal payment error occurred."},
-            {receipt_with_transfer(), "AuthorizationUsed"},
-            {Map.put(receipt_with_authorization(), "logs", []), "AuthorizationUsed"}
+      for {receipt, detail, type} <- [
+            {nil, "not confirmed", "server-error"},
+            {Map.put(receipt_with_authorization(), "status", "0x0"), "reverted", "settlement-failed"},
+            {Map.put(receipt_with_authorization(), "blockNumber", nil), "An internal payment error occurred.",
+             "internal-payment-error"},
+            {receipt_with_transfer(), "AuthorizationUsed", "verification-failed"},
+            {Map.put(receipt_with_authorization(), "logs", []), "AuthorizationUsed", "verification-failed"}
           ] do
         stub_custom(receipt)
-        assert {:error, %Errors{detail: settlement_error}} = Authorization.settle(signed_payload(), c)
+
+        assert {:error, %Errors{detail: settlement_error, type: settlement_type}} =
+                 Authorization.settle(signed_payload(), c)
+
         assert settlement_error =~ detail
-        assert {:error, %Errors{detail: error}} = EVM.verify(signed_payload(), c)
+        assert settlement_type =~ type
+        assert {:error, %Errors{detail: error, type: verify_type}} = EVM.verify(signed_payload(), c)
         assert error =~ detail
+        assert verify_type =~ type
       end
+    end
+
+    test "AUTH-CUSTOM-EXACT: an omitted removed flag still matches AuthorizationUsed" do
+      c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
+
+      receipt =
+        Map.update!(receipt_with_authorization(), "logs", fn logs ->
+          Enum.map(logs, &Map.delete(&1, "removed"))
+        end)
+
+      stub_custom(receipt)
+      assert {:ok, %MPP.Receipt{reference: @tx_hash}} = EVM.verify(signed_payload(), c)
     end
 
     test "AUTH-CUSTOM-EXACT: nonce, authorizer and token event bindings are mandatory" do

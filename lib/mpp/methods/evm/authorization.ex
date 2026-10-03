@@ -193,7 +193,9 @@ defmodule MPP.Methods.EVM.Authorization do
   No MPP private key is required. A custom reference must already be mined:
   MPP independently checks its successful receipt and matching AuthorizationUsed
   event; `MPP.Methods.EVM.verify/2` also checks the exact Transfer and replay store.
-  `settle/3` alone does not issue an MPP receipt.
+  `settle/3` alone does not issue an MPP receipt. A reverted receipt is
+  `:settlement_failed`, the same as direct submission, and does not fall back.
+  A log with `removed: true` does not match; an omitted `removed` flag still matches.
 
   Callback errors never fall back to direct submission; exceptions propagate.
   Concurrent calls may invoke the callback more than once. It must submit the
@@ -568,7 +570,8 @@ defmodule MPP.Methods.EVM.Authorization do
 
       matched? =
         Enum.any?(receipt.logs, fn log ->
-          Address.equal?(log.address, charge.currency) and log.topics == topics and not log.removed
+          # `removed` is nil when a node omits it (Onchain.Filter.Log). `not nil` would crash.
+          Address.equal?(log.address, charge.currency) and log.topics == topics and log.removed != true
         end)
 
       if matched? do
@@ -583,7 +586,15 @@ defmodule MPP.Methods.EVM.Authorization do
     {:error, Errors.new(:settlement_timeout, "Authorization settlement was not confirmed")}
   end
 
-  defp confirmed_custom_receipt(receipt), do: Shared.check_receipt_status(receipt)
+  defp confirmed_custom_receipt(receipt) do
+    case Shared.check_receipt_status(receipt) do
+      :ok ->
+        :ok
+
+      {:error, _error} ->
+        {:error, Errors.new(:settlement_failed, "Authorization settlement transaction reverted")}
+    end
+  end
 
   defp broadcast(parsed, charge, private_key, chain_id, rpc_opts) do
     with {:ok, from_bin} <- Address.validate(parsed.from),
