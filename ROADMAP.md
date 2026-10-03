@@ -15,7 +15,7 @@
 
 **Last shipped:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) on 2026-10-02
 
-**Up next:** none — focus phase complete or all blocked
+**Up next:** Task 134 — Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋
 <!-- FOCUS:END -->
 
 ---
@@ -95,7 +95,7 @@
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 | Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 85 `[P]` | ✅ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
-| Task 134 | 🔄 | 🎁 **evm** · Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋 |
+| Task 134 | ⬜ | 🎁 **evm** · Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋 |
 <!-- TASKS:END -->
 
 ---

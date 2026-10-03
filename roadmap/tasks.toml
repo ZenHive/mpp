@@ -3718,7 +3718,7 @@ shipped_in = "311cc458fcff01ab7f144b564c7a37178a005d4f"
 id = "134"
 phase = 5
 bundle = "evm"
-status = "in_progress"
+status = "pending"
 title = "Support custom EIP-3009 settlement with a live payment-and-distribution batch example"
 scores = { d = 6, b = 7, u = 6 }
 depends_on = [40]
