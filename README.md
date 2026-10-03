@@ -129,6 +129,84 @@ Currency is the ERC-20 token contract address (e.g., USDC above). For native ETH
 
 The transaction flag gates acceptance and advertisement together. [draft-evm-charge-00 § Credential Type Negotiation](https://github.com/tempoxyz/mpp-specs/blob/main/specs/methods/evm/draft-evm-charge-00.md#credential-type-negotiation) requires accepting transactions by default only when `credentialTypes` is omitted. EVM challenges always populate that list; without `"transaction" => true`, transaction credentials are rejected before decoding or RPC calls.
 
+#### Custom EIP-3009 settlement
+
+Use the server-only `"settle_authorization" => {callback, configuration}` option
+instead of an MPP settlement key. Both options advertise the same authorization
+credential; without a callback, direct token submission is unchanged. Neither
+the callback nor its configuration is serialized into the challenge.
+
+```elixir
+method_config = %{
+  "rpc_url" => sepolia_rpc_url,
+  "chain_id" => 11_155_111,
+  "settle_authorization" => {&MyRelayer.settle/2, relayer_configuration}
+}
+```
+
+The callback takes `%{authorization: parsed, currency: token, chain_id: chain}`
+and the caller's opaque configuration. `parsed` contains `from`, `to`, `value`
+(decimal string), `valid_after`, `valid_before` (Unix seconds), `nonce` and
+`signature` (hex). It returns `{:ok, transaction_hash}` for a **mined** transaction
+or `{:error, reason}`. It owns signing, gas payment, transaction nonce coordination,
+broadcasting and waiting for confirmation. It may call an external relayer;
+MPP needs no private key. Callback errors return a generic settlement error;
+exceptions propagate. Neither path falls back to direct submission.
+
+MPP validates signature/domain/chain, recipient, exact amount, challenge nonce,
+validity and optional credential source before calling it, then checks the RPC
+chain and unused authorization state. A callback is trusted executable server
+configuration, but its success is not payment evidence: MPP independently fetches
+the receipt, requires success and the token's matching `AuthorizationUsed` event,
+checks the exact payer/token/recipient/amount `Transfer`, and atomically consumes
+the transaction in its replay store. A pending or unrelated hash grants nothing.
+Do not disable the replay store; multi-node deployments must share an atomic store.
+
+Concurrent requests can invoke the callback more than once. Deduplicate relayer
+work by `(chain, token, from, nonce)` and coordinate the relayer account's transaction
+nonce. Submit the supplied EIP-3009 authorization, never replace it with an ordinary
+transfer. The token's nonce rule prevents a second payment; MPP's atomic store
+prevents two receipts. A timeout or lost response can follow a successful payment:
+retain the transaction reference and reconcile it in the consuming application.
+MPP does not automatically retry or recover a consumed authorization.
+
+The runnable [consumer callback](examples/eip3009_push_split.exs) uses Sepolia
+Multicall3 `aggregate3`: payment has `allowFailure=false`, distribution has
+`allowFailure=true`. It verifies the deployed PushSplit clone/implementation,
+owner-zero state, fixed recipients/allocations and zero distributor incentive.
+Those are consumer policy, not MPP policy. The split address is the charge recipient;
+do not set the EVM `"splits"` option (that option belongs to Permit2).
+A receipt proves full payment to that split, **not distribution completion**.
+Distribution failures leave funds at the split and can be retried independently,
+without resubmitting payment. The example uses explicit distribution amounts;
+allocation rounding can leave dust for allocations that do not divide the amount.
+
+Run the example with the live integration driver (four small testnet transactions):
+
+```sh
+export ETH_SEPOLIA_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+export ETH_SEPOLIA_PRIVATE_KEY="0x<funded-testnet-key>"
+export EVM_SETTLEMENT_EVIDENCE_DIR=".harness/evidence/custom-settlement"
+mix test test/mpp/methods/evm_custom_settlement_integration_test.exs --include integration
+```
+
+Fund gas with [Sepolia ETH](https://www.alchemy.com/faucets/ethereum-sepolia) and
+[Circle testnet USDC](https://faucet.circle.com/). The driver uses the deployed,
+immutable test split `0x8889c332727d5f3865526391bfb124cfab74c05f`, checks recipient
+balance deltas, deliberately supplies invalid distribution parameters, retries
+only distribution, and proves a reverted payment earns no receipt. Missing
+credentials fail. Evidence includes chain/block, transactions, runtime hashes,
+proxy implementations, configuration and source fingerprints for reviewer binding
+to the delivery commit. No deployed-bytecode audit coverage is claimed.
+
+Authority: [EIP-3009](https://eips.ethereum.org/EIPS/eip-3009),
+[Circle EIP3009 source](https://github.com/circlefin/stablecoin-evm/blob/master/contracts/v2/EIP3009.sol),
+[PushSplit](https://github.com/0xSplits/splits-contracts-monorepo/blob/main/packages/splits-v2/src/splitters/push/PushSplit.sol),
+[official Sepolia deployments](https://github.com/0xSplits/splits-contracts-monorepo/blob/main/packages/splits-v2/deployments/11155111.json),
+and [Multicall3](https://github.com/mds1/multicall/blob/main/src/Multicall3.sol).
+[mppx at c0ce0fe](https://github.com/wevm/mppx/blob/c0ce0fecccf29f0dab8457c4356c0a3838af3390/src/evm/server/Charge.ts)
+is compatibility precedent, not the payment oracle.
+
 ### Solana (SOL and SPL tokens)
 
 ```elixir

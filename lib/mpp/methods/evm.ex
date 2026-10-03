@@ -41,8 +41,11 @@ defmodule MPP.Methods.EVM do
       implementing `MPP.Tempo.Store` (Redis/Postgres for multi-node) or
       `{MPP.Tempo.ConCacheStore, opts}`; a configured store MUST implement the atomic
       `check_and_mark/2`. Pass `store: false` to opt out (not recommended)
-    * `"private_key"` — (required for `type="authorization"` and `type="permit2"`)
+    * `"private_key"` — (required for direct `type="authorization"` and `type="permit2"`)
       server-only secp256k1 key used to submit settlement (pays gas)
+    * `"settle_authorization"` — (optional, server-only) `{callback/2, configuration}`
+      for custom EIP-3009 submission without an MPP private key. See
+      `MPP.Methods.EVM.Authorization.settle/3` and the README consumer example.
     * `"permit2"` — (optional) `true` to advertise and settle `type="permit2"`
     * `"transaction"` — (optional) `true` to accept and advertise `type="transaction"`
       for ERC-20 charges without splits. The client signs an EIP-1559 transfer and
@@ -96,7 +99,7 @@ defmodule MPP.Methods.EVM do
       `keccak256(challenge.id <> challenge.realm)` (`challengeHash`). Advertised
       only when the currency is a known EIP-3009 token (or
       `"authorization" => %{"name" => ..., "version" => ...}` is configured)
-      and `"private_key"` is set for settlement.
+      and `"private_key"` or `"settle_authorization"` is set for settlement.
 
     * `type="permit2"` — off-chain Permit2 witness authorization. Enable with
       `"permit2" => true` and `"private_key"`. The server pays gas and settles
@@ -185,6 +188,7 @@ defmodule MPP.Methods.EVM do
 
     validate_store!(config["store"])
     Authorization.validate_config!(config["authorization"])
+    Authorization.validate_settlement!(config["settle_authorization"])
     :ok
   end
 

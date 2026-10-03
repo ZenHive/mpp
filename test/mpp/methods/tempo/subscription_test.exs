@@ -233,6 +233,37 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       refute_receive {:rpc, "eth_sendRawTransactionSync", _params}
     end
 
+    test "does not restore a subscription deleted while its renewal settles", %{store: store} do
+      stub_successful_chain()
+      config = config(store)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      stub_rpc(fn conn ->
+        request = request(conn)
+
+        if request["method"] == "eth_sendRawTransactionSync" do
+          assert :ok = Store.delete(store, activation.subscription_id)
+        end
+
+        result = chain_result(request, System.os_time(:second))
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+      end)
+
+      assert {:error, %Errors{detail: "subscription not found"}} =
+               Subscription.renew(activation.subscription_id, config)
+
+      assert :not_found = Store.get(store, activation.subscription_id)
+    end
+
     test "releases an in-flight renewal after a reverted settlement so a retry can proceed", %{store: store} do
       stub_successful_chain()
       config = config(store)

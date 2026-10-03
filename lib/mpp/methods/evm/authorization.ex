@@ -3,7 +3,8 @@ defmodule MPP.Methods.EVM.Authorization do
   EIP-3009 `transferWithAuthorization` credential for Circle USDC/EURC.
 
   The client signs an off-chain EIP-712 `TransferWithAuthorization` message.
-  The server submits it to the token contract and pays gas. The EIP-3009
+  The server submits it directly or delegates submission to an explicitly
+  configured server-only callback. The EIP-3009
   `nonce` for native Payment-auth is the `challengeHash`:
 
       keccak256(challenge.id <> challenge.realm)
@@ -37,6 +38,7 @@ defmodule MPP.Methods.EVM.Authorization do
   @primary_type "TransferWithAuthorization"
   @transfer_fn "transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)"
   @authorization_state_fn "authorizationState(address,bytes32)"
+  @authorization_used_topic Hash.keccak("AuthorizationUsed(address,bytes32)")
   @signature_bytes 65
   @nonce_bytes 32
   @gas_headroom_num 5
@@ -132,9 +134,33 @@ defmodule MPP.Methods.EVM.Authorization do
   def offered?(%Charge{} = charge) do
     config = charge.method_details || %{}
 
-    is_binary(config["private_key"]) and config["private_key"] != "" and
+    settlement_configured?(config) and
       match?({:ok, _domain}, resolve_domain(charge)) and
       not splits?(config)
+  end
+
+  @type settlement_input :: %{
+          authorization: parsed(),
+          currency: String.t(),
+          chain_id: non_neg_integer()
+        }
+  @type settlement_callback :: (settlement_input(), term() -> {:ok, String.t()} | {:error, term()})
+
+  @doc "Validate the server-only `{callback/2, configuration}` settlement option."
+  @spec validate_settlement!(term()) :: :ok
+  def validate_settlement!(nil), do: :ok
+  def validate_settlement!({callback, _configuration}) when is_function(callback, 2), do: :ok
+
+  def validate_settlement!(_other) do
+    raise ArgumentError, "EVM settle_authorization must be {callback/2, configuration}"
+  end
+
+  defp settlement_configured?(%{"settle_authorization" => {callback, _configuration}}) when is_function(callback, 2),
+    do: true
+
+  defp settlement_configured?(config) do
+    is_nil(config["settle_authorization"]) and
+      is_binary(config["private_key"]) and config["private_key"] != ""
   end
 
   @doc """
@@ -159,6 +185,23 @@ defmodule MPP.Methods.EVM.Authorization do
 
   Pass `expected_nonce: nonce` in `opts` to replace the native `challengeHash`
   check. The caller must supply the nonce its own profile requires.
+
+  `method_details["settle_authorization"] = {callback, configuration}` delegates
+  submission after validation. The callback receives `settlement_input()` and
+  the opaque configuration, returning `{:ok, tx_hash}` or `{:error, reason}`.
+  It owns submission, gas, relayer nonce coordination and confirmation polling.
+  No MPP private key is required. A custom reference must already be mined:
+  MPP independently checks its successful receipt and matching AuthorizationUsed
+  event; `MPP.Methods.EVM.verify/2` also checks the exact Transfer and replay store.
+  `settle/3` alone does not issue an MPP receipt.
+
+  Callback errors never fall back to direct submission; exceptions propagate.
+  Concurrent calls may invoke the callback more than once. It must submit the
+  same validated authorization (deduplicate by chain/token/from/nonce), never
+  substitute an ordinary transfer. EIP-3009 prevents a second payment on-chain;
+  the enabled atomic replay store prevents duplicate receipts. A lost response
+  after broadcast is not proof of failure; reconcile at the relayer. Already-used
+  authorizations remain rejected on retry. See the README for distribution retries.
   """
   @spec settle(map(), Charge.t()) :: {:ok, String.t()} | {:error, Errors.t()}
   @spec settle(map(), Charge.t(), keyword()) :: {:ok, String.t()} | {:error, Errors.t()}
@@ -176,13 +219,11 @@ defmodule MPP.Methods.EVM.Authorization do
          :ok <- verify_signature(parsed, charge, domain),
          :ok <- match_source(parsed, config),
          {:ok, rpc_url} <- require_rpc_url(config),
-         {:ok, private_key} <- require_private_key(config),
+         :ok <- require_submission_config(config),
          {:ok, chain_id} <- EvmRPC.require_chain_id(config),
          rpc_opts = EvmRPC.rpc_opts(rpc_url, config),
-         :ok <- reject_used_nonce(parsed, charge, rpc_opts),
-         {:ok, tx_hash} <- broadcast(parsed, charge, private_key, chain_id, rpc_opts),
-         :ok <- await_receipt(tx_hash, rpc_opts) do
-      {:ok, tx_hash}
+         :ok <- reject_used_nonce(parsed, charge, rpc_opts) do
+      submit(parsed, charge, chain_id, rpc_opts)
     end
   end
 
@@ -485,6 +526,65 @@ defmodule MPP.Methods.EVM.Authorization do
     end
   end
 
+  defp submit(parsed, charge, chain_id, rpc_opts) do
+    config = charge.method_details || %{}
+
+    case config["settle_authorization"] do
+      nil ->
+        with {:ok, key} <- require_private_key(config),
+             {:ok, hash} <- broadcast(parsed, charge, key, chain_id, rpc_opts),
+             :ok <- await_receipt(hash, rpc_opts) do
+          {:ok, hash}
+        end
+
+      {callback, configuration} when is_function(callback, 2) ->
+        with {:ok, ^chain_id} <- RPC.eth_chain_id(rpc_opts),
+             input = %{authorization: parsed, currency: charge.currency, chain_id: chain_id},
+             {:ok, hash} <- invoke_settlement(callback, input, configuration),
+             :ok <- verify_custom_settlement(hash, parsed, charge, rpc_opts) do
+          {:ok, hash}
+        else
+          {:ok, _other_chain} -> {:error, Errors.new(:verification_failed, "Settlement RPC chain mismatch")}
+          {:error, %Errors{} = error} -> {:error, error}
+          {:error, reason} -> wrap_rpc_error(reason)
+        end
+    end
+  end
+
+  defp invoke_settlement(callback, input, configuration) do
+    case callback.(input, configuration) do
+      {:ok, hash} -> Shared.extract_hash(%{"hash" => hash})
+      {:error, _reason} -> {:error, Errors.new(:settlement_failed, "Authorization settlement callback failed")}
+      _other -> {:error, Errors.new(:settlement_failed, "Invalid authorization settlement callback return")}
+    end
+  end
+
+  defp verify_custom_settlement(hash, parsed, charge, rpc_opts) do
+    with {:ok, receipt} <- RPC.get_transaction_receipt(hash, rpc_opts),
+         :ok <- confirmed_custom_receipt(receipt),
+         {:ok, from} <- Address.validate(parsed.from),
+         {:ok, nonce} <- decode_bytes32(parsed.nonce) do
+      topics = [@authorization_used_topic, <<0::96, from::binary>>, nonce]
+
+      matched? =
+        Enum.any?(receipt.logs, fn log ->
+          Address.equal?(log.address, charge.currency) and log.topics == topics and not log.removed
+        end)
+
+      if matched? do
+        :ok
+      else
+        {:error, Errors.new(:verification_failed, "No matching AuthorizationUsed event found in transaction")}
+      end
+    end
+  end
+
+  defp confirmed_custom_receipt(nil) do
+    {:error, Errors.new(:settlement_timeout, "Authorization settlement was not confirmed")}
+  end
+
+  defp confirmed_custom_receipt(receipt), do: Shared.check_receipt_status(receipt)
+
   defp broadcast(parsed, charge, private_key, chain_id, rpc_opts) do
     with {:ok, from_bin} <- Address.validate(parsed.from),
          {:ok, to_bin} <- Address.validate(parsed.to),
@@ -576,6 +676,17 @@ defmodule MPP.Methods.EVM.Authorization do
     case config["rpc_url"] do
       url when is_binary(url) and url != "" -> {:ok, url}
       _ -> {:error, Errors.new(:verification_failed, "EVM method missing required config: rpc_url")}
+    end
+  end
+
+  defp require_submission_config(%{"settle_authorization" => {callback, _configuration}}) when is_function(callback, 2),
+    do: :ok
+
+  defp require_submission_config(config) do
+    if is_nil(config["settle_authorization"]) do
+      with {:ok, _key} <- require_private_key(config), do: :ok
+    else
+      {:error, Errors.new(:verification_failed, "Invalid settle_authorization configuration")}
     end
   end
 

@@ -1,8 +1,10 @@
 defmodule MPP.Methods.EVM.AuthorizationTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias MPP.Errors
   alias MPP.Intents.Charge
+  alias MPP.Methods.EVM
   alias MPP.Methods.EVM.Authorization
   alias MPP.Test.EVMAuthorization
   alias MPP.Test.RPCShapes
@@ -704,6 +706,265 @@ defmodule MPP.Methods.EVM.AuthorizationTest do
       assert error.detail == "An internal payment error occurred."
       refute error.detail =~ "econnrefused"
     end
+  end
+
+  describe "custom settlement invariants" do
+    test "AUTH-CUSTOM-VALIDATE: invalid authorization never invokes the callback" do
+      callback = fn _, _ -> flunk("callback invoked for invalid credential") end
+      base = charge(%{"settle_authorization" => {callback, :secret}})
+
+      for {payload, config, detail} <- [
+            {signed_payload(chain_id: 2), %{}, "signature"},
+            {signed_payload(), %{"authorization" => %{"name" => "wrong", "version" => "2"}}, "signature"},
+            {signed_payload(recipient: EVMAuthorization.signer_address()), %{}, "recipient"},
+            {signed_payload(amount: "2"), %{}, "amount"},
+            {signed_payload(nonce: "0x" <> String.duplicate("ab", 32)), %{}, "nonce"},
+            {signed_payload(valid_after: System.system_time(:second) + 100), %{}, "not yet valid"},
+            {signed_payload(valid_before: System.system_time(:second)), %{}, "expired"},
+            {signed_payload(), %{"credential_source" => "invalid"}, "source"},
+            {Map.put(signed_payload(), "signature", "bad"), %{}, "signature"}
+          ] do
+        c = %{base | method_details: Map.merge(base.method_details, config)}
+        assert {:error, %Errors{detail: error}} = EVM.verify(payload, c)
+        assert error =~ detail
+      end
+    end
+
+    test "AUTH-CUSTOM-VALIDATE: chain mismatch and consumed nonce never invoke callback" do
+      callback = fn _, _ -> flunk("callback invoked") end
+      c = charge(%{"settle_authorization" => {callback, nil}})
+      stub_custom(receipt_with_authorization(), %{"eth_chainId" => "0x2"})
+      assert {:error, %Errors{detail: "Settlement RPC chain mismatch"}} = EVM.verify(signed_payload(), c)
+      stub_custom(receipt_with_authorization(), %{"eth_call" => used_state()})
+      assert {:error, %Errors{detail: "Authorization already used"}} = EVM.verify(signed_payload(), c)
+    end
+
+    test "callback receives only validated input and caller configuration without an MPP key" do
+      caller = self()
+
+      callback = fn input, configuration ->
+        send(caller, {:submitted, input, configuration})
+        {:ok, @tx_hash}
+      end
+
+      c = charge(%{"settle_authorization" => {callback, %{relayer: :external}}})
+      stub_custom(receipt_with_authorization())
+      assert Authorization.offered?(c)
+      assert {:ok, %MPP.Receipt{reference: @tx_hash}} = EVM.verify(signed_payload(), c)
+
+      assert_receive {:submitted, %{authorization: parsed, currency: @token, chain_id: @chain_id} = input,
+                      %{relayer: :external}}
+
+      assert map_size(input) == 3
+      assert parsed.nonce == @spec_example_challenge_hash
+      assert parsed.value == @amount
+    end
+
+    test "callback and configuration never enter the public challenge" do
+      callback = fn _, _ -> {:ok, @tx_hash} end
+
+      config =
+        MPP.Plug.init(
+          secret_key: String.duplicate("s", 32),
+          realm: @realm,
+          method: EVM,
+          amount: @amount,
+          currency: @token,
+          recipient: @recipient,
+          method_config: charge(%{"settle_authorization" => {callback, "server-only-secret"}}).method_details
+        )
+
+      conn = MPP.Plug.call(Plug.Test.conn(:get, "/"), config)
+      assert conn.status == 402
+      [header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+      {:ok, challenge} = MPP.Headers.parse_challenge(header)
+      request = Base.url_decode64!(challenge.request, padding: false)
+      assert Jason.decode!(request)["methodDetails"]["credentialTypes"] == ["authorization", "hash"]
+      refute request =~ "settle_authorization"
+      refute request =~ "server-only-secret"
+    end
+
+    test "AUTH-CUSTOM-NO-FALLBACK: errors and malformed returns never submit directly" do
+      for result <- [{:error, :provider_down}, :ok, {:ok, "garbage"}, {:ok, nil}] do
+        stub_custom(receipt_with_authorization())
+
+        c =
+          charge(%{
+            "private_key" => EVMAuthorization.private_key(),
+            "settle_authorization" => {fn _, _ -> result end, nil}
+          })
+
+        assert {:error, %Errors{}} = EVM.verify(signed_payload(), c)
+      end
+    end
+
+    test "AUTH-CUSTOM-NO-FALLBACK: callback exceptions propagate without direct submission" do
+      stub_custom(receipt_with_authorization())
+
+      c =
+        charge(%{
+          "private_key" => EVMAuthorization.private_key(),
+          "settle_authorization" => {fn _, _ -> raise "relayer unavailable" end, nil}
+        })
+
+      assert_raise RuntimeError, "relayer unavailable", fn -> EVM.verify(signed_payload(), c) end
+    end
+
+    test "malformed callback config is rejected even when a direct key exists" do
+      for bad <- [:invalid, {fn _ -> :ok end, nil}, {nil, :config}] do
+        config = %{"private_key" => EVMAuthorization.private_key(), "settle_authorization" => bad}
+        refute Authorization.offered?(charge(config))
+
+        assert_raise ArgumentError, ~r/settle_authorization/, fn ->
+          EVM.validate_config!(charge(config).method_details)
+        end
+
+        assert {:error, %Errors{detail: "Invalid settle_authorization configuration"}} =
+                 EVM.verify(signed_payload(), charge(config))
+      end
+    end
+
+    test "AUTH-CUSTOM-EXACT: unconfirmed, reverted and unrelated success cannot grant receipt" do
+      c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
+
+      for {receipt, detail} <- [
+            {nil, "not confirmed"},
+            {Map.put(receipt_with_authorization(), "status", "0x0"), "reverted"},
+            {Map.put(receipt_with_authorization(), "blockNumber", nil), "An internal payment error occurred."},
+            {receipt_with_transfer(), "AuthorizationUsed"},
+            {Map.put(receipt_with_authorization(), "logs", []), "AuthorizationUsed"}
+          ] do
+        stub_custom(receipt)
+        assert {:error, %Errors{detail: settlement_error}} = Authorization.settle(signed_payload(), c)
+        assert settlement_error =~ detail
+        assert {:error, %Errors{detail: error}} = EVM.verify(signed_payload(), c)
+        assert error =~ detail
+      end
+    end
+
+    test "AUTH-CUSTOM-EXACT: nonce, authorizer and token event bindings are mandatory" do
+      c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
+
+      for change <- [
+            fn event -> Map.put(event, "address", @recipient) end,
+            fn event -> Map.update!(event, "topics", &List.replace_at(&1, 1, "0x" <> String.duplicate("00", 32))) end,
+            fn event -> Map.update!(event, "topics", &List.replace_at(&1, 2, "0x" <> String.duplicate("00", 32))) end,
+            fn event -> Map.put(event, "removed", true) end
+          ] do
+        receipt = Map.update!(receipt_with_authorization(), "logs", fn [auth | rest] -> [change.(auth) | rest] end)
+        stub_custom(receipt)
+        assert {:error, %Errors{detail: error}} = EVM.verify(signed_payload(), c)
+        assert error =~ "AuthorizationUsed"
+      end
+    end
+
+    test "AUTH-CUSTOM-EXACT: payment token, payer, recipient and exact amount remain mandatory" do
+      c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
+
+      for change <- [
+            fn event -> Map.put(event, "address", @recipient) end,
+            fn event -> Map.update!(event, "topics", &List.replace_at(&1, 1, "0x" <> String.duplicate("00", 32))) end,
+            fn event -> Map.update!(event, "topics", &List.replace_at(&1, 2, "0x" <> String.duplicate("00", 32))) end,
+            fn event -> Map.put(event, "data", "0x" <> String.duplicate("00", 32)) end
+          ] do
+        receipt = Map.update!(receipt_with_authorization(), "logs", fn [auth, transfer] -> [auth, change.(transfer)] end)
+        stub_custom(receipt)
+
+        assert {:error, %Errors{detail: "No matching Transfer event found in transaction"}} =
+                 EVM.verify(signed_payload(), c)
+      end
+    end
+
+    property "AUTH-CUSTOM-VALIDATE: any unequal signed amount is rejected before submission" do
+      check all(amount <- integer(1..1_000_000_000), amount != 1_000_000, max_runs: 25) do
+        callback = fn _, _ -> flunk("unequal amount submitted") end
+        c = charge(%{"settle_authorization" => {callback, nil}})
+
+        assert {:error, %Errors{detail: "Authorization amount does not match charge amount"}} =
+                 EVM.verify(signed_payload(amount: Integer.to_string(amount)), c)
+      end
+    end
+
+    test "AUTH-CUSTOM-REPLAY: simultaneous callbacks cannot grant two receipts" do
+      owner = self()
+
+      callback = fn _, _ ->
+        send(owner, {:ready, self()})
+
+        receive do
+          :submit -> {:ok, @tx_hash}
+        after
+          1000 -> flunk("submission barrier timed out")
+        end
+      end
+
+      store = {MPP.Tempo.ConCacheStore, key_prefix: "custom-" <> Integer.to_string(System.unique_integer([:positive]))}
+      c = charge(%{"settle_authorization" => {callback, nil}, "store" => store})
+      stub_custom(receipt_with_authorization())
+      tasks = for _ <- 1..2, do: Task.async(fn -> EVM.verify(signed_payload(), c) end)
+      assert_receive {:ready, first}
+      assert_receive {:ready, second}
+      send(first, :submit)
+      send(second, :submit)
+      results = Enum.map(tasks, &Task.await/1)
+      assert Enum.count(results, &match?({:ok, %MPP.Receipt{}}, &1)) == 1
+      assert Enum.count(results, &match?({:error, %Errors{detail: "Transaction hash already used"}}, &1)) == 1
+      stub_custom(receipt_with_authorization(), %{"eth_call" => used_state()})
+      assert {:error, %Errors{detail: "Authorization already used"}} = EVM.verify(signed_payload(), c)
+      refute_receive {:ready, _}
+    end
+
+    test "RPC errors do not become callback successes" do
+      c = charge(%{"settle_authorization" => {fn _, _ -> {:ok, @tx_hash} end, nil}})
+
+      for failing <- ["eth_chainId", "eth_getTransactionReceipt"] do
+        Req.Test.stub(EVM, fn conn ->
+          {method, id, conn} = read_request(conn)
+
+          if method == failing do
+            rpc_json(conn, id, "error", %{"code" => -32_000, "message" => "provider unavailable"})
+          else
+            rpc_json(conn, id, "result", Map.fetch!(%{"eth_call" => unused_state(), "eth_chainId" => "0x1"}, method))
+          end
+        end)
+
+        assert {:error, %Errors{detail: error}} = EVM.verify(signed_payload(), c)
+        assert error == "An internal payment error occurred."
+      end
+    end
+  end
+
+  defp stub_custom(receipt, overrides \\ %{}) do
+    Req.Test.stub(EVM, fn conn ->
+      rpc_dispatch(
+        conn,
+        Map.merge(
+          %{"eth_call" => unused_state(), "eth_chainId" => "0x1", "eth_getTransactionReceipt" => receipt},
+          overrides
+        )
+      )
+    end)
+  end
+
+  defp receipt_with_authorization do
+    receipt = receipt_with_transfer()
+
+    event = %{
+      "address" => @token,
+      "topics" => [
+        Onchain.Hex.encode(Onchain.Hash.keccak("AuthorizationUsed(address,bytes32)")),
+        "0x" <>
+          String.duplicate("0", 24) <> String.replace_prefix(String.downcase(EVMAuthorization.signer_address()), "0x", ""),
+        @spec_example_challenge_hash
+      ],
+      "data" => "0x",
+      "removed" => false,
+      "blockNumber" => "0x1",
+      "transactionHash" => @tx_hash,
+      "logIndex" => "0x1"
+    }
+
+    Map.update!(receipt, "logs", &[event | &1])
   end
 
   defp signed_payload(overrides \\ []) do
