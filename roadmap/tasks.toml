@@ -3717,7 +3717,7 @@ shipped_in = "311cc458fcff01ab7f144b564c7a37178a005d4f"
 id = "134"
 phase = 5
 bundle = "evm"
-status = "pending"
+status = "in_progress"
 title = "Support custom EIP-3009 settlement with a live payment-and-distribution batch example"
 scores = { d = 6, b = 7, u = 6 }
 depends_on = [40]
@@ -3736,6 +3736,7 @@ Decision: a confirmed full payment to the configured immutable split address is 
 Authority: live Circle USDC on Ethereum Sepolia, Circle's FiatToken contract source and EIP-3009 establish payment semantics; the actual deployed 0xSplits PushSplit and chosen existing batch executor plus their official source establish batch effects. SDK code is compatibility evidence only. Observe a real success and a relevant real error before implementing; derive mocks afterward. Exact executor/deployment compatibility is unverified at filing: establish it during live discovery, record addresses/code identity, and report an external blocker if no usable testnet deployment can be exercised rather than substituting a mock or writing a new Solidity executor. The named benefit is the user's requested batching capability and the Starpatron PushSplit consumer; D6 includes live batch evidence, B7 enables custom relayers without a new method, U6 reflects the explicit request while separate distribution already works.
 """
 created_at = "2026-09-18"
+started_at = "2026-10-03"
 scored_at = "2026-09-18"
 
 [[task]]
