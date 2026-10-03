@@ -3372,7 +3372,7 @@ done_at = "2026-09-13"
 id = "122"
 phase = 16
 bundle = "additional-methods"
-status = "in_progress"
+status = "pending"
 title = "USDC charge method: Stacks USDCx profile"
 scores = { d = 8, b = 6, u = 6 }
 depends_on = [80]

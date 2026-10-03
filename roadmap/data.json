@@ -5133,7 +5133,7 @@
       "id": "122",
       "phase": 16,
       "bundle": "additional-methods",
-      "status": "in_progress",
+      "status": "pending",
       "title": "USDC charge method: Stacks USDCx profile",
       "scores": {
         "d": 8,
