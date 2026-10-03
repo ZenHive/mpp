@@ -46,7 +46,7 @@
 | Task 151 `[P]` | ✅ | 🎁 **core-protocol** · Map remaining method infrastructure failures to internal-payment-error [D:5/B:7/U:6 → Eff:1.3] 📋 |
 | Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
-| Task 155 `[P]` | 🔄 | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋 |
+| Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋 |
 <!-- TASKS:END -->
 
 ---
