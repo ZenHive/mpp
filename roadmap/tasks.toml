@@ -3372,7 +3372,7 @@ done_at = "2026-09-13"
 id = "122"
 phase = 16
 bundle = "additional-methods"
-status = "pending"
+status = "in_progress"
 title = "USDC charge method: Stacks USDCx profile"
 scores = { d = 8, b = 6, u = 6 }
 depends_on = [80]
@@ -3387,6 +3387,7 @@ Split out of Task 80 on 2026-09-16 (review: four live environments in one dispat
 Authority: Circle's USDCx documentation and the SIP-010 standard plus observed Stacks testnet behavior for chain semantics; the MPP USDC draft for the wire contract. No MPP reference SDK implements this profile at scoring time; re-check refs at pickup.
 """
 created_at = "2026-09-16"
+started_at = "2026-10-03"
 scored_at = "2026-09-16"
 
 [[task]]
