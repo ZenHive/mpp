@@ -77,7 +77,7 @@ defmodule MPP.Transports.WebSocketTest do
           store: false
         )
 
-      assert length(sess.config.method_entries) == 2
+      assert [_, _] = sess.config.method_entries
       {_session, texts} = WebSocket.open(sess)
       assert {:ok, [challenge]} = texts |> decode_one() |> ClientTransport.get_challenges()
       request = challenge.request |> Base.url_decode64!(padding: false) |> Jason.decode!()

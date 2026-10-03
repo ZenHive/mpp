@@ -49,6 +49,29 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     def delete(id, opts), do: ETSStore.delete(id, opts)
   end
 
+  defmodule FinalizationStore do
+    @moduledoc false
+
+    def get(id, opts), do: ETSStore.get(id, opts)
+
+    def update(id, fun, opts) do
+      ETSStore.update(
+        id,
+        fn current ->
+          case fun.(current) do
+            {:ok, %Record{in_flight_period: nil}} -> finalization_result(fun, current, opts[:failure])
+            result -> result
+          end
+        end,
+        opts
+      )
+    end
+
+    defp finalization_result(_fun, _current, :unavailable), do: {:error, :unavailable}
+    defp finalization_result(fun, _current, :missing), do: fun.(:not_found)
+    defp finalization_result(fun, current, :mismatch), do: fun.(%{current | in_flight_period: -1})
+  end
+
   defmodule EtsClaimStore do
     @moduledoc false
 
@@ -444,6 +467,51 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       failing_update = Map.put(config, "subscription_store", {FailingUpdateSubscriptionStore, elem(store, 1)})
       InternalPaymentError.assert_error(Subscription.renew(due.subscription_id, failing_update))
+    end
+
+    test "finalization failures retain the settled period claim and prevent another broadcast", %{store: store} do
+      stub_successful_chain()
+
+      for failure <- [:unavailable, :missing, :mismatch] do
+        config = config(store)
+        now = DateTime.truncate(DateTime.utc_now(), :second)
+
+        due = %{
+          record(subscription(config), now)
+          | subscription_id: "sub_finalize_#{failure}",
+            in_flight_period: nil,
+            in_flight_reference: nil
+        }
+
+        assert :ok = Store.put(store, due)
+        failing_store = {FinalizationStore, Keyword.put(elem(store, 1), :failure, failure)}
+        failing_config = Map.put(config, "subscription_store", failing_store)
+        result = Subscription.renew(due.subscription_id, failing_config)
+
+        case failure do
+          :unavailable ->
+            InternalPaymentError.assert_error(result)
+
+          :missing ->
+            assert {:error, %Errors{status: 402, detail: "subscription not found"}} = result
+
+          :mismatch ->
+            assert {:error, %Errors{status: 402, detail: "subscription operation failed: :renewal_claim_mismatch"}} =
+                     result
+        end
+
+        assert_received {:rpc, "eth_sendRawTransactionSync", [_raw]}
+        assert {:ok, held} = Store.get(store, due.subscription_id)
+        assert held.in_flight_period == 2
+        assert held.in_flight_reference == "renewal:#{due.subscription_id}:2"
+        assert held.last_charged_period == 0
+        assert held.payments == %{}
+
+        assert {:error, %Errors{detail: "subscription renewal is already in flight"}} =
+                 Subscription.renew(due.subscription_id, config)
+
+        refute_received {:rpc, "eth_sendRawTransactionSync", _params}
+      end
     end
 
     test "rejects an expired persisted subscription", %{store: store} do

@@ -11,6 +11,10 @@ defmodule MPP.Methods.Tempo.Subscription do
   scope persisted at activation, with the same settlement policy: a confirmed
   revert releases the in-flight period claim, while an ambiguous broadcast or
   a confirmed transfer that missed the recipient keeps the period claimed.
+
+  Store, broadcast and settlement-lookup failures return a sanitized
+  `internal-payment-error` (HTTP 500). A failed finalization after settlement
+  keeps the period claimed; it must be reconciled before another charge.
   """
 
   alias MPP.Errors

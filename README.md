@@ -320,6 +320,11 @@ later renewals. Both methods use `MPP.Subscription.ETSStore` by default;
 configure a shared `MPP.Subscription.Store` backend when renewals must
 coordinate across nodes or survive restarts.
 
+Tempo subscription store, broadcast and settlement-lookup failures return
+`internal-payment-error` (HTTP 500). An uncertain broadcast or a settled payment
+whose finalization failed retains its claim and requires reconciliation before
+another charge.
+
 ## What This Means for Your API
 
 Today, monetizing an API means building a billing system: user accounts, API key provisioning, usage tracking, rate limiting, a pricing page, a dashboard. That's months of work before you earn a cent.
@@ -471,6 +476,9 @@ Provider credentials and endpoints are passed explicitly; the providers do not r
 application configuration or environment variables. The Tempo provider verifies that
 the RPC serves the challenge's advertised chain before signing and always creates
 the challenge-bound attribution memo. A `memo` advertised by the server is ignored.
+Machine-token payments use MACH by default; set `machine_token_deployment: :machine_usd`
+for a server that accepts only machineUSD. The advertised `machineTokenEnabled`
+flag does not distinguish deployments.
 When `:expected_recipients` is set, the provider refuses a challenge whose primary
 `recipient` or any `splits` recipient is outside that allowlist — before signing a
 transaction or a zero-amount proof. Address comparison is checksum-agnostic. Omit
