@@ -66,7 +66,7 @@ defmodule MPP.MixProject do
       # admits decimal 3, which the rest of the lock already carries.
       {:open_api_spex, "~> 3.22.3", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.9", only: :dev},
-      {:bandit, "~> 1.12.0", only: :dev},
+      {:bandit, "~> 1.13.1", only: :dev},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
 
       # Code analysis tools (vibe_kit baseline: credo + ex_slop, ex_dna, reach)
