@@ -688,7 +688,7 @@ defmodule MPP.Methods.StripeIntegrationTest do
 
       assert conn_error.status == 402
       body = Jason.decode!(conn_error.resp_body)
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "payment-action-required"
       assert body["detail"] == "Stripe subscription first invoice requires customer action"
       assert Plug.Conn.get_resp_header(conn_error, "payment-receipt") == []
     end
