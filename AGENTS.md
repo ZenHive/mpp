@@ -216,7 +216,7 @@ reviewers via `sync-agents-md.sh`.
 ## 🚨 ADJUDICATED: the cowlib / gun advisories are ALREADY DECIDED — do NOT re-investigate
 
 **Read this before spending a single token on a `VULNERABLE!` line mentioning `gun`,
-`cowlib`, `GHSA-w4f7-4cxr-rv3c`, or `EEF-CVE-2026-43966`/`-43969`.** This has been
+`cowlib`, `GHSA-w4f7-4cxr-rv3c`, or `EEF-CVE-2026-43966`.** This has been
 adjudicated repeatedly by many sessions — local Claude instances, and every harness
 implementer / reviewer / auditor that ran `mix deps.get` in a fresh worktree. Each one
 found the same unbudgeted alarm and redid the same analysis. **The verdict is below.
@@ -240,17 +240,21 @@ call:
 | Advisory | Vulnerable function | Reachability |
 |---|---|---|
 | `EEF-CVE-2026-43966` (alias `GHSA-w4f7-4cxr-rv3c`, `CVE-2026-43966`) | `cow_http_struct_hd:escape_string/2` | **0 references** in `deps/gun/src/` |
-| `EEF-CVE-2026-43969` | `cow_cookie:cookie/1` | only from `gun_cookies.erl` — gun's **opt-in** cookie store; `zen_websocket` never sets `cookie_store` (the string `cookie` does not appear in its `lib/`) |
 
-**`EEF-CVE-2026-43971` (`cow_link:link/1`) is FIXED in cowlib 2.20.0 (2026-09-08)**
-(EEF CNA: affected `>= 2.9.0 < 2.20.0`) and was removed from the global Hex ignore list
-2026-09-24. If it reappears, the repo is on cowlib < 2.20.0: bump it, don't re-ignore it.
-The other two are still reported against cowlib 2.20.0 / gun 2.6.0 (verified 2026-09-24,
-`HEX_HOME=<empty> mix hex.audit` in bourse); no fixed release exists, so reachability is
-the only available adjudication. The 43969 fix is upstream (`177953d` "Preliminary patch",
-"Validate cookie domain/path") but unreleased. Re-check at the next cowlib release.
-`hex.audit` in a repo without cowlib (e.g. harness) warns the two ignores "match no
-advisory" — that is expected, not a sign they're resolved.
+**Fixed upstream — bump, never re-ignore.** These were removed from the global Hex
+ignore list once a fixed cowlib shipped. If one reappears, the repo is on an older
+cowlib: bump it.
+
+| Advisory | Function | Fixed in (OSV range) | Removed from ignore list |
+|---|---|---|---|
+| `EEF-CVE-2026-43971` | `cow_link:link/1` | cowlib 2.20.0 (`>= 2.9.0 < 2.20.0`) | 2026-09-24 |
+| `EEF-CVE-2026-43969` | `cow_cookie:cookie/1` | cowlib 2.21.0 (`>= 2.9.0 < 2.21.0`) | 2026-10-31 |
+
+43966 is still reported against cowlib 2.21.0 / gun 2.7.0 (verified 2026-10-31,
+`mix hex.audit` in mpp); no fixed release exists, so reachability is the only available
+adjudication. Re-check at the next cowlib release. `hex.audit` in a repo without cowlib
+(e.g. harness) warns the ignore "matches no advisory" — that is expected, not a sign it
+is resolved.
 
 **The separate `gun 2.5.0` line is a mirror bug, already reported upstream.** gun's real
 vulnerable range is `< 2.4.0`; gun 2.5.0 is patched. The mirego importer groups by
@@ -269,10 +273,11 @@ argument above has been made for that specific id.
 **What invalidates this verdict — re-adjudicate if any becomes true:** a repo takes
 `cowboy` as a **runtime** (not `only: :test`) dependency; gun's `cookie_store` option is
 enabled anywhere; gun is used as a general HTTP client with caller-supplied header
-values; or a new cowlib advisory appears that is not one of the two ids above.
+values; or a new cowlib advisory appears that is not the id above.
 
-**Affected repos (cowlib in the lock as of 2026-09-24, all on 2.20.0):** `bourse`, `mpp`,
-`zen_websocket`. The `onchain*` repos no longer lock cowlib. Suppression is inconsistent across them — most carry
+**Affected repos (cowlib in the lock):** `bourse`, `mpp`, `zen_websocket`. As of
+2026-10-31 `mpp` and `zen_websocket` lock cowlib 2.21.0; `bourse` still locks 2.20.0
+and will now report 43969 on `deps.get` until bumped. The `onchain*` repos no longer lock cowlib. Suppression is inconsistent across them — most carry
 `.mix_audit_ignore`, bourse uses an `--ignore-advisory-ids` alias in
 `mix.exs`. Standardize on `.mix_audit_ignore` when you touch one.
 
