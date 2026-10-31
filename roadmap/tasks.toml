@@ -4489,6 +4489,68 @@ body = "Opt-in mppx session server features we lack: reusable session challenges
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
+[[task]]
+id = "168"
+phase = 1
+bundle = "client-sdk"
+status = "pending"
+title = "Harden Tempo client proof signing (see private advisory GHSA-f382-x4g8-jg9q)"
+scores = { d = 4, b = 8, u = 9 }
+markers = ["parallel"]
+acceptance_criteria = ["Every behavior listed under 'Fix to port' in GHSA-f382-x4g8-jg9q is implemented and covered by a test that fails on the pre-fix code", "Unaffected paths named in the advisory keep working (regression tests)", "Behavior cross-checked against refs/mppx and refs/mpp-rs with file:line citations in the delivery report (not in committed files)", "No commit message, comment, doc or roadmap text contains the attack mechanism or the advisory's description; the advisory id may appear only in this task"]
+touches = ["lib/mpp/client/", "test/mpp/client/"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Security hardening of the client-side Tempo provider and its transports. The mechanism, affected code and the reference-SDK fix to port are ONLY in private draft advisory GHSA-f382-x4g8-jg9q — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-f382-x4g8-jg9q --jq .description`. Port the reference behavior from refs/mppx and refs/mpp-rs (cited in the advisory) and cross-check that both agree. DISCLOSURE: this repo is public and the advisory is unpublished — commit messages, code comments, moduledocs, CHANGELOG and roadmap text describe only the shape of the fix (e.g. 'add trusted-realm option to the Tempo client provider'), never the attack."
+created_at = "2026-10-31"
+scored_at = "2026-10-31"
+
+[[task]]
+id = "169"
+phase = 1
+bundle = "session"
+status = "pending"
+title = "Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq)"
+scores = { d = 6, b = 8, u = 9 }
+acceptance_criteria = ["Every behavior under 'Fix to port' (and 'Also port') in GHSA-fqv7-fp33-2mxq is implemented with tests that fail on the pre-fix code, for both the HTTP voucher path and the WebSocket meter", "Fails closed on verifier error (test)", "Moderato :integration test covers the new verification path and flunks with export instructions when credentials are missing", "MPP.Session.Actions moduledoc documents the new configuration; existing session tests stay green", "No commit message, comment, doc or roadmap text contains the attack mechanism; the advisory id appears only in this task"]
+touches = ["lib/mpp/session/", "lib/mpp/transports/websocket/", "lib/mpp/methods/tempo.ex", "test/mpp/session/", "test/mpp/transports/"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Security hardening of the generic session layer and the WebSocket meter. Mechanism, affected code and fix to port are ONLY in private draft advisory GHSA-fqv7-fp33-2mxq — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-fqv7-fp33-2mxq --jq .description`. Port the reference behavior from refs/mppx and refs/mpp-rs (cited there); keep the existing callback style of MPP.Session.Actions (verify_open / verify_top_up) and update the session moduledoc + README for any new required configuration. Live evidence: a Moderato :integration test exercising the new path, flunking loudly without credentials. DISCLOSURE: public repo, unpublished advisory — commits, comments, docs, CHANGELOG and roadmap text describe only the fix shape, never the attack."
+created_at = "2026-10-31"
+scored_at = "2026-10-31"
+
+[[task]]
+id = "170"
+phase = 1
+bundle = "session"
+status = "pending"
+title = "Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9)"
+scores = { d = 5, b = 7, u = 8 }
+acceptance_criteria = ["Every behavior under 'Fix to port' in GHSA-2grw-xqfc-q2x9 is implemented with tests that fail on the pre-fix code", "Typed-data hash matches a vector derived from refs/mppx or refs/mpp-rs (cross-validation test), citations in the delivery report", "Signer acceptance follows the advisory (payer or authorized signer, primitive signatures only) with positive and negative tests", "No commit message, comment, doc or roadmap text contains the attack mechanism; the advisory id appears only in this task"]
+touches = ["lib/mpp/session/", "test/mpp/session/"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Security hardening of the session close action. Mechanism, affected code, the EIP-712 type/domain and the fix to port are ONLY in private draft advisory GHSA-2grw-xqfc-q2x9 — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-2grw-xqfc-q2x9 --jq .description`. The typed-data layout is a wire-format constant: verify it against BOTH refs/mppx and refs/mpp-rs and pin it with a cross-validation vector produced by the reference SDK (QuickBEAM/ox or a refs-derived fixture), not a self-built one. Shares lib/mpp/session/ with the voucher-acceptance hardening task, so it is coalesced with it. DISCLOSURE: public repo, unpublished advisory — describe only the fix shape (e.g. 'require a close authorization signature'), never the attack."
+created_at = "2026-10-31"
+scored_at = "2026-10-31"
+
+[[task]]
+id = "171"
+phase = 1
+bundle = "transport-ws"
+status = "pending"
+title = "Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924)"
+scores = { d = 3, b = 7, u = 8 }
+markers = ["parallel"]
+acceptance_criteria = ["Every behavior under 'Fix to port' in GHSA-4rf9-cqhr-4924 is implemented with tests that fail on the pre-fix code", "Reconnects that are still legitimate (before any payment) keep working (regression test)", "Behavior cross-checked against refs/mpp-rs with citations in the delivery report", "No commit message, comment, doc or roadmap text contains the attack mechanism; the advisory id appears only in this task"]
+touches = ["lib/mpp/client/transport/websocket.ex", "lib/mpp/client/transport/websocket/", "test/mpp/client/transport/"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Security hardening of the WebSocket client retry state machine. Mechanism, affected code and fix to port are ONLY in private draft advisory GHSA-4rf9-cqhr-4924 — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-4rf9-cqhr-4924 --jq .description`. Port the reference behavior from refs/mpp-rs (cited there). DISCLOSURE: public repo, unpublished advisory — describe only the fix shape (e.g. 'bound payments per WebSocket connection'), never the attack."
+created_at = "2026-10-31"
+scored_at = "2026-10-31"
+
 [bundles.testnet-funding]
 phase = 1
 order = 9
