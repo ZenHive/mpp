@@ -151,6 +151,19 @@ defmodule MPP.Client.MultiProviderTest do
     end
   end
 
+  describe "pay/3" do
+    test "merges the transport context over the selected provider config" do
+      multi =
+        MultiProvider.new([
+          {ConfigProvider,
+           %{required_method: "tempo", required_intent: "charge", provider_id: "tempo", config_value: "from-config"}}
+        ])
+
+      assert {:ok, credential} = MultiProvider.pay(multi, challenge(method: "tempo"), %{config_value: "from-context"})
+      assert credential.payload == %{"provider" => "tempo", "config_value" => "from-context"}
+    end
+  end
+
   defp challenge(opts \\ []) do
     %Challenge{
       realm: "api.example.com",

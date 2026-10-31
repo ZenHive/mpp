@@ -4,10 +4,12 @@ defmodule MPP.Client.ReqTest do
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentProvider
+  alias MPP.Client.Providers.Tempo
   alias MPP.Client.Req, as: ClientReq
   alias MPP.Credential
   alias MPP.Demo.Router
   alias MPP.Headers
+  alias MPP.Intents.Charge
 
   @secret_key "test-secret-key-xxxxxxxxxxxxxxxx"
   @request "eyJhbW91bnQiOiIxMDAwIiwiY3VycmVuY3kiOiJ1c2QifQ"
@@ -56,6 +58,20 @@ defmodule MPP.Client.ReqTest do
 
     @impl PaymentProvider
     def pay(_challenge, _config), do: {:error, :payment_failed}
+  end
+
+  defmodule ContextProvider do
+    @moduledoc false
+    use PaymentProvider
+
+    @impl PaymentProvider
+    def supports?(method, intent, _config), do: method == "tempo" and intent == "charge"
+
+    @impl PaymentProvider
+    def pay(challenge, config) do
+      send(config.test_pid, {:request_url, config[:request_url]})
+      {:ok, %Credential{challenge: challenge, payload: %{"type" => "hash", "hash" => "0xabc"}, source: nil}}
+    end
   end
 
   defmodule DemoProvider do
@@ -535,6 +551,71 @@ defmodule MPP.Client.ReqTest do
     end
   end
 
+  describe "zero-amount Tempo proof realm" do
+    @proof_realm "target.example"
+    @chain_id 42_431
+
+    test "passes the request URL to the provider as :request_url" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+          ["Payment " <> _blob] -> Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {ContextProvider, %{test_pid: self(), request_url: "https://stale.example"}})
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource?x=1")
+      assert_received {:request_url, %URI{scheme: "http", host: "example.com", path: "/resource", query: "x=1"}}
+    end
+
+    test "signs a proof for a realm owned by the requested host" do
+      stub_chain_id()
+      test_pid = self()
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            send_proof_challenge(conn)
+
+          ["Payment " <> blob] ->
+            send(test_pid, {:credential, blob})
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {Tempo, tempo_config()})
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} = Req.get(req, url: "http://TARGET.example/resource")
+      assert_received {:credential, _blob}
+    end
+
+    test "refuses to sign a proof for a realm the requested host does not own" do
+      test_pid = self()
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            send_proof_challenge(conn)
+
+          [_credential] ->
+            send(test_pid, :credential_sent)
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {Tempo, tempo_config()})
+
+      assert {:error, %ClientReq.Error{reason: {:untrusted_proof_realm, @proof_realm, "http://other.example"}} = error} =
+               Req.get(req, url: "http://other.example/resource")
+
+      assert Exception.message(error) =~ ":trusted_tempo_proof_realms"
+      refute_received :credential_sent
+    end
+  end
+
   describe "Accept-Payment advertisement" do
     test "injects Accept-Payment from configured entries" do
       plug = fn conn ->
@@ -617,5 +698,48 @@ defmodule MPP.Client.ReqTest do
       body = if is_binary(body), do: Jason.decode!(body), else: body
       assert body == %{"status" => "ok"}
     end
+  end
+
+  defp send_proof_challenge(conn) do
+    {:ok, charge} =
+      Charge.new(
+        amount: "0",
+        currency: "0x20c0000000000000000000000000000000000001",
+        recipient: "0x2222222222222222222222222222222222222222",
+        method_details: %{"chainId" => @chain_id}
+      )
+
+    request = charge |> Charge.to_request() |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+    header =
+      [realm: @proof_realm, method: "tempo", intent: "charge", request: request]
+      |> Challenge.create(@secret_key)
+      |> Headers.format_challenge()
+
+    conn
+    |> Plug.Conn.put_resp_header("www-authenticate", header)
+    |> Plug.Conn.send_resp(402, "pay")
+  end
+
+  defp tempo_config do
+    %{
+      private_key: String.duplicate("11", 32),
+      rpc_url: "https://moderato.invalid",
+      expected_chain_id: @chain_id,
+      req_options: [plug: {Req.Test, __MODULE__}]
+    }
+  end
+
+  defp stub_chain_id do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "result" => "0x" <> Integer.to_string(@chain_id, 16)
+      })
+    end)
   end
 end

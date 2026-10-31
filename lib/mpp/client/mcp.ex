@@ -16,6 +16,11 @@ defmodule MPP.Client.MCP do
   (`refs/mppx/src/mcp/client/McpClient.ts`) so a malicious server cannot drain
   a client wallet through repeated re-challenges.
 
+  MCP has no request origin, so providers are paid with `request_url: nil`:
+  a zero-amount Tempo proof is signed only for a realm listed as a bare
+  string in the provider's `:trusted_tempo_proof_realms`
+  (see `MPP.Client.Providers.Tempo`).
+
   Approval runs **after** challenge selection and **before** each payment —
   matching `refs/mppx/src/mcp/client/McpClient.ts`. A declined approval neither
   pays nor retries.
@@ -141,7 +146,7 @@ defmodule MPP.Client.MCP do
     with {:ok, challenges} <- MCPTransport.get_challenges(response),
          {:ok, challenge} <- Transport.select_challenge(challenges, client.provider, selection: client.selection),
          :ok <- Transport.approve(challenge, hook),
-         {:ok, credential} <- MultiProvider.pay(client.provider, challenge) do
+         {:ok, credential} <- MultiProvider.pay(client.provider, challenge, %{request_url: nil}) do
       case request |> MCPTransport.set_credential(credential) |> send_fun.() do
         next when is_map(next) ->
           handle_response(client, request, next, send_fun, hook, payments_made + 1)

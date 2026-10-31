@@ -16,6 +16,11 @@ defmodule MPP.Client.Req do
   A 402 that arrives after a redirect changed the request origin is refused
   (`:cross_origin_redirect`) so a payment credential is never attached to a
   different host, scheme, or port than the caller asked for (mpp-rs #379).
+
+  The request URL is passed to the provider as `:request_url` (see
+  `MPP.Client.MultiProvider.pay/3`), so a zero-amount Tempo proof is signed
+  only for a realm the requested server owns
+  (`MPP.Client.Providers.Tempo`, `:trusted_tempo_proof_realms`).
   """
 
   use Descripex, namespace: "/client"
@@ -182,7 +187,7 @@ defmodule MPP.Client.Req do
          {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
          :ok <- Transport.approve(challenge, config.on_payment_required),
-         {:ok, credential} <- MultiProvider.pay(config.provider, challenge) do
+         {:ok, credential} <- MultiProvider.pay(config.provider, challenge, %{request_url: request.url}) do
       paid =
         request
         |> HTTP.set_credential(credential)
@@ -262,6 +267,11 @@ defmodule MPP.Client.Req do
   defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
+
+  defp error_message({:untrusted_proof_realm, realm, origin}) do
+    "refusing to sign a Tempo proof for realm #{inspect(realm)} from #{origin}; " <>
+      "pin it with :trusted_tempo_proof_realms if this server issues it"
+  end
 
   defp error_message(reason), do: "MPP payment failed: #{inspect(reason)}"
 end

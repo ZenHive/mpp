@@ -70,7 +70,9 @@ defmodule MPP.Client.PaymentProvider do
   ## Arguments
 
     * `challenge` — the `MPP.Challenge` struct from the 402 response
-    * `config` — provider-specific configuration (API keys, RPC URLs, etc.)
+    * `config` — provider-specific configuration (API keys, RPC URLs, etc.).
+      When paid through `MPP.Client.MultiProvider.pay/3`, transport context
+      such as `:request_url` is merged in.
 
   ## Returns
 

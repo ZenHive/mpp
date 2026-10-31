@@ -561,6 +561,122 @@ defmodule MPP.Client.Providers.TempoTest do
     end
   end
 
+  describe "zero-amount proof realm" do
+    test "signs a proof when the realm is the request hostname, ignoring case and port" do
+      config = Map.put(provider_config(), :request_url, "https://PAYMENTS.Example.com:8443/resource")
+
+      assert {:ok, %{payload: %{"type" => "proof"}}} = Tempo.pay(challenge(amount: "0"), config)
+    end
+
+    test "refuses a proof for a realm that is not the request hostname before any RPC call" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      config = Map.put(provider_config(), :request_url, "https://other.example/resource")
+
+      assert {:error, {:untrusted_proof_realm, @realm, "https://other.example"}} =
+               Tempo.pay(challenge(amount: "0"), config)
+    end
+
+    test "refuses a realm that names the request host with a port" do
+      config = Map.put(provider_config(), :request_url, "http://localhost:4402/resource")
+
+      assert {:error, {:untrusted_proof_realm, "localhost:4402", "http://localhost:4402"}} =
+               Tempo.pay(challenge(amount: "0", realm: "localhost:4402"), config)
+    end
+
+    test "signs a proof for a realm pinned to the request origin" do
+      config =
+        Map.merge(provider_config(), %{
+          request_url: "https://api.example.com/pay",
+          trusted_tempo_proof_realms: %{"https://API.example.com:443/" => "MPP Payment"}
+        })
+
+      assert {:ok, %{payload: %{"type" => "proof"}}} = Tempo.pay(challenge(amount: "0", realm: "MPP Payment"), config)
+    end
+
+    test "accepts origin pins as a list of tuples" do
+      config =
+        Map.merge(provider_config(), %{
+          request_url: "https://api.example.com/pay",
+          trusted_tempo_proof_realms: [{"https://api.example.com", "MPP Payment"}]
+        })
+
+      assert {:ok, %{payload: %{"type" => "proof"}}} = Tempo.pay(challenge(amount: "0", realm: "MPP Payment"), config)
+    end
+
+    test "refuses a pin for another origin, scheme, port, or realm" do
+      for {pins, request_url} <- [
+            {%{"https://api.example.com" => "MPP Payment"}, "https://other.example/pay"},
+            {%{"http://api.example.com" => "MPP Payment"}, "https://api.example.com/pay"},
+            {%{"https://api.example.com:8443" => "MPP Payment"}, "https://api.example.com/pay"},
+            {%{"https://api.example.com" => "mpp payment"}, "https://api.example.com/pay"},
+            {["MPP Payment"], "https://api.example.com/pay"}
+          ] do
+        config = Map.merge(provider_config(), %{request_url: request_url, trusted_tempo_proof_realms: pins})
+        origin = request_url |> URI.parse() |> Map.put(:path, nil) |> URI.to_string()
+
+        assert {:error, {:untrusted_proof_realm, "MPP Payment", ^origin}} =
+                 Tempo.pay(challenge(amount: "0", realm: "MPP Payment"), config)
+      end
+    end
+
+    test "compares a WebSocket request URL as its HTTP origin" do
+      host_config = Map.put(provider_config(), :request_url, "wss://#{@realm}/rpc")
+      assert {:ok, %{payload: %{"type" => "proof"}}} = Tempo.pay(challenge(amount: "0"), host_config)
+
+      pinned_config =
+        Map.merge(provider_config(), %{
+          request_url: "wss://api.example.com/rpc",
+          trusted_tempo_proof_realms: %{"https://api.example.com" => "MPP Payment"}
+        })
+
+      assert {:ok, %{payload: %{"type" => "proof"}}} =
+               Tempo.pay(challenge(amount: "0", realm: "MPP Payment"), pinned_config)
+
+      plain_config = Map.put(pinned_config, :request_url, "ws://api.example.com/rpc")
+
+      assert {:error, {:untrusted_proof_realm, "MPP Payment", "http://api.example.com"}} =
+               Tempo.pay(challenge(amount: "0", realm: "MPP Payment"), plain_config)
+    end
+
+    test "refuses a proof without a request URL unless the realm is listed as trusted" do
+      config = Map.delete(provider_config(), :request_url)
+
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} = Tempo.pay(challenge(amount: "0"), config)
+
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} =
+               Tempo.pay(challenge(amount: "0"), Map.put(config, :request_url, nil))
+
+      origin_pinned = Map.put(config, :trusted_tempo_proof_realms, %{"https://#{@realm}" => @realm})
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} = Tempo.pay(challenge(amount: "0"), origin_pinned)
+
+      trusted = Map.put(config, :trusted_tempo_proof_realms, [@realm])
+      assert {:ok, %{payload: %{"type" => "proof"}}} = Tempo.pay(challenge(amount: "0"), trusted)
+    end
+
+    test "rejects malformed trusted realms and request URLs" do
+      for pins <- [%{"api.example.com" => "MPP Payment"}, %{"ftp://api.example.com" => "x"}, [:realm], "realm"] do
+        config = Map.put(provider_config(), :trusted_tempo_proof_realms, pins)
+
+        assert {:error, {:invalid_config, :trusted_tempo_proof_realms}} = Tempo.pay(challenge(amount: "0"), config)
+      end
+
+      for request_url <- ["not a url", "ftp://#{@realm}/file", 42] do
+        config = Map.put(provider_config(), :request_url, request_url)
+
+        assert {:error, {:invalid_config, :request_url}} = Tempo.pay(challenge(amount: "0"), config)
+      end
+    end
+
+    test "does not apply to non-zero charges" do
+      for config <- [
+            Map.delete(provider_config(), :request_url),
+            Map.put(provider_config(), :request_url, "https://other.example/resource")
+          ] do
+        assert {:ok, %{payload: %{"type" => "transaction"}}} = Tempo.pay(challenge(), config)
+      end
+    end
+  end
+
   describe "expected_recipients" do
     test "refuses an unlisted primary recipient on the transaction path before signing" do
       Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
@@ -674,7 +790,7 @@ defmodule MPP.Client.Providers.TempoTest do
 
     %Challenge{
       id: @challenge_id,
-      realm: @realm,
+      realm: Keyword.get(opts, :realm, @realm),
       method: "tempo",
       intent: "charge",
       request: request,
@@ -704,7 +820,8 @@ defmodule MPP.Client.Providers.TempoTest do
       client_id: @client_id,
       nonce: 0,
       gas_limit: @gas_limit,
-      req_options: [plug: {Req.Test, __MODULE__}]
+      req_options: [plug: {Req.Test, __MODULE__}],
+      request_url: "https://#{@realm}/resource"
     }
   end
 

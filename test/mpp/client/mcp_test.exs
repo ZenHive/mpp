@@ -5,8 +5,10 @@ defmodule MPP.Client.MCPTest do
   alias MPP.Client.MCP, as: ClientMCP
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentProvider
+  alias MPP.Client.Providers.Tempo
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
+  alias MPP.Intents.Charge
   alias MPP.Mcp
 
   @secret_key "test-secret-key-for-mcp-client-x"
@@ -321,6 +323,40 @@ defmodule MPP.Client.MCPTest do
     end
   end
 
+  describe "zero-amount Tempo proof realm" do
+    @chain_id 42_431
+
+    test "refuses a proof when the realm is not listed as trusted" do
+      client = ClientMCP.new(provider: {Tempo, tempo_config()})
+
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} =
+               ClientMCP.call(client, json_rpc_request(), proof_server())
+
+      refute_received {:credential_sent, _}
+    end
+
+    test "ignores a :request_url left in the provider config" do
+      config = Map.put(tempo_config(), :request_url, "https://#{@realm}/mcp")
+      client = ClientMCP.new(provider: {Tempo, config})
+
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} =
+               ClientMCP.call(client, json_rpc_request(), proof_server())
+
+      refute_received {:credential_sent, _}
+    end
+
+    test "signs a proof for a realm listed as trusted" do
+      stub_chain_id()
+      config = Map.put(tempo_config(), :trusted_tempo_proof_realms, [@realm])
+      client = ClientMCP.new(provider: {Tempo, config})
+
+      assert {:ok, %{"result" => %{"content" => []}}} =
+               ClientMCP.call(client, json_rpc_request(), proof_server())
+
+      assert_received {:credential_sent, %{"payload" => %{"type" => "proof"}}}
+    end
+  end
+
   describe "errors and malformed envelopes" do
     test "returns the provider error when payment fails" do
       error = Mcp.payment_required_error(make_challenge("tempo"))
@@ -592,5 +628,52 @@ defmodule MPP.Client.MCPTest do
 
     assert :new in names
     assert :call in names
+  end
+
+  defp proof_server do
+    {:ok, charge} =
+      Charge.new(
+        amount: "0",
+        currency: "0x20c0000000000000000000000000000000000001",
+        recipient: "0x2222222222222222222222222222222222222222",
+        method_details: %{"chainId" => @chain_id}
+      )
+
+    request = charge |> Charge.to_request() |> Jason.encode!() |> Base.url_encode64(padding: false)
+    challenge = Challenge.create([realm: @realm, method: "tempo", intent: "charge", request: request], @secret_key)
+    test_pid = self()
+
+    fn rpc_request ->
+      case get_in(rpc_request, ["params", "_meta", Mcp.credential_meta_key()]) do
+        nil ->
+          %{"jsonrpc" => "2.0", "id" => rpc_request["id"], "error" => Mcp.payment_required_error(challenge)}
+
+        credential ->
+          send(test_pid, {:credential_sent, credential})
+          %{"jsonrpc" => "2.0", "id" => rpc_request["id"], "result" => %{"content" => []}}
+      end
+    end
+  end
+
+  defp tempo_config do
+    %{
+      private_key: String.duplicate("11", 32),
+      rpc_url: "https://moderato.invalid",
+      expected_chain_id: @chain_id,
+      req_options: [plug: {Req.Test, __MODULE__}]
+    }
+  end
+
+  defp stub_chain_id do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "result" => "0x" <> Integer.to_string(@chain_id, 16)
+      })
+    end)
   end
 end

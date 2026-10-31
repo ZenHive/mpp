@@ -40,6 +40,32 @@ defmodule MPP.Client.Providers.Tempo do
   Zero-amount charges use `type="proof"` and ignore `supportedModes`.
   The payment memo is always the challenge-bound attribution memo. A `memo`
   advertised in method details is ignored (mppx #904 / mpp-rs #421).
+
+  ## Zero-amount proof realm
+
+  A `type="proof"` credential authenticates the payer at the challenge
+  `realm`, so the provider signs one only when that realm belongs to the
+  server the credential is sent to. Two config keys control this:
+
+    * `:request_url` — the URL the credential will be sent to. Transports
+      supply it through the pay context (`MPP.Client.Req` does so
+      automatically via `MPP.Client.MultiProvider.pay/3`); a WebSocket caller
+      passes its `ws://` / `wss://` URL, which is compared as the matching
+      `http://` / `https://` origin. Absent or `nil` means the transport has
+      no origin (MCP, bare JSON-RPC).
+    * `:trusted_tempo_proof_realms` — optional caller-pinned trust. A map
+      `%{"https://api.example.com" => "MPP Payment"}` (or a list of
+      `{origin, realm}` tuples) allows that realm from that HTTP origin. Bare
+      realm strings in a list (`["MPP Payment"]`) are trusted only on
+      transports without an origin. Origins compare scheme, host, and port
+      (default ports elided, path ignored); realms compare exactly.
+
+  With a request URL, the proof is signed when the realm equals the URL
+  hostname (ASCII case-insensitive, port ignored) or an origin pin lists the
+  realm. Without one, the realm must be listed as a bare trusted realm.
+  Otherwise `pay/2` returns
+  `{:error, {:untrusted_proof_realm, realm, origin_or_nil}}` before any RPC
+  call or signature. Non-zero charges are unaffected.
   """
 
   use MPP.Client.PaymentProvider
@@ -47,6 +73,7 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.Challenge
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Shared
+  alias MPP.Client.Providers.Tempo.ProofRealm
   alias MPP.Credential
   alias MPP.DID
   alias MPP.Intents.Charge
@@ -123,6 +150,7 @@ defmodule MPP.Client.Providers.Tempo do
          {:ok, details} <- method_details(charge),
          {:ok, amount} <- parse_amount(charge.amount),
          :ok <- ensure_pull_supported(amount, details),
+         :ok <- ensure_proof_realm(challenge, amount, config[:request_url], provider.trusted_proof_realms),
          :ok <- pin_recipients(charge, details, provider.expected_recipients),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
@@ -143,7 +171,8 @@ defmodule MPP.Client.Providers.Tempo do
          {:ok, req_options} <- req_options(config[:req_options]),
          {:ok, expected_chain_id} <- optional_chain_id(config[:expected_chain_id]),
          {:ok, expected_recipients} <- expected_recipients(config[:expected_recipients]),
-         {:ok, client_id} <- optional_string(config[:client_id], :client_id) do
+         {:ok, client_id} <- optional_string(config[:client_id], :client_id),
+         {:ok, trusted_proof_realms} <- trusted_proof_realms(config[:trusted_tempo_proof_realms]) do
       {:ok,
        %{
          private_key: private_key,
@@ -151,6 +180,7 @@ defmodule MPP.Client.Providers.Tempo do
          expected_chain_id: expected_chain_id,
          expected_recipients: expected_recipients,
          client_id: client_id,
+         trusted_proof_realms: trusted_proof_realms,
          fee_token: config[:fee_token],
          machine_token_deployment: config[:machine_token_deployment] || :mach,
          req_options: req_options,
@@ -425,6 +455,16 @@ defmodule MPP.Client.Providers.Tempo do
       {:error, _reason} -> {:error, {:invalid_config, :expected_recipients}}
     end
   end
+
+  defp trusted_proof_realms(value) do
+    case ProofRealm.normalize_pins(value) do
+      {:ok, pins} -> {:ok, pins}
+      :error -> {:error, {:invalid_config, :trusted_tempo_proof_realms}}
+    end
+  end
+
+  defp ensure_proof_realm(challenge, 0, request_url, pins), do: ProofRealm.check(challenge.realm, request_url, pins)
+  defp ensure_proof_realm(_challenge, _amount, _request_url, _pins), do: :ok
 
   defp optional_string(nil, _key), do: {:ok, nil}
   defp optional_string(value, _key) when is_binary(value), do: {:ok, value}

@@ -113,7 +113,11 @@ defmodule MPP.Client.MultiProvider do
   api(:pay, "Execute payment by dispatching to the first matching provider.",
     params: [
       multi: [kind: :value, description: "MultiProvider struct"],
-      challenge: [kind: :value, description: "Challenge struct from 402 response"]
+      challenge: [kind: :value, description: "Challenge struct from 402 response"],
+      context: [
+        kind: :value,
+        description: "Optional transport context merged over the selected provider config, e.g. `%{request_url: url}`"
+      ]
     ],
     returns: %{type: :tuple, description: "{:ok, Credential.t()} or {:error, term()}"},
     errors: [:unsupported_payment_method]
@@ -122,14 +126,21 @@ defmodule MPP.Client.MultiProvider do
   @doc """
   Execute payment by dispatching to the first matching provider.
 
+  `context` is transport-supplied request state merged over the selected
+  provider's config before `pay/2` runs. Transports pass `:request_url` — the
+  URL the credential will be sent to, or `nil` when the transport has no
+  origin — so a provider can bind what it signs to that server (see
+  `MPP.Client.Providers.Tempo`). Context keys override config keys of the
+  same name.
+
   Returns `{:error, :unsupported_payment_method}` if no provider matches.
   """
-  @spec pay(t(), MPP.Challenge.t()) :: {:ok, MPP.Credential.t()} | {:error, term()}
-  def pay(%__MODULE__{providers: providers}, challenge) do
+  @spec pay(t(), MPP.Challenge.t(), map()) :: {:ok, MPP.Credential.t()} | {:error, term()}
+  def pay(%__MODULE__{providers: providers}, challenge, context \\ %{}) when is_map(context) do
     providers
     |> Enum.find(fn {mod, cfg} -> provider_supports_challenge?(mod, cfg, challenge) end)
     |> case do
-      {mod, cfg} -> mod.pay(challenge, cfg)
+      {mod, cfg} -> mod.pay(challenge, Map.merge(cfg, context))
       nil -> {:error, :unsupported_payment_method}
     end
   end
