@@ -618,10 +618,4 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   defp subscription_error(:renewal_claim_mismatch),
     do: Errors.new(:verification_failed, "subscription renewal claim no longer matches the stored record")
-
-  # Store and adapter terms stay in the server log, never in the problem detail.
-  defp subscription_error(reason) do
-    Logger.error("Tempo subscription operation failed: #{inspect(reason)}")
-    Shared.internal_payment_error()
-  end
 end

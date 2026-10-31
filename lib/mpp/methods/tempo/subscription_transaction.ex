@@ -3,7 +3,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
   import Bitwise, only: [<<<: 2]
 
+  alias MPP.Errors
   alias MPP.Intents.Subscription
+  alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.KeyAuthorization
   alias Onchain.Address
@@ -28,7 +30,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
   @doc "Build an access-key-signed Tempo subscription payment transaction."
   @spec build(Subscription.t(), KeyAuthorization.t() | nil, String.t(), map(), String.t()) ::
-          {:ok, Transaction.t(), String.t()} | {:error, String.t()}
+          {:ok, Transaction.t(), String.t()} | {:error, String.t() | Errors.t()}
   def build(%Subscription{} = subscription, authorization, source, config, settlement_reference) do
     sponsored? = fee_payer_enabled?(config)
     chain_id = config["chain_id"]
@@ -58,7 +60,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
 
       {:error, reason} ->
         Logger.error("Tempo subscription transaction build failed: #{inspect(reason)}")
-        {:error, "subscription transaction could not be built"}
+        {:error, Shared.internal_payment_error()}
     end
   end
 

@@ -7,6 +7,17 @@ defmodule MPP.Transports.JsonRpcTest do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Transports.JsonRpc
 
+  defmodule InternalErrorMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "demo"
+
+    @impl MPP.Method
+    def verify(_payload, _charge), do: {:error, MPP.Errors.new(:internal_payment_error, "private-db-marker-rpc")}
+  end
+
   @secret_key "test-secret-key-for-jsonrpc-xxxx"
   @realm "rpc.example.com"
 
@@ -73,6 +84,23 @@ defmodule MPP.Transports.JsonRpcTest do
       assert challenge["request"]["amount"] == "1000"
       assert challenge["request"]["currency"] == "usd"
       refute Map.has_key?(response, "_meta")
+    end
+
+    test "a typed internal error renders the fixed detail and logs the original" do
+      config = server_config(method: InternalErrorMethod)
+      unpaid = JsonRpc.call(rpc_request(), config, fn _ -> flunk("unpaid") end)
+      assert {:ok, [challenge]} = JsonRpc.extract_challenges(unpaid)
+      request = JsonRpc.attach_credential(rpc_request(), credential_for(challenge))
+
+      {response, log} =
+        ExUnit.CaptureLog.with_log(fn -> JsonRpc.call(request, config, fn _ -> flunk("handler must not run") end) end)
+
+      assert response["error"]["code"] == -32_603
+      problem = response["error"]["data"]["problem"]
+      assert problem["type"] == "https://paymentauth.org/problems/internal-payment-error"
+      assert problem["detail"] == "An internal payment error occurred."
+      refute Jason.encode!(response) =~ "private-db-marker-rpc"
+      assert log =~ "private-db-marker-rpc"
     end
 
     test "accepts a root-level _meta credential and attaches the receipt at root _meta" do

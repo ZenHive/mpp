@@ -874,6 +874,26 @@ defmodule MPP.Transports.WebSocketTest do
       assert log =~ @channel_id
     end
 
+    test "a typed internal channel-state error renders the fixed detail and logs the original" do
+      store = session_store()
+      put_channel!(store, cumulative: 100, spent: 0)
+      failing = fn _, _ -> {:error, Errors.new(:internal_payment_error, "private-db-marker-ws")} end
+
+      method_config =
+        store |> session_options() |> Keyword.fetch!(:method_config) |> Map.put("verify_channel_state", failing)
+
+      {sess, _} = WebSocket.open(meter_session(store, generate: [], method_config: method_config))
+      sess = %{sess | status: :authorized}
+
+      {{_sess, [frame]}, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["chunk-1"], tick_cost: 50)
+        end)
+
+      assert frame["error"] == Shared.internal_payment_error().detail
+      assert log =~ "private-db-marker-ws"
+    end
+
     test "a failed spend update reports the generic internal error and logs the term" do
       backing = session_store()
       put_channel!(backing, cumulative: 100, spent: 0)

@@ -36,6 +36,10 @@ defmodule MPP.PlugTest do
       {:error, Errors.new(:verification_failed, "Invalid proof")}
     end
 
+    def verify(%{"proof" => "internal"}, _charge) do
+      {:error, Errors.new(:internal_payment_error, "private-db-marker-plug")}
+    end
+
     def verify(%{"proof" => "capacity"}, _charge) do
       error =
         :sponsor_capacity_exhausted
@@ -963,6 +967,23 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       InternalPaymentError.assert_plug(conn)
+    end
+
+    test "a typed internal error from the method renders the fixed detail and logs the original" do
+      config = init_config()
+      auth_header = build_authorization_header(config, %{"proof" => "internal"})
+
+      {conn, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          :get
+          |> Plug.Test.conn("/premium")
+          |> Plug.Conn.put_req_header("authorization", auth_header)
+          |> call_plug(config)
+        end)
+
+      InternalPaymentError.assert_plug(conn)
+      refute conn.resp_body =~ "private-db-marker-plug"
+      assert log =~ "private-db-marker-plug"
     end
 
     test "tempo method with its own store skips plug-level replay store" do

@@ -65,6 +65,31 @@ defmodule MPP.ErrorsTest do
     end
   end
 
+  describe "client_detail/1" do
+    test "an internal payment error renders the fixed detail and logs the original" do
+      error = Errors.new(:internal_payment_error, "private-db-marker")
+
+      {map, log} = ExUnit.CaptureLog.with_log(fn -> Errors.to_map(error) end)
+      assert map["detail"] == "An internal payment error occurred."
+      refute Errors.to_json(error) =~ "private-db-marker"
+      assert log =~ "private-db-marker"
+      assert error.detail == "private-db-marker"
+    end
+
+    test "the fixed internal detail is rendered without a log line" do
+      error = Errors.new(:internal_payment_error, "An internal payment error occurred.")
+
+      assert {"An internal payment error occurred.", ""} =
+               ExUnit.CaptureLog.with_log(fn -> Errors.client_detail(error) end)
+    end
+
+    test "public problem types keep their detail" do
+      for type <- [:verification_failed, :invalid_payload, :settlement_unavailable, :channel_closed] do
+        assert Errors.client_detail(Errors.new(type, "public detail")) == "public detail"
+      end
+    end
+  end
+
   describe "put_retry_after/2" do
     test "attaches a positive delta without changing the problem body" do
       error =

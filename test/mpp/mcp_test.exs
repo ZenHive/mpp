@@ -56,7 +56,7 @@ defmodule MPP.McpTest do
 
     @impl MPP.Method
     def verify(%{"proof" => "internal"}, _charge) do
-      {:error, Errors.new(:internal_payment_error, "Payment processor failure")}
+      {:error, Errors.new(:internal_payment_error, "private-db-marker-mcp")}
     end
 
     @impl MPP.Method
@@ -1225,10 +1225,12 @@ defmodule MPP.McpTest do
         |> json_rpc_request_with_credential()
         |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
 
-      internal =
-        %{"proof" => "internal"}
-        |> json_rpc_request_with_credential()
-        |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+      {internal, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          %{"proof" => "internal"}
+          |> json_rpc_request_with_credential()
+          |> Mcp.call(server_config(), fn _request -> flunk("handler must not run") end)
+        end)
 
       assert invalid["error"]["code"] == -32_602
       assert invalid["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/invalid-payload"
@@ -1238,6 +1240,9 @@ defmodule MPP.McpTest do
       assert internal["error"]["data"]["httpStatus"] == 500
       assert internal["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/internal-payment-error"
       assert internal["error"]["data"]["problem"]["title"] == "Internal Payment Error"
+      assert internal["error"]["data"]["problem"]["detail"] == "An internal payment error occurred."
+      refute Jason.encode!(internal) =~ "private-db-marker-mcp"
+      assert log =~ "private-db-marker-mcp"
       assert [_retry] = internal["error"]["data"]["challenges"]
     end
 

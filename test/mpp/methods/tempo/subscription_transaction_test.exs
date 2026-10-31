@@ -178,7 +178,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
     assert_received {:rpc, %{"method" => "eth_getTransactionCount"}}
   end
 
-  test "a non-string build failure returns fixed text and logs the term" do
+  test "a non-string build failure returns internal-payment-error and logs the term" do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       request = Jason.decode!(body)
@@ -206,7 +206,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
         )
       end)
 
-    assert {:error, "subscription transaction could not be built"} = result
+    MPP.Test.InternalPaymentError.assert_error(result)
     assert log =~ "nonce-backend-6b2e"
   end
 

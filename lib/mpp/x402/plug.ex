@@ -147,16 +147,30 @@ defmodule MPP.X402.Plug do
          :ok <- reject_native_nonce(payload, conn, x402),
          :ok <- Replay.claim(store, authorization_nonce(payload)),
          payload = Map.put(payload, "accepted", accepted),
-         {:ok, verified} <- Facilitator.verify(x402.facilitator, payload, accepted),
+         {:ok, verified} <- facilitator_call(:verify, Facilitator.verify(x402.facilitator, payload, accepted)),
          :ok <- require_valid(verified),
-         {:ok, settled} <- Facilitator.settle(x402.facilitator, payload, accepted),
+         {:ok, settled} <- facilitator_call(:settle, Facilitator.settle(x402.facilitator, payload, accepted)),
          :ok <- require_success(settled) do
       {:ok, put_settlement(conn, settled)}
     else
       {:error, %Errors{} = error} -> {:error, error}
       {:error, :already_used} -> {:error, Errors.new(:verification_failed, "x402 payment has already been settled")}
-      {:error, reason} -> {:error, x402_error(reason)}
+      {:error, :store_error} -> {:error, Shared.internal_payment_error()}
+      {:error, reason} when is_atom(reason) -> {:error, Errors.new(:verification_failed, "x402 #{reason}")}
+      {:error, reason} when is_binary(reason) -> {:error, Errors.new(:verification_failed, reason)}
     end
+  end
+
+  # A raw facilitator error (transport, HTTP, or callback term of any shape) is
+  # an internal failure; only the facilitator's `isValid`/`success` results are
+  # public rejections. Typed errors pass through and are rendered by
+  # `MPP.Errors.client_detail/1`.
+  defp facilitator_call(_stage, {:ok, _response} = ok), do: ok
+  defp facilitator_call(_stage, {:error, %Errors{}} = error), do: error
+
+  defp facilitator_call(stage, {:error, reason}) do
+    Logger.error("MPP x402 facilitator #{stage} failed: #{inspect(reason)}")
+    {:error, Shared.internal_payment_error()}
   end
 
   defp bind_route(payload, conn, x402) do
@@ -385,14 +399,5 @@ defmodule MPP.X402.Plug do
 
   defp route_scope!(key, _nested, _route) do
     raise ArgumentError, "MPP.Plug :x402 :#{key} conflicts with the route :#{key}"
-  end
-
-  defp x402_error(reason) when is_atom(reason), do: Errors.new(:verification_failed, "x402 #{reason}")
-  defp x402_error(reason) when is_binary(reason), do: Errors.new(:verification_failed, reason)
-
-  # Facilitator transport/HTTP and callback terms stay in the server log.
-  defp x402_error(reason) do
-    Logger.error("MPP x402 facilitator failure: #{inspect(reason)}")
-    Shared.internal_payment_error()
   end
 end

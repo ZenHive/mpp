@@ -696,6 +696,33 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       end
     end
 
+    test "a backend failure while building the transaction returns internal-payment-error", %{store: store} do
+      config = store |> config() |> Map.delete("subscription_nonce")
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      stub_rpc(fn conn ->
+        request = conn.assigns.rpc_request
+        send(self(), {:rpc, request["method"], request["params"]})
+
+        Req.Test.json(conn, %{
+          "jsonrpc" => "2.0",
+          "id" => request["id"],
+          "error" => %{"code" => -32_000, "message" => "nonce-backend-6b2e"}
+        })
+      end)
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+        end)
+
+      error = InternalPaymentError.assert_error(result)
+      refute error.detail =~ "nonce-backend-6b2e"
+      assert log =~ "nonce-backend-6b2e"
+      refute_received {:rpc, "eth_sendRawTransactionSync", _params}
+    end
+
     test "rejects unavailable and post-expiry settlement timestamps", %{store: store} do
       missing_config = config(store)
       missing_subscription = subscription(missing_config)

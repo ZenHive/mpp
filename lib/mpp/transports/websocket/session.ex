@@ -181,10 +181,10 @@ defmodule MPP.Transports.WebSocket.Session do
           {:ok, %{session | meter: %{session.meter | state_checked_at: now}}}
 
         {:error, %Errors{status: 410} = error} ->
-          {:error, %{session | status: :complete}, Frame.error_frame(error.detail)}
+          {:error, %{session | status: :complete}, Frame.error_frame(Errors.client_detail(error))}
 
         {:error, %Errors{} = error} ->
-          {:error, session, Frame.error_frame(error.detail)}
+          {:error, session, Frame.error_frame(Errors.client_detail(error))}
       end
     end
   end

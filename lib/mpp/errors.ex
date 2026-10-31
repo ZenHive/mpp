@@ -40,7 +40,11 @@ defmodule MPP.Errors do
 
   use Descripex, namespace: "/protocol"
 
+  require Logger
+
   @base_uri "https://paymentauth.org/problems/"
+  @internal_payment_error_uri @base_uri <> "internal-payment-error"
+  @internal_payment_error_detail "An internal payment error occurred."
 
   @problem_types %{
     payment_required: %{suffix: "payment-required", title: "Payment Required", status: 402},
@@ -192,9 +196,35 @@ defmodule MPP.Errors do
       "type" => error.type,
       "title" => error.title,
       "status" => error.status,
-      "detail" => error.detail
+      "detail" => client_detail(error)
     }
   end
+
+  api(:client_detail, "Return the detail string that may be sent to a remote client.",
+    params: [
+      error: [kind: :value, description: "Error struct to render"]
+    ],
+    returns: %{type: :string, description: "Fixed text for internal payment errors, otherwise the error's detail"},
+    composes_with: [:to_map]
+  )
+
+  @doc """
+  Return the detail string that may be sent to a remote client.
+
+  An internal payment error always renders the fixed
+  `"An internal payment error occurred."` text; any other detail it carries is
+  logged server-side instead. Every other problem type keeps its detail.
+  """
+  @spec client_detail(t()) :: String.t()
+  def client_detail(%__MODULE__{type: @internal_payment_error_uri, detail: @internal_payment_error_detail}),
+    do: @internal_payment_error_detail
+
+  def client_detail(%__MODULE__{type: @internal_payment_error_uri, detail: detail}) do
+    Logger.error("MPP internal payment error: #{detail}")
+    @internal_payment_error_detail
+  end
+
+  def client_detail(%__MODULE__{detail: detail}), do: detail
 
   api(:put_retry_after, "Attach a positive Retry-After delta in seconds to an error.")
 

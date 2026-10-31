@@ -320,11 +320,19 @@ defmodule MPP.X402.PlugTest do
     end
   end
 
-  test "facilitator transport and HTTP failures return the generic internal error and log the term" do
-    for {stage, response, term} <- [
-          {:verify, {:error, {:transport, :facilitator_db_offline_7f3a}}, "facilitator_db_offline_7f3a"},
-          {:settle, {:error, {:facilitator_http, 503, %{"trace" => "pg-replica-9c1d"}}}, "pg-replica-9c1d"}
-        ] do
+  test "raw and typed-internal facilitator errors return the generic internal error and log the term" do
+    cases =
+      for stage <- [:verify, :settle],
+          {response, term} <- [
+            {{:error, {:transport, :facilitator_db_offline_7f3a}}, "facilitator_db_offline_7f3a"},
+            {{:error, {:facilitator_http, 503, %{"trace" => "pg-replica-9c1d"}}}, "pg-replica-9c1d"},
+            {{:error, "private-db-marker"}, "private-db-marker"},
+            {{:error, :private_db_marker}, "private_db_marker"},
+            {{:error, Errors.new(:internal_payment_error, "typed-db-marker")}, "typed-db-marker"}
+          ],
+          do: {stage, response, term}
+
+    for {stage, response, term} <- cases do
       opts = plug_opts(self(), store: start_replay_store!())
       payload = signed_payload(opts)
       client = Map.put(opts.x402.facilitator, stage, fn _, _ -> response end)
