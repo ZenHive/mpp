@@ -7060,7 +7060,7 @@
       "id": "168",
       "phase": 1,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Harden Tempo client proof signing (see private advisory GHSA-f382-x4g8-jg9q)",
       "scores": {
         "d": 4,
@@ -7088,6 +7088,7 @@
       ],
       "body": "Security hardening of the client-side Tempo provider and its transports. The mechanism, affected code and the reference-SDK fix to port are ONLY in private draft advisory GHSA-f382-x4g8-jg9q — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-f382-x4g8-jg9q --jq .description`. Port the reference behavior from refs/mppx and refs/mpp-rs (cited in the advisory) and cross-check that both agree. DISCLOSURE: this repo is public and the advisory is unpublished — commit messages, code comments, moduledocs, CHANGELOG and roadmap text describe only the shape of the fix (e.g. 'add trusted-realm option to the Tempo client provider'), never the attack.",
       "created_at": "2026-10-31",
+      "started_at": "2026-10-31",
       "scored_at": "2026-10-31",
       "cross_repo": []
     },

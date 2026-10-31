@@ -59,7 +59,7 @@
 | Task 165 | ⬜ | 🎁 **solana** · Implement the solana/subscription intent [D:7/B:4/U:2 → Eff:0.43] ⚠️ |
 | Task 166 | 🔶 | 🎁 **evm** · Track the EIP-3009 challenge nonce framing divergence between mppx and the EVM spec [D:2/B:3/U:2 → Eff:1.25] 📋 ⛔ waits on draft-evm-charge changing its EIP-3009 nonce derivation (tempoxyz/mpp-specs) |
 | Task 167 | ⬜ | 🎁 **session** · Session server accounting features from mppx [D:6/B:3/U:1 → Eff:0.33] ⚠️ |
-| Task 168 `[P]` | ⬜ | 🎁 **client-sdk** · Harden Tempo client proof signing (see private advisory GHSA-f382-x4g8-jg9q) [D:4/B:8/U:9 → Eff:2.12] 🎯 |
+| Task 168 `[P]` | 🔄 | 🎁 **client-sdk** · Harden Tempo client proof signing (see private advisory GHSA-f382-x4g8-jg9q) [D:4/B:8/U:9 → Eff:2.12] 🎯 |
 | Task 169 | ⬜ | 🎁 **session** · Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq) [D:6/B:8/U:9 → Eff:1.42] 📋 |
 | Task 170 | ⬜ | 🎁 **session** · Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9) [D:5/B:7/U:8 → Eff:1.5] 🚀 |
 | Task 171 `[P]` | ⬜ | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
