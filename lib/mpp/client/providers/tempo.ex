@@ -65,7 +65,10 @@ defmodule MPP.Client.Providers.Tempo do
   realm. Without one, the realm must be listed as a bare trusted realm.
   Otherwise `pay/2` returns
   `{:error, {:untrusted_proof_realm, realm, origin_or_nil}}` before any RPC
-  call or signature. Non-zero charges are unaffected.
+  call or signature. The same rule applies to the `presenterSignature` added
+  to a transaction credential when the challenge advertises
+  `presenterBinding`, since it signs the same proof. Other non-zero charges
+  are unaffected.
   """
 
   use MPP.Client.PaymentProvider
@@ -150,7 +153,7 @@ defmodule MPP.Client.Providers.Tempo do
          {:ok, details} <- method_details(charge),
          {:ok, amount} <- parse_amount(charge.amount),
          :ok <- ensure_pull_supported(amount, details),
-         :ok <- ensure_proof_realm(challenge, amount, config[:request_url], provider.trusted_proof_realms),
+         :ok <- ensure_proof_realm(challenge, amount, details, config[:request_url], provider.trusted_proof_realms),
          :ok <- pin_recipients(charge, details, provider.expected_recipients),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
@@ -463,8 +466,13 @@ defmodule MPP.Client.Providers.Tempo do
     end
   end
 
-  defp ensure_proof_realm(challenge, 0, request_url, pins), do: ProofRealm.check(challenge.realm, request_url, pins)
-  defp ensure_proof_realm(_challenge, _amount, _request_url, _pins), do: :ok
+  # Every credential that carries a proof signature — the zero-amount proof and
+  # the presenter signature on a bound transaction — is gated by the realm policy.
+  defp ensure_proof_realm(challenge, amount, details, request_url, pins) do
+    if amount == 0 or details["presenterBinding"] == true,
+      do: ProofRealm.check(challenge.realm, request_url, pins),
+      else: :ok
+  end
 
   defp optional_string(nil, _key), do: {:ok, nil}
   defp optional_string(value, _key) when is_binary(value), do: {:ok, value}

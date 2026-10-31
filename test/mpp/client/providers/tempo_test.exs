@@ -667,12 +667,38 @@ defmodule MPP.Client.Providers.TempoTest do
       end
     end
 
-    test "does not apply to non-zero charges" do
+    test "does not apply to non-zero charges without presenter binding" do
       for config <- [
             Map.delete(provider_config(), :request_url),
             Map.put(provider_config(), :request_url, "https://other.example/resource")
           ] do
         assert {:ok, %{payload: %{"type" => "transaction"}}} = Tempo.pay(challenge(), config)
+      end
+    end
+
+    test "applies to the presenter signature of a presenter-bound transaction" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      bound = challenge(method_details: %{"chainId" => @chain_id, "presenterBinding" => true})
+
+      assert {:error, {:untrusted_proof_realm, @realm, "https://other.example"}} =
+               Tempo.pay(bound, Map.put(provider_config(), :request_url, "https://other.example/resource"))
+
+      assert {:error, {:untrusted_proof_realm, @realm, nil}} =
+               Tempo.pay(bound, Map.delete(provider_config(), :request_url))
+    end
+
+    test "signs a presenter-bound transaction for the request host or a trusted realm" do
+      bound = challenge(method_details: %{"chainId" => @chain_id, "presenterBinding" => true})
+
+      for config <- [
+            provider_config(),
+            Map.merge(provider_config(), %{
+              request_url: "https://other.example/resource",
+              trusted_tempo_proof_realms: %{"https://other.example" => @realm}
+            }),
+            provider_config() |> Map.delete(:request_url) |> Map.put(:trusted_tempo_proof_realms, [@realm])
+          ] do
+        assert {:ok, %{payload: %{"type" => "transaction", "presenterSignature" => _}}} = Tempo.pay(bound, config)
       end
     end
   end
