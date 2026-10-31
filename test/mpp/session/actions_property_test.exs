@@ -23,8 +23,10 @@ defmodule MPP.Session.ActionsPropertyTest do
   end
 
   # `finalized` in the mpp-rs channel model is `status: :closed` here. A topUp
-  # may raise `spent` to the escrow's settled total; that catch-up is not a
-  # request deduction and is not required to fit in the previous authorization.
+  # raises `spent` to the escrow's settled total only when settlement exceeds
+  # the accepted cumulative amount (mpp-rs `session_method/stream.rs`); that
+  # catch-up is not a request deduction. Settlement within accepted credit
+  # leaves `spent` unchanged.
   property "random action sequences keep session channel invariants", %{store: store} do
     check all(steps <- StreamData.list_of(step(), min_length: 1, max_length: 24), max_runs: 100) do
       :ok = Store.delete(store, @channel_id)
@@ -139,7 +141,11 @@ defmodule MPP.Session.ActionsPropertyTest do
     assert channel.deposit == deposit
     assert channel.deposit > before.deposit
     assert channel.settled == max(before.settled, settled)
-    assert channel.spent == max(before.spent, channel.settled)
+
+    if channel.settled > before.cumulative_amount,
+      do: assert(channel.spent == max(before.spent, channel.settled)),
+      else: assert(channel.spent == before.spent)
+
     assert channel.cumulative_amount == max(before.cumulative_amount, channel.settled)
     assert channel.units == before.units
   end
@@ -191,7 +197,7 @@ defmodule MPP.Session.ActionsPropertyTest do
   end
 
   defp assert_bounds(channel) do
-    assert channel.spent >= channel.settled
+    assert channel.settled <= channel.cumulative_amount
     assert channel.spent <= channel.cumulative_amount
     assert channel.cumulative_amount <= channel.deposit
     assert channel.deposit >= 0
