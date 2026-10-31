@@ -183,9 +183,10 @@ defmodule MPP.Session.Channel do
   Apply a live on-chain read of the escrow to an active channel.
 
   `deposit` replaces the stored deposit and must still cover the accepted
-  cumulative amount. `settled` only ever moves up; like
-  `apply_verified_deposit/3`, `spent` and `cumulative_amount` are raised to at
-  least the settled amount.
+  cumulative amount. `settled` only ever moves up and raises
+  `cumulative_amount` to at least itself. `spent` is raised to the settled
+  amount only when the settlement exceeds the accepted cumulative amount;
+  settling an accepted voucher leaves its unspent credit available.
   """
   @spec apply_onchain_state(t(), non_neg_integer(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
   def apply_onchain_state(%__MODULE__{status: :closed}, _deposit, _settled),
@@ -199,6 +200,11 @@ defmodule MPP.Session.Channel do
     settled = max(settled, channel.settled)
     cumulative_amount = max(channel.cumulative_amount, settled)
 
+    # Settling a voucher this channel accepted does not deliver its unspent
+    # credit; only a settlement above the accepted amount counts as spent
+    # (mpp-rs `session_method/stream.rs`).
+    spent = if settled > channel.cumulative_amount, do: max(channel.spent, settled), else: channel.spent
+
     if cumulative_amount > deposit do
       {:error, :deposit_below_cumulative}
     else
@@ -207,7 +213,7 @@ defmodule MPP.Session.Channel do
          channel
          | deposit: deposit,
            settled: settled,
-           spent: max(channel.spent, settled),
+           spent: spent,
            cumulative_amount: cumulative_amount
        }}
     end

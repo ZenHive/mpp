@@ -232,8 +232,11 @@ defmodule MPP.Session.ChannelTest do
       assert {:ok, %Channel{deposit: 500, settled: 0, spent: 100, cumulative_amount: 400}} =
                Channel.apply_onchain_state(channel, 500, 0)
 
-      assert {:ok, %Channel{settled: 200, spent: 200, cumulative_amount: 400}} =
+      assert {:ok, %Channel{settled: 200, spent: 100, cumulative_amount: 400}} =
                Channel.apply_onchain_state(channel, 500, 200)
+
+      assert {:ok, %Channel{settled: 400, spent: 100, cumulative_amount: 400}} =
+               Channel.apply_onchain_state(channel, 500, 400)
 
       assert {:ok, %Channel{settled: 450, spent: 450, cumulative_amount: 450}} =
                Channel.apply_onchain_state(channel, 500, 450)

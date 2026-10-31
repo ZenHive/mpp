@@ -557,6 +557,26 @@ defmodule MPP.Transports.WebSocketTest do
       assert reads() == 1
     end
 
+    test "metering keeps accepted credit available after that voucher settles on-chain" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 50)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{settled: 200})})
+
+      {_sess, frames} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a", "b", "c"], tick_cost: 50)
+      assert Enum.map(frames, & &1["type"]) == ["message", "message", "message", "receipt"]
+      assert {:ok, %Channel{settled: 200, spent: 200}} = Store.get(store, @channel_id)
+    end
+
+    test "metering counts a settlement above the accepted amount as spent" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 50)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{settled: 300})})
+
+      {_sess, frames} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      assert Enum.map(frames, & &1["type"]) == ["needVoucher"]
+      assert {:ok, %Channel{settled: 300, spent: 300, cumulative_amount: 300}} = Store.get(store, @channel_id)
+    end
+
     test "metering fails closed without a channel-state verifier" do
       store = session_store()
       put_channel!(store, cumulative: 200, spent: 0)
