@@ -20,8 +20,9 @@ defmodule MPP.Session.Method do
 
       @doc """
       Require the voucher verification domain, signer, open funding verifier
-      (`verify_open`) and close settlement callback (`settle_close`) at method
-      initialization; see `MPP.Session.Actions`.
+      (`verify_open`), live channel-state verifier (`verify_channel_state`) and
+      close settlement callback (`settle_close`) at method initialization; see
+      `MPP.Session.Actions`.
       """
       @spec validate_config!(map()) :: :ok
       @impl MPP.Method
@@ -30,6 +31,9 @@ defmodule MPP.Session.Method do
         missing = Enum.filter(required, &is_nil(config[&1]))
         missing = if is_function(config["verify_open"], 2), do: missing, else: missing ++ ["verify_open"]
         missing = if is_function(config["settle_close"], 3), do: missing, else: missing ++ ["settle_close"]
+
+        missing =
+          if is_function(config["verify_channel_state"], 2), do: missing, else: missing ++ ["verify_channel_state"]
 
         if missing != [] do
           raise ArgumentError,

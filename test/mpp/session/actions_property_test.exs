@@ -219,6 +219,7 @@ defmodule MPP.Session.ActionsPropertyTest do
       chain_id: 42_431,
       request_amount: request,
       verify_signature: :already_verified,
+      verify_channel_state: &MPP.Test.SessionChainState.mirror/2,
       method_name: "session",
       challenge_id: "property-challenge",
       settle_close: fn _payload, _channel, _opts -> {:ok, %{tx_hash: @tx_hash}} end

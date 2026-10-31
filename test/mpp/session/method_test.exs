@@ -24,12 +24,13 @@ defmodule MPP.Session.MethodTest do
       "verify_open" => fn _payload, _opts ->
         {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
       end,
+      "verify_channel_state" => &MPP.Test.SessionChainState.mirror/2,
       "settle_close" => fn _payload, _channel, _opts -> {:ok, %{tx_hash: "0x" <> String.duplicate("ab", 32)}} end
     }
 
     assert :ok = DemoSessionMethod.validate_config!(config)
 
-    for missing <- ~w(escrow_contract chain_id authorized_signer verify_open settle_close) do
+    for missing <- ~w(escrow_contract chain_id authorized_signer verify_open verify_channel_state settle_close) do
       assert_raise ArgumentError, ~r/#{missing}/, fn ->
         DemoSessionMethod.validate_config!(Map.delete(config, missing))
       end
@@ -41,6 +42,10 @@ defmodule MPP.Session.MethodTest do
 
     assert_raise ArgumentError, ~r/settle_close/, fn ->
       DemoSessionMethod.validate_config!(Map.put(config, "settle_close", fn _payload, _opts -> :ok end))
+    end
+
+    assert_raise ArgumentError, ~r/verify_channel_state/, fn ->
+      DemoSessionMethod.validate_config!(Map.put(config, "verify_channel_state", fn _channel -> :ok end))
     end
   end
 

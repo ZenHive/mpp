@@ -75,6 +75,28 @@ defmodule MPP.Session.Actions do
   callback returns. When that callback names a different signer, the signature
   is checked again against it.
 
+  Every `voucher` re-reads the escrow first through a required channel-state
+  verifier, passed as the `:verify_channel_state` option or the server-only
+  `"verify_channel_state"` method-config key. It is called as
+  `verify.(channel, opts)` with the stored `MPP.Session.Channel` and returns the
+  same `{:ok, %{deposit, settled, close_requested, finalized}}` /
+  `{:error, %MPP.Errors{}}` shape as the funding verifiers, read live from the
+  escrow (`getChannelState`) on every call. Without a verifier, on a read
+  error, or on a malformed result the voucher is rejected. A pending close
+  (`close_requested`) or a `finalized` channel rejects the voucher and records
+  `close_requested` on the stored channel in the same atomic update, so later
+  vouchers, top-ups and metered spends stop as well; the highest accepted
+  voucher can still be settled through `close`. A zero deposit, or a deposit
+  below the accepted cumulative amount, rejects the voucher. The on-chain
+  `settled` amount is folded into the channel (it only moves up), and a voucher
+  below it is rejected. `verify_channel_state/2` exposes the same check for
+  transports that meter a stream: `MPP.Transports.WebSocket` calls it before
+  each metered deduction, reusing a successful read for at most five seconds
+  (`"channel_state_ttl_ms"` method-config key, capped at 5000) and never
+  caching a failure. Methods that re-read the channel themselves before
+  dispatching (`MPP.Methods.XRPL.Session`) pass `verify_channel_state:
+  :already_verified`.
+
   `close` requires a settlement callback, passed as the `:settle_close` option
   or the server-only `"settle_close"` method-config key. Once the close voucher
   has been validated, `close` calls `settle.(payload, closing_channel, opts)`.
@@ -184,10 +206,13 @@ defmodule MPP.Session.Actions do
     end
   end
 
-  defp fetch_live_channel(payload, opts) do
-    case Store.get(store(opts), payload.channel_id) do
+  defp fetch_live_channel(payload, opts), do: fetch_live_channel_id(payload.channel_id, opts)
+
+  defp fetch_live_channel_id(channel_id, opts) do
+    case Store.get(store(opts), channel_id) do
       {:ok, %Channel{status: :closed}} -> {:error, Errors.new(:channel_closed, "channel is closed")}
       {:ok, %Channel{closing: true}} -> {:error, store_error(:channel_closing)}
+      {:ok, %Channel{close_requested: true}} -> {:error, store_error(:channel_close_requested)}
       {:ok, %Channel{} = channel} -> {:ok, channel}
       :not_found -> {:error, Errors.new(:channel_not_found, "channel not found")}
       {:error, reason} -> {:error, store_error(reason)}
@@ -215,9 +240,91 @@ defmodule MPP.Session.Actions do
     end
   end
 
+  # The escrow is re-read before every voucher (mppx `handleVoucherCredential`
+  # `forceRefresh`, mpp-rs `session_method/voucher.rs`): a pending close, a
+  # finalized or withdrawn channel, or a failed read rejects the voucher.
   defp handle_voucher(payload, opts) do
-    with_channel_signer(payload, opts, &accept_voucher/3)
+    with :ok <- maybe_refresh_channel_state(payload, opts) do
+      with_channel_signer(payload, opts, &accept_voucher/3)
+    end
   end
+
+  defp maybe_refresh_channel_state(payload, opts) do
+    case Keyword.get(opts, :verify_channel_state) do
+      :already_verified ->
+        :ok
+
+      _verifier ->
+        with {:ok, _channel} <- refresh_channel_state(payload.channel_id, opts), do: :ok
+    end
+  end
+
+  @doc """
+  Re-read a stored channel's live on-chain state through the configured
+  `verify_channel_state` callback and fold it into the store.
+
+  Returns the refreshed channel, or an error when the channel is unknown,
+  closed, closing, has a pending on-chain close, is finalized or unfunded on
+  chain, or the read fails. A detected close is recorded on the channel
+  (`close_requested`) in the same atomic store update, so later vouchers and
+  metered spends are rejected without another read.
+  """
+  @spec verify_channel_state(String.t(), Session.t()) :: {:ok, Channel.t()} | {:error, Errors.t()}
+  def verify_channel_state(channel_id, %Session{} = session) when is_binary(channel_id) do
+    case Channel.normalize_id(channel_id) do
+      {:ok, id} -> refresh_channel_state(id, opts_from_session(session))
+      {:error, _reason} -> {:error, Errors.new(:invalid_payload, "invalid session channelId")}
+    end
+  end
+
+  defp refresh_channel_state(channel_id, opts) do
+    with {:ok, current} <- fetch_live_channel_id(channel_id, opts),
+         {:ok, state} <- read_channel_state(current, opts),
+         {:ok, channel} <- store_update_id(channel_id, opts, &apply_channel_state(&1, state)) do
+      if channel.close_requested,
+        do: {:error, channel_state_error(state)},
+        else: {:ok, channel}
+    end
+  end
+
+  defp read_channel_state(channel, opts) do
+    case Keyword.get(opts, :verify_channel_state) do
+      fun when is_function(fun, 2) ->
+        channel |> fun.(opts) |> live_state()
+
+      _ ->
+        {:error,
+         Errors.new(
+           :verification_failed,
+           "session requires a configured channel-state verifier (verify_channel_state) that reads the escrow on-chain"
+         )}
+    end
+  end
+
+  # Same result shape as the funding verifiers; every key is required.
+  defp live_state({:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result) do
+    if well_formed_escrow?(state), do: {:ok, state}, else: channel_state_failure(result)
+  end
+
+  defp live_state({:error, %Errors{}} = error), do: error
+  defp live_state(other), do: channel_state_failure(other)
+
+  defp channel_state_failure(result),
+    do: {:error, Errors.new(:verification_failed, "channel state verification failed: #{inspect(result)}")}
+
+  defp apply_channel_state(:not_found, _state), do: {:error, Errors.new(:channel_not_found, "channel not found")}
+
+  defp apply_channel_state(%Channel{status: :active, closing: false, close_requested: false} = channel, state)
+       when state.finalized or state.close_requested, do: {:ok, Channel.mark_close_requested(channel)}
+
+  defp apply_channel_state(%Channel{}, %{deposit: 0}),
+    do: {:error, Errors.new(:channel_not_found, "channel not funded on-chain")}
+
+  defp apply_channel_state(%Channel{} = channel, state),
+    do: Channel.apply_onchain_state(channel, state.deposit, state.settled)
+
+  defp channel_state_error(%{finalized: true}), do: Errors.new(:channel_closed, "channel is finalized on-chain")
+  defp channel_state_error(_state), do: store_error(:channel_close_requested)
 
   # A close finalizes the channel only after the escrow settled it on-chain:
   # the configured `settle_close` callback submits the close and returns the
@@ -427,6 +534,9 @@ defmodule MPP.Session.Actions do
     min_delta = min_voucher_delta(opts)
 
     cond do
+      payload.cumulative_amount < channel.settled ->
+        {:error, Errors.new(:verification_failed, "voucher cumulativeAmount is below on-chain settled amount")}
+
       payload.cumulative_amount == channel.cumulative_amount ->
         {:error, Errors.new(:delta_too_small, "voucher must increase the accepted cumulative amount")}
 
@@ -493,8 +603,10 @@ defmodule MPP.Session.Actions do
     with {:ok, channel} <- store_update(payload, opts, fun), do: {:ok, receipt(channel, opts)}
   end
 
-  defp store_update(%Payload{} = payload, opts, fun) do
-    case Store.update(store(opts), payload.channel_id, &normalize_update(fun.(&1))) do
+  defp store_update(%Payload{} = payload, opts, fun), do: store_update_id(payload.channel_id, opts, fun)
+
+  defp store_update_id(channel_id, opts, fun) do
+    case Store.update(store(opts), channel_id, &normalize_update(fun.(&1))) do
       {:ok, channel} -> {:ok, channel}
       {:error, reason} -> {:error, store_error(reason)}
     end
@@ -502,6 +614,12 @@ defmodule MPP.Session.Actions do
 
   defp store_error(%Errors{} = error), do: error
   defp store_error(:channel_closing), do: Errors.new(:channel_closed, "channel is closing")
+
+  defp store_error(:channel_close_requested), do: Errors.new(:channel_closed, "channel has a pending close request")
+
+  defp store_error(:deposit_below_cumulative),
+    do: Errors.new(:insufficient_balance, "on-chain deposit is below the accepted cumulative amount")
+
   defp store_error(:insufficient_balance), do: Errors.new(:insufficient_balance, "insufficient channel balance")
   defp store_error(:amount_exceeds_deposit), do: Errors.new(:amount_exceeds_deposit, "amount exceeds channel deposit")
 
@@ -886,6 +1004,7 @@ defmodule MPP.Session.Actions do
       challenge_id: optional_binary(Map.get(details, "challenge_id") || Map.get(details, "challengeId")),
       verify_open: Map.get(details, "verify_open"),
       verify_top_up: Map.get(details, "verify_top_up"),
+      verify_channel_state: Map.get(details, "verify_channel_state"),
       settle_close: Map.get(details, "settle_close")
     ]
   end

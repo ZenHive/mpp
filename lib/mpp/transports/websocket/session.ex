@@ -4,7 +4,13 @@ defmodule MPP.Transports.WebSocket.Session do
   # (`refs/mpp-rs/src/server/ws_session.rs`): deduct per tick, emit needVoucher
   # when the channel is exhausted, wait for a voucher credential, resume, then
   # emit a session receipt when the generator is drained.
+  #
+  # Before each deduction the escrow is re-read through
+  # `MPP.Session.Actions.verify_channel_state/2` (mppx `beforeStreamCharge`,
+  # mpp-rs `verify_stream`). Only successful reads are reused, for at most
+  # five seconds; a failed read or a detected close stops delivery.
 
+  alias MPP.Errors
   alias MPP.Intents.Session, as: SessionIntent
   alias MPP.Plug.Config
   alias MPP.Session.Actions
@@ -20,13 +26,16 @@ defmodule MPP.Transports.WebSocket.Session do
             channel_id: String.t() | nil,
             tick_cost: pos_integer(),
             remaining: [term()] | nil,
-            store: Store.store_ref()
+            store: Store.store_ref(),
+            state_checked_at: integer() | nil
           }
 
-    defstruct [:channel_id, :tick_cost, :remaining, :store]
+    defstruct [:channel_id, :tick_cost, :remaining, :store, :state_checked_at]
   end
 
   @type ws :: WebSocket.t()
+
+  @max_state_ttl_ms 5_000
 
   @doc "Pull `:generate` / `:tick_cost` off Plug opts and build a meter when present."
   @spec parse_opts(keyword(), Config.t()) :: {Meter.t() | nil, keyword()}
@@ -152,7 +161,47 @@ defmodule MPP.Transports.WebSocket.Session do
     end
   end
 
-  defp deduct(%WebSocket{meter: %Meter{} = meter} = session) do
+  defp deduct(%WebSocket{} = session) do
+    with {:ok, session} <- ensure_live_channel(session), do: spend_tick(session)
+  end
+
+  defp ensure_live_channel(%WebSocket{meter: %Meter{} = meter} = session) do
+    now = System.monotonic_time(:millisecond)
+
+    if fresh?(meter.state_checked_at, now, state_ttl_ms(session.config)) do
+      {:ok, session}
+    else
+      session = %{session | meter: %{meter | state_checked_at: nil}}
+
+      case Actions.verify_channel_state(meter.channel_id, session_intent(session.config)) do
+        {:ok, _channel} ->
+          {:ok, %{session | meter: %{session.meter | state_checked_at: now}}}
+
+        {:error, %Errors{status: 410} = error} ->
+          {:error, %{session | status: :complete}, Frame.error_frame(error.detail)}
+
+        {:error, %Errors{} = error} ->
+          {:error, session, Frame.error_frame(error.detail)}
+      end
+    end
+  end
+
+  defp fresh?(nil, _now, _ttl), do: false
+  defp fresh?(checked_at, now, ttl), do: now >= checked_at and now - checked_at < ttl
+
+  defp state_ttl_ms(%Config{method_entries: [entry | _]}) do
+    case Map.get(entry.method_config, "channel_state_ttl_ms") do
+      ttl when is_integer(ttl) and ttl >= 0 -> min(ttl, @max_state_ttl_ms)
+      _other -> @max_state_ttl_ms
+    end
+  end
+
+  defp session_intent(%Config{method_entries: [entry | _]}) do
+    details = Map.merge(entry.charge.method_details || %{}, entry.method_config)
+    %{entry.charge | method_details: details}
+  end
+
+  defp spend_tick(%WebSocket{meter: %Meter{} = meter} = session) do
     result =
       Store.update(meter.store, meter.channel_id, fn
         :not_found ->
@@ -175,6 +224,9 @@ defmodule MPP.Transports.WebSocket.Session do
       {:error, :channel_closing} ->
         {:error, %{session | status: :complete}, Frame.error_frame("session channel is closing")}
 
+      {:error, :channel_close_requested} ->
+        {:error, %{session | status: :complete}, Frame.error_frame("session channel has a pending close request")}
+
       {:error, :channel_not_found} ->
         {:error, session, Frame.error_frame("session channel not found")}
 
@@ -190,9 +242,7 @@ defmodule MPP.Transports.WebSocket.Session do
   defp need_voucher_frame(%WebSocket{meter: meter, config: config}) do
     case Store.get(meter.store, meter.channel_id) do
       {:ok, channel} ->
-        [entry | _] = config.method_entries
-        details = Map.merge(entry.charge.method_details || %{}, entry.method_config)
-        min_delta = Actions.minimum_voucher_delta(%{entry.charge | method_details: details})
+        min_delta = Actions.minimum_voucher_delta(session_intent(config))
         required = max(channel.spent + meter.tick_cost, channel.cumulative_amount + min_delta)
 
         Frame.need_voucher_frame(

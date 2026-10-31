@@ -315,6 +315,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
           "verify_open" => fn _payload, _opts ->
             {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
           end,
+          "verify_channel_state" => &MPP.Test.SessionChainState.mirror/2,
           "payer" => @payer,
           "token" => @token,
           "escrowContract" => @escrow,

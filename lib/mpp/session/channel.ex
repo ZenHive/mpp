@@ -59,6 +59,7 @@ defmodule MPP.Session.Channel do
           units: non_neg_integer(),
           status: status(),
           closing: boolean(),
+          close_requested: boolean(),
           proof: proof() | nil
         }
 
@@ -76,6 +77,7 @@ defmodule MPP.Session.Channel do
     units: 0,
     status: :open,
     closing: false,
+    close_requested: false,
     proof: nil
   ]
 
@@ -167,6 +169,52 @@ defmodule MPP.Session.Channel do
   def mark_closing(%__MODULE__{status: :active, closing: true}), do: {:error, :channel_closing}
   def mark_closing(%__MODULE__{status: status}), do: {:error, {:invalid_transition, status, :closed}}
 
+  @doc """
+  Record that the escrow reports a pending or completed on-chain close.
+
+  The channel then accepts no further vouchers, spends or top-ups. Unlike
+  `mark_closing/1` it does not reserve a server-side close: the highest
+  accepted voucher can still be settled through the close path.
+  """
+  @spec mark_close_requested(t()) :: t()
+  def mark_close_requested(%__MODULE__{} = channel), do: %{channel | close_requested: true}
+
+  @doc """
+  Apply a live on-chain read of the escrow to an active channel.
+
+  `deposit` replaces the stored deposit and must still cover the accepted
+  cumulative amount. `settled` only ever moves up; like
+  `apply_verified_deposit/3`, `spent` and `cumulative_amount` are raised to at
+  least the settled amount.
+  """
+  @spec apply_onchain_state(t(), non_neg_integer(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
+  def apply_onchain_state(%__MODULE__{status: :closed}, _deposit, _settled),
+    do: {:error, {:invalid_transition, :closed, :active}}
+
+  def apply_onchain_state(%__MODULE__{closing: true}, _deposit, _settled), do: {:error, :channel_closing}
+  def apply_onchain_state(%__MODULE__{close_requested: true}, _deposit, _settled), do: {:error, :channel_close_requested}
+
+  def apply_onchain_state(%__MODULE__{} = channel, deposit, settled)
+      when is_integer(deposit) and is_integer(settled) and settled >= 0 and settled <= deposit do
+    settled = max(settled, channel.settled)
+    cumulative_amount = max(channel.cumulative_amount, settled)
+
+    if cumulative_amount > deposit do
+      {:error, :deposit_below_cumulative}
+    else
+      {:ok,
+       %{
+         channel
+         | deposit: deposit,
+           settled: settled,
+           spent: max(channel.spent, settled),
+           cumulative_amount: cumulative_amount
+       }}
+    end
+  end
+
+  def apply_onchain_state(_channel, _deposit, _settled), do: {:error, {:invalid_amount, :deposit}}
+
   @doc "Release a pending close after the on-chain close definitively failed."
   @spec clear_closing(t()) :: t()
   def clear_closing(%__MODULE__{} = channel), do: %{channel | closing: false}
@@ -193,6 +241,7 @@ defmodule MPP.Session.Channel do
 
   def apply_voucher(%__MODULE__{status: :closed}, _amount, _proof), do: {:error, {:invalid_transition, :closed, :active}}
   def apply_voucher(%__MODULE__{closing: true}, _amount, _proof), do: {:error, :channel_closing}
+  def apply_voucher(%__MODULE__{close_requested: true}, _amount, _proof), do: {:error, :channel_close_requested}
 
   def apply_voucher(%__MODULE__{} = channel, amount, proof) when is_integer(amount) and amount >= 0 do
     cond do
@@ -230,6 +279,9 @@ defmodule MPP.Session.Channel do
 
   def apply_verified_deposit(%__MODULE__{closing: true}, _deposit, _settled), do: {:error, :channel_closing}
 
+  def apply_verified_deposit(%__MODULE__{close_requested: true}, _deposit, _settled),
+    do: {:error, :channel_close_requested}
+
   def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit, settled)
       when is_integer(deposit) and deposit > current and is_integer(settled) and settled >= 0 and settled <= deposit do
     settled = max(settled, channel.settled)
@@ -256,6 +308,7 @@ defmodule MPP.Session.Channel do
   @spec apply_spend(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
   def apply_spend(%__MODULE__{status: :closed}, _amount), do: {:error, {:invalid_transition, :closed, :active}}
   def apply_spend(%__MODULE__{closing: true}, _amount), do: {:error, :channel_closing}
+  def apply_spend(%__MODULE__{close_requested: true}, _amount), do: {:error, :channel_close_requested}
 
   def apply_spend(%__MODULE__{} = channel, 0), do: {:ok, channel}
 

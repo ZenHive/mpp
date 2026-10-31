@@ -23,6 +23,12 @@ defmodule MPP.Transports.WebSocket do
   is exhausted, waits for a voucher credential, then resumes and finishes
   with a session receipt. Pass `:generate` and optional `:tick_cost` to
   `init/1`; use `generate: nil` to bind data later with `start_metering/2`.
+  Before each deduction the channel's on-chain state is re-read through the
+  method's required `"verify_channel_state"` callback
+  (`MPP.Session.Actions.verify_channel_state/2`); a successful read is reused
+  for at most five seconds (`"channel_state_ttl_ms"`, capped at 5000), and a
+  failed read, a pending or completed on-chain close, or an unfunded escrow
+  stops delivery.
 
   Wire format matches mpp-rs `server::ws` / `alloy-transport-mpp`
   (`refs/mpp-rs/src/server/ws.rs`, `refs/mpp-rs/src/server/ws_session.rs`,

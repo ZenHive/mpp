@@ -225,6 +225,54 @@ defmodule MPP.Session.ChannelTest do
     end
   end
 
+  describe "on-chain state" do
+    test "apply_onchain_state replaces the deposit and folds in settled" do
+      {:ok, channel} = Channel.activate(Channel.new!(Keyword.merge(channel_opts(), cumulative_amount: 400, spent: 100)))
+
+      assert {:ok, %Channel{deposit: 500, settled: 0, spent: 100, cumulative_amount: 400}} =
+               Channel.apply_onchain_state(channel, 500, 0)
+
+      assert {:ok, %Channel{settled: 200, spent: 200, cumulative_amount: 400}} =
+               Channel.apply_onchain_state(channel, 500, 200)
+
+      assert {:ok, %Channel{settled: 450, spent: 450, cumulative_amount: 450}} =
+               Channel.apply_onchain_state(channel, 500, 450)
+
+      settled = %{channel | settled: 300, spent: 300}
+      assert {:ok, %Channel{settled: 300}} = Channel.apply_onchain_state(settled, 500, 100)
+    end
+
+    test "apply_onchain_state rejects a deposit below the accepted amount and invalid input" do
+      {:ok, channel} = Channel.activate(Channel.new!(Keyword.put(channel_opts(), :cumulative_amount, 400)))
+
+      assert {:error, :deposit_below_cumulative} = Channel.apply_onchain_state(channel, 399, 0)
+      assert {:error, {:invalid_amount, :deposit}} = Channel.apply_onchain_state(channel, 500, 600)
+      assert {:error, {:invalid_amount, :deposit}} = Channel.apply_onchain_state(channel, 500, -1)
+      assert {:error, {:invalid_amount, :deposit}} = Channel.apply_onchain_state(channel, nil, 0)
+    end
+
+    test "a channel with a recorded close accepts no vouchers, spends, top-ups or state refreshes" do
+      {:ok, channel} = Channel.activate(Channel.new!(Keyword.put(channel_opts(), :cumulative_amount, 400)))
+      marked = Channel.mark_close_requested(channel)
+
+      assert marked.close_requested
+      assert {:error, :channel_close_requested} = Channel.apply_voucher(marked, 500)
+      assert {:error, :channel_close_requested} = Channel.apply_spend(marked, 10)
+      assert {:error, :channel_close_requested} = Channel.apply_verified_deposit(marked, 2_000_000)
+      assert {:error, :channel_close_requested} = Channel.apply_onchain_state(marked, 2_000_000, 0)
+      assert {:ok, %Channel{status: :closed}} = Channel.close(marked)
+    end
+
+    test "apply_onchain_state rejects closed and closing channels" do
+      {:ok, channel} = Channel.activate(Channel.new!(channel_opts()))
+      {:ok, closed} = Channel.close(channel)
+      {:ok, closing} = Channel.mark_closing(channel)
+
+      assert {:error, {:invalid_transition, :closed, :active}} = Channel.apply_onchain_state(closed, 10, 0)
+      assert {:error, :channel_closing} = Channel.apply_onchain_state(closing, 10, 0)
+    end
+  end
+
   describe "XRPL identity" do
     @xrpl_payer "rnuh5j7ZarfCymLtgrGuBnPzTWdZ9SXHjQ"
     @xrpl_payee "rsGNsDhce3dugGQt9hfawTmDtr76nqTz8D"

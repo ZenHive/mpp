@@ -4,9 +4,11 @@ defmodule MPP.Transports.WebSocketTest do
   alias MPP.Client.Transport.WebSocket, as: ClientTransport
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
+  alias MPP.Errors
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
   alias MPP.Session.Store
+  alias MPP.Test.SessionChainState
   alias MPP.Test.SessionSigning
   alias MPP.Transports.WebSocket
   alias MPP.Transports.WebSocket.Session
@@ -329,6 +331,7 @@ defmodule MPP.Transports.WebSocketTest do
           "verify_open" => fn _payload, _opts ->
             {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
           end,
+          "verify_channel_state" => &SessionChainState.mirror/2,
           "payer" => @payer,
           "token" => @token,
           "escrowContract" => @escrow,
@@ -469,6 +472,162 @@ defmodule MPP.Transports.WebSocketTest do
       assert sess.status == :complete
     end
 
+    defp state_session(store, config) do
+      options = session_options(store)
+      method_config = Map.merge(Keyword.fetch!(options, :method_config), config)
+
+      {sess, _} =
+        options
+        |> Keyword.merge(method_config: method_config, generate: [])
+        |> WebSocket.init()
+        |> WebSocket.open()
+
+      %{sess | status: :authorized}
+    end
+
+    defp counting_reader(state) do
+      test_pid = self()
+
+      fn channel, _opts ->
+        send(test_pid, :state_read)
+
+        {:ok,
+         Map.merge(%{deposit: channel.deposit, settled: channel.settled, close_requested: false, finalized: false}, state)}
+      end
+    end
+
+    defp reads, do: reads(0)
+
+    defp reads(count) do
+      receive do
+        :state_read -> reads(count + 1)
+      after
+        0 -> count
+      end
+    end
+
+    test "metering re-reads the channel state and reuses a successful read within the TTL" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{})})
+
+      {sess, frames} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a", "b", "c"], tick_cost: 50)
+      assert Enum.map(frames, & &1["type"]) == ["message", "message", "message", "receipt"]
+      assert reads() == 1
+      assert is_integer(sess.meter.state_checked_at)
+    end
+
+    test "metering refreshes the channel state once the cached read is older than the TTL" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{})})
+
+      {sess, [_a, _need_voucher]} =
+        WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a", "b", "c", "d", "e"], tick_cost: 200)
+
+      assert reads() == 1
+      {:ok, _} = Store.update(store, @channel_id, &Channel.apply_voucher(&1, 1_000))
+
+      stale = System.monotonic_time(:millisecond) - 5_001
+      sess = %{sess | status: :authorized, meter: %{sess.meter | state_checked_at: stale}}
+      {_sess, frames} = WebSocket.tick(sess)
+      assert Enum.map(frames, & &1["type"]) == ["message", "message", "message", "message", "receipt"]
+      assert reads() == 1
+    end
+
+    test "a zero channel_state_ttl_ms re-reads before every deduction and the TTL is capped" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+
+      sess =
+        state_session(store, %{"verify_channel_state" => counting_reader(%{}), "channel_state_ttl_ms" => 0})
+
+      {_sess, _frames} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a", "b", "c"], tick_cost: 50)
+      assert reads() == 3
+
+      capped =
+        state_session(store, %{"verify_channel_state" => counting_reader(%{}), "channel_state_ttl_ms" => 60_000})
+
+      {capped, _frames} = WebSocket.start_metering(capped, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
+      assert reads() == 1
+
+      stale = System.monotonic_time(:millisecond) - 5_001
+      capped = %{capped | status: :authorized, meter: %{capped.meter | state_checked_at: stale, remaining: ["y"]}}
+      {_capped, _frames} = WebSocket.tick(capped)
+      assert reads() == 1
+    end
+
+    test "metering fails closed without a channel-state verifier" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => nil})
+
+      {sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      assert frame["type"] == "error"
+      assert frame["error"] =~ "verify_channel_state"
+      assert {:ok, %Channel{spent: 0, units: 0}} = Store.get(store, @channel_id)
+      assert sess.status == :authorized
+    end
+
+    test "a failed channel-state read stops delivery and is not cached" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      test_pid = self()
+
+      reader = fn _channel, _opts ->
+        send(test_pid, :state_read)
+        {:error, Errors.new(:verification_failed, "Unable to verify stream escrow")}
+      end
+
+      sess = state_session(store, %{"verify_channel_state" => reader})
+
+      {sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      assert frame == %{"type" => "error", "error" => "Unable to verify stream escrow"}
+      assert sess.meter.state_checked_at == nil
+      {_sess, [_frame]} = WebSocket.tick(sess)
+      assert reads() == 2
+      assert {:ok, %Channel{spent: 0}} = Store.get(store, @channel_id)
+    end
+
+    test "a detected on-chain close stops metering and marks the channel" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{close_requested: true})})
+
+      {sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a", "b"], tick_cost: 50)
+      assert frame == %{"type" => "error", "error" => "channel has a pending close request"}
+      assert sess.status == :complete
+      assert {:ok, %Channel{close_requested: true, spent: 0}} = Store.get(store, @channel_id)
+    end
+
+    test "a finalized channel stops metering" do
+      store = session_store()
+      put_channel!(store, cumulative: 200, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{finalized: true})})
+
+      {sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      assert frame == %{"type" => "error", "error" => "channel is finalized on-chain"}
+      assert sess.status == :complete
+    end
+
+    test "the meter stops within the cached window once a close is recorded on the channel" do
+      store = session_store()
+      put_channel!(store, cumulative: 500, spent: 0)
+      sess = state_session(store, %{"verify_channel_state" => counting_reader(%{})})
+
+      {sess, [_a, _receipt]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["a"], tick_cost: 50)
+      assert reads() == 1
+
+      {:ok, _} = Store.update(store, @channel_id, &{:ok, Channel.mark_close_requested(&1)})
+      sess = %{sess | status: :authorized, meter: %{sess.meter | remaining: ["b", "c"]}}
+
+      {sess, [frame]} = WebSocket.tick(sess)
+      assert frame == %{"type" => "error", "error" => "session channel has a pending close request"}
+      assert sess.status == :complete
+      assert reads() == 0
+      assert {:ok, %Channel{spent: 50, units: 1}} = Store.get(store, @channel_id)
+    end
+
     test "message while awaiting a voucher is rejected" do
       store = session_store()
       put_channel!(store, cumulative: 50, spent: 0)
@@ -495,7 +654,7 @@ defmodule MPP.Transports.WebSocketTest do
       {_sess, [missing]} =
         WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
 
-      assert missing["error"] == "session channel not found"
+      assert missing["error"] == "channel not found"
 
       put_channel!(store, cumulative: 100)
       {:ok, _} = Store.update(store, @channel_id, &Channel.close/1)
@@ -507,7 +666,7 @@ defmodule MPP.Transports.WebSocketTest do
           tick_cost: 50
         )
 
-      assert closed["error"] == "session channel is closed"
+      assert closed["error"] == "channel is closed"
     end
 
     test "tick with an unbound meter reports an error" do
@@ -569,7 +728,7 @@ defmodule MPP.Transports.WebSocketTest do
       {sess, _} = WebSocket.open(meter_session(__MODULE__.ErrorStore, generate: []))
       sess = %{sess | status: :authorized}
       {_sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["x"], tick_cost: 50)
-      assert frame["error"] =~ "session deduct failed"
+      assert frame["error"] == "An internal payment error occurred."
     end
 
     test "init defaults tick_cost from the session amount" do
@@ -591,6 +750,7 @@ defmodule MPP.Transports.WebSocketTest do
             "verify_open" => fn _payload, _opts ->
               {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
             end,
+            "verify_channel_state" => &SessionChainState.mirror/2,
             "payer" => @payer,
             "token" => @token,
             "escrowContract" => @escrow,
@@ -623,6 +783,7 @@ defmodule MPP.Transports.WebSocketTest do
             "verify_open" => fn _payload, _opts ->
               {:ok, %{deposit: 1_000, settled: 0, close_requested: false, finalized: false}}
             end,
+            "verify_channel_state" => &SessionChainState.mirror/2,
             "payer" => @payer,
             "token" => @token
           },

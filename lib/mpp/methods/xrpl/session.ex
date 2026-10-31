@@ -338,6 +338,8 @@ defmodule MPP.Methods.XRPL.Session do
       request_amount: if(params.action == :close, do: 0, else: request),
       min_voucher_delta: request,
       verify_signature: :already_verified,
+      # Vouchers and closes re-read the ledger channel in dispatch/3.
+      verify_channel_state: :already_verified,
       # Closed XRPL channels are redeemed by `redeem/2`.
       settle_close: :caller,
       method_name: "xrpl",

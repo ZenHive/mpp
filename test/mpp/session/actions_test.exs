@@ -10,6 +10,7 @@ defmodule MPP.Session.ActionsTest do
   alias MPP.Session.Payload
   alias MPP.Session.Store
   alias MPP.Test.InternalPaymentError
+  alias MPP.Test.SessionChainState
   alias MPP.Test.SessionSigning
   alias Onchain.Address
 
@@ -250,6 +251,198 @@ defmodule MPP.Session.ActionsTest do
       assert channel.spent == 20
       assert channel.units == 2
       assert channel.deposit == 1_000
+    end
+  end
+
+  describe "live channel state" do
+    test "a voucher fails closed without a channel-state verifier", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      for verifier <- [nil, :other, fn _channel -> :ok end] do
+        assert {:error, %Errors{} = error} =
+                 Actions.dispatch(voucher_payload(80), Keyword.put(opts, :verify_channel_state, verifier))
+
+        assert String.contains?(error.type, "verification-failed")
+        assert error.detail =~ "verify_channel_state"
+      end
+
+      assert {:ok, %Channel{cumulative_amount: 50}} = Store.get(store, @channel_id)
+    end
+
+    test "a voucher is rejected when the channel-state read fails", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      rpc_down = Errors.new(:verification_failed, "escrow read failed")
+
+      assert {:error, ^rpc_down} =
+               Actions.dispatch(
+                 voucher_payload(80),
+                 Keyword.put(opts, :verify_channel_state, fn _, _ -> {:error, rpc_down} end)
+               )
+
+      for malformed <- [{:ok, %{deposit: 1_000}}, {:ok, state(%{deposit: 1_000, settled: 2_000})}, :timeout] do
+        assert {:error, %Errors{detail: "channel state verification failed: " <> _}} =
+                 Actions.dispatch(voucher_payload(80), Keyword.put(opts, :verify_channel_state, fn _, _ -> malformed end))
+      end
+
+      assert {:ok, %Channel{cumulative_amount: 50, close_requested: false}} = Store.get(store, @channel_id)
+    end
+
+    test "a channel removed during the state read is not recreated", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      removing = fn channel, _opts ->
+        :ok = Store.delete(store, channel.channel_id)
+        SessionChainState.mirror(channel, [])
+      end
+
+      assert {:error, %Errors{detail: "channel not found"}} =
+               Actions.dispatch(voucher_payload(80), Keyword.put(opts, :verify_channel_state, removing))
+
+      assert :not_found = Store.get(store, @channel_id)
+    end
+
+    test "every voucher re-reads the channel state", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      test_pid = self()
+
+      opts =
+        Keyword.put(opts, :verify_channel_state, fn channel, _opts ->
+          send(test_pid, {:read, channel.cumulative_amount})
+          SessionChainState.mirror(channel, [])
+        end)
+
+      assert {:ok, _} = Actions.dispatch(voucher_payload(80), opts)
+      assert {:ok, _} = Actions.dispatch(voucher_payload(120), opts)
+      assert_received {:read, 50}
+      assert_received {:read, 80}
+    end
+
+    test "a pending on-chain close rejects the voucher and marks the channel", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      requested =
+        Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 1_000, close_requested: true})} end)
+
+      assert {:error, %Errors{status: 410, detail: "channel has a pending close request"}} =
+               Actions.dispatch(voucher_payload(80), requested)
+
+      assert {:ok, %Channel{close_requested: true, cumulative_amount: 50, status: :active}} =
+               Store.get(store, @channel_id)
+
+      no_read = Keyword.put(opts, :verify_channel_state, fn _, _ -> flunk("channel state read again") end)
+
+      assert {:error, %Errors{detail: "channel has a pending close request"}} =
+               Actions.dispatch(voucher_payload(80), no_read)
+
+      assert {:error, %Errors{detail: "channel has a pending close request"}} =
+               Actions.dispatch(
+                 top_up_payload(100),
+                 Keyword.put(no_read, :verify_top_up, fn _, _, _ -> flunk("top-up verified") end)
+               )
+
+      assert {:error, :channel_close_requested} =
+               Store.update(store, @channel_id, &Channel.apply_spend(&1, 10))
+    end
+
+    test "a marked channel still settles its accepted voucher through close", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      requested =
+        Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 1_000, close_requested: true})} end)
+
+      assert {:error, %Errors{}} = Actions.dispatch(voucher_payload(80), requested)
+
+      assert {:error, %Errors{detail: "channel has a pending close request"}} = Actions.dispatch(close_payload(80), opts)
+      assert {:ok, receipt} = Actions.dispatch(close_payload(50), opts)
+      assert receipt.extensions["txHash"] == @close_tx_hash
+      assert {:ok, %Channel{status: :closed, cumulative_amount: 50}} = Store.get(store, @channel_id)
+    end
+
+    test "a finalized channel rejects the voucher and marks the channel", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      finalized =
+        Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 1_000, finalized: true})} end)
+
+      assert {:error, %Errors{status: 410, detail: "channel is finalized on-chain"}} =
+               Actions.dispatch(voucher_payload(80), finalized)
+
+      assert {:ok, %Channel{close_requested: true}} = Store.get(store, @channel_id)
+    end
+
+    test "a withdrawn or short deposit rejects the voucher", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      assert {:error, %Errors{detail: "channel not funded on-chain"} = unfunded} =
+               Actions.dispatch(
+                 voucher_payload(80),
+                 Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 0})} end)
+               )
+
+      assert String.contains?(unfunded.type, "channel-not-found")
+
+      assert {:error, %Errors{detail: "on-chain deposit is below the accepted cumulative amount"} = short} =
+               Actions.dispatch(
+                 voucher_payload(80),
+                 Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 40})} end)
+               )
+
+      assert String.contains?(short.type, "insufficient-balance")
+
+      assert {:error, %Errors{type: type}} =
+               Actions.dispatch(
+                 voucher_payload(80),
+                 Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 60})} end)
+               )
+
+      assert String.contains?(type, "amount-exceeds-deposit")
+      assert {:ok, %Channel{cumulative_amount: 50, close_requested: false, deposit: 60}} = Store.get(store, @channel_id)
+    end
+
+    test "on-chain settled is folded in and a voucher below it is rejected", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      settled = Keyword.put(opts, :verify_channel_state, fn _, _ -> {:ok, state(%{deposit: 1_000, settled: 150})} end)
+
+      assert {:error, %Errors{detail: "voucher cumulativeAmount is below on-chain settled amount"}} =
+               Actions.dispatch(voucher_payload(120), settled)
+
+      assert {:ok, %Channel{settled: 150, spent: 150, cumulative_amount: 150}} = Store.get(store, @channel_id)
+      assert {:ok, receipt} = Actions.dispatch(voucher_payload(200), settled)
+      assert receipt.extensions["acceptedCumulative"] == "200"
+    end
+
+    test "verify_channel_state/2 reads through the session intent", %{store: store, opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      session = fn verifier ->
+        {:ok, session} =
+          Session.new(
+            amount: "1",
+            currency: @token,
+            recipient: @recipient,
+            method_details: %{"session_store" => store, "verify_channel_state" => verifier}
+          )
+
+        session
+      end
+
+      assert {:ok, %Channel{channel_id: @channel_id}} =
+               Actions.verify_channel_state(
+                 "0x" <> String.upcase(String.slice(@channel_id, 2..-1//1)),
+                 session.(&SessionChainState.mirror/2)
+               )
+
+      assert {:error, %Errors{detail: "invalid session channelId"}} =
+               Actions.verify_channel_state("0xdead", session.(&SessionChainState.mirror/2))
+
+      assert {:error, %Errors{detail: "channel has a pending close request"}} =
+               Actions.verify_channel_state(
+                 @channel_id,
+                 session.(fn _, _ -> {:ok, state(%{deposit: 1_000, close_requested: true})} end)
+               )
+
+      assert {:error, %Errors{detail: "channel has a pending close request"}} =
+               Actions.verify_channel_state(@channel_id, session.(&SessionChainState.mirror/2))
     end
   end
 
@@ -1361,6 +1554,7 @@ defmodule MPP.Session.ActionsTest do
           method_details: %{
             "session_store" => store,
             "verify_open" => funded(1_000),
+            "verify_channel_state" => &SessionChainState.mirror/2,
             "payer" => @payer,
             "token" => @token,
             "minVoucherDelta" => "nope",
@@ -1378,6 +1572,9 @@ defmodule MPP.Session.ActionsTest do
 
   defp concurrent_vouchers(payloads, opts, {ETSStore, store_opts}) do
     server = Process.whereis(Keyword.fetch!(store_opts, :name))
+    # The channel-state read runs before the atomic update; skip it here so
+    # both updates queue on the suspended store.
+    opts = Keyword.put(opts, :verify_channel_state, :already_verified)
     :ok = :sys.suspend(server)
 
     # Queue both updates before the real store processes either, in payload order.
@@ -1541,6 +1738,7 @@ defmodule MPP.Session.ActionsTest do
     [
       store: store,
       verify_open: funded(1_000),
+      verify_channel_state: &SessionChainState.mirror/2,
       payer: @payer,
       recipient: @recipient,
       token: @token,
