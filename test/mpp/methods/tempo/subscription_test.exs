@@ -20,6 +20,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   @subscription_id_encoded_bytes 24
   @gas_limit 1_000_000
   @max_total_fee 30_000_000_000_000_000
+  # Subscription transactions carry 24s of validity; advancing the clock by 10s
+  # during simulation leaves 14s, one second under the sponsorship floor.
+  @validity_margin_ms 10_000
 
   defmodule InvalidStore do
     @moduledoc false
@@ -580,6 +583,51 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       refute Transaction.has_fee_payer_placeholder?(tx)
     end
 
+    test "skips activation broadcast and releases the claim when validity runs short before send", %{store: store} do
+      {clock, set_clock} = fake_clock()
+      stub_successful_chain(on_simulate: fn -> set_clock.(clock.() + @validity_margin_ms) end)
+      config = store |> sponsored_config() |> Map.put("clock", clock)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:error, %Errors{} = error} = Subscription.verify(payload, subscription)
+      assert error.detail =~ "needs at least 15s of remaining validity"
+      assert_received {:rpc, "eth_simulateV1", _params}
+      refute_received {:rpc, "eth_sendRawTransactionSync", _params}
+
+      set_clock.(System.os_time(:millisecond))
+      stub_successful_chain()
+      assert {:ok, %Receipt{reference: @tx_hash}} = Subscription.verify(payload, subscription)
+    end
+
+    test "skips renewal broadcast and releases the claim when validity runs short before send", %{store: store} do
+      {clock, set_clock} = fake_clock()
+      stub_successful_chain()
+      config = store |> sponsored_config() |> Map.put("clock", clock)
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+
+      assert {:ok, activation} =
+               Subscription.verify(%{"type" => "keyAuthorization", "signature" => signature}, subscription)
+
+      assert {:ok, _record} =
+               Store.update(store, activation.subscription_id, fn record ->
+                 {:ok, %{record | billing_anchor: DateTime.shift(record.billing_anchor, day: -2)}}
+               end)
+
+      assert_received {:rpc, "eth_sendRawTransactionSync", _activation}
+      stub_successful_chain(on_simulate: fn -> set_clock.(clock.() + @validity_margin_ms) end)
+
+      assert {:error, %Errors{} = error} = Subscription.renew(activation.subscription_id, config)
+      assert error.detail =~ "needs at least 15s of remaining validity"
+      refute_received {:rpc, "eth_sendRawTransactionSync", _params}
+
+      assert {:ok, held} = Store.get(store, activation.subscription_id)
+      assert held.in_flight_period == nil
+      assert held.last_charged_period == 0
+    end
+
     test "releases a reverted activation claim so a retry can proceed", %{store: store} do
       stub_reverted_chain()
       config = config(store)
@@ -787,11 +835,13 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
     test_pid = self()
     block_timestamp = Keyword.get(opts, :block_timestamp, System.os_time(:second))
     simulation = Keyword.get(opts, :simulation, :success)
+    on_simulate = Keyword.get(opts, :on_simulate, fn -> :ok end)
 
     stub_rpc(
       fn conn ->
         request = request(conn)
         send(test_pid, {:rpc, request["method"], request["params"]})
+        if request["method"] == "eth_simulateV1", do: on_simulate.()
 
         case request do
           %{"method" => "eth_simulateV1"} when simulation == :unsupported ->
@@ -808,6 +858,12 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       end,
       opts
     )
+  end
+
+  # Controllable unix-millisecond clock for the Tempo `"clock"` config key.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> System.os_time(:millisecond) end}, id: make_ref())
+    {fn -> Agent.get(agent, & &1) end, fn ms -> Agent.update(agent, fn _ -> ms end) end}
   end
 
   defp chain_result(request, block_timestamp) do

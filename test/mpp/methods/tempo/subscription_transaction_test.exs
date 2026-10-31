@@ -93,6 +93,32 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
     assert :ok = SubscriptionTransaction.check_remaining_validity(%{tx | valid_before: 0}, config())
   end
 
+  test "derives sponsored validity from the clock after the nonce lookup" do
+    subscription = SubscriptionHelpers.subscription()
+    clock_agent = start_supervised!({Agent, fn -> System.os_time(:millisecond) end})
+    clock = fn -> Agent.get(clock_agent, & &1) end
+    after_lookup_ms = clock.() + 10_000
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+      Agent.update(clock_agent, fn _ -> after_lookup_ms end)
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => "0x0"})
+    end)
+
+    sponsored =
+      subscription
+      |> sponsored_config()
+      |> Map.delete("subscription_nonce")
+      |> Map.put("req_options", plug: {Req.Test, __MODULE__})
+      |> Map.put("clock", clock)
+
+    assert {:ok, tx, _memo} =
+             SubscriptionTransaction.build(subscription, nil, SubscriptionHelpers.root_address(), sponsored, "renewal")
+
+    assert tx.valid_before == FeePayerPolicy.ceil_now(clock) + 24
+  end
+
   test "rejects invalid signing and sponsorship configuration" do
     subscription = SubscriptionHelpers.subscription()
 

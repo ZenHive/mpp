@@ -55,13 +55,18 @@ defmodule MPP.Methods.Tempo do
       `"max_fee_per_gas"`, `"max_priority_fee_per_gas"`, `"max_total_fee"` (wei),
       and `"max_validity_window_seconds"` (seconds, at least 15). A sponsored
       transaction must carry at least 15 seconds of remaining `valid_before`
-      validity, checked before co-sign and again before broadcast. Bounds the client-supplied
+      validity, checked before co-sign and again before broadcast. Sponsored
+      pull charges must use an endpoint `:expires_in` of at least 15 seconds.
+      Bounds the client-supplied
       gas fields and validity window before the server co-signs so a malicious
       client cannot drain the fee-payer wallet via inflated gas price, total fee
       budget, or a padded access list, nor hold a co-signed sponsorship
       broadcastable far into the future. The same map accepts
       `"max_in_flight_total_fee"` and `"max_in_flight_reservations"` for aggregate
       worst-case exposure. See `MPP.Methods.Tempo.FeePayerPolicy`.
+    * `"clock"` — (optional) zero-arity function returning unix milliseconds,
+      read for every sponsored remaining-validity check. Defaults to the system
+      clock; inject one for deterministic time in tests.
     * `"sponsor_budget_reconcile"` — (optional, defaults to `false`) when `true`, an
       at-capacity request checks a bounded set of pending async transaction receipts
       before rejecting.
@@ -241,6 +246,7 @@ defmodule MPP.Methods.Tempo do
     validate_presenter_binding!(config["require_presenter_binding"])
     validate_machine_token!(config)
     validate_supported_modes!(config["supported_modes"])
+    validate_clock!(config["clock"])
     if config["intent"] == "subscription", do: TempoSubscription.validate_config!(config)
     :ok
   end
@@ -451,6 +457,7 @@ defmodule MPP.Methods.Tempo do
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
     reject_machine_token_currency!(charge.currency, config["chain_id"] || @moderato_chain_id)
+    reject_short_sponsored_expiry!(charge, config)
 
     details = %{
       "chainId" => config["chain_id"] || @moderato_chain_id,
@@ -700,6 +707,40 @@ defmodule MPP.Methods.Tempo do
   defp advertised_supported_modes(%{"supported_modes" => modes}) when not is_nil(modes), do: modes
   defp advertised_supported_modes(%{"supportedModes" => modes}) when not is_nil(modes), do: modes
   defp advertised_supported_modes(_config), do: nil
+
+  # Issuance floor (refs/mppx/src/tempo/server/Charge.ts:559-573,
+  # refs/mpp-rs/src/protocol/methods/tempo/mod.rs:213-253): a sponsored pull
+  # charge whose challenge expires sooner than the co-signer's remaining-validity
+  # floor is unpayable. `MPP.Plug` stamps `expires` as issuance time plus the
+  # endpoint `"expires_in"`, so that TTL is the exact remaining lifetime at
+  # issuance. Zero-amount proofs and push-only routes never use the fee payer.
+  defp reject_short_sponsored_expiry!(%Charge{amount: amount}, config) do
+    floor = FeePayerPolicy.min_remaining_validity_seconds()
+    expires_in = config["expires_in"]
+    modes = advertised_supported_modes(config)
+
+    if fee_payer_enabled?(config) and positive_amount?(amount) and (is_nil(modes) or "pull" in modes) and
+         is_integer(expires_in) and expires_in < floor do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee-sponsored charge challenges must expire at least #{floor} seconds " <>
+              "after issuance (expires_in #{expires_in})"
+    end
+
+    :ok
+  end
+
+  defp positive_amount?(amount) when is_binary(amount) do
+    match?({value, ""} when value > 0, Integer.parse(amount))
+  end
+
+  defp positive_amount?(_amount), do: false
+
+  defp validate_clock!(nil), do: :ok
+  defp validate_clock!(clock) when is_function(clock, 0), do: :ok
+
+  defp validate_clock!(_clock) do
+    raise ArgumentError, "MPP.Methods.Tempo clock must be a zero-arity function returning unix milliseconds"
+  end
 
   defp validate_supported_modes!(nil), do: :ok
 
@@ -1108,7 +1149,7 @@ defmodule MPP.Methods.Tempo do
     if fee_payer_enabled?(config) do
       policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
 
-      with {:ok, measurement} <- FeePayerPolicy.measure(tx, policy),
+      with {:ok, measurement} <- FeePayerPolicy.measure(tx, policy, FeePayerPolicy.ceil_now(config["clock"])),
            {:ok, store} <- sponsor_store(config),
            {:ok, sponsor_id} <- sponsor_identity(config) do
         reserve_sponsor_budget(store, config, chain_id, sponsor_id, policy, measurement)
@@ -1225,22 +1266,31 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp complete_reserved_transaction(tx, config) do
-    with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
+    with :ok <- check_sponsored_validity(tx, config),
+         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, tx, _hash} <- canonicalize_transaction(tx),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
-         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config),
-         :ok <- recheck_sponsored_validity(tx, config) do
+         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
       {:ok, tx, rpc_url}
     end
   end
 
-  # Co-sign, fill and simulation take round trips, so the remaining-validity
-  # floor is re-checked on the final envelope right before broadcast
+  # Store calls, co-sign/fill and simulation all take time out of the validity
+  # window, so the remaining-validity floor is re-checked against a fresh clock
+  # right before co-sign (local and hosted) and at the send boundary, after the
+  # last store call and immediately before the sync or async send
   # (refs/mpp-rs/src/protocol/methods/tempo/method/transaction_credential.rs:427-441).
-  defp recheck_sponsored_validity(%Transaction{valid_before: valid_before}, config) do
+  defp check_sponsored_validity(%Transaction{valid_before: valid_before}, config) do
     if fee_payer_enabled?(config),
-      do: FeePayerPolicy.check_remaining_validity(valid_before),
+      do: FeePayerPolicy.check_remaining_validity(valid_before, FeePayerPolicy.ceil_now(config["clock"])),
       else: :ok
+  end
+
+  defp check_send_boundary(tx, config) do
+    case check_sponsored_validity(tx, config) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:pre_broadcast, reason}}
+    end
   end
 
   defp broadcast_reserved_transaction(tx, rpc_url, config, charge, wait?, %{
@@ -1251,6 +1301,7 @@ defmodule MPP.Methods.Tempo do
          funding_currency: funding_currency
        }) do
     with :ok <- begin_budget_broadcast(budget),
+         :ok <- check_send_boundary(tx, config),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget) do
       safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
 
@@ -1266,6 +1317,12 @@ defmodule MPP.Methods.Tempo do
         safe_budget_release(budget)
         safe_dedup_release(store, reserved_hash, token)
         {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+
+      # Nothing was sent: release what this attempt holds.
+      {:error, {:pre_broadcast, reason}} ->
+        safe_budget_release(budget)
+        safe_dedup_release(store, reserved_hash, token)
+        {:error, reason}
 
       {:error, _reason} = error ->
         error

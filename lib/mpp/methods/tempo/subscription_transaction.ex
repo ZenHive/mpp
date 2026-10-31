@@ -35,8 +35,10 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     sponsored? = fee_payer_enabled?(config)
     chain_id = config["chain_id"]
     rpc_url = config["rpc_url"]
-    now = FeePayerPolicy.ceil_now()
 
+    # `valid_before` is derived after the nonce RPC, and the policy (including
+    # the remaining-validity floor) is evaluated against a fresh clock at
+    # co-sign, so neither is measured against time captured before a round trip.
     with {:ok, access_key} <- decode_key(config["subscription_access_key_private_key"]),
          {:ok, access_key_address} <- Secp256k1.get_address(access_key),
          {:ok, source_address} <- Address.validate(source),
@@ -44,6 +46,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          {:ok, recipient} <- Address.validate(subscription.recipient),
          {:ok, amount} <- parse_amount(subscription.amount),
          {:ok, nonce} <- resolve_nonce(source, rpc_url, config),
+         now = FeePayerPolicy.ceil_now(config["clock"]),
          memo = attribution_memo(settlement_reference),
          calldata = TIP20.transfer_with_memo_calldata(recipient, amount, memo),
          call = [token, <<>>, calldata],
@@ -51,7 +54,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          {:ok, sender_signature} <- sign_keychain(base_fields, access_key, access_key_address, source_address),
          fields = base_fields ++ [sender_signature],
          {:ok, tx} <- deserialize(fields),
-         :ok <- validate_sponsor_policy(tx, config, sponsored?, now, authorization),
+         :ok <- validate_sponsor_policy(tx, config, sponsored?, FeePayerPolicy.ceil_now(config["clock"]), authorization),
          {:ok, tx} <- maybe_cosign(tx, config) do
       {:ok, tx, hex(memo)}
     else
@@ -72,7 +75,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   @spec check_remaining_validity(Transaction.t(), map()) :: :ok | {:error, String.t()}
   def check_remaining_validity(%Transaction{valid_before: valid_before}, config) do
     if fee_payer_enabled?(config),
-      do: FeePayerPolicy.check_remaining_validity(valid_before),
+      do: FeePayerPolicy.check_remaining_validity(valid_before, FeePayerPolicy.ceil_now(config["clock"])),
       else: :ok
   end
 

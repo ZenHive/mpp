@@ -41,13 +41,24 @@ defmodule MPP.Methods.TempoTest do
     @state_key {__MODULE__, :state}
     @update_count_key {__MODULE__, :update_count}
     @fail_on_update_key {__MODULE__, :fail_on_update}
+    @hooks_key {__MODULE__, :hooks}
 
-    @spec configure(pos_integer()) :: :ok
-    def configure(fail_on_update) do
+    @spec configure(pos_integer(), map()) :: :ok
+    def configure(fail_on_update, hooks \\ %{}) do
       Process.put(@state_key, %{})
       Process.put(@update_count_key, 0)
       Process.put(@fail_on_update_key, fail_on_update)
+      Process.put(@hooks_key, hooks)
       :ok
+    end
+
+    # Hooks run before the store call they name (`:check_and_mark` or
+    # `{:update, n}`), so a test can model a slow store at an exact step.
+    defp run_hook(event) do
+      case Map.fetch(Process.get(@hooks_key, %{}), event) do
+        {:ok, hook} -> hook.()
+        :error -> :ok
+      end
     end
 
     @impl Store
@@ -66,6 +77,8 @@ defmodule MPP.Methods.TempoTest do
 
     @impl Store
     def check_and_mark(key, value) do
+      run_hook(:check_and_mark)
+
       if Map.has_key?(state(), key) do
         {:error, :already_exists}
       else
@@ -77,6 +90,7 @@ defmodule MPP.Methods.TempoTest do
     def update(key, fun, _opts) do
       update_count = Process.get(@update_count_key, 0) + 1
       Process.put(@update_count_key, update_count)
+      run_hook({:update, update_count})
 
       if update_count == Process.get(@fail_on_update_key) do
         {:error, :forced_failure}
@@ -180,9 +194,54 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
+    test "Plug.init refuses sponsored pull charges that expire under the remaining-validity floor" do
+      init = fn amount, expires_in, extra ->
+        MPP.Plug.init(
+          secret_key: String.duplicate("k", 32),
+          realm: @realm,
+          method: Tempo,
+          amount: amount,
+          currency: @token_address,
+          recipient: @recipient,
+          expires_in: expires_in,
+          method_config:
+            Map.merge(
+              %{
+                "rpc_url" => @rpc_url,
+                "fee_payer" => true,
+                "fee_payer_private_key" => String.duplicate("11", 32),
+                "fee_token" => @token_address,
+                "store" => ConCacheStore
+              },
+              extra
+            )
+        )
+      end
+
+      for extra <- [%{}, %{"supported_modes" => ["pull", "push"]}] do
+        assert_raise ArgumentError, ~r/must expire at least 15 seconds after issuance \(expires_in 14\)/, fn ->
+          init.("1000000", 14, extra)
+        end
+      end
+
+      assert %{} = init.("1000000", 15, %{})
+      assert %{} = init.("0", 14, %{})
+      assert %{} = init.("1000000", 14, %{"supported_modes" => ["push"]})
+    end
+
     test "accepts boolean require_presenter_binding" do
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => true})
       assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "require_presenter_binding" => false})
+    end
+
+    test "accepts a zero-arity clock and rejects other clock values" do
+      assert :ok = Tempo.validate_config!(%{"rpc_url" => @rpc_url, "clock" => fn -> 0 end})
+
+      for clock <- [1_000, fn _arg -> 0 end, "now"] do
+        assert_raise ArgumentError, ~r/clock must be a zero-arity function/, fn ->
+          Tempo.validate_config!(%{"rpc_url" => @rpc_url, "clock" => clock})
+        end
+      end
     end
 
     test "raises on non-boolean require_presenter_binding" do
@@ -3238,7 +3297,9 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "re-checks remaining validity before broadcast and releases budget and dedup claim", %{charge: charge} do
-      valid_before = FeePayerPolicy.ceil_now() + 16
+      valid_before = FeePayerPolicy.ceil_now() + 600
+      {clock, set_clock} = fake_clock()
+      charge = put_in(charge.method_details["clock"], clock)
       {:ok, tx_hex} = build_sponsored_client_tx(nonce: 12, valid_before: valid_before)
       {ConCacheStore, store_opts} = charge.method_details["store"]
       dedup_key = "mpp:charge:" <> keccak256_hex(tx_hex)
@@ -3253,7 +3314,7 @@ defmodule MPP.Methods.TempoTest do
           "eth_simulateV1" ->
             send(test_pid, {:held_during_simulate, sponsor_budget_state(charge, @fee_payer_private_key)})
             # Simulation outlasts the margin, leaving less than the floor.
-            Process.sleep(max((valid_before - 15) * 1000 - System.os_time(:millisecond) + 50, 0))
+            set_clock.((valid_before - 14) * 1000)
             Req.Test.json(conn, simulate_success_body())
 
           _ ->
@@ -3273,6 +3334,70 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_sendRawTransaction"}
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
       assert :not_found = ConCacheStore.get(dedup_key, store_opts)
+    end
+
+    test "re-checks remaining validity at the send boundary after a slow budget transition", %{charge: charge} do
+      for {wait?, nonce} <- [{true, 21}, {false, 22}] do
+        valid_before = FeePayerPolicy.ceil_now() + 600
+        {clock, set_clock} = fake_clock()
+        {:ok, tx_hex} = build_sponsored_client_tx(nonce: nonce, valid_before: valid_before)
+        test_pid = self()
+
+        # Update 1 reserves the sponsor budget, update 2 moves it to :broadcasting.
+        :ok =
+          SponsorLifecycleStore.configure(999, %{
+            {:update, 2} => margin_hook(set_clock, valid_before, lifecycle_budget_key())
+          })
+
+        charge =
+          charge
+          |> put_in([Access.key(:method_details), "store"], SponsorLifecycleStore)
+          |> put_in([Access.key(:method_details), "clock"], clock)
+          |> put_in([Access.key(:method_details), "wait_for_confirmation"], wait?)
+
+        stub_recording_simulation(test_pid)
+
+        payload = %{"type" => "transaction", "signature" => tx_hex}
+        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert error.type =~ "verification-failed"
+        assert error.detail =~ "needs at least 15s of remaining validity"
+
+        assert_received {:rpc_call, "eth_simulateV1"}
+        refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+        refute_received {:rpc_call, "eth_sendRawTransaction"}
+        assert_received {:held_budget, {:ok, %{reservations: held}}} when map_size(held) == 1
+        assert :not_found = SponsorLifecycleStore.get(lifecycle_budget_key())
+        assert :not_found = SponsorLifecycleStore.get("mpp:charge:" <> keccak256_hex(tx_hex))
+      end
+    end
+
+    test "re-checks remaining validity before co-sign after a slow dedup claim", %{charge: charge} do
+      valid_before = FeePayerPolicy.ceil_now() + 600
+      {clock, set_clock} = fake_clock()
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 23, valid_before: valid_before)
+      test_pid = self()
+
+      :ok =
+        SponsorLifecycleStore.configure(999, %{
+          check_and_mark: margin_hook(set_clock, valid_before, lifecycle_budget_key())
+        })
+
+      charge =
+        charge
+        |> put_in([Access.key(:method_details), "store"], SponsorLifecycleStore)
+        |> put_in([Access.key(:method_details), "clock"], clock)
+
+      stub_recording_simulation(test_pid)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "needs at least 15s of remaining validity"
+
+      refute_received {:rpc_call, _method}
+      assert_received {:held_budget, {:ok, %{reservations: held}}} when map_size(held) == 1
+      assert :not_found = SponsorLifecycleStore.get(lifecycle_budget_key())
+      assert :not_found = SponsorLifecycleStore.get("mpp:charge:" <> keccak256_hex(tx_hex))
     end
 
     test "retains async sponsorship and rejects the next request with retry timing", %{charge: charge} do
@@ -4302,6 +4427,7 @@ defmodule MPP.Methods.TempoTest do
     @client_private_key "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     @fee_payer_private_key "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
     @hosted_url "https://sponsor.moderato.tempo.xyz"
+    @hosted_budget_key "mpp:sponsor-budget:42431:hosted-wallet"
     @rogue_token "0x1111111111111111111111111111111111111111"
 
     setup %{charge: charge} do
@@ -4316,6 +4442,33 @@ defmodule MPP.Methods.TempoTest do
       }
 
       {:ok, charge: charge}
+    end
+
+    test "re-checks remaining validity before the hosted fill after a slow dedup claim", %{charge: charge} do
+      valid_before = FeePayerPolicy.ceil_now() + 600
+      {clock, set_clock} = fake_clock()
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0, valid_before: valid_before)
+      test_pid = self()
+
+      :ok =
+        SponsorLifecycleStore.configure(999, %{check_and_mark: margin_hook(set_clock, valid_before, @hosted_budget_key)})
+
+      charge =
+        charge
+        |> put_in([Access.key(:method_details), "store"], SponsorLifecycleStore)
+        |> put_in([Access.key(:method_details), "clock"], clock)
+
+      stub_recording_simulation(test_pid)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "needs at least 15s of remaining validity"
+
+      refute_received {:rpc_call, _method}
+      assert_received {:held_budget, {:ok, %{reservations: held}}} when map_size(held) == 1
+      assert :not_found = SponsorLifecycleStore.get(@hosted_budget_key)
+      assert :not_found = SponsorLifecycleStore.get("mpp:charge:" <> keccak256_hex(tx_hex))
     end
 
     test "fills via eth_fillTransaction then broadcasts", %{charge: charge} do
@@ -4484,6 +4637,39 @@ defmodule MPP.Methods.TempoTest do
     cache_name = :"#{__MODULE__}.SponsorBudget.#{System.unique_integer([:positive])}"
     start_supervised!(ConCacheStore.child_spec(name: cache_name))
     {ConCacheStore, name: cache_name}
+  end
+
+  # Store hook modelling a slow store call: records the held sponsor budget,
+  # then moves the clock to 14s before `valid_before`.
+  defp margin_hook(set_clock, valid_before, budget_key) do
+    fn ->
+      send(self(), {:held_budget, SponsorLifecycleStore.get(budget_key)})
+      set_clock.((valid_before - 14) * 1000)
+    end
+  end
+
+  # Controllable unix-millisecond clock for the Tempo `"clock"` config key.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> System.os_time(:millisecond) end}, id: make_ref())
+    {fn -> Agent.get(agent, & &1) end, fn ms -> Agent.update(agent, fn _ -> ms end) end}
+  end
+
+  defp stub_recording_simulation(test_pid) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+      send(test_pid, {:rpc_call, request["method"]})
+
+      case request["method"] do
+        "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
+        _ -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]})
+      end
+    end)
+  end
+
+  defp lifecycle_budget_key do
+    {:ok, sponsor_id} = Onchain.Signer.address_from_key(@fee_payer_private_key)
+    "mpp:sponsor-budget:42431:#{String.downcase(sponsor_id)}"
   end
 
   defp sponsor_budget_state(charge, private_key) do

@@ -331,6 +331,12 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       assert ceiled * 1000 - System.os_time(:millisecond) < 1000
     end
 
+    test "ceil_now/1 rounds an injected millisecond clock up to the next second" do
+      assert FeePayerPolicy.ceil_now(fn -> 1_000_000 end) == 1000
+      assert FeePayerPolicy.ceil_now(fn -> 1_000_001 end) == 1001
+      assert FeePayerPolicy.ceil_now(fn -> 1_000_999 end) == 1001
+    end
+
     test "rejects a policy window below the 15-second floor" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, %{"max_validity_window_seconds" => 14})
 

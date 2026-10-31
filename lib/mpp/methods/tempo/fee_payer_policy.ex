@@ -242,9 +242,16 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   The reference point for every validity comparison in this module (mpp-rs
   `now.as_secs() + (subsec_nanos > 0)`, mppx `Math.ceil(now / 1000)`).
+
+  `clock` is an optional zero-arity function returning unix milliseconds (the
+  Tempo `"clock"` method_config key); `nil` reads the system clock.
   """
-  @spec ceil_now() :: integer()
-  def ceil_now, do: div(System.os_time(:millisecond) + 999, 1000)
+  @spec ceil_now((-> integer()) | nil) :: integer()
+  def ceil_now(clock \\ nil)
+  def ceil_now(nil), do: ceil_seconds(System.os_time(:millisecond))
+  def ceil_now(clock) when is_function(clock, 0), do: ceil_seconds(clock.())
+
+  defp ceil_seconds(ms), do: Integer.floor_div(ms + 999, 1000)
 
   @doc """
   Check that `valid_before` leaves at least `min_remaining_validity_seconds/0`
