@@ -4510,7 +4510,7 @@ scored_at = "2026-10-31"
 id = "169"
 phase = 1
 bundle = "session"
-status = "pending"
+status = "in_progress"
 title = "Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq)"
 scores = { d = 6, b = 8, u = 9 }
 acceptance_criteria = ["Every behavior under 'Fix to port' (and 'Also port') in GHSA-fqv7-fp33-2mxq is implemented with tests that fail on the pre-fix code, for both the HTTP voucher path and the WebSocket meter", "Fails closed on verifier error (test)", "Moderato :integration test covers the new verification path and flunks with export instructions when credentials are missing", "MPP.Session.Actions moduledoc documents the new configuration; existing session tests stay green", "No commit message, comment, doc or roadmap text contains the attack mechanism; the advisory id appears only in this task"]
@@ -4519,6 +4519,7 @@ assignee = "codex"
 model = "gpt-6-astra"
 body = "Security hardening of the generic session layer and the WebSocket meter. Mechanism, affected code and fix to port are ONLY in private draft advisory GHSA-fqv7-fp33-2mxq — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-fqv7-fp33-2mxq --jq .description`. Port the reference behavior from refs/mppx and refs/mpp-rs (cited there); keep the existing callback style of MPP.Session.Actions (verify_open / verify_top_up) and update the session moduledoc + README for any new required configuration. Live evidence: a Moderato :integration test exercising the new path, flunking loudly without credentials. DISCLOSURE: public repo, unpublished advisory — commits, comments, docs, CHANGELOG and roadmap text describe only the fix shape, never the attack."
 created_at = "2026-10-31"
+started_at = "2026-10-31"
 scored_at = "2026-10-31"
 
 [[task]]
