@@ -17,6 +17,10 @@ defmodule MPP.Client.Req do
   (`:cross_origin_redirect`) so a payment credential is never attached to a
   different host, scheme, or port than the caller asked for (mpp-rs #379).
 
+  The request that carries the payment credential never follows redirects: a
+  3xx answer to the paid retry is returned to the caller as-is, whichever header
+  holds the credential (mppx `redirect: 'manual'`, mpp-rs redirect-safe client).
+
   The request URL is passed to the provider as `:request_url` (see
   `MPP.Client.MultiProvider.pay/3`), so a zero-amount Tempo proof is signed
   only for a realm the requested server owns
@@ -191,6 +195,7 @@ defmodule MPP.Client.Req do
       paid =
         request
         |> HTTP.set_credential(credential)
+        |> Req.Request.put_option(:redirect, false)
         |> Req.Request.put_private(:mpp_payment_retries, retries + 1)
 
       {paid, result} = Req.Request.run_request(%{paid | halted: false})

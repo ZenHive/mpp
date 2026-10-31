@@ -100,6 +100,30 @@ defmodule MPP.Client.ReqTest do
     |> Headers.format_challenge()
   end
 
+  # good.example answers the unpaid request with a 402 and the paid retry with
+  # a 302 to other.example; any request reaching other.example is reported.
+  defp paid_retry_redirect_plug(challenge_header, credential_header) do
+    test_pid = self()
+
+    fn conn ->
+      case {conn.host, Plug.Conn.get_req_header(conn, credential_header)} do
+        {"good.example", []} ->
+          conn
+          |> Plug.Conn.put_resp_header("www-authenticate", challenge_header)
+          |> Plug.Conn.send_resp(402, "pay")
+
+        {"good.example", ["Payment " <> _blob]} ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "http://other.example/landing")
+          |> Plug.Conn.send_resp(302, "moved")
+
+        {"other.example", _credential} ->
+          send(test_pid, {:other_origin, conn.req_headers})
+          Plug.Conn.send_resp(conn, 200, "other")
+      end
+    end
+  end
+
   defp client(plug, opts) do
     [plug: plug]
     |> Req.new()
@@ -522,6 +546,42 @@ defmodule MPP.Client.ReqTest do
                Req.get(req, url: "http://example.com/start")
 
       assert_received {:paid, "tempo"}
+    end
+
+    test "returns a 302 to the paid retry without following it (Authorization, trusted redirects)" do
+      header = challenge_header("tempo")
+      plug = paid_retry_redirect_plug(header, "authorization")
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 302} = response} =
+               Req.get(req, url: "http://good.example/resource", redirect_trusted: true)
+
+      assert Req.Response.get_header(response, "location") == ["http://other.example/landing"]
+      assert_received {:paid, "tempo"}
+      refute_received {:other_origin, _headers}
+    end
+
+    test "returns a 302 to the paid retry without following it (Payment-Authorization)" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      plug = paid_retry_redirect_plug(Headers.format_challenge(challenge), "payment-authorization")
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 302}} = Req.get(req, url: "http://good.example/resource")
+      assert_received {:paid, "tempo"}
+      refute_received {:other_origin, _headers}
     end
 
     test "a paid retry that offers no supported challenge returns the 402" do
