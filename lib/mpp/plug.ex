@@ -63,8 +63,9 @@ defmodule MPP.Plug do
       x402 request passes through with `:x402_settlement` assigned (the
       facilitator's settlement response) instead of `:mpp_receipt`, and the
       `PAYMENT-RESPONSE` header is attached on a successful response.
-      Route binding (`:resource`, `:extensions`, `:digest`, `:route_binding`)
-      is described in `MPP.X402.Plug`.
+      The route's `:digest` and `:opaque` also scope the x402 route binding;
+      binding options (`:resource`, `:extensions`, `:digest`, `:opaque`,
+      `:route_binding`) are described in `MPP.X402.Plug`.
 
   ## Single-Method Options
 
@@ -204,7 +205,7 @@ defmodule MPP.Plug do
       intent: intent,
       session_store: session_store,
       requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false)),
-      x402: X402Plug.configure(Keyword.get(opts, :x402))
+      x402: X402Plug.configure(Keyword.get(opts, :x402), Keyword.take(opts, [:digest, :opaque]))
     }
   end
 

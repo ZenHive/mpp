@@ -15,12 +15,23 @@ defmodule MPP.X402.Plug do
 
   ## Route binding
 
-  A route is *scoped* when it sets `:digest`, or when the advertised
-  `extensions.mppx.info` carries `digest`, `opaque` or `_mppx_scope` — the
-  route metadata mppx folds into its binding (`routeRequiresBinding` and
-  `routeExtensions` in `refs/mppx/src/x402/server/EvmCharge.ts`). `info.method`
-  alone does not scope a route. `:route_binding` decides how a scoped route
-  treats a credential without `extensions.mppx.info.nonce`:
+  Every challenge advertises an `extensions.mppx` route binding derived from
+  the route itself (mppx `routeExtensions`,
+  `refs/mppx/src/x402/server/EvmCharge.ts:414-433`): `info.method` is the
+  request method, `info.digest` the route digest and `info.opaque` the route
+  opaque value. The digest and opaque come from the `MPP.Plug` route
+  (`:digest` / `:opaque`) or from the nested `:x402` options; a value set in
+  both places must agree. Caller-supplied `:extensions` are advertised
+  alongside, and their other `mppx.info` keys are kept; the route-derived keys
+  take precedence. A route-bound credential must echo this binding before its
+  nonce is recomputed over it (`EvmCharge.ts:173-218`), so a credential signed
+  for one route scope does not match another.
+
+  A route is *scoped* when the derived `mppx.info` carries `digest`, `opaque`
+  or `_mppx_scope` (`routeRequiresBinding`, `EvmCharge.ts:158-162`).
+  `info.method` alone does not scope a route. `:route_binding` decides how a
+  scoped route treats a credential without `extensions.mppx.info.nonce`
+  (`EvmCharge.ts:168-198`):
 
     * `:required` (default) — rejected with `route_binding_required`. Only
       clients implementing the mppx route binding can pay a scoped route.
@@ -44,6 +55,18 @@ defmodule MPP.X402.Plug do
   alias Plug.Conn
 
   @route_scope_keys ["digest", "opaque", "_mppx_scope"]
+  @mppx_binding_schema %{
+    "additionalProperties" => false,
+    "properties" => %{
+      "_mppx_scope" => %{"type" => "string"},
+      "digest" => %{"type" => "string"},
+      "method" => %{"type" => "string"},
+      "nonce" => %{"type" => "string"},
+      "opaque" => %{"type" => "string"}
+    },
+    "required" => ["method"],
+    "type" => "object"
+  }
 
   @type t :: %__MODULE__{
           facilitator: Facilitator.t(),
@@ -51,7 +74,8 @@ defmodule MPP.X402.Plug do
           resource: map() | nil,
           extensions: map() | nil,
           route_binding: :resource | :required,
-          digest: String.t() | nil
+          digest: String.t() | nil,
+          opaque: String.t() | nil
         }
 
   @enforce_keys [:facilitator, :accepts]
@@ -61,24 +85,32 @@ defmodule MPP.X402.Plug do
     resource: nil,
     extensions: nil,
     route_binding: :required,
-    digest: nil
+    digest: nil,
+    opaque: nil
   ]
 
-  @doc "Build x402 plug options from `MPP.Plug` `:x402` config."
-  @spec configure(nil | false | keyword() | map()) :: t() | nil
-  def configure(nil), do: nil
-  def configure(false), do: nil
+  @doc """
+  Build x402 plug options from `MPP.Plug` `:x402` config.
 
-  def configure(opts) when is_list(opts), do: configure(Map.new(opts))
+  `route` carries the enclosing route's `:digest` and `:opaque`; they scope the
+  x402 binding together with any nested `:digest` / `:opaque`.
+  """
+  @spec configure(nil | false | keyword() | map(), keyword()) :: t() | nil
+  def configure(opts, route \\ [])
+  def configure(nil, _route), do: nil
+  def configure(false, _route), do: nil
 
-  def configure(%{} = opts) do
+  def configure(opts, route) when is_list(opts), do: configure(Map.new(opts), route)
+
+  def configure(%{} = opts, route) do
     %__MODULE__{
       facilitator: Facilitator.resolve(Map.get(opts, :facilitator)),
       accepts: normalize_accepts(opts),
       resource: Map.get(opts, :resource),
       extensions: Map.get(opts, :extensions),
       route_binding: configure_binding(opts),
-      digest: Map.get(opts, :digest)
+      digest: route_scope!(:digest, Map.get(opts, :digest), Keyword.get(route, :digest)),
+      opaque: route_scope!(:opaque, Map.get(opts, :opaque), Keyword.get(route, :opaque))
     }
   end
 
@@ -125,10 +157,12 @@ defmodule MPP.X402.Plug do
   end
 
   defp bind_route(payload, conn, x402) do
+    binding = route_extensions(conn, x402)
+
     with {:ok, accepted} <- match_accepted(payload["accepted"], x402.accepts),
-         :ok <- match_resource(payload, conn, x402),
+         :ok <- match_resource(payload, conn, x402, binding),
          :ok <- match_digest(conn, x402),
-         :ok <- match_extensions(payload, x402),
+         :ok <- match_extensions(payload, binding),
          :ok <- match_extension_nonce(payload, accepted, conn, x402) do
       {:ok, accepted}
     end
@@ -154,31 +188,43 @@ defmodule MPP.X402.Plug do
     end
   end
 
-  defp match_resource(payload, conn, x402) do
+  defp match_resource(payload, conn, x402, binding) do
     expected = resource_url(conn, x402)
     actual = get_in(payload, ["resource", "url"])
-    compare_resource(actual, expected, route_bound?(payload), x402)
+    compare_resource(actual, expected, route_bound?(payload), x402, binding)
   end
 
-  defp compare_resource(actual, expected, true, _x402) do
+  defp compare_resource(actual, expected, true, _x402, _binding) do
     if actual == expected, do: :ok, else: {:error, :resource_mismatch}
   end
 
-  defp compare_resource(actual, expected, false, x402) do
-    case {scoped?(x402), x402.route_binding, actual} do
+  defp compare_resource(actual, expected, false, x402, binding) do
+    case {scoped?(binding), x402.route_binding, actual} do
       {true, :required, _actual} -> {:error, :route_binding_required}
       {false, _binding, nil} -> :ok
       _other -> if actual == expected, do: :ok, else: {:error, :resource_mismatch}
     end
   end
 
-  defp scoped?(%__MODULE__{digest: digest}) when is_binary(digest), do: true
+  defp scoped?(%{"mppx" => %{"info" => info}}), do: Enum.any?(@route_scope_keys, &Map.has_key?(info, &1))
 
-  defp scoped?(%__MODULE__{extensions: %{"mppx" => %{"info" => info}}}) when is_map(info) do
-    Enum.any?(@route_scope_keys, &Map.has_key?(info, &1))
+  # mppx routeExtensions (refs/mppx/src/x402/server/EvmCharge.ts:414-433).
+  defp route_extensions(%Conn{method: method}, %__MODULE__{} = x402) do
+    caller = if is_map(x402.extensions), do: x402.extensions, else: %{}
+    mppx = if is_map(caller["mppx"]), do: caller["mppx"], else: %{}
+    info = if is_map(mppx["info"]), do: mppx["info"], else: %{}
+
+    info =
+      info
+      |> Map.put("method", method)
+      |> put_present("digest", x402.digest)
+      |> put_present("opaque", x402.opaque)
+
+    Map.put(caller, "mppx", %{"info" => info, "schema" => Map.get(mppx, "schema", @mppx_binding_schema)})
   end
 
-  defp scoped?(_x402), do: false
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 
   defp match_digest(%Conn{} = conn, %__MODULE__{digest: digest}) when is_binary(digest) do
     body = raw_body(conn)
@@ -192,15 +238,13 @@ defmodule MPP.X402.Plug do
 
   defp match_digest(_conn, _x402), do: :ok
 
-  defp match_extensions(payload, %__MODULE__{extensions: expected}) when is_map(expected) do
+  defp match_extensions(payload, expected) do
     if route_bound?(payload) and not contains_extensions?(payload["extensions"], expected) do
       {:error, :extension_mismatch}
     else
       :ok
     end
   end
-
-  defp match_extensions(_payload, _x402), do: :ok
 
   defp contains_extensions?(actual, expected) when is_map(actual) do
     Enum.all?(expected, fn {key, expected_extension} -> same_extension?(actual[key], expected_extension) end)
@@ -284,10 +328,7 @@ defmodule MPP.X402.Plug do
       "accepts" => x402.accepts
     }
 
-    case x402.extensions do
-      extensions when is_map(extensions) -> Map.put(envelope, "extensions", extensions)
-      _other -> envelope
-    end
+    Map.put(envelope, "extensions", route_extensions(conn, x402))
   end
 
   defp resource_url(_conn, %__MODULE__{resource: %{"url" => url}}) when is_binary(url) and url != "", do: url
@@ -333,6 +374,14 @@ defmodule MPP.X402.Plug do
       binding when binding in [:resource, :required] -> binding
       _other -> raise ArgumentError, "MPP.Plug :x402 :route_binding must be :resource or :required"
     end
+  end
+
+  defp route_scope!(_key, nil, route), do: route
+  defp route_scope!(_key, nested, nil), do: nested
+  defp route_scope!(_key, same, same), do: same
+
+  defp route_scope!(key, _nested, _route) do
+    raise ArgumentError, "MPP.Plug :x402 :#{key} conflicts with the route :#{key}"
   end
 
   defp x402_error(reason) when is_atom(reason), do: "x402 #{reason}"

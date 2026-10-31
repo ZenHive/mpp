@@ -190,6 +190,76 @@ defmodule MPP.X402.PlugTest do
       assert problem_detail(settle(unscoped, moved)) =~ "resource_mismatch"
     end
 
+    test "the route digest and opaque scope x402 and are advertised in the binding" do
+      digest = MPP.BodyDigest.compute("")
+
+      for {route, key, value} <- [
+            {[route_digest: digest], "digest", digest},
+            {[route_opaque: "eyJvcmRlciI6IjEyMyJ9"], "opaque", "eyJvcmRlciI6IjEyMyJ9"},
+            {[digest: digest], "digest", digest},
+            {[opaque: "eyJvcmRlciI6IjEyMyJ9"], "opaque", "eyJvcmRlciI6IjEyMyJ9"}
+          ] do
+        opts = plug_opts(self(), route)
+        payload = signed_payload(opts)
+
+        assert get_in(payload, ["extensions", "mppx", "info", key]) == value
+        assert get_in(payload, ["extensions", "mppx", "info", "method"]) == "GET"
+        assert is_binary(get_in(payload, ["extensions", "mppx", "info", "nonce"]))
+        assert settle(opts, payload).status == 200
+        assert_received {:verify, _payload, _requirements}
+
+        unbound = Map.delete(payload, "extensions")
+        assert problem_detail(settle(opts, unbound)) =~ "route_binding_required"
+        refute_received {:verify, _payload, _requirements}
+      end
+    end
+
+    test "nested x402 options keep the route scope" do
+      digest = MPP.BodyDigest.compute("")
+      opts = plug_opts(self(), route_digest: digest, digest: digest, extensions: @extensions)
+
+      assert opts.x402.digest == digest
+      unbound = opts |> signed_payload() |> Map.delete("extensions")
+      assert problem_detail(settle(opts, unbound)) =~ "route_binding_required"
+
+      assert_raise ArgumentError, ~r/:digest conflicts/, fn ->
+        plug_opts(self(), route_digest: digest, digest: MPP.BodyDigest.compute("other"))
+      end
+
+      assert_raise ArgumentError, ~r/:opaque conflicts/, fn ->
+        plug_opts(self(), route_opaque: "eyJhIjoiMSJ9", opaque: "eyJhIjoiMiJ9")
+      end
+    end
+
+    test "a credential bound to one route digest does not match another" do
+      first = plug_opts(self(), extensions: @extensions, route_digest: MPP.BodyDigest.compute("body-a"))
+      second = plug_opts(self(), extensions: @extensions, route_digest: MPP.BodyDigest.compute("body-b"))
+      payload = signed_payload(first)
+      {:ok, header} = Headers.encode_payment_signature(payload)
+
+      conn =
+        :get
+        |> Plug.Test.conn(@url, "body-b")
+        |> Plug.Conn.put_req_header("payment-signature", header)
+        |> PaymentPlug.call(second)
+
+      assert conn.status == 402
+      assert problem_detail(conn) =~ "extension_mismatch"
+      refute_received {:verify, _payload, _requirements}
+    end
+
+    test "a credential bound to one route opaque does not match another" do
+      first = plug_opts(self(), route_opaque: "eyJvcmRlciI6IjEifQ")
+      second = plug_opts(self(), route_opaque: "eyJvcmRlciI6IjIifQ")
+      payload = signed_payload(first)
+
+      conn = settle(second, payload)
+
+      assert conn.status == 402
+      assert problem_detail(conn) =~ "extension_mismatch"
+      refute_received {:verify, _payload, _requirements}
+    end
+
     test "a route-bound credential for another resource is rejected" do
       opts = plug_opts(self(), extensions: @extensions)
       payload = signed_payload(opts)
@@ -253,7 +323,7 @@ defmodule MPP.X402.PlugTest do
 
   test "rejects native and altered extension nonces before verification" do
     opts = plug_opts(self())
-    payload = signed_payload(opts)
+    payload = opts |> signed_payload() |> Map.delete("extensions")
     native = Authorization.challenge_hash("x402:0", "example.com")
     assert problem_detail(settle(opts, put_in(payload, ["payload", "authorization", "nonce"], native))) =~ "native_nonce"
 
@@ -265,10 +335,10 @@ defmodule MPP.X402.PlugTest do
   end
 
   test "digest binding checks cached and empty request bodies" do
-    opts = plug_opts(self())
+    opts = plug_opts(self(), digest: MPP.BodyDigest.compute("expected"))
     payload = signed_payload(opts)
     {:ok, header} = Headers.encode_payment_signature(payload)
-    x402 = %{opts.x402 | digest: MPP.BodyDigest.compute("expected"), route_binding: :resource}
+    x402 = opts.x402
 
     for body <- ["expected", ""] do
       conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
@@ -288,7 +358,7 @@ defmodule MPP.X402.PlugTest do
   test "resource defaults to request URL and settlement response is limited to successful HTTP responses" do
     opts = plug_opts(self())
     opts = %{opts | x402: %{opts.x402 | resource: nil}}
-    payload = opts |> signed_payload() |> Map.delete("resource")
+    payload = opts |> signed_payload() |> Map.drop(["resource", "extensions"])
     {:ok, header} = Headers.encode_payment_signature(payload)
     conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
     assert {:ok, conn} = X402.Plug.maybe_settle(conn, opts.x402, nil)
@@ -342,7 +412,7 @@ defmodule MPP.X402.PlugTest do
 
   test "relative resource URLs use the fallback realm when rejecting native nonces" do
     opts = plug_opts(self())
-    payload = signed_payload(opts)
+    payload = opts |> signed_payload() |> Map.delete("extensions")
     opts = %{opts | x402: %{opts.x402 | resource: %{"url" => "/relative"}}}
     payload = put_in(payload, ["resource", "url"], "/relative")
     native = Authorization.challenge_hash("x402:0", "x402")
@@ -390,7 +460,7 @@ defmodule MPP.X402.PlugTest do
   defp plug_opts(parent, overrides \\ []) do
     x402 =
       [facilitator: facilitator(parent), accepts: [@accept], resource: %{"url" => @url}] ++
-        Keyword.take(overrides, [:extensions, :route_binding, :digest])
+        Keyword.take(overrides, [:extensions, :route_binding, :digest, :opaque])
 
     PaymentPlug.init(
       secret_key: "x402-plug-secret-xxxxxxxxxxxxxxx",
@@ -398,6 +468,8 @@ defmodule MPP.X402.PlugTest do
       method: MockMethod,
       amount: "1000",
       currency: "usd",
+      digest: Keyword.get(overrides, :route_digest),
+      opaque: Keyword.get(overrides, :route_opaque),
       store: Keyword.get(overrides, :store, false),
       x402: x402
     )
