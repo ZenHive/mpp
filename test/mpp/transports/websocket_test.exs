@@ -47,6 +47,79 @@ defmodule MPP.Transports.WebSocketTest do
     end
   end
 
+  describe "inbound frame size" do
+    defp padded_frame(size) do
+      prefix = ~s({"type":"credential","credential":")
+      suffix = ~s("})
+      text = prefix <> String.duplicate("x", size - byte_size(prefix) - byte_size(suffix)) <> suffix
+      assert byte_size(text) == size
+      text
+    end
+
+    test "a frame of exactly the default cap is decoded" do
+      session = session()
+      assert session.max_incoming_message_bytes == 65_536
+
+      {session, texts} = WebSocket.handle_text(padded_frame(65_536), session)
+
+      assert %{"type" => "error", "error" => "malformed credential: " <> _} = decode_one(texts)
+      assert session.close == nil
+    end
+
+    test "a frame one byte over the default cap is rejected without decoding and requests close 1009" do
+      {session, texts} = WebSocket.handle_text(padded_frame(65_537), session())
+
+      assert decode_one(texts) == %{"type" => "error", "error" => "payment message is too large"}
+      assert session.close == {1009, "payment message is too large"}
+    end
+
+    test "an oversized frame is rejected even when it is not valid JSON" do
+      text = String.duplicate("{", 65_537)
+
+      {session, texts} = WebSocket.handle_text(text, session())
+
+      assert decode_one(texts) == %{"type" => "error", "error" => "payment message is too large"}
+      assert session.close == {1009, "payment message is too large"}
+    end
+
+    test "a closed session ignores further frames" do
+      {session, _texts} = WebSocket.handle_text(padded_frame(65_537), session())
+
+      assert {^session, []} = WebSocket.handle_text(~s({"type":"message","data":{}}), session)
+    end
+
+    test "a custom cap is honored" do
+      session = session(max_incoming_message_bytes: 64)
+
+      {at_cap, texts} = WebSocket.handle_text(padded_frame(64), session)
+      assert %{"type" => "error", "error" => "malformed credential: " <> _} = decode_one(texts)
+      assert at_cap.close == nil
+
+      {over_cap, texts} = WebSocket.handle_text(padded_frame(65), session)
+      assert decode_one(texts) == %{"type" => "error", "error" => "payment message is too large"}
+      assert over_cap.close == {1009, "payment message is too large"}
+    end
+
+    test "the cap counts bytes, not characters" do
+      session = session(max_incoming_message_bytes: 4)
+      text = "ééé"
+      assert String.length(text) == 3
+
+      {session, texts} = WebSocket.handle_text(text, session)
+
+      assert decode_one(texts) == %{"type" => "error", "error" => "payment message is too large"}
+      assert session.close == {1009, "payment message is too large"}
+    end
+
+    for bad <- [0, -1, 1.5, "65536", nil] do
+      test "rejects max_incoming_message_bytes #{inspect(bad)}" do
+        assert_raise ArgumentError, ~r/:max_incoming_message_bytes must be a positive integer/, fn ->
+          session(max_incoming_message_bytes: unquote(bad))
+        end
+      end
+    end
+  end
+
   describe "open/1 handshake" do
     test "emits a challenge frame with HTTP-style base64url request" do
       {_session, texts} = WebSocket.open(session())

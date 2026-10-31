@@ -36,6 +36,20 @@ defmodule MPP.Transports.WebSocket do
 
     * Client → server: `credential`, `message`
     * Server → client: `challenge`, `message`, `needVoucher`, `receipt`, `error`
+
+  ## Inbound frame size
+
+  `handle_text/2` checks the byte size of every inbound text frame before
+  decoding it. The cap is `:max_incoming_message_bytes` (positive integer,
+  default `65_536`, matching mpp-rs `MAX_INCOMING_MESSAGE_BYTES` and mppx
+  `maxIncomingMessageBytes`). A frame larger than the cap is not decoded: the
+  reply is an `error` frame (`"payment message is too large"`) and the session's
+  `:close` field becomes `{1009, "payment message is too large"}`. The host
+  must then close the socket with that code (1009, "message too big"); a closed
+  session ignores further frames.
+
+  The check runs on a frame the WebSocket library has already buffered, so also
+  bound the transport itself (e.g. the server's maximum frame size option).
   """
 
   use Descripex, namespace: "/transports"
@@ -51,6 +65,9 @@ defmodule MPP.Transports.WebSocket do
   alias MPP.Transports.WebSocket.Session
 
   @metered_session_request_amount 0
+  @default_max_incoming_message_bytes 64 * 1024
+  @message_too_large "payment message is too large"
+  @close_message_too_big 1009
 
   @type status :: :open | :authorized | :awaiting_voucher | :complete
 
@@ -59,17 +76,28 @@ defmodule MPP.Transports.WebSocket do
           handler: (map() -> term()),
           status: status(),
           challenge: Challenge.t() | nil,
-          meter: Session.Meter.t() | nil
+          meter: Session.Meter.t() | nil,
+          max_incoming_message_bytes: pos_integer(),
+          close: {non_neg_integer(), String.t()} | nil
         }
 
   @enforce_keys [:config, :handler]
-  defstruct [:config, :handler, status: :open, challenge: nil, meter: nil]
+  defstruct [
+    :config,
+    :handler,
+    status: :open,
+    challenge: nil,
+    meter: nil,
+    max_incoming_message_bytes: @default_max_incoming_message_bytes,
+    close: nil
+  ]
 
   api(:init, "Build a WebSocket session from the same endpoint options as `MPP.Plug`, plus a JSON-RPC `:handler`.",
     params: [
       opts: [
         kind: :value,
-        description: "Keyword options including :handler, :secret_key, :realm, and one or more payment methods"
+        description:
+          "Keyword options including :handler, :secret_key, :realm, one or more payment methods, and optional :max_incoming_message_bytes"
       ]
     ],
     returns: %{type: :struct, description: "`MPP.Transports.WebSocket` session"}
@@ -83,10 +111,17 @@ defmodule MPP.Transports.WebSocket do
       raise ArgumentError, "MPP.Transports.WebSocket requires :handler (arity-1 function)"
     end
 
+    {max_bytes, opts} = Keyword.pop(opts, :max_incoming_message_bytes, @default_max_incoming_message_bytes)
+
+    if !(is_integer(max_bytes) and max_bytes > 0) do
+      raise ArgumentError,
+            "MPP.Transports.WebSocket :max_incoming_message_bytes must be a positive integer, got: #{inspect(max_bytes)}"
+    end
+
     config = JsonRpc.init(drop_meter_opts(opts))
     {meter, _opts} = Session.parse_opts(opts, config)
     config = websocket_config(config, meter)
-    %__MODULE__{config: config, handler: handler, meter: meter}
+    %__MODULE__{config: config, handler: handler, meter: meter, max_incoming_message_bytes: max_bytes}
   end
 
   api(:open, "Emit the subscription-handshake challenge frame for a newly accepted socket.",
@@ -108,10 +143,21 @@ defmodule MPP.Transports.WebSocket do
       text: [kind: :value, description: "Raw WebSocket text payload"],
       session: [kind: :value, description: "Current session"]
     ],
-    returns: %{type: :tuple, description: "`{session, [json_text]}`"}
+    returns: %{
+      type: :tuple,
+      description: "`{session, [json_text]}`; close the socket with `session.close` when it is set"
+    }
   )
 
   @spec handle_text(String.t(), t()) :: {t(), [String.t()]}
+  def handle_text(text, %__MODULE__{close: {_code, _reason}} = session) when is_binary(text), do: {session, []}
+
+  def handle_text(text, %__MODULE__{max_incoming_message_bytes: max_bytes} = session)
+      when is_binary(text) and byte_size(text) > max_bytes do
+    session = %{session | close: {@close_message_too_big, @message_too_large}}
+    {session, [Frame.encode(Frame.error_frame(@message_too_large))]}
+  end
+
   def handle_text(text, %__MODULE__{} = session) when is_binary(text) do
     case Frame.decode(text) do
       {:ok, frame} ->
