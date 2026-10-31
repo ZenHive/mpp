@@ -289,6 +289,50 @@ defmodule MPP.Client.Transport.WebSocketTest do
       assert Retry.delay_ms(state) == 30_000
     end
 
+    test "drop after a receipt is fatal and refuses another payment" do
+      {:continue, state} = Retry.transition(Retry.new(), :pay_started)
+      {:continue, state} = Retry.transition(state, :credential_sent)
+      {:continue, state} = Retry.transition(state, :receipt)
+      refute Retry.reconnect?(state)
+
+      for event <- [:connection_dropped, :server_gone, {:socket_error, :closed}, {:close, 1012}, {:close, 1013}] do
+        {{:fatal, :dropped_after_payment}, latched} = Retry.transition(state, event)
+        refute Retry.should_pay?(latched)
+        refute Retry.reconnect?(latched)
+        assert latched.attempts == 0
+        {{:fatal, :dropped_after_payment}, latched} = Retry.transition(latched, :pay_started)
+        assert latched.pay_count == 1
+      end
+    end
+
+    test "drop after a voucher started is fatal" do
+      {:continue, state} = Retry.transition(Retry.new(), :need_voucher)
+      {:continue, state} = Retry.transition(state, :credential_sent)
+      {:continue, state} = Retry.transition(state, :receipt)
+      assert state.pay_count == 0
+      {{:fatal, :dropped_after_payment}, _} = Retry.transition(state, :connection_dropped)
+    end
+
+    test "payments per connection are capped at max_payments (default 3)" do
+      pay = fn state ->
+        {:continue, state} = Retry.transition(state, :pay_started)
+        {:continue, state} = Retry.transition(state, :credential_sent)
+        {:continue, state} = Retry.transition(state, :receipt)
+        state
+      end
+
+      state = Retry.new()
+      assert state.max_payments == 3
+      state = state |> pay.() |> pay.() |> pay.()
+      assert state.pay_count == 3
+      refute Retry.should_pay?(state)
+      {{:fatal, :payment_limit}, state} = Retry.transition(state, :pay_started)
+      assert state.pay_count == 3
+
+      state = pay.(Retry.new(max_payments: 1))
+      {{:fatal, :payment_limit}, _} = Retry.transition(state, :pay_started)
+    end
+
     test "needVoucher while a voucher is in flight is fatal" do
       {:continue, state} = Retry.transition(Retry.new(), :need_voucher)
       assert state.voucher_in_flight?
