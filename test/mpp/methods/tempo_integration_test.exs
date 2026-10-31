@@ -521,10 +521,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert body["detail"] =~ "No matching Transfer"
     end
 
-    test "rejects non-existent transaction hash", %{config: config} do
+    # An unmined hash is retryable (mpp-rs `VerificationError::pending`), so it
+    # is not answered with a fresh challenge.
+    test "reports a non-existent transaction hash as an internal payment error", %{config: config} do
       fake_hash = "0x" <> String.duplicate("ab", 32)
-      body = submit_credential!(config, %{"type" => "hash", "hash" => fake_hash})
-      assert body["type"] =~ "verification-failed"
+      conn = submit_credential_conn(config, request_challenge!(config), %{"type" => "hash", "hash" => fake_hash})
+      assert conn.status == 500
+      assert Jason.decode!(conn.resp_body)["type"] =~ "internal-payment-error"
     end
 
     test "rejects malformed hash", %{config: config} do
@@ -858,8 +861,9 @@ defmodule MPP.Methods.TempoIntegrationTest do
       payload = %{"type" => "transaction", "signature" => signed_tx}
       expected_key = "mpp:charge:" <> TempoTestHelpers.keccak256_hex(signed_tx)
 
-      body = submit_credential!(dead_config, challenge, payload)
-      assert body["type"] =~ "verification-failed"
+      conn = submit_credential_conn(dead_config, challenge, payload)
+      assert conn.status == 500
+      assert Jason.decode!(conn.resp_body)["type"] =~ "internal-payment-error"
       assert :not_found = TempoMemoryStore.get(expected_key)
 
       conn = submit_credential_conn(live_config, challenge, payload)
