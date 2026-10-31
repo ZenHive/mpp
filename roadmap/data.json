@@ -7134,7 +7134,7 @@
       "id": "170",
       "phase": 1,
       "bundle": "session",
-      "status": "pending",
+      "status": "in_progress",
       "title": "Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9)",
       "scores": {
         "d": 5,
@@ -7160,6 +7160,7 @@
       ],
       "body": "Security hardening of the session close action. Mechanism, affected code, the EIP-712 type/domain and the fix to port are ONLY in private draft advisory GHSA-2grw-xqfc-q2x9 — read it at pickup: `gh api repos/ZenHive/mpp/security-advisories/GHSA-2grw-xqfc-q2x9 --jq .description`. The typed-data layout is a wire-format constant: verify it against BOTH refs/mppx and refs/mpp-rs and pin it with a cross-validation vector produced by the reference SDK (QuickBEAM/ox or a refs-derived fixture), not a self-built one. Shares lib/mpp/session/ with the voucher-acceptance hardening task, so it is coalesced with it. DISCLOSURE: public repo, unpublished advisory — describe only the fix shape (e.g. 'require a close authorization signature'), never the attack.",
       "created_at": "2026-10-31",
+      "started_at": "2026-10-31",
       "scored_at": "2026-10-31",
       "cross_repo": []
     },
