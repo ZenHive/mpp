@@ -12,6 +12,25 @@ defmodule MPP.X402.Plug do
   route-bound credential (`extensions.mppx.info.nonce`) must echo the
   advertised `:extensions` (schema and info, minus the client nonce salt)
   before its nonce is recomputed — mppx `containsExtensions`.
+
+  ## Route binding
+
+  A route is *scoped* when it sets `:digest`, or when the advertised
+  `extensions.mppx.info` carries `digest`, `opaque` or `_mppx_scope` — the
+  route metadata mppx folds into its binding (`routeRequiresBinding` and
+  `routeExtensions` in `refs/mppx/src/x402/server/EvmCharge.ts`). `info.method`
+  alone does not scope a route. `:route_binding` decides how a scoped route
+  treats a credential without `extensions.mppx.info.nonce`:
+
+    * `:required` (default) — rejected with `route_binding_required`. Only
+      clients implementing the mppx route binding can pay a scoped route.
+    * `:resource` — accepted when it echoes the route's `resource.url` and
+      `accepted`. `resource` is not covered by the EIP-3009 signature, so this
+      binds weaker than the route-bound nonce.
+
+  Unscoped routes accept plain x402 exact payloads in either mode; an echoed
+  `resource.url` must still match. Route-bound credentials are always checked
+  in full (resource, extensions, recomputed nonce).
   """
 
   alias MPP.BodyDigest
@@ -23,6 +42,8 @@ defmodule MPP.X402.Plug do
   alias MPP.X402.Replay
   alias Onchain.Address
   alias Plug.Conn
+
+  @route_scope_keys ["digest", "opaque", "_mppx_scope"]
 
   @type t :: %__MODULE__{
           facilitator: Facilitator.t(),
@@ -39,7 +60,7 @@ defmodule MPP.X402.Plug do
     :accepts,
     resource: nil,
     extensions: nil,
-    route_binding: :resource,
+    route_binding: :required,
     digest: nil
   ]
 
@@ -143,19 +164,21 @@ defmodule MPP.X402.Plug do
     if actual == expected, do: :ok, else: {:error, :resource_mismatch}
   end
 
-  defp compare_resource(_actual, _expected, false, %__MODULE__{route_binding: :required}) do
-    {:error, :route_binding_required}
+  defp compare_resource(actual, expected, false, x402) do
+    case {scoped?(x402), x402.route_binding, actual} do
+      {true, :required, _actual} -> {:error, :route_binding_required}
+      {false, _binding, nil} -> :ok
+      _other -> if actual == expected, do: :ok, else: {:error, :resource_mismatch}
+    end
   end
 
-  defp compare_resource(actual, expected, false, %__MODULE__{digest: digest}) when is_binary(digest) do
-    if actual == expected, do: :ok, else: {:error, :resource_mismatch}
+  defp scoped?(%__MODULE__{digest: digest}) when is_binary(digest), do: true
+
+  defp scoped?(%__MODULE__{extensions: %{"mppx" => %{"info" => info}}}) when is_map(info) do
+    Enum.any?(@route_scope_keys, &Map.has_key?(info, &1))
   end
 
-  defp compare_resource(nil, _expected, false, _x402), do: :ok
-
-  defp compare_resource(actual, expected, false, _x402) do
-    if actual == expected, do: :ok, else: {:error, :resource_mismatch}
-  end
+  defp scoped?(_x402), do: false
 
   defp match_digest(%Conn{} = conn, %__MODULE__{digest: digest}) when is_binary(digest) do
     body = raw_body(conn)
@@ -306,7 +329,7 @@ defmodule MPP.X402.Plug do
   end
 
   defp configure_binding(opts) do
-    case Map.get(opts, :route_binding, :resource) do
+    case Map.get(opts, :route_binding, :required) do
       binding when binding in [:resource, :required] -> binding
       _other -> raise ArgumentError, "MPP.Plug :x402 :route_binding must be :resource or :required"
     end

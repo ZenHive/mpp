@@ -28,6 +28,12 @@ defmodule MPP.X402.PlugTest do
       "schema" => %{"type" => "object"}
     }
   }
+  @scoped_extensions %{
+    "mppx" => %{
+      "info" => %{"method" => "GET", "opaque" => "eyJvcmRlciI6IjEyMyJ9"},
+      "schema" => %{"type" => "object"}
+    }
+  }
   @config %{private_key: EVMAuthorization.private_key(), networks: [84_532]}
 
   defmodule MockMethod do
@@ -111,29 +117,77 @@ defmodule MPP.X402.PlugTest do
       refute_received {:verify, _payload, _requirements}
     end
 
-    test "dropping the mppx extension falls back to the unbound contract under :resource" do
-      # Without `extensions.mppx` the credential is a plain x402 exact payment
-      # (mppx `isRouteBound` false); `:resource` binding only checks the URL.
-      opts = plug_opts(self(), extensions: @extensions)
+    test "an unscoped route accepts a plain x402 payload by default" do
+      for extensions <- [nil, @extensions] do
+        opts = plug_opts(self(), extensions: extensions)
+        unbound = opts |> signed_payload() |> Map.delete("extensions")
+
+        conn = settle(opts, unbound)
+
+        assert conn.status == 200
+        assert_received {:verify, _payload, _requirements}
+      end
+    end
+
+    test "a scoped route rejects an unbound payload by default" do
+      for scope <- [[extensions: @scoped_extensions], [digest: MPP.BodyDigest.compute("")]] do
+        opts = plug_opts(self(), scope)
+        unbound = opts |> signed_payload() |> Map.delete("extensions")
+
+        conn = settle(opts, unbound)
+
+        assert conn.status == 402
+        assert problem_detail(conn) =~ "route_binding_required"
+        refute_received {:verify, _payload, _requirements}
+      end
+    end
+
+    test "a scoped route accepts a route-bound payload by default" do
+      opts = plug_opts(self(), extensions: @scoped_extensions)
       payload = signed_payload(opts)
-      unbound = Map.delete(payload, "extensions")
 
-      conn = settle(opts, unbound)
-
-      assert conn.status == 200
+      assert is_binary(get_in(payload, ["extensions", "mppx", "info", "nonce"]))
+      assert settle(opts, payload).status == 200
       assert_received {:verify, _payload, _requirements}
     end
 
-    test "dropping the mppx extension is rejected under :required" do
-      opts = plug_opts(self(), extensions: @extensions, route_binding: :required)
-      payload = signed_payload(opts)
-      unbound = Map.delete(payload, "extensions")
+    test "every mppx route scope key scopes the route" do
+      for key <- ["digest", "opaque", "_mppx_scope"] do
+        extensions = put_in(@extensions, ["mppx", "info", key], "value")
+        opts = plug_opts(self(), extensions: extensions)
+        unbound = opts |> signed_payload() |> Map.delete("extensions")
 
-      conn = settle(opts, unbound)
+        assert problem_detail(settle(opts, unbound)) =~ "route_binding_required"
+      end
+    end
 
-      assert conn.status == 402
-      assert problem_detail(conn) =~ "route_binding_required"
+    test ":resource accepts an unbound payload on a scoped route only when it echoes the resource" do
+      opts = plug_opts(self(), extensions: @scoped_extensions, route_binding: :resource)
+      unbound = opts |> signed_payload() |> Map.delete("extensions")
+
+      assert settle(opts, unbound).status == 200
+      assert_received {:verify, _payload, _requirements}
+
+      missing = Map.delete(unbound, "resource")
+      assert problem_detail(settle(opts, missing)) =~ "resource_mismatch"
+
+      moved = put_in(unbound, ["resource", "url"], "http://example.com/other")
+      assert problem_detail(settle(opts, moved)) =~ "resource_mismatch"
       refute_received {:verify, _payload, _requirements}
+    end
+
+    test "explicit :required rejects unbound payloads on scoped routes and accepts them on unscoped routes" do
+      scoped = plug_opts(self(), extensions: @scoped_extensions, route_binding: :required)
+      unbound = scoped |> signed_payload() |> Map.delete("extensions")
+      assert problem_detail(settle(scoped, unbound)) =~ "route_binding_required"
+      refute_received {:verify, _payload, _requirements}
+
+      unscoped = plug_opts(self(), extensions: @extensions, route_binding: :required)
+      unbound = unscoped |> signed_payload() |> Map.delete("extensions")
+      assert settle(unscoped, unbound).status == 200
+
+      moved = put_in(unbound, ["resource", "url"], "http://example.com/other")
+      assert problem_detail(settle(unscoped, moved)) =~ "resource_mismatch"
     end
 
     test "a route-bound credential for another resource is rejected" do
@@ -214,7 +268,7 @@ defmodule MPP.X402.PlugTest do
     opts = plug_opts(self())
     payload = signed_payload(opts)
     {:ok, header} = Headers.encode_payment_signature(payload)
-    x402 = %{opts.x402 | digest: MPP.BodyDigest.compute("expected")}
+    x402 = %{opts.x402 | digest: MPP.BodyDigest.compute("expected"), route_binding: :resource}
 
     for body <- ["expected", ""] do
       conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
@@ -336,7 +390,7 @@ defmodule MPP.X402.PlugTest do
   defp plug_opts(parent, overrides \\ []) do
     x402 =
       [facilitator: facilitator(parent), accepts: [@accept], resource: %{"url" => @url}] ++
-        Keyword.take(overrides, [:extensions, :route_binding])
+        Keyword.take(overrides, [:extensions, :route_binding, :digest])
 
     PaymentPlug.init(
       secret_key: "x402-plug-secret-xxxxxxxxxxxxxxx",
