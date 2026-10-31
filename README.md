@@ -617,6 +617,11 @@ WebSocket endpoints use typed MPP frames (mpp-rs / `alloy-transport-mpp`).
 JSON-RPC carried in `message` frames. Session-intent sockets can meter a
 generator: deduct per tick, emit `needVoucher` when the channel is exhausted,
 resume after a voucher credential, and finish with a session receipt.
+Inbound text frames are bounded before decoding by `:max_incoming_message_bytes`
+(an `init/1` option, default 65 536 bytes). An oversized frame is answered with
+an `error` frame and sets `session.close` to `{1009, reason}`: the host must
+then close the socket with that code and reason and stop reading. Also set the
+WebSocket server's own maximum frame size so oversized frames are not buffered.
 `MPP.Client.Transport.WebSocket` detects `challenge` frames and attaches
 `Payment <base64url>` credential frames. `MPP.Client.Transport.WebSocket.Retry`
 matches upstream reconnect posture: capped exponential backoff, fatal latch on

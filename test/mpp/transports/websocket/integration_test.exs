@@ -147,6 +147,19 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       WebSocketLoopback.close(client)
     end
 
+    test "an oversized inbound frame gets an error frame, then close code 1009" do
+      server = start_adapter!()
+      assert {:ok, client} = WebSocketLoopback.connect(server.port)
+      {_challenge, client} = recv_frame!(client)
+
+      assert :ok = WebSocketLoopback.send_text(client, String.duplicate("x", 65_537))
+      {frame, client} = recv_frame!(client)
+      assert frame == %{"type" => "error", "error" => "payment message is too large"}
+
+      assert {:ok, 1009, "payment message is too large"} = WebSocketLoopback.recv_close(client)
+      assert {:error, :closed} = :gen_tcp.recv(client.socket, 0, 1_000)
+    end
+
     test "malformed inbound frame is a protocol error, not a reconnect" do
       server = start_adapter!()
       assert {:ok, client} = WebSocketLoopback.connect(server.port)

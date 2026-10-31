@@ -46,7 +46,10 @@ defmodule MPP.Transports.WebSocket do
   reply is an `error` frame (`"payment message is too large"`) and the session's
   `:close` field becomes `{1009, "payment message is too large"}`. The host
   must then close the socket with that code (1009, "message too big"); a closed
-  session ignores further frames.
+  session ignores further frames in both `handle_text/2` and `handle_frame/2`.
+  Hosts that decode frames themselves use `decode_frame/2` with the session's
+  `max_incoming_message_bytes`, which returns `{:error, :message_too_large}`
+  for an oversized payload without parsing it.
 
   The check runs on a frame the WebSocket library has already buffered, so also
   bound the transport itself (e.g. the server's maximum frame size option).
@@ -152,17 +155,15 @@ defmodule MPP.Transports.WebSocket do
   @spec handle_text(String.t(), t()) :: {t(), [String.t()]}
   def handle_text(text, %__MODULE__{close: {_code, _reason}} = session) when is_binary(text), do: {session, []}
 
-  def handle_text(text, %__MODULE__{max_incoming_message_bytes: max_bytes} = session)
-      when is_binary(text) and byte_size(text) > max_bytes do
-    session = %{session | close: {@close_message_too_big, @message_too_large}}
-    {session, [Frame.encode(Frame.error_frame(@message_too_large))]}
-  end
-
-  def handle_text(text, %__MODULE__{} = session) when is_binary(text) do
-    case Frame.decode(text) do
+  def handle_text(text, %__MODULE__{max_incoming_message_bytes: max_bytes} = session) when is_binary(text) do
+    case decode_frame(text, max_bytes) do
       {:ok, frame} ->
         {session, replies} = handle_frame(frame, session)
         {session, Enum.map(replies, &Frame.encode/1)}
+
+      {:error, :message_too_large} ->
+        session = %{session | close: {@close_message_too_big, @message_too_large}}
+        {session, [Frame.encode(Frame.error_frame(@message_too_large))]}
 
       {:error, :malformed_frame} ->
         {session, [Frame.encode(Frame.error_frame("malformed MPP frame"))]}
@@ -172,7 +173,11 @@ defmodule MPP.Transports.WebSocket do
     end
   end
 
-  api(:handle_frame, "Handle one already-decoded MPP frame map.",
+  api(
+    :handle_frame,
+    "Handle one already-decoded MPP frame map. Decode it with `decode_frame/2` and the session's " <>
+      "`max_incoming_message_bytes` so the inbound size bound applies; a session whose `close` is set " <>
+      "ignores the frame and returns no replies.",
     params: [
       frame: [kind: :value, description: "Decoded frame map with a `type` discriminator"],
       session: [kind: :value, description: "Current session"]
@@ -181,6 +186,8 @@ defmodule MPP.Transports.WebSocket do
   )
 
   @spec handle_frame(map(), t()) :: {t(), [map()]}
+  def handle_frame(%{} = _frame, %__MODULE__{close: {_code, _reason}} = session), do: {session, []}
+
   def handle_frame(%{"type" => "credential"} = frame, %__MODULE__{} = session) do
     handle_credential(frame, session)
   end
@@ -193,19 +200,36 @@ defmodule MPP.Transports.WebSocket do
     {session, [Frame.error_frame("unexpected MPP frame")]}
   end
 
-  api(:decode_frame, "Parse a WebSocket text payload into an MPP frame map.",
+  api(
+    :decode_frame,
+    "Parse a WebSocket text payload into an MPP frame map. A payload larger than `max_bytes` " <>
+      "(default 65_536) is not parsed and returns `{:error, :message_too_large}`; answer it with " <>
+      "`error_frame(\"payment message is too large\")` and close the socket with code 1009.",
     params: [
-      text: [kind: :value, description: "Raw WebSocket text payload"]
+      text: [kind: :value, description: "Raw WebSocket text payload"],
+      max_bytes: [
+        kind: :value,
+        description: "Inbound byte cap; pass the session's `max_incoming_message_bytes`"
+      ]
     ],
     returns: %{
       type: :tagged_tuple,
-      description: "`{:ok, frame}` or `{:error, :malformed_frame | :unknown_frame}`"
+      description: "`{:ok, frame}` or `{:error, :message_too_large | :malformed_frame | :unknown_frame}`"
     },
-    errors: [:malformed_frame, :unknown_frame]
+    errors: [:message_too_large, :malformed_frame, :unknown_frame]
   )
 
-  @spec decode_frame(String.t()) :: {:ok, map()} | {:error, :malformed_frame | :unknown_frame}
-  def decode_frame(text) when is_binary(text), do: Frame.decode(text)
+  @spec decode_frame(String.t(), pos_integer()) ::
+          {:ok, map()} | {:error, :message_too_large | :malformed_frame | :unknown_frame}
+  def decode_frame(text, max_bytes \\ @default_max_incoming_message_bytes)
+
+  def decode_frame(text, max_bytes) when is_binary(text) and is_integer(max_bytes) and max_bytes > 0 do
+    if byte_size(text) > max_bytes do
+      {:error, :message_too_large}
+    else
+      Frame.decode(text)
+    end
+  end
 
   api(:encode_frame, "Serialize an MPP frame map to a WebSocket text payload.",
     params: [

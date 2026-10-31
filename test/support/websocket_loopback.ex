@@ -63,6 +63,28 @@ defmodule MPP.Test.WebSocketLoopback do
     end
   end
 
+  @spec recv_close(client(), timeout()) :: {:ok, non_neg_integer() | nil, binary()} | {:error, term()}
+  def recv_close(%{socket: socket, buf: buf}, timeout \\ @recv_timeout), do: await_close(socket, buf, timeout)
+
+  defp await_close(socket, acc, timeout) do
+    case decode_frame(acc, []) do
+      {:ok, {:close, <<code::16, reason::binary>>}, _rest} ->
+        {:ok, code, reason}
+
+      {:ok, {:close, <<>>}, _rest} ->
+        {:ok, nil, <<>>}
+
+      {:ok, _other, rest} ->
+        await_close(socket, rest, timeout)
+
+      {:error, :incomplete} ->
+        case :gen_tcp.recv(socket, 0, timeout) do
+          {:ok, data} -> await_close(socket, acc <> data, timeout)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
   @spec close(client()) :: :ok
   def close(%{socket: socket}), do: :gen_tcp.close(socket)
 
@@ -120,8 +142,8 @@ defmodule MPP.Test.WebSocketLoopback do
   defp dispatch_inbound(socket, session, buffer) do
     case consume_frames(buffer, masked: true) do
       {:ok, frames, rest} ->
-        session = Enum.reduce(frames, session, fn frame, session -> push_inbound(socket, session, frame) end)
-        adapter_recv(socket, session, rest)
+        session = Enum.reduce_while(frames, session, &push_until_close(socket, &1, &2))
+        continue_or_close(socket, session, rest)
 
       {:error, :incomplete, rest} ->
         adapter_recv(socket, session, rest)
@@ -130,6 +152,18 @@ defmodule MPP.Test.WebSocketLoopback do
         :gen_tcp.close(socket)
     end
   end
+
+  defp push_until_close(socket, frame, session) do
+    session = push_inbound(socket, session, frame)
+    if session.close, do: {:halt, session}, else: {:cont, session}
+  end
+
+  defp continue_or_close(socket, %{close: {code, reason}}, _rest) do
+    :gen_tcp.send(socket, encode_frame(0x8, <<code::16, reason::binary>>, masked: false))
+    :gen_tcp.close(socket)
+  end
+
+  defp continue_or_close(socket, session, rest), do: adapter_recv(socket, session, rest)
 
   defp push_inbound(socket, session, {:text, text}) do
     {session, replies} = WebSocket.handle_text(text, session)
@@ -206,6 +240,9 @@ defmodule MPP.Test.WebSocketLoopback do
       {:ok, {:text, text}, rest} ->
         {:ok, text, rest}
 
+      {:ok, {:close, _payload}, _rest} ->
+        {:error, :closed}
+
       {:ok, _other, rest} ->
         recv_frame(socket, rest, timeout)
 
@@ -214,9 +251,6 @@ defmodule MPP.Test.WebSocketLoopback do
           {:ok, data} -> recv_frame(socket, acc <> data, timeout)
           {:error, reason} -> {:error, reason}
         end
-
-      {:error, :closed} ->
-        {:error, :closed}
     end
   end
 
@@ -226,9 +260,9 @@ defmodule MPP.Test.WebSocketLoopback do
 
   defp consume_frames(buffer, opts, acc) do
     case decode_frame(buffer, opts) do
+      {:ok, {:close, _payload}, _rest} -> {:error, :closed}
       {:ok, frame, rest} -> consume_frames(rest, opts, [frame | acc])
       {:error, :incomplete} -> {:error, :incomplete, buffer}
-      {:error, :closed} -> {:error, :closed}
     end
   end
 
@@ -279,7 +313,7 @@ defmodule MPP.Test.WebSocketLoopback do
   defp take_payload(_opcode, _mask, _len, _rest, _opts), do: {:error, :incomplete}
 
   defp finish_frame(0x1, payload, rest), do: {:ok, {:text, payload}, rest}
-  defp finish_frame(0x8, _payload, _rest), do: {:error, :closed}
+  defp finish_frame(0x8, payload, rest), do: {:ok, {:close, payload}, rest}
   defp finish_frame(0x9, payload, rest), do: {:ok, {:ping, payload}, rest}
   defp finish_frame(0xA, _payload, rest), do: {:ok, :pong, rest}
   defp finish_frame(_opcode, _payload, rest), do: {:ok, :other, rest}

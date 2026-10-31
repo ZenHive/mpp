@@ -111,6 +111,34 @@ defmodule MPP.Transports.WebSocketTest do
       assert session.close == {1009, "payment message is too large"}
     end
 
+    test "decode_frame/2 bounds the payload before parsing" do
+      assert {:error, :unknown_frame} = WebSocket.decode_frame(~s({"type":"nope"}))
+      assert {:error, :message_too_large} = WebSocket.decode_frame(String.duplicate("{", 65_537))
+
+      assert {:ok, %{"type" => "credential"}} = WebSocket.decode_frame(padded_frame(65_536))
+      assert {:error, :malformed_frame} = WebSocket.decode_frame(String.duplicate("{", 65_536))
+
+      assert {:error, :message_too_large} = WebSocket.decode_frame(padded_frame(65), 64)
+      assert {:ok, %{"type" => "credential"}} = WebSocket.decode_frame(padded_frame(64), 64)
+    end
+
+    test "handle_frame/2 ignores frames once the session is closed" do
+      {sess, [challenge_text]} = WebSocket.open(session())
+      {:ok, challenge_frame} = WebSocket.decode_frame(challenge_text)
+      assert {:ok, [challenge]} = ClientTransport.get_challenges(challenge_frame)
+      credential = %Credential{challenge: challenge, payload: %{"token" => "demo-token"}}
+      cred_frame = ClientTransport.set_credential(%{"type" => "message", "data" => %{}}, credential)
+      {sess, [_receipt]} = WebSocket.handle_text(Jason.encode!(cred_frame), sess)
+      assert sess.status == :authorized
+
+      {closed, [_error]} = WebSocket.handle_text(String.duplicate("x", 65_537), sess)
+      assert closed.close == {1009, "payment message is too large"}
+
+      rpc = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_chainId", "params" => []}
+      assert {^closed, []} = WebSocket.handle_frame(%{"type" => "message", "data" => rpc}, closed)
+      assert {^closed, []} = WebSocket.handle_frame(cred_frame, closed)
+    end
+
     for bad <- [0, -1, 1.5, "65536", nil] do
       test "rejects max_incoming_message_bytes #{inspect(bad)}" do
         assert_raise ArgumentError, ~r/:max_incoming_message_bytes must be a positive integer/, fn ->
