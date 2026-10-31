@@ -6964,10 +6964,10 @@
       "acceptance_criteria": [
         "Two challenges issued for the same route in the same microsecond have different ids (test)",
         "HMAC id still recomputes identically to refs/mppx for a given opaque (cross-validation vector)",
-        "With route scope enabled, a credential issued by route A is rejected at route B with identical charge config",
+        "With route scope enabled, a credential is accepted only at the route that issued its challenge",
         "Existing opaque pinning behavior unchanged for callers that set static opaque"
       ],
-      "body": "mppx #996 (bbbec69) adds an HMAC-bound random nonce to every issued challenge (src/server/internal/challengeMeta.ts withNonce, excluded from route-meta pinning) and #958 (8bfe2d1) binds challenges to the route that issued them. MPP.Plug challenge ids depend only on route config plus expires, and two mounts with identical charge config accept each other's credentials. Add a random issuance nonce inside opaque (do not add an HMAC input slot — that breaks cross-SDK id interop) and an opt-in route scope; Verifier compares route opaque excluding the nonce. mpp-rs has not adopted the nonce; follow mppx's wire shape exactly.",
+      "body": "mppx #996 (bbbec69) adds an HMAC-bound random nonce to every issued challenge (src/server/internal/challengeMeta.ts withNonce, excluded from route-meta pinning) and #958 (8bfe2d1) binds challenges to the route that issued them. Adopt both wire shapes in MPP.Plug. Add a random issuance nonce inside opaque (do not add an HMAC input slot — that breaks cross-SDK id interop) and an opt-in route scope; Verifier compares route opaque excluding the nonce. mpp-rs has not adopted the nonce; follow mppx's wire shape exactly.",
       "created_at": "2026-10-31",
       "scored_at": "2026-10-31",
       "cross_repo": []
