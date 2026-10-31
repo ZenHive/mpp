@@ -62,7 +62,7 @@
 | Task 168 `[P]` | 🔄 | 🎁 **client-sdk** · Harden Tempo client proof signing (see private advisory GHSA-f382-x4g8-jg9q) [D:4/B:8/U:9 → Eff:2.12] 🎯 |
 | Task 169 | 🔄 | 🎁 **session** · Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq) [D:6/B:8/U:9 → Eff:1.42] 📋 |
 | Task 170 | ⬜ | 🎁 **session** · Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9) [D:5/B:7/U:8 → Eff:1.5] 🚀 |
-| Task 171 `[P]` | ⬜ | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 171 `[P]` | 🔄 | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---
