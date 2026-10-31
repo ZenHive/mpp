@@ -152,6 +152,19 @@ open-items note below).
 | mpp-rs #540 (commit 6e57e8d) accept a quoted request of exactly 16 KiB | Off-by-one in the token cap | Cap compares with `>`; exactly 16 KiB pinned in `test/mpp/headers_test.exs` |
 | mpp-rs #535 / #467 / #497 (commits 2688ac5, 754dc2d, a712b01) client paid-402 handling, final-URL retry, spec-shaped rejections | Client paying repeatedly, retrying a pre-redirect URL; non-spec rejection shape | `MPP.Client.Req` returns a post-payment 402 instead of re-paying and retries the final URL with a same-origin check; Plug answers rejections as problem+json with a challenge only on 402 — `client/req.ex`, `plug.ex` |
 | mpp-rs #464 (commit 461dcb7) normalise session channel ids | Case variants of one channel id treated as distinct channels | `Channel.normalize_id` lower-cases on parse and store — `session/channel.ex`, `session/payload.ex`, `session/ets_store.ex` |
+| mppx #953 (commit 8c42db6) bind transaction credentials to source | A transaction credential presented under another payer's `source` | `source` must parse on the expected chain and equal the recovered sender — `methods/tempo.ex` (transaction credential path) |
+| mppx #990 (commit cfb4bff) share stream reservations atomically | Concurrent workers over-reserving one channel | No process-local reservations: each WebSocket tick spends inside one atomic `Store.update` — `transports/websocket/session.ex` (`deduct/1`), `session/channel.ex` (`apply_spend`) |
+| mppx #954 (commit 23499aa) restrict composed credential headers | Credentials smuggled in arbitrary headers | Credentials are read only from `authorization` / the advertised `payment-authorization`, never by scanning headers — `plug.ex` |
+| mppx #964 (commit ad11f54) reject pending renewals | Receipt issued for a renewal still in flight | In-flight renewal is rejected, not answered with a receipt — `methods/tempo/subscription.ex` |
+| mppx #974 (commit dcee2e8) restrict sponsored subscription fee tokens | Sponsor paying gas in an arbitrary token | Subscription co-sign uses the server-configured fee token checked with `fee_token_allowed?` — `methods/tempo/subscription_transaction.ex` |
+| mppx #1009 (commit 3b08fc4) release only claimed final-hash replay markers | One request deleting a replay marker another request holds | Release is compare-and-delete on a per-attempt random token — `methods/tempo.ex` (claim/release helpers) |
+| mppx #1013 / mpp-rs #569 (commits 06dc781, bba4614) keep ambiguous closes pending | Metering continuing after a close with unknown outcome | Unknown settle result leaves the channel reserved (`closing`); spends refused — `session/actions.ex`, `session/channel.ex` |
+| mppx #1046 (commit 763a187) share sponsor budgets across currency offers | Per-currency budgets multiplying the sponsor's exposure | Budget key is chain + sponsor (no currency) in the shared default store — `methods/tempo/sponsor_budget.ex`, `methods/tempo.ex` |
+| mppx #973 / mpp-rs #624, #661 (commits 9076794, a610ec0, f7e03a8) sponsored access keys | Sponsor paying for access-key installation | Stricter than upstream: the charge path rejects any key authorization and the subscription path pins the exact verified one (see mppx #881 row); upstream's newer default-allow is deliberately not ported — `methods/tempo/fee_payer_policy.ex` |
+| mpp-rs #565 (commit 5f7a6b5) verify close voucher signature before amount checks | Amount oracle on unsigned close attempts | Signature verified before any amount comparison; open/voucher/close all require a signature — `session/actions.ex`, `session/payload.ex` |
+| mpp-rs #641 (commit 2a26d58) reject unbound Stripe externalId | PaymentIntent reuse across challenges | Missing or mismatched `externalId` → `invalid_challenge` before any PaymentIntent call — `methods/stripe.ex` |
+| mpp-rs #658 / #657 (commits 06343e8, 80f02e8) close-state cleanup and voucher commit ordering | Late handler clobbering a newer close; state committed before authentication | Exclusive close reservation with no automatic stale cleanup; voucher signature checked inside the same atomic update before commit — `session/channel.ex`, `session/actions.ex` |
+| mpp-specs #375 (commit 50309c8) client-arranged fee payer | Rejecting valid client-paid envelopes carrying a third-party fee-payer signature | Placeholder enforced only when server sponsorship is on; otherwise the envelope passes through unchanged — `methods/tempo.ex` |
 
 ## 📋 Tracked as roadmap work (parity pending)
 
@@ -164,7 +177,7 @@ open-items note below).
 
 ## Open hardening items
 
-**0 open items** as of 2026-10-02.
+**9 open items** as of 2026-10-31.
 
 Previously resolved items: the four draft advisories from the 2026-10-02 upstream sweep shipped in 0.20.1 and were published the same day (`GHSA-g95p-rmq5-gpxm`, `GHSA-69rf-j8gf-4525`, `GHSA-4rg3-425j-59hj`, `GHSA-c8mm-74wp-238x`; 0.20.0 was tagged but never published to Hex).
 Earlier: the three inbound reports triaged 2026-09-24 and the two related session findings from their review shipped in 0.19.0 and were published the same day (`GHSA-6xg7-3f46-g3g5`, `GHSA-2g9q-rg79-676x`, `GHSA-25v8-3q3q-3m7j`, `GHSA-9c4m-cr2r-c3px`, `GHSA-c33f-jwgj-rw53`).

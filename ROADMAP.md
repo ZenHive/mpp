@@ -13,9 +13,9 @@
 <!-- FOCUS:BEGIN -->
 **Focus phase:** 12 — Client SDK (10 of 11 done · 0 in progress)
 
-**Last shipped:** Task 150 — Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) on 2026-10-02
+**Last shipped:** no recent shipments
 
-**Up next:** Task 122 — USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75] ⚠️
+**Up next:** Task 160 — Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -36,10 +36,10 @@
 | Task 7 | ✅ | 🎁 **core-protocol** · Method behaviour [D:3/B:10/U:10 → Eff:3.33?] 🎯 |
 | Task 8 | ✅ | 🎁 **core-protocol** · Plug middleware [D:5/B:10/U:10 → Eff:2.0?] 🎯 |
 | Task 55 | ✅ | 🎁 **core-protocol** · Hash credential type audit + spec backfill [D:2/B:7/U:8 → Eff:3.75?] 🎯 |
-| Task 103 | ✅ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67] 🎯 |
-| Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33] 📋 |
-| Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 138 | ✅ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0] 🎯 |
+| Task 103 | ✅ | 🎁 **core-protocol** · 🔒 Attach Payment-Receipt and Cache-Control: private at send time, only on successful responses, merged with the app's own directives [D:3/B:8/U:8 → Eff:2.67?] 🎯 |
+| Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33?] 📋 |
+| Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33?] 📋 |
+| Task 138 | ✅ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0?] 🎯 |
 | Task 144 | ✅ | 🎁 **core-protocol** · Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 145 | ✅ | 🎁 **core-protocol** · Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447) [D:5/B:6/U:5 → Eff:1.1] 📋 |
 | Task 146 | ✅ | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33] 📋 |
@@ -47,6 +47,18 @@
 | Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋 |
+| Task 156 `[P]` | ⬜ | 🎁 **core-protocol** · Answer replayed or settled credentials with 403 credential-replayed [D:3/B:6/U:5 → Eff:1.83] 🚀 |
+| Task 157 `[P]` | ⬜ | 🎁 **core-protocol** · Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯 |
+| Task 158 `[P]` | ⬜ | 🎁 **stripe** · Standardize Stripe PaymentIntent analytics metadata [D:2/B:4/U:3 → Eff:1.75] 🚀 |
+| Task 159 `[P]` | ⬜ | 🎁 **client-sdk** · Tempo client provider: spending caps, expiry rounding and MACH gas token [D:4/B:6/U:4 → Eff:1.25] 📋 |
+| Task 160 `[P]` | ⬜ | 🎁 **core-protocol** · Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯 |
+| Task 161 `[P]` | ⬜ | 🎁 **tempo** · Accept sponsored Tempo swaps that acquire only the shortfall [D:2/B:4/U:3 → Eff:1.75] 🚀 |
+| Task 162 | ⬜ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
+| Task 163 `[P]` | ⬜ | 🎁 **mcp** · MCP client pays the next supported challenge when the preferred one fails [D:2/B:3/U:2 → Eff:1.25] 📋 |
+| Task 164 | ⬜ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:4/U:3 → Eff:0.88] ⚠️ |
+| Task 165 | ⬜ | 🎁 **solana** · Implement the solana/subscription intent [D:7/B:4/U:2 → Eff:0.43] ⚠️ |
+| Task 166 | 🔶 | 🎁 **evm** · Track the EIP-3009 challenge nonce framing divergence between mppx and the EVM spec [D:2/B:3/U:2 → Eff:1.25] 📋 ⛔ waits on draft-evm-charge changing its EIP-3009 nonce derivation (tempoxyz/mpp-specs) |
+| Task 167 | ⬜ | 🎁 **session** · Session server accounting features from mppx [D:6/B:3/U:1 → Eff:0.33] ⚠️ |
 <!-- TASKS:END -->
 
 ---
@@ -72,7 +84,7 @@
 | Task 12 | ✅ | 🎁 **descripex** · mix mpp.manifest [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
 | Task 42 `[P]` | ✅ | 🎁 **discovery** · OpenAPI discovery document generation [D:4/B:8/U:8 → Eff:2.0?] 🎯 |
 | Task 87 `[P]` | ✅ | 🎁 **discovery** · Allow unpaid routes in MPP.Discovery.OpenApi [D:2/B:5/U:3 → Eff:2.0?] 🎯 |
-| Task 100 | ✅ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:4/B:6/U:4 → Eff:1.25] 📋 |
+| Task 100 | ✅ | 🎁 **discovery** · Accept parameters on MPP.Discovery.OpenApi routes [D:4/B:6/U:4 → Eff:1.25?] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -95,7 +107,7 @@
 | Task 14 | ✅ | 🎁 **evm** · Generic EVM method [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 | Task 38 | ✅ | 🎁 **evm** · EVM credentialTypes backfill [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
 | Task 85 `[P]` | ✅ | 🎁 **evm** · Require chainId in EVM challenge configuration [D:3/B:7/U:8 → Eff:2.5?] 🎯 |
-| Task 134 | ✅ | 🎁 **evm** · Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08] 📋 |
+| Task 134 | ✅ | 🎁 **evm** · Support custom EIP-3009 settlement with a live payment-and-distribution batch example [D:6/B:7/U:6 → Eff:1.08?] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -153,9 +165,9 @@
 | Task 50 | ✅ | 🎁 **session** · Tempo subscriptions [D:6/B:9/U:8 → Eff:1.42?] 📋 |
 | Task 90 `[P]` | ✅ | 🎁 **session** · Stripe subscription method on the shared subscription intent [D:6/B:8/U:5 → Eff:1.08?] 📋 |
 | Task 91 `[P]` | ✅ | 🎁 **session** · Release Tempo subscription activation claims after failed settlement [D:6/B:8/U:7 → Eff:1.25?] 📋 |
-| Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83] 🎯 |
-| Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6] 🚀 |
-| Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5] 🚀 |
+| Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83?] 🎯 |
+| Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6?] 🚀 |
+| Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5?] 🚀 |
 | Task 148 | ✅ | 🎁 **session** · Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550) [D:4/B:5/U:5 → Eff:1.25] 📋 |
 <!-- TASKS:END -->
 
@@ -184,10 +196,10 @@
 | Task 33d | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · MCP client transport [D:5/B:9/U:9 → Eff:1.8?] 🚀 |
 | Task 33e | ✅ | 🎁 **client-sdk** · 🚀 **v0_13** · Built-in charge providers [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
 | Task 47 | ⛔ | 🎁 **client-sdk** · Client challenge ordering hook [D:2/B:4/U:5 → Eff:2.25?] 🎯 |
-| Task 81 | ✅ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0] 📋 |
+| Task 81 | ✅ | 🎁 **client-sdk** · Add x402 v2 exact interoperability [D:9/B:9/U:9 → Eff:1.0?] 📋 |
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17?] 📋 |
-| Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0] 🎯 |
-| Task 140 | ✅ | 🎁 **client-sdk** · Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) [D:2/B:4/U:4 → Eff:2.0] 🎯 |
+| Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0?] 🎯 |
+| Task 140 | ✅ | 🎁 **client-sdk** · Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) [D:2/B:4/U:4 → Eff:2.0?] 🎯 |
 | Task 150 | ✅ | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋 |
 <!-- TASKS:END -->
 
@@ -202,15 +214,15 @@
 <!-- TASKS:BEGIN phase=13 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
-| Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
+| Task 19 | 🔶 | 🎁 **lightning** · Lightning charge method [D:8/B:7/U:8 → Eff:0.94?] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
+| Task 20 | 🔶 | 🎁 **lightning** · Lightning session method [D:9/B:8/U:7 → Eff:0.83?] ⚠️ ⛔ No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service. |
 | Task 82 | ✅ | 🎁 **utilities** · 🔒 Mutation-grade payment credential and wire-security suite [D:6/B:10/U:9 → Eff:1.58?] 🚀 |
 | Task 93 | ✅ | 🎁 **utilities** · Run the payment-security mutation campaign on a nightly cadence [D:4/B:7/U:6 → Eff:1.62?] 🚀 |
 | Task 94 | ✅ | 🎁 **tempo** · Keep Tempo subscription renewal claims after ambiguous broadcast [D:4/B:8/U:7 → Eff:1.88?] 🚀 |
 | Task 95 | ✅ | 🎁 **utilities** · Extend the payment-security mutant set to EIP-3009 authorization checks [D:3/B:7/U:5 → Eff:2.0?] 🎯 |
 | Task 96 | ✅ | 🎁 **stripe** · Stripe subscription durable state, renewal, and cancellation [D:7/B:8/U:5 → Eff:0.93?] ⚠️ |
-| Task 137 | ✅ | 🎁 **tempo** · Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67] 🚀 |
-| Task 139 | ✅ | 🎁 **tempo** · Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity) [D:4/B:6/U:6 → Eff:1.5] 🚀 |
+| Task 137 | ✅ | 🎁 **tempo** · Retire the static Tempo memo option in favour of mandatory challenge-bound attribution (mppx #904 / mpp-rs #421 parity) [D:3/B:5/U:5 → Eff:1.67?] 🚀 |
+| Task 139 | ✅ | 🎁 **tempo** · Recognize the MACH machine-token deployment alongside machineUSD in Tempo charge routes (mppx #902 parity) [D:4/B:6/U:6 → Eff:1.5?] 🚀 |
 <!-- TASKS:END -->
 
 ---
@@ -239,7 +251,7 @@
 <!-- TASKS:BEGIN phase=15 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 22 | 🔶 | 🎁 **card** · Card charge method [D:8/B:7/U:6 → Eff:0.81] ⚠️ ⛔ No conforming MPP card Server Enabler test environment is known or accessible (2026-09-16 review checked mpp-specs and the SDKs: none named). Unblock: name a provider with a sandbox, add its credentials to ~/.secrets on the harness host, restart harness.service. |
+| Task 22 | 🔶 | 🎁 **card** · Card charge method [D:8/B:7/U:6 → Eff:0.81?] ⚠️ ⛔ No conforming MPP card Server Enabler test environment is known or accessible (2026-09-16 review checked mpp-specs and the SDKs: none named). Unblock: name a provider with a sandbox, add its credentials to ~/.secrets on the harness host, restart harness.service. |
 <!-- TASKS:END -->
 
 ---
@@ -251,29 +263,29 @@
 <!-- TASKS:BEGIN phase=16 -->
 | Task | Status | Notes |
 |------|--------|-------|
-| Task 36 | ✅ | 🎁 **additional-methods** · Stellar charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ |
-| Task 39 | ✅ | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0] 📋 |
+| Task 36 | ✅ | 🎁 **additional-methods** · Stellar charge method [D:8/B:7/U:7 → Eff:0.88?] ⚠️ |
+| Task 39 | ✅ | 🎁 **additional-methods** · EVM Permit2 credential path [D:8/B:8/U:8 → Eff:1.0?] 📋 |
 | Task 40 | ✅ | 🎁 **additional-methods** · EVM EIP-3009 authorization credential [D:6/B:10/U:10 → Eff:1.67?] 🚀 |
-| Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service. |
+| Task 51 | 🔶 | 🎁 **additional-methods** · Hedera charge method [D:8/B:7/U:7 → Eff:0.88?] ⚠️ ⛔ No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service. |
 | Task 79 | ✅ | 🎁 **additional-methods** · Near Intents charge method [D:7/B:8/U:8 → Eff:1.14?] 📋 |
-| Task 80 | ✅ | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14] 📋 |
-| Task 86 | ✅ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17] 📋 |
-| Task 109 | ✅ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86] ⚠️ |
-| Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62] ⚠️ |
-| Task 122 | ⬜ | 🎁 **additional-methods** · USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75] ⚠️ |
-| Task 123 | 🔶 | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88] ⚠️ ⛔ No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80. |
-| Task 126 | ✅ | 🎁 **additional-methods** · Bring the Stellar method modules to the 95% critical-tier coverage floor [D:4/B:6/U:6 → Eff:1.5] 🚀 |
-| Task 127 | ✅ | 🎁 **additional-methods** · Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module [D:5/B:7/U:6 → Eff:1.3] 📋 |
-| Task 128 | ✅ | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5] 🎯 |
-| Task 129 | ⛔ | 🎁 **additional-methods** · Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38] 📋 |
-| Task 130 | ✅ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 131 | ⛔ | 🎁 **additional-methods** · MPP.Methods.EVM.Split: atomic fee split through a splitter contract [D:7/B:8/U:7 → Eff:1.07] 📋 |
-| Task 132 | ✅ | 🎁 **additional-methods** · Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25] 🎯 |
-| Task 135 | ✅ | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5] 🚀 |
-| Task 136 | ⛔ | 🎁 **additional-methods** · Make full QA freshness checks executable in isolated worktrees [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 141 | ✅ | 🎁 **additional-methods** · Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67] 🚀 |
-| Task 142 | ✅ | 🎁 **additional-methods** · Document shipped x402, USDC and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5] 🎯 |
-| Task 143 | ✅ | 🎁 **additional-methods** · Adjudicate the pending private security inbox reports [D:5/B:5/U:5 → Eff:1.0] 📋 |
+| Task 80 | ✅ | 🎁 **additional-methods** · USDC charge method: EVM and Solana direct profiles [D:7/B:8/U:8 → Eff:1.14?] 📋 |
+| Task 86 | ✅ | 🎁 **additional-methods** · EVM signed-transaction credential path [D:6/B:7/U:7 → Eff:1.17?] 📋 |
+| Task 109 | ✅ | 🎁 **additional-methods** · XRPL charge method [D:7/B:6/U:6 → Eff:0.86?] ⚠️ |
+| Task 110 | ✅ | 🎁 **additional-methods** · XRPL session method [D:8/B:5/U:5 → Eff:0.62?] ⚠️ |
+| Task 122 | ⬜ | 🎁 **additional-methods** · USDC charge method: Stacks USDCx profile [D:8/B:6/U:6 → Eff:0.75?] ⚠️ |
+| Task 123 | 🔶 | 🎁 **additional-methods** · USDC charge method: Circle Gateway Transfer profile [D:8/B:7/U:7 → Eff:0.88?] ⚠️ ⛔ No Circle sandbox API key: Circle developer signup is an operator step. Unblock: export CIRCLE_SANDBOX_API_KEY in ~/.secrets on the harness host, restart harness.service. Also depends on Task 80. |
+| Task 126 | ✅ | 🎁 **additional-methods** · Bring the Stellar method modules to the 95% critical-tier coverage floor [D:4/B:6/U:6 → Eff:1.5?] 🚀 |
+| Task 127 | ✅ | 🎁 **additional-methods** · Gate per-module coverage for the payment-method tier so an aggregate pass cannot hide a low module [D:5/B:7/U:6 → Eff:1.3?] 📋 |
+| Task 128 | ✅ | 🎁 **additional-methods** · 🔒 Reject an EVM type=transaction credential the challenge did not offer [D:2/B:5/U:5 → Eff:2.5?] 🎯 |
+| Task 129 | ⛔ | 🎁 **additional-methods** · Fail the gate when a lib/ module is missing from the CLAUDE.md module map [D:4/B:6/U:5 → Eff:1.38?] 📋 |
+| Task 130 | ✅ | 🎁 **additional-methods** · Settle whether the dispatch-injected Cursor rule is tracked, so delivery commits stop deleting it [D:3/B:4/U:4 → Eff:1.33?] 📋 |
+| Task 131 | ⛔ | 🎁 **additional-methods** · MPP.Methods.EVM.Split: atomic fee split through a splitter contract [D:7/B:8/U:7 → Eff:1.07?] 📋 |
+| Task 132 | ✅ | 🎁 **additional-methods** · Bump locked mint to 1.10.1 [D:2/B:6/U:7 → Eff:3.25?] 🎯 |
+| Task 135 | ✅ | 🎁 **additional-methods** · Include x402 settlement and signing in critical coverage enforcement [D:3/B:5/U:4 → Eff:1.5?] 🚀 |
+| Task 136 | ⛔ | 🎁 **additional-methods** · Make full QA freshness checks executable in isolated worktrees [D:3/B:4/U:4 → Eff:1.33?] 📋 |
+| Task 141 | ✅ | 🎁 **additional-methods** · Refresh payment-security mutation evidence after integrated source changes [D:3/B:5/U:5 → Eff:1.67?] 🚀 |
+| Task 142 | ✅ | 🎁 **additional-methods** · Document shipped x402, USDC and critical-coverage changes in release notes [D:1/B:2/U:3 → Eff:2.5?] 🎯 |
+| Task 143 | ✅ | 🎁 **additional-methods** · Adjudicate the pending private security inbox reports [D:5/B:5/U:5 → Eff:1.0?] 📋 |
 <!-- TASKS:END -->
 
 ---

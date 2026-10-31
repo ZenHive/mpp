@@ -6701,6 +6701,360 @@
       "verified_by": "cursor",
       "verification_ref": "harness-run:run-1790984916355-a112ccb0",
       "cross_repo": []
+    },
+    {
+      "id": "156",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Answer replayed or settled credentials with 403 credential-replayed",
+      "scores": {
+        "d": 3,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.83,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A replayed Tempo credential, a settled-hash replay and a Stripe Idempotent-Replayed response each return 403 with the credential-replayed problem type and no WWW-Authenticate header (Plug tests)",
+        "MCP and JSON-RPC transports map the same condition to the code both reference SDKs use, cited by refs path",
+        "Problem type URI matches refs/mppx and refs/mpp-rs",
+        "Genuine verification failures still return 402 with a challenge (regression tests)"
+      ],
+      "body": "Both reference SDKs now answer a replayed or already-settled credential with a final 403 problem (`credential-replayed`) and no WWW-Authenticate challenge, so clients stop instead of paying again (mppx #1039 / 47beb31; mpp-rs #627 bd0c8a2, #646 194c9d9, #656 79a9b0d for Stripe Idempotent-Replayed). We answer 402 with a fresh challenge. Add the problem type to MPP.Errors (verify the exact URI/suffix and status against refs/mppx and refs/mpp-rs; cross-check refs/mpp-specs) and route MPP.Replay hits, Tempo settled-hash replays and Stripe Idempotent-Replayed through it in MPP.Plug, MCP and JSON-RPC transports.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "157",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Expose the verified payer on payment success",
+      "scores": {
+        "d": 2,
+        "b": 5,
+        "u": 3
+      },
+      "eff": 2.0,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "After a successful Tempo, EVM and Stripe verification the conn carries the verified payer; tests assert the value equals the on-chain sender / Stripe customer the method verified",
+        "No payer is assigned when verification fails or the method cannot attest a payer",
+        "Documented in MPP.Plug moduledoc"
+      ],
+      "body": "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "158",
+      "phase": 1,
+      "bundle": "stripe",
+      "status": "pending",
+      "title": "Standardize Stripe PaymentIntent analytics metadata",
+      "scores": {
+        "d": 2,
+        "b": 4,
+        "u": 3
+      },
+      "eff": 1.75,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "grok",
+      "model": "grok-4.7",
+      "acceptance_criteria": [
+        "PaymentIntent metadata keys and values match refs/mppx and refs/mpp-rs (cited)",
+        "Stripe :integration test creates a PaymentIntent and reads the new metadata back from the live test API",
+        "Old keys are no longer sent"
+      ],
+      "body": "Both SDKs replaced the MPP PaymentIntent metadata keys (mpp-rs #617 7bf2630, #615 ff2a8fe; refs/mppx/src/stripe/internal/constants.ts): add machine_payment, mpp_sdk, mpp_intent; drop mpp_version, mpp_is_mpp, mpp_server_id. Our keys are in MPP.Methods.Stripe. Authority: refs/mppx + refs/mpp-rs agreeing, and the live Stripe test API accepting the metadata.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "159",
+      "phase": 1,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Tempo client provider: spending caps, expiry rounding and MACH gas token",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 4
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A challenge above max_amount, above max_atomic_amount, or in a non-allowlisted currency is refused before any signature, with a specific error",
+        "validBefore for an expires with a fractional second equals the reference SDKs' value (unit test with a reference-derived vector)",
+        "MACH-funded charge selects the stablecoin fee token per refs; Moderato :integration test pays one MACH charge",
+        "Existing provider tests stay green"
+      ],
+      "body": "Client-side parity for MPP.Client.Providers.Tempo: (1) caller-configured max_amount / max_atomic_amount / currency allowlist refused before signing (mppx #1035 61b4c10, mpp-rs #629 8d27fac); (2) derive validBefore from a fractional challenge expires by rounding up to the next second, capped at the second after expiry (mppx #1042 68381a4, mpp-rs #630 eb0f55d); (3) for MACH-funded charges pay gas in a stablecoin rather than the charge currency (mpp-rs #616 09762dd). Verify constants against refs/mppx and refs/mpp-rs.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "160",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Raise the credential token cap to the reference SDKs' 64 KiB",
+      "scores": {
+        "d": 1,
+        "b": 4,
+        "u": 4
+      },
+      "eff": 4.0,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "A credential just under 64 KiB parses; one over 64 KiB is rejected before base64/JSON decoding (tests at both boundaries)",
+        "The bound is cited against refs/mppx and refs/mpp-rs",
+        "MCP/JSON-RPC credential paths use the same bound"
+      ],
+      "body": "MPP.Headers caps the Authorization credential token at 16 KiB; mppx (src/Credential.ts) and mpp-rs (src/protocol/core/headers.rs, #611 12bf82a) both bound the Authorization value at 64 KiB before extraction. Credentials echoing a large request/opaque are rejected by us but accepted by both SDKs. Align the bound (still applied before any decoding).",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "161",
+      "phase": 1,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Accept sponsored Tempo swaps that acquire only the shortfall",
+      "scores": {
+        "d": 2,
+        "b": 4,
+        "u": 3
+      },
+      "eff": 1.75,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A sponsored transaction swapping a partial amountOut followed by a full-amount transfer verifies; amountOut = 0 or > amount is rejected",
+        "The transfer leg must still equal the charge amount (regression test)",
+        "Moderato :integration test exercises one partial-swap credential or the task states why the live path cannot be reached"
+      ],
+      "body": "Both SDKs now accept a sponsored swap call with 0 < amountOut <= payment amount (clients buy only the deficit; mppx #1031 22e5b42, mpp-rs #566 13aabf2 src/protocol/methods/tempo/method/calls.rs). MPP.Methods.Tempo requires exact equality, so upstream clients are rejected. Relax the bound while the transfer leg still pays the full charge amount.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "162",
+      "phase": 1,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Recover confirmed Tempo charges after ambiguous broadcast errors",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 4
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "An ambiguous broadcast followed by a confirmed receipt returns a successful receipt within the polling bound (stubbed RPC test)",
+        "A retry of the same credential after confirmation returns the original receipt rather than already-used, or the task documents why that is unsafe",
+        "No path releases a claim for a transaction that may have been included (regression test)",
+        "Moderato :integration test covers the happy path and flunks loudly without credentials"
+      ],
+      "body": "After an ambiguous sync-broadcast failure (timeout, 'already known', RPC error) MPP.Methods.Tempo keeps the hash claim (fail-safe) and fails; a retry of the same credential then gets 'already used' even when the transaction confirmed. Both SDKs add bounded receipt polling and return success when the receipt confirms (mppx #1028 7271a85, #1040 29855e8, #1041 08fa745; mpp-rs #625 29366d9). Keep the fail-safe claim policy (Task 91 / renewal) intact: never release a claim that may be included; add recovery on top.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "163",
+      "phase": 1,
+      "bundle": "mcp",
+      "status": "pending",
+      "title": "MCP client pays the next supported challenge when the preferred one fails",
+      "scores": {
+        "d": 2,
+        "b": 3,
+        "u": 2
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "cursor",
+      "model": "cursor-grok-4.6-high",
+      "acceptance_criteria": [
+        "With two offered challenges where the provider refuses the first, the client pays the second (test)",
+        "A provider error after a credential was sent does not trigger another payment",
+        "Total payment attempts stay bounded as today"
+      ],
+      "body": "mpp-rs #602 (cedb328): when paying the preferred MCP challenge fails locally (provider refuses, unsupported currency), try the next supported challenge instead of giving up. MPP.Client.MCP stops at the first. Keep the existing at-most-two-payment-attempts bound.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "164",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Randomize challenge issuance and optionally bind challenges to routes",
+      "scores": {
+        "d": 4,
+        "b": 4,
+        "u": 3
+      },
+      "eff": 0.88,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Two challenges issued for the same route in the same microsecond have different ids (test)",
+        "HMAC id still recomputes identically to refs/mppx for a given opaque (cross-validation vector)",
+        "With route scope enabled, a credential issued by route A is rejected at route B with identical charge config",
+        "Existing opaque pinning behavior unchanged for callers that set static opaque"
+      ],
+      "body": "mppx #996 (bbbec69) adds an HMAC-bound random nonce to every issued challenge (src/server/internal/challengeMeta.ts withNonce, excluded from route-meta pinning) and #958 (8bfe2d1) binds challenges to the route that issued them. MPP.Plug challenge ids depend only on route config plus expires, and two mounts with identical charge config accept each other's credentials. Add a random issuance nonce inside opaque (do not add an HMAC input slot — that breaks cross-SDK id interop) and an opt-in route scope; Verifier compares route opaque excluding the nonce. mpp-rs has not adopted the nonce; follow mppx's wire shape exactly.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "165",
+      "phase": 1,
+      "bundle": "solana",
+      "status": "pending",
+      "title": "Implement the solana/subscription intent",
+      "scores": {
+        "d": 7,
+        "b": 4,
+        "u": 2
+      },
+      "eff": 0.43,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Activation and renewal verify per the spec's normative requirements, each cited by spec section",
+        "Devnet :integration tests pin one successful activation, one renewal and one relevant rejection, flunking loudly without the Solana fixtures",
+        "Single-use and period-claim semantics match the existing subscription methods (tests)"
+      ],
+      "body": "mpp-specs #310 (61f9c31) adds a solana/subscription intent (refs/mpp-specs/specs/methods/solana/). We implement Solana charge only (MPP.Methods.Solana). Implement the intent per the spec, reusing MPP.Intents.Subscription and the subscription store pattern of the Tempo/Stripe subscription methods. Authority: the spec text plus live devnet behavior.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
+    },
+    {
+      "id": "166",
+      "phase": 1,
+      "bundle": "evm",
+      "status": "blocked",
+      "title": "Track the EIP-3009 challenge nonce framing divergence between mppx and the EVM spec",
+      "scores": {
+        "d": 2,
+        "b": 3,
+        "u": 2
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Nonce derivation equals the current draft-evm-charge text, verified with a vector derived from the spec and refs/mppx",
+        "If the spec adopted the framed form, the server accepts it per the spec's migration rule (test)"
+      ],
+      "body": "mppx #950 (b224b23) computes the EVM charge EIP-3009 nonce as keccak256(JSON.stringify([id, realm])); MPP.Methods.EVM.Authorization uses keccak(id <> realm), which matches refs/mpp-specs/specs/methods/evm/draft-evm-charge-00.md (abi.encodePacked) at 1f0574a. New mppx EVM clients and our server no longer interoperate. Follow the spec: when draft-evm-charge changes its nonce derivation, port it (with a refs-derived vector); until then do not change unilaterally.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "blocked_reason": "waits on draft-evm-charge changing its EIP-3009 nonce derivation (tempoxyz/mpp-specs)",
+      "cross_repo": []
+    },
+    {
+      "id": "167",
+      "phase": 1,
+      "bundle": "session",
+      "status": "pending",
+      "title": "Session server accounting features from mppx",
+      "scores": {
+        "d": 6,
+        "b": 3,
+        "u": 1
+      },
+      "eff": 0.33,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Each ported feature is opt-in, defaults preserve current behavior (regression tests)",
+        "Wire shapes match refs/mppx (cited)",
+        "Features not ported are listed with the reason in the delivery"
+      ],
+      "body": "Opt-in mppx session server features we lack: reusable session challenges charged per request (#1063 97eb961, #1064 22c96ac), idempotent charge()/credit() and settlement within spend (#1070 00d3894), scheduled close supervision (#1076 908af47), voucherStateMaxAge (#1062 13a9035). Port only what a consumer of MPP.Session needs; scope each against refs/mppx/src/tempo/session/server/ and the mpp-rs equivalents where they exist.",
+      "created_at": "2026-10-31",
+      "scored_at": "2026-10-31",
+      "cross_repo": []
     }
   ]
 }
