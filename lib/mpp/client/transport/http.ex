@@ -15,6 +15,9 @@ defmodule MPP.Client.Transport.HTTP do
   refuse that path — the same guard as mpp-rs `HttpError::CrossOriginRedirect`
   (`refs/mpp-rs/src/client/fetch.rs:256-272`, #379). `MPP.Client.Req.attach/2`
   enforces this; this module documents the contract for hand-rolled transports.
+  A caller that attaches a credential with `set_credential/2` must also disable
+  redirects on that request; `MPP.Client.Req` does this only for its own paid
+  retry.
 
   ## Wire format
 

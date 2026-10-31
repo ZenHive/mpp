@@ -195,7 +195,7 @@ defmodule MPP.Client.Req do
       paid =
         request
         |> HTTP.set_credential(credential)
-        |> Req.Request.put_option(:redirect, false)
+        |> disable_redirects()
         |> Req.Request.put_private(:mpp_payment_retries, retries + 1)
 
       {paid, result} = Req.Request.run_request(%{paid | halted: false})
@@ -207,6 +207,14 @@ defmodule MPP.Client.Req do
       {:error, reason} ->
         Req.Request.halt(request, %Error{reason: reason, message: error_message(reason)})
     end
+  end
+
+  # Req's redirect step lets the legacy `:follow_redirects` option override
+  # `:redirect`, so both must be cleared.
+  defp disable_redirects(request) do
+    request
+    |> Req.Request.delete_option(:follow_redirects)
+    |> Req.Request.put_option(:redirect, false)
   end
 
   defp ensure_same_origin(request) do

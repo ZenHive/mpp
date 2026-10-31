@@ -584,6 +584,32 @@ defmodule MPP.Client.ReqTest do
       refute_received {:other_origin, _headers}
     end
 
+    test "returns a 302 to the paid retry even when follow_redirects: true is set" do
+      challenge =
+        Challenge.create(
+          [
+            realm: "api.example.com",
+            method: "tempo",
+            intent: "charge",
+            request: @request,
+            header: "Payment-Authorization"
+          ],
+          @secret_key
+        )
+
+      plug = paid_retry_redirect_plug(Headers.format_challenge(challenge), "payment-authorization")
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        send(self(), {:result, Req.get(req, url: "http://good.example/resource", follow_redirects: true)})
+      end)
+
+      assert_received {:result, {:ok, %Req.Response{status: 302}}}
+      assert_received {:paid, "tempo"}
+      refute_received {:other_origin, _headers}
+    end
+
     test "a paid retry that offers no supported challenge returns the 402" do
       tempo = challenge_header("tempo")
       stripe = challenge_header("stripe")
