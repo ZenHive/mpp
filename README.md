@@ -307,7 +307,9 @@ which return the confirmed `%{deposit, settled, close_requested, finalized}`
 state. Without them both actions fail closed. `close` likewise requires the
 `:settle_close` callback (or the `"settle_close"` key), which submits the escrow
 close and returns the mined `tx_hash`; the channel closes only after it
-succeeds. See `MPP.Session.Actions`.
+succeeds. A `close` credential must carry `closeSignature`, a separate EIP-712
+`CloseAuthorization(bytes32 channelId,uint96 cumulativeAmount)` signature by the
+channel payer or its authorized signer. See `MPP.Session.Actions`.
 
 ### NEAR Intents (1Click)
 

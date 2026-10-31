@@ -5,6 +5,13 @@ defmodule MPP.Session.Voucher do
   The signed type is `Voucher(bytes32 channelId,uint96 cumulativeAmount)`
   under the `TIP20 Channel Reserve` version `1` domain. Signatures are canonical
   65-byte secp256k1 signatures, matching the contract-backed mppx voucher path.
+
+  A cooperative close is authorized by a second signature over the distinct
+  type `CloseAuthorization(bytes32 channelId,uint96 cumulativeAmount)` under the
+  same domain, so a voucher signature never authorizes a close (mppx
+  `Voucher.ts` `closeAuthorizationTypes`, mpp-rs `precompile_voucher.rs`
+  `CloseAuthorization`). The struct's `signature` then holds the close
+  authorization signature.
   """
 
   import Bitwise, only: [<<<: 2]
@@ -22,6 +29,7 @@ defmodule MPP.Session.Voucher do
   @domain_name "TIP20 Channel Reserve"
   @domain_version "1"
   @primary_type "Voucher"
+  @close_primary_type "CloseAuthorization"
   @max_cumulative_amount (1 <<< 96) - 1
   @max_chain_id (1 <<< 256) - 1
 
@@ -62,7 +70,40 @@ defmodule MPP.Session.Voucher do
 
   @doc "Build the EIP-712 typed data for a voucher."
   @spec typed_data(t(), String.t(), non_neg_integer()) :: {:ok, Typed.t()} | {:error, term()}
-  def typed_data(%__MODULE__{} = voucher, escrow_contract, chain_id) do
+  def typed_data(%__MODULE__{} = voucher, escrow_contract, chain_id),
+    do: build_typed_data(voucher, escrow_contract, chain_id, @primary_type)
+
+  @doc "Build the EIP-712 typed data for a cooperative close authorization."
+  @spec close_authorization_typed_data(t(), String.t(), non_neg_integer()) :: {:ok, Typed.t()} | {:error, term()}
+  def close_authorization_typed_data(%__MODULE__{} = authorization, escrow_contract, chain_id),
+    do: build_typed_data(authorization, escrow_contract, chain_id, @close_primary_type)
+
+  @doc "Compute the 32-byte EIP-712 close authorization signing digest."
+  @spec close_authorization_hash(t(), String.t(), non_neg_integer()) :: {:ok, <<_::256>>} | {:error, term()}
+  def close_authorization_hash(%__MODULE__{} = authorization, escrow_contract, chain_id) do
+    with {:ok, typed_data} <- close_authorization_typed_data(authorization, escrow_contract, chain_id) do
+      {:ok, typed_data |> Typed.encode() |> Hash.keccak()}
+    end
+  end
+
+  @doc """
+  Verify that a close authorization signature recovers to one of the
+  expected signers (the channel payer or its authorized signer).
+  """
+  @spec verify_close_authorization(t(), String.t(), non_neg_integer(), [String.t()]) :: :ok | {:error, term()}
+  def verify_close_authorization(%__MODULE__{} = authorization, escrow_contract, chain_id, expected_signers)
+      when is_list(expected_signers) do
+    with {:ok, digest} <- close_authorization_hash(authorization, escrow_contract, chain_id),
+         {:ok, _signature_hex, signature} <- decode_signature(authorization.signature),
+         {:ok, expected} <- validate_expected_signers(expected_signers),
+         {:ok, recovered} <- recover_address(digest, signature) do
+      if recovered in expected,
+        do: :ok,
+        else: {:error, :signature_mismatch}
+    end
+  end
+
+  defp build_typed_data(%__MODULE__{} = voucher, escrow_contract, chain_id, primary_type) do
     with {:ok, channel_id} <- decode_channel_id(voucher.channel_id),
          :ok <- validate_cumulative_amount(voucher.cumulative_amount),
          {:ok, escrow_contract} <- validate_escrow_contract(escrow_contract),
@@ -75,7 +116,7 @@ defmodule MPP.Session.Voucher do
            chain_id: chain_id,
            verifying_contract: escrow_contract
          },
-         types: voucher_types(),
+         types: signed_types(primary_type),
          value: %{
            "channelId" => channel_id,
            "cumulativeAmount" => voucher.cumulative_amount
@@ -124,10 +165,10 @@ defmodule MPP.Session.Voucher do
     end
   end
 
-  @spec voucher_types() :: %{String.t() => Type.t()}
-  defp voucher_types do
+  @spec signed_types(String.t()) :: %{String.t() => Type.t()}
+  defp signed_types(primary_type) do
     %{
-      @primary_type => %Type{
+      primary_type => %Type{
         fields: [
           {"channelId", {:bytes, 32}},
           {"cumulativeAmount", {:uint, 96}}
@@ -155,6 +196,17 @@ defmodule MPP.Session.Voucher do
       {:error, _reason} -> {:error, :invalid_expected_signer}
     end
   end
+
+  defp validate_expected_signers([_ | _] = signers) do
+    Enum.reduce_while(signers, {:ok, []}, fn signer, {:ok, acc} ->
+      case validate_expected_signer(signer) do
+        {:ok, address} -> {:cont, {:ok, [address | acc]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_expected_signers(_signers), do: {:error, :invalid_expected_signer}
 
   defp validate_cumulative_amount(amount) when is_integer(amount) and amount >= 0 and amount <= @max_cumulative_amount,
     do: :ok

@@ -53,7 +53,8 @@ defmodule MPP.Session.Payload do
           authorized_signer: String.t() | nil,
           cumulative_amount: non_neg_integer() | nil,
           additional_deposit: non_neg_integer() | nil,
-          signature: String.t() | nil
+          signature: String.t() | nil,
+          close_signature: String.t() | nil
         }
 
   @enforce_keys [:action, :channel_id]
@@ -67,7 +68,8 @@ defmodule MPP.Session.Payload do
     :authorized_signer,
     :cumulative_amount,
     :additional_deposit,
-    :signature
+    :signature,
+    :close_signature
   ]
 
   @doc "Parse a session credential payload map into a typed struct."
@@ -95,6 +97,7 @@ defmodule MPP.Session.Payload do
     |> maybe_put_amount("cumulativeAmount", payload.cumulative_amount)
     |> maybe_put_amount("additionalDeposit", payload.additional_deposit)
     |> maybe_put("signature", payload.signature)
+    |> maybe_put("closeSignature", payload.close_signature)
   end
 
   defp parse_action(:open, payload, channel_id, descriptor, settlement_route) do
@@ -152,7 +155,8 @@ defmodule MPP.Session.Payload do
 
   defp parse_action(:close, payload, channel_id, descriptor, settlement_route) do
     with {:ok, cumulative_amount} <- require_amount(payload["cumulativeAmount"], :cumulative_amount),
-         {:ok, signature} <- require_hex(payload["signature"], :signature) do
+         {:ok, signature} <- require_hex(payload["signature"], :signature),
+         {:ok, close_signature} <- require_hex(payload["closeSignature"], :close_signature) do
       {:ok,
        %__MODULE__{
          action: :close,
@@ -160,7 +164,8 @@ defmodule MPP.Session.Payload do
          descriptor: descriptor,
          settlement_route: settlement_route,
          cumulative_amount: cumulative_amount,
-         signature: signature
+         signature: signature,
+         close_signature: close_signature
        }}
     end
   end

@@ -35,9 +35,31 @@ defmodule MPP.Test.SessionSigning do
     sign_voucher_with(@other_private_key, channel_id, cumulative_amount, escrow_contract, chain_id)
   end
 
+  @doc "EIP-712-sign a close authorization for the given domain with the Anvil-0 key."
+  @spec sign_close_authorization(String.t(), non_neg_integer(), String.t(), non_neg_integer()) :: String.t()
+  def sign_close_authorization(channel_id, cumulative_amount, escrow_contract, chain_id) do
+    sign_close_authorization_with(@private_key, channel_id, cumulative_amount, escrow_contract, chain_id)
+  end
+
+  @doc "EIP-712-sign a close authorization for the given domain with the Anvil-1 key."
+  @spec sign_close_authorization_as_other(String.t(), non_neg_integer(), String.t(), non_neg_integer()) ::
+          String.t()
+  def sign_close_authorization_as_other(channel_id, cumulative_amount, escrow_contract, chain_id) do
+    sign_close_authorization_with(@other_private_key, channel_id, cumulative_amount, escrow_contract, chain_id)
+  end
+
   defp sign_voucher_with(private_key, channel_id, cumulative_amount, escrow_contract, chain_id) do
     voucher = struct(Voucher, channel_id: String.downcase(channel_id), cumulative_amount: cumulative_amount)
-    digest = Voucher.hash!(voucher, escrow_contract, chain_id)
+    sign_digest(Voucher.hash!(voucher, escrow_contract, chain_id), private_key)
+  end
+
+  defp sign_close_authorization_with(private_key, channel_id, cumulative_amount, escrow_contract, chain_id) do
+    authorization = struct(Voucher, channel_id: String.downcase(channel_id), cumulative_amount: cumulative_amount)
+    {:ok, digest} = Voucher.close_authorization_hash(authorization, escrow_contract, chain_id)
+    sign_digest(digest, private_key)
+  end
+
+  defp sign_digest(digest, private_key) do
     {:ok, signature} = Secp256k1.sign_payload(digest, private_key)
     signature = Recover.normalize_low_s(signature)
     {:ok, address} = Secp256k1.get_address(private_key)

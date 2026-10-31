@@ -83,6 +83,12 @@ defmodule MPP.Session.Actions do
   return `{:ok, %{tx_hash: "0x" <> 64 hex}}` or `{:error, %MPP.Errors{}}`. Only
   then is the channel marked closed. The hash is recorded on its proof and
   returned as the receipt `txHash`; the receipt reference stays the channel id.
+  A `close` must also carry `closeSignature`, an EIP-712
+  `CloseAuthorization(bytes32 channelId,uint96 cumulativeAmount)` signature
+  under the voucher domain, recovering to the channel payer or its stored
+  signer (see `MPP.Session.Voucher`). It is checked with the default signature
+  verification; a custom `:verify_signature` callback receives the close
+  payload and must check `close_signature` itself.
   Before the callback runs, the channel is reserved as closing: it accepts no
   vouchers, spends, top-ups or competing closes. `{:error, %MPP.Errors{}}`
   must mean the close definitively did not settle; it releases the reservation
@@ -333,8 +339,48 @@ defmodule MPP.Session.Actions do
   defp verify_channel_signer(channel, payload, opts) do
     signer = channel_signer(channel, opts)
 
-    with :ok <- ensure_same_descriptor(payload, signer, opts) do
-      maybe_verify_signature(payload, signer, opts)
+    with :ok <- ensure_same_descriptor(payload, signer, opts),
+         :ok <- maybe_verify_signature(payload, signer, opts) do
+      maybe_verify_close_authorization(channel, payload, signer, opts)
+    end
+  end
+
+  # A close needs its own `CloseAuthorization` signature from the payer or the
+  # channel signer; the voucher signature alone never authorizes a close
+  # (mppx `CredentialVerification.ts`, mpp-rs `session_method/close.rs`).
+  # A custom `:verify_signature` callback receives the close payload, including
+  # `close_signature`, and is responsible for checking it.
+  defp maybe_verify_close_authorization(channel, %Payload{action: :close} = payload, signer, opts) do
+    case Keyword.get(opts, :verify_signature, :default) do
+      :default -> verify_close_authorization(channel, payload, signer, opts)
+      _custom_or_already_verified -> :ok
+    end
+  end
+
+  defp maybe_verify_close_authorization(_channel, _payload, _signer, _opts), do: :ok
+
+  defp verify_close_authorization(_channel, %Payload{close_signature: nil}, _signer, _opts),
+    do: {:error, Errors.new(:invalid_signature, "close requires a close authorization signature (closeSignature)")}
+
+  defp verify_close_authorization(%Channel{payer: payer}, %Payload{} = payload, signer, opts) do
+    signers = Enum.uniq(Enum.filter([payer, signer], &is_binary/1))
+
+    with {:ok, authorization} <-
+           Voucher.new(
+             channel_id: payload.channel_id,
+             cumulative_amount: payload.cumulative_amount,
+             signature: payload.close_signature
+           ),
+         :ok <-
+           Voucher.verify_close_authorization(
+             authorization,
+             Keyword.get(opts, :escrow_contract),
+             Keyword.get(opts, :chain_id),
+             signers
+           ) do
+      :ok
+    else
+      {:error, _reason} -> {:error, Errors.new(:invalid_signature, "invalid close authorization signature")}
     end
   end
 

@@ -393,6 +393,97 @@ defmodule MPP.Session.ActionsTest do
     end
   end
 
+  describe "close authorization" do
+    test "rejects a close without closeSignature before settlement", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      opts = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("settlement called") end)
+
+      assert {:error, %Errors{detail: "invalid session credential close_signature"} = error} =
+               Actions.dispatch(Map.delete(close_payload(50), "closeSignature"), opts)
+
+      assert String.contains?(error.type, "invalid-payload")
+      assert {:ok, %Channel{status: :active, closing: false}} = Store.get(store, @channel_id)
+    end
+
+    test "rejects a voucher signature presented as the close authorization", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      opts = Keyword.put(opts, :settle_close, fn _, _, _ -> flunk("settlement called") end)
+      payload = Map.put(close_payload(50), "closeSignature", sign(@channel_id, 50))
+
+      assert {:error, %Errors{detail: "invalid close authorization signature"} = error} =
+               Actions.dispatch(payload, opts)
+
+      assert String.contains?(error.type, "invalid-signature")
+      assert {:ok, %Channel{status: :active, closing: false}} = Store.get(store, @channel_id)
+    end
+
+    test "rejects a close authorization for a different amount", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      payload =
+        Map.put(
+          close_payload(50),
+          "closeSignature",
+          SessionSigning.sign_close_authorization(@channel_id, 60, @tip1034_escrow, 42_431)
+        )
+
+      assert {:error, %Errors{detail: "invalid close authorization signature"}} = Actions.dispatch(payload, opts)
+    end
+
+    test "rejects a close authorization from a key that is neither payer nor signer", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      payload =
+        Map.put(
+          close_payload(50),
+          "closeSignature",
+          SessionSigning.sign_close_authorization_as_other(@channel_id, 50, @tip1034_escrow, 42_431)
+        )
+
+      assert {:error, %Errors{detail: "invalid close authorization signature"}} = Actions.dispatch(payload, opts)
+      assert {:ok, %Channel{status: :active}} = Store.get(store, @channel_id)
+    end
+
+    test "accepts a close authorization from the channel signer", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      assert {:ok, receipt} = Actions.dispatch(close_payload(50), opts)
+      assert receipt.extensions["action"] == "close"
+      assert {:ok, %Channel{status: :closed}} = Store.get(store, @channel_id)
+    end
+
+    test "accepts a close authorization from the channel payer", %{opts: opts, store: store} do
+      opts = Keyword.put(opts, :payer, SessionSigning.other_signer_address())
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+
+      payload =
+        Map.put(
+          close_payload(50),
+          "closeSignature",
+          SessionSigning.sign_close_authorization_as_other(@channel_id, 50, @tip1034_escrow, 42_431)
+        )
+
+      assert {:ok, _receipt} = Actions.dispatch(payload, opts)
+      assert {:ok, %Channel{status: :closed}} = Store.get(store, @channel_id)
+    end
+
+    test "also requires the close authorization on caller-settled closes", %{opts: opts, store: store} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      opts = Keyword.put(opts, :settle_close, :caller)
+      payload = Map.put(close_payload(50), "closeSignature", sign(@channel_id, 50))
+
+      assert {:error, %Errors{detail: "invalid close authorization signature"}} = Actions.dispatch(payload, opts)
+      assert {:ok, %Channel{status: :active}} = Store.get(store, @channel_id)
+    end
+
+    test "fails closed when a parsed close carries no close authorization", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      {:ok, payload} = Payload.parse(close_payload(50))
+
+      assert {:error, %Errors{detail: "close requires a close authorization signature (closeSignature)"}} =
+               Actions.handle(%{payload | close_signature: nil}, opts)
+    end
+  end
+
   describe "close" do
     test "rejects a close voucher below spent or above deposit", %{opts: opts} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
@@ -1366,7 +1457,8 @@ defmodule MPP.Session.ActionsTest do
       "action" => "close",
       "channelId" => @channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => sign(@channel_id, amount)
+      "signature" => sign(@channel_id, amount),
+      "closeSignature" => SessionSigning.sign_close_authorization(@channel_id, amount, @tip1034_escrow, 42_431)
     }
   end
 
@@ -1418,13 +1510,28 @@ defmodule MPP.Session.ActionsTest do
   end
 
   defp other_voucher(action, channel_id, amount) do
-    %{
-      "action" => action,
-      "channelId" => channel_id,
-      "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => SessionSigning.sign_voucher_as_other(channel_id, amount, @tip1034_escrow, 42_431)
-    }
+    maybe_close_authorization_as_other(
+      %{
+        "action" => action,
+        "channelId" => channel_id,
+        "cumulativeAmount" => Integer.to_string(amount),
+        "signature" => SessionSigning.sign_voucher_as_other(channel_id, amount, @tip1034_escrow, 42_431)
+      },
+      action,
+      channel_id,
+      amount
+    )
   end
+
+  defp maybe_close_authorization_as_other(payload, "close", channel_id, amount) do
+    Map.put(
+      payload,
+      "closeSignature",
+      SessionSigning.sign_close_authorization_as_other(channel_id, amount, @tip1034_escrow, 42_431)
+    )
+  end
+
+  defp maybe_close_authorization_as_other(payload, _action, _channel_id, _amount), do: payload
 
   defp sign(channel_id, amount) do
     SessionSigning.sign_voucher(channel_id, amount, @tip1034_escrow, 42_431)

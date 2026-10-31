@@ -4,6 +4,7 @@ defmodule MPP.Session.VoucherTest do
   import Bitwise, only: [<<<: 2]
 
   alias MPP.Session.Voucher
+  alias MPP.Test.SessionSigning
   alias Onchain.Hex
   alias Onchain.Typed.Domain
 
@@ -72,6 +73,68 @@ defmodule MPP.Session.VoucherTest do
                  @escrow_contract,
                  @chain_id,
                  "0x0000000000000000000000000000000000000001"
+               )
+    end
+  end
+
+  describe "close authorization" do
+    # refs/mpp-rs/src/protocol/methods/tempo/precompile_voucher.rs:516-536
+    # precompile_close_authorization_signing_hash_matches_mppx (viem
+    # hashTypedData of mppx `closeAuthorizationTypes`, same domain).
+    @close_authorization_digest "0x223b6a6cbf14199a5c3cbf882d847396b680bab705d0597f3d4d7227bc24e887"
+
+    test "matches the mpp-rs/mppx CloseAuthorization digest and differs from the voucher digest" do
+      assert {:ok, digest} = Voucher.close_authorization_hash(voucher(), @escrow_contract, @chain_id)
+      assert Hex.encode(digest) == @close_authorization_digest
+      assert Hex.encode(digest) != @tip1034_digest
+    end
+
+    test "builds the CloseAuthorization type under the voucher domain" do
+      assert {:ok, typed_data} = Voucher.close_authorization_typed_data(voucher(), @escrow_contract, @chain_id)
+      assert %Domain{name: "TIP20 Channel Reserve", version: "1", chain_id: @chain_id} = typed_data.domain
+      assert typed_data.domain.verifying_contract == Hex.decode!(@escrow_contract)
+
+      assert typed_data.types == %{
+               "CloseAuthorization" => %Onchain.Typed.Type{
+                 fields: [{"channelId", {:bytes, 32}}, {"cumulativeAmount", {:uint, 96}}]
+               }
+             }
+    end
+
+    test "verifies a close authorization from any expected signer only" do
+      signature = SessionSigning.sign_close_authorization(@channel_id, @cumulative_amount, @escrow_contract, @chain_id)
+      authorization = %{voucher() | signature: signature}
+      other = SessionSigning.other_signer_address()
+
+      assert :ok = Voucher.verify_close_authorization(authorization, @escrow_contract, @chain_id, [@signer])
+      assert :ok = Voucher.verify_close_authorization(authorization, @escrow_contract, @chain_id, [other, @signer])
+
+      assert {:error, :signature_mismatch} =
+               Voucher.verify_close_authorization(authorization, @escrow_contract, @chain_id, [other])
+
+      assert {:error, :signature_mismatch} =
+               Voucher.verify_close_authorization(voucher(), @escrow_contract, @chain_id, [@signer])
+
+      assert {:error, :signature_mismatch} =
+               Voucher.verify_close_authorization(
+                 %{authorization | cumulative_amount: @cumulative_amount + 1},
+                 @escrow_contract,
+                 @chain_id,
+                 [@signer]
+               )
+
+      assert {:error, :invalid_expected_signer} =
+               Voucher.verify_close_authorization(authorization, @escrow_contract, @chain_id, [])
+
+      assert {:error, :invalid_expected_signer} =
+               Voucher.verify_close_authorization(authorization, @escrow_contract, @chain_id, ["0xdead"])
+
+      assert {:error, :invalid_signature} =
+               Voucher.verify_close_authorization(
+                 %{authorization | signature: high_s_twin(signature)},
+                 @escrow_contract,
+                 @chain_id,
+                 [@signer]
                )
     end
   end

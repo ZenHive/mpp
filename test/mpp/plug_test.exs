@@ -2127,7 +2127,8 @@ defmodule MPP.PlugTest do
       "action" => "close",
       "channelId" => @session_channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => session_sign(amount)
+      "signature" => session_sign(amount),
+      "closeSignature" => SessionSigning.sign_close_authorization(@session_channel_id, amount, @session_escrow, 42_431)
     }
   end
 

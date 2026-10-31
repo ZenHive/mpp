@@ -6,6 +6,7 @@ defmodule MPP.Session.PayloadTest do
   @channel_id "0x5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"
   @transaction "0x76abcd"
   @signature "0x729359a3e060a6822af39785f1c806d820f6fb25bf94cb075038c60dc33fb37262db7e618685db686c2f870ead2e955ae0d907dde5739607d15ef1dafc65a31b1c"
+  @close_signature "0x" <> String.duplicate("ab", 64) <> "1b"
   @payer "0x1111111111111111111111111111111111111111"
   @payee "0x2222222222222222222222222222222222222222"
   @operator "0x0000000000000000000000000000000000000000"
@@ -37,6 +38,17 @@ defmodule MPP.Session.PayloadTest do
       assert {:ok, close} = Payload.parse(close_map())
       assert close.action == :close
       assert close.cumulative_amount == 400
+      assert close.close_signature == @close_signature
+      assert Payload.to_map(close)["closeSignature"] == @close_signature
+    end
+
+    test "requires a hex closeSignature on close" do
+      assert {:error, {:invalid_hex, :close_signature}} = Payload.parse(Map.delete(close_map(), "closeSignature"))
+
+      assert {:error, {:invalid_hex, :close_signature}} =
+               Payload.parse(Map.put(close_map(), "closeSignature", "0xnothex"))
+
+      refute Map.has_key?(Payload.to_map(elem(Payload.parse(voucher_map()), 1)), "closeSignature")
     end
 
     test "round-trips camelCase JSON including optional descriptor" do
@@ -142,7 +154,8 @@ defmodule MPP.Session.PayloadTest do
       "action" => "close",
       "channelId" => @channel_id,
       "cumulativeAmount" => "400",
-      "signature" => @signature
+      "signature" => @signature,
+      "closeSignature" => @close_signature
     }
   end
 

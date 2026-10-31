@@ -260,7 +260,8 @@ defmodule MPP.Session.ActionsPropertyTest do
       "action" => "close",
       "channelId" => @channel_id,
       "cumulativeAmount" => Integer.to_string(amount),
-      "signature" => @signature
+      "signature" => @signature,
+      "closeSignature" => @signature
     }
   end
 end
