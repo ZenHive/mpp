@@ -197,13 +197,7 @@ defmodule MPP.Session.Channel do
 
   def apply_onchain_state(%__MODULE__{} = channel, deposit, settled)
       when is_integer(deposit) and is_integer(settled) and settled >= 0 and settled <= deposit do
-    settled = max(settled, channel.settled)
-    cumulative_amount = max(channel.cumulative_amount, settled)
-
-    # Settling a voucher this channel accepted does not deliver its unspent
-    # credit; only a settlement above the accepted amount counts as spent
-    # (mpp-rs `session_method/stream.rs`).
-    spent = if settled > channel.cumulative_amount, do: max(channel.spent, settled), else: channel.spent
+    %{settled: settled, spent: spent, cumulative_amount: cumulative_amount} = fold_settled(channel, settled)
 
     if cumulative_amount > deposit do
       {:error, :deposit_below_cumulative}
@@ -220,6 +214,17 @@ defmodule MPP.Session.Channel do
   end
 
   def apply_onchain_state(_channel, _deposit, _settled), do: {:error, {:invalid_amount, :deposit}}
+
+  # `settled` only moves up and raises `cumulative_amount` to at least itself.
+  # Settling a voucher this channel accepted does not deliver its unspent
+  # credit, so `spent` rises only for a settlement above the accepted amount
+  # (mpp-rs `session_method/stream.rs`).
+  defp fold_settled(%__MODULE__{} = channel, settled) do
+    settled = max(settled, channel.settled)
+    spent = if settled > channel.cumulative_amount, do: max(channel.spent, settled), else: channel.spent
+
+    %{settled: settled, spent: spent, cumulative_amount: max(channel.cumulative_amount, settled)}
+  end
 
   @doc "Release a pending close after the on-chain close definitively failed."
   @spec clear_closing(t()) :: t()
@@ -272,10 +277,10 @@ defmodule MPP.Session.Channel do
 
   `deposit` is the escrow's confirmed total after a top-up, never a
   client-claimed increment, and must exceed the current deposit. `settled`
-  is the escrow's confirmed settled amount. Settled funds were paid out of
-  accepted vouchers, so `spent` and `cumulative_amount` are raised to at
-  least `settled` (never increased by it): they already count what was
-  settled.
+  is the escrow's confirmed settled amount; it is folded in as in
+  `apply_onchain_state/3`, so settling an accepted voucher leaves its unspent
+  credit available and only a settlement above the accepted amount raises
+  `spent` (never increased by it).
   """
   @spec apply_verified_deposit(t(), pos_integer(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
   def apply_verified_deposit(channel, deposit, settled \\ 0)
@@ -290,16 +295,7 @@ defmodule MPP.Session.Channel do
 
   def apply_verified_deposit(%__MODULE__{deposit: current} = channel, deposit, settled)
       when is_integer(deposit) and deposit > current and is_integer(settled) and settled >= 0 and settled <= deposit do
-    settled = max(settled, channel.settled)
-
-    {:ok,
-     %{
-       channel
-       | deposit: deposit,
-         settled: settled,
-         spent: max(channel.spent, settled),
-         cumulative_amount: max(channel.cumulative_amount, settled)
-     }}
+    {:ok, Map.merge(%{channel | deposit: deposit}, fold_settled(channel, settled))}
   end
 
   def apply_verified_deposit(%__MODULE__{deposit: current}, deposit, _settled)

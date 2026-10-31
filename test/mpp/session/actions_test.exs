@@ -1524,15 +1524,20 @@ defmodule MPP.Session.ActionsTest do
       assert :not_found = Store.get(store, @channel_id)
     end
 
-    test "topUp applies settled funds without double counting", %{opts: opts, store: store} do
+    test "topUp folds in settled funds without consuming accepted credit", %{opts: opts, store: store} do
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
+      assert {:ok, %Channel{spent: spent}} = Store.get(store, @channel_id)
+      assert spent < 30
 
       top_up = fn state -> Keyword.put(opts, :verify_top_up, fn _, _, _ -> {:ok, state} end) end
       assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(state(%{deposit: 1_500, settled: 30})))
-      assert {:ok, %Channel{settled: 30, spent: 30, cumulative_amount: 50}} = Store.get(store, @channel_id)
+      assert {:ok, %Channel{settled: 30, spent: ^spent, cumulative_amount: 50}} = Store.get(store, @channel_id)
 
       assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(state(%{deposit: 2_000, settled: 20})))
-      assert {:ok, %Channel{deposit: 2_000, settled: 30, spent: 30}} = Store.get(store, @channel_id)
+      assert {:ok, %Channel{deposit: 2_000, settled: 30, spent: ^spent}} = Store.get(store, @channel_id)
+
+      assert {:ok, _} = Actions.dispatch(top_up_payload(500), top_up.(state(%{deposit: 2_500, settled: 80})))
+      assert {:ok, %Channel{settled: 80, spent: 80, cumulative_amount: 80}} = Store.get(store, @channel_id)
     end
   end
 
