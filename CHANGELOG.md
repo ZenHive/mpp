@@ -6,9 +6,43 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.21.0] — 2026-10-31
 
 ### Breaking
+
+- **`MPP.Client.Providers.Tempo` signs a Tempo proof only for the request's
+  own realm.** A zero-amount proof credential, and the `presenterSignature` of
+  a presenter-bound transaction, are produced only when the challenge realm is
+  the request host (ASCII case-insensitive, port ignored) or the caller pinned
+  that origin to that realm in `:trusted_tempo_proof_realms`. Without an
+  origin, only bare trusted realms are accepted. `MPP.Client.Req` supplies the
+  request URL; `MPP.Client.MCP` supplies none. Calling the provider directly
+  now needs a `:request_url` in the context (`MPP.Client.MultiProvider.pay/3`
+  takes one) or a trusted realm; otherwise it returns
+  `{:error, {:untrusted_proof_realm, realm, origin}}`. Matches mppx
+  `ProofRealm.ts` and mpp-rs `client/flow.rs`.
+- **Session methods require a `verify_channel_state` callback.**
+  `MPP.Session.Method` raises at `validate_config!/1` without the
+  `"verify_channel_state"` method-config key (direct `MPP.Session.Actions`
+  callers pass the `:verify_channel_state` option). Every
+  `voucher` re-reads the escrow through it, uncached; a read error, a pending
+  close request, a finalized or unfunded channel, or a deposit below the
+  accepted cumulative amount stops acceptance, and a detected close request is
+  recorded on the stored channel. A voucher below the settled amount is
+  rejected. `MPP.Methods.XRPL.Session` verifies the channel itself for HTTP
+  vouchers; WebSocket metering of an XRPL session needs the callback.
+- **WebSocket metering re-verifies the channel before each deduction.**
+  `MPP.Transports.WebSocket` reuses a successful channel-state read for at most
+  five seconds (`"channel_state_ttl_ms"`, capped at 5000); a failed read, an
+  on-chain close or an unfunded escrow stops delivery.
+- **A session `close` credential on the EIP-712 voucher path
+  (`MPP.Session.Method`) must carry `closeSignature`**: an EIP-712
+  `CloseAuthorization(bytes32 channelId,uint96 cumulativeAmount)` signature
+  under the voucher domain, by the channel payer or its stored authorized
+  signer (`MPP.Session.Voucher.close_authorization_typed_data/3`,
+  `verify_close_authorization/4`). A custom `verify_signature` callback must
+  verify `close_signature` itself. `MPP.Methods.XRPL.Session` keeps its
+  claim-based close.
 
 - **The static Tempo `"memo"` option is removed.** Configuring it raises at
   `MPP.Plug.init/1`; every Tempo charge requires the challenge-bound
@@ -17,6 +51,13 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- **Custom EIP-3009 settlement.** `MPP.Methods.EVM` accepts a server-only
+  `"settle_authorization" => {callback/2, configuration}` option in place of an
+  MPP settlement key. The callback runs only after every authorization check
+  passes and returns the mined transaction hash; MPP still verifies the receipt
+  and the transfer before issuing a payment receipt, and never falls back to
+  direct submission after a callback error. See the README section and
+  `examples/eip3009_push_split.exs`.
 - **Multi-currency Tempo charges.** `MPP.Plug` accepts `:currencies` and
   offers one challenge per currency; a Tempo charge without a currency offers
   OUSD plus the chain's stablecoin (mainnet `4217`: USDC.e; Moderato `42431`:
@@ -63,6 +104,26 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 - **Session open rejects a voucher below the request, or signed by the wrong
   known signer, before `verify_open` runs**, so an invalid open is never
   broadcast.
+
+### Fixed
+
+- **`MPP.Client.Transport.WebSocket` reconnects only before the first payment
+  or voucher**, and pays at most `:max_payments` challenges per connection
+  (default 3, as mpp-rs). A connection dropped after a payment is fatal:
+  `:dropped_awaiting_receipt` while a credential awaits its receipt,
+  `:dropped_after_payment` otherwise. A payment past the limit is fatal with
+  `:payment_limit`.
+- **Settled session funds no longer consume accepted credit.** When the
+  channel state or a top-up reports a settled amount, the channel's spent
+  balance is raised to the settled total only when it exceeds the accepted
+  cumulative amount, and is otherwise unchanged (mpp-rs
+  `session_method/stream.rs`).
+
+### Dependencies
+
+- onchain 0.17.0, ed25519 1.5.2, cowlib 2.21.0, gun 2.7.0, req, quickbeam,
+  ex_ast, sobelow 0.18.1, bandit 1.14.1 (dev), tidewave 0.9.2 (dev),
+  faucet_ex 0.2.1 (test).
 
 ## [0.20.1] — 2026-10-02
 
