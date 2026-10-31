@@ -35,7 +35,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
     sponsored? = fee_payer_enabled?(config)
     chain_id = config["chain_id"]
     rpc_url = config["rpc_url"]
-    now = System.os_time(:second)
+    now = FeePayerPolicy.ceil_now()
 
     with {:ok, access_key} <- decode_key(config["subscription_access_key_private_key"]),
          {:ok, access_key_address} <- Secp256k1.get_address(access_key),
@@ -62,6 +62,18 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
         Logger.error("Tempo subscription transaction build failed: #{inspect(reason)}")
         {:error, Shared.internal_payment_error()}
     end
+  end
+
+  @doc """
+  Re-check the remaining-validity floor of a sponsored transaction right before
+  broadcast (refs/mppx/src/tempo/server/Subscription.ts:1029). Unsponsored
+  transactions carry no `valid_before` and pass.
+  """
+  @spec check_remaining_validity(Transaction.t(), map()) :: :ok | {:error, String.t()}
+  def check_remaining_validity(%Transaction{valid_before: valid_before}, config) do
+    if fee_payer_enabled?(config),
+      do: FeePayerPolicy.check_remaining_validity(valid_before),
+      else: :ok
   end
 
   defp base_fields(chain_id, nonce, call, token, sponsored?, now, config, authorization) do

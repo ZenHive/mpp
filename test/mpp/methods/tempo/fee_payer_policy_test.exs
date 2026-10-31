@@ -304,6 +304,43 @@ defmodule MPP.Methods.Tempo.FeePayerPolicyTest do
       assert FeePayerPolicy.validate(valid_tx(valid_before: @now + 900), policy, @now) == :ok
     end
 
+    test "requires at least 15 seconds of remaining validity" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, nil)
+
+      assert {:error, "fee-payer transaction needs at least 15s of remaining validity" <> _} =
+               FeePayerPolicy.validate(valid_tx(valid_before: @now + 14), policy, @now)
+
+      assert {:error, "fee-payer transaction needs at least 15s of remaining validity" <> _} =
+               FeePayerPolicy.validate(valid_tx(valid_before: @now + 1), policy, @now)
+
+      assert FeePayerPolicy.validate(valid_tx(valid_before: @now + 15), policy, @now) == :ok
+    end
+
+    test "check_remaining_validity/2 compares against the rounded-up now" do
+      assert FeePayerPolicy.check_remaining_validity(@now + 15, @now) == :ok
+      assert {:error, _reason} = FeePayerPolicy.check_remaining_validity(@now + 15, @now + 1)
+
+      assert {:error, "fee-payer transaction must declare valid_before"} =
+               FeePayerPolicy.check_remaining_validity(nil, @now)
+    end
+
+    test "ceil_now/0 never lags the system clock" do
+      before = System.os_time(:millisecond)
+      ceiled = FeePayerPolicy.ceil_now()
+      assert ceiled * 1000 >= before
+      assert ceiled * 1000 - System.os_time(:millisecond) < 1000
+    end
+
+    test "rejects a policy window below the 15-second floor" do
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, %{"max_validity_window_seconds" => 14})
+
+      assert {:error, "sponsor max_validity_window_seconds 14 is below the 15s minimum"} =
+               FeePayerPolicy.validate(valid_tx(valid_before: @now + 14), policy, @now)
+
+      policy = FeePayerPolicy.resolve(@moderato_chain_id, %{"max_validity_window_seconds" => 15})
+      assert FeePayerPolicy.validate(valid_tx(valid_before: @now + 15), policy, @now) == :ok
+    end
+
     test "honors a widened max_validity_window_seconds override" do
       policy = FeePayerPolicy.resolve(@moderato_chain_id, %{"max_validity_window_seconds" => 7_200})
       assert FeePayerPolicy.validate(valid_tx(valid_before: @now + 3_600), policy, @now) == :ok

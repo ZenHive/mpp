@@ -188,6 +188,14 @@ defmodule MPP.Methods.Tempo.Subscription do
   end
 
   defp settle_activation(subscription, authorization, serialized_authorization, config, tx, memo) do
+    case SubscriptionTransaction.check_remaining_validity(tx, config) do
+      :ok -> broadcast_activation(subscription, authorization, serialized_authorization, config, tx, memo)
+      # Nothing was broadcast, so the activation claim is released.
+      {:error, reason} -> {:error, {:retryable, reason}}
+    end
+  end
+
+  defp broadcast_activation(subscription, authorization, serialized_authorization, config, tx, memo) do
     case broadcast(tx.raw, config) do
       {:ok, tx_hash, chain_receipt} ->
         confirm_activation(subscription, authorization, serialized_authorization, config, tx_hash, chain_receipt, memo)
@@ -256,7 +264,8 @@ defmodule MPP.Methods.Tempo.Subscription do
 
     with {:ok, key_type} <- renewal_key_type(record, config),
          {:ok, tx, memo} <- SubscriptionTransaction.build(subscription, nil, source, config, reference),
-         :ok <- simulate_sponsored(tx, source, key_type, config) do
+         :ok <- simulate_sponsored(tx, source, key_type, config),
+         :ok <- SubscriptionTransaction.check_remaining_validity(tx, config) do
       case broadcast(tx.raw, config) do
         {:ok, tx_hash, chain_receipt} ->
           confirm_renewal(record, period_index, tx_hash, chain_receipt, subscription, memo, config)

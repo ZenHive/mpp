@@ -73,7 +73,24 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
     assert r in 1..(Bitwise.bsl(1, 256) - 1)
     assert s in 1..(Bitwise.bsl(1, 256) - 1)
     refute Transaction.has_fee_payer_placeholder?(tx)
-    assert tx.valid_before <= System.os_time(:second) + 24
+    assert tx.valid_before <= FeePayerPolicy.ceil_now() + 24
+    assert :ok = SubscriptionTransaction.check_remaining_validity(tx, sponsored)
+  end
+
+  test "pre-broadcast re-check rejects a sponsored transaction under the remaining-validity floor" do
+    subscription = SubscriptionHelpers.subscription()
+    sponsored = sponsored_config(subscription)
+
+    assert {:ok, tx, _memo} =
+             SubscriptionTransaction.build(subscription, nil, SubscriptionHelpers.root_address(), sponsored, "renewal")
+
+    now = FeePayerPolicy.ceil_now()
+
+    assert {:error, "fee-payer transaction needs at least 15s of remaining validity" <> _} =
+             SubscriptionTransaction.check_remaining_validity(%{tx | valid_before: now + 14}, sponsored)
+
+    assert :ok = SubscriptionTransaction.check_remaining_validity(%{tx | valid_before: now + 16}, sponsored)
+    assert :ok = SubscriptionTransaction.check_remaining_validity(%{tx | valid_before: 0}, config())
   end
 
   test "rejects invalid signing and sponsorship configuration" do

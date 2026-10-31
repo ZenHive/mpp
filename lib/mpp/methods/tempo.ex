@@ -53,7 +53,9 @@ defmodule MPP.Methods.Tempo do
     * `"fee_payer_policy"` — (optional, `fee_payer: true` only) map of sponsor
       ceilings overriding the per-chain defaults: `"max_gas"`,
       `"max_fee_per_gas"`, `"max_priority_fee_per_gas"`, `"max_total_fee"` (wei),
-      and `"max_validity_window_seconds"` (seconds). Bounds the client-supplied
+      and `"max_validity_window_seconds"` (seconds, at least 15). A sponsored
+      transaction must carry at least 15 seconds of remaining `valid_before`
+      validity, checked before co-sign and again before broadcast. Bounds the client-supplied
       gas fields and validity window before the server co-signs so a malicious
       client cannot drain the fee-payer wallet via inflated gas price, total fee
       budget, or a padded access list, nor hold a co-signed sponsorship
@@ -604,6 +606,14 @@ defmodule MPP.Methods.Tempo do
         raise ArgumentError, "MPP.Methods.Tempo fee_payer_policy #{key} must be a positive integer"
       end
     end)
+
+    min_window = FeePayerPolicy.min_remaining_validity_seconds()
+
+    if Map.has_key?(overrides, "max_validity_window_seconds") and
+         !(is_integer(overrides["max_validity_window_seconds"]) and overrides["max_validity_window_seconds"] >= min_window) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_policy max_validity_window_seconds must be an integer of at least #{min_window}"
+    end
 
     chain_id = config["chain_id"] || @moderato_chain_id
     policy = FeePayerPolicy.resolve(chain_id, overrides)
@@ -1218,9 +1228,19 @@ defmodule MPP.Methods.Tempo do
     with {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, tx, _hash} <- canonicalize_transaction(tx),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
-         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
+         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config),
+         :ok <- recheck_sponsored_validity(tx, config) do
       {:ok, tx, rpc_url}
     end
+  end
+
+  # Co-sign, fill and simulation take round trips, so the remaining-validity
+  # floor is re-checked on the final envelope right before broadcast
+  # (refs/mpp-rs/src/protocol/methods/tempo/method/transaction_credential.rs:427-441).
+  defp recheck_sponsored_validity(%Transaction{valid_before: valid_before}, config) do
+    if fee_payer_enabled?(config),
+      do: FeePayerPolicy.check_remaining_validity(valid_before),
+      else: :ok
   end
 
   defp broadcast_reserved_transaction(tx, rpc_url, config, charge, wait?, %{

@@ -196,6 +196,22 @@ defmodule MPP.Client.Providers.TempoTest do
       assert Transaction.fee_token_empty?(tx)
     end
 
+    test "refuses to sign a fee-payer transaction under the remaining-validity floor" do
+      sponsored = %{"chainId" => @chain_id, "feePayer" => true}
+
+      expiring = challenge(expires: Expires.seconds(10), method_details: sponsored)
+      assert {:error, :sponsored_challenge_expiring} = Tempo.pay(expiring, provider_config())
+
+      short_window = Map.put(provider_config(), :valid_before, System.os_time(:second) + 10)
+
+      assert {:error, :sponsored_validity_too_short} =
+               Tempo.pay(challenge(method_details: sponsored), short_window)
+
+      # Without sponsorship nobody else must broadcast, so a short window is signed.
+      unsponsored = challenge(expires: Expires.seconds(10))
+      assert {:ok, _credential} = Tempo.pay(unsponsored, provider_config())
+    end
+
     test "adds a presenter signature when advertised by the challenge" do
       challenge = challenge(method_details: %{"chainId" => @chain_id, "presenterBinding" => true})
 

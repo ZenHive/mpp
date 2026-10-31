@@ -82,6 +82,7 @@ defmodule MPP.Client.Providers.Tempo do
   alias MPP.Intents.Charge
   alias MPP.Intents.Subscription
   alias MPP.Methods.Shared, as: MethodShared
+  alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
@@ -240,11 +241,13 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   defp build_transaction(calls, challenge, charge, details, chain_id, provider) do
+    valid_before = valid_before(challenge, provider.transaction_options[:valid_before])
+
     opts =
       provider.transaction_options
       |> Map.put_new(:nonce, 0)
       |> Map.put_new(:nonce_key, @expiring_nonce_key)
-      |> Map.put(:valid_before, valid_before(challenge, provider.transaction_options[:valid_before]))
+      |> Map.put(:valid_before, valid_before)
       |> Map.merge(%{
         private_key: provider.private_key,
         calls: calls,
@@ -254,7 +257,12 @@ defmodule MPP.Client.Providers.Tempo do
       |> Map.to_list()
 
     if details["feePayer"] == true do
-      Builder.build_fee_payer_multicall(opts)
+      # Building fills gas over RPC, so the floor is checked before and after.
+      with :ok <- ensure_sponsorable(challenge, valid_before),
+           {:ok, _signed} = built <- Builder.build_fee_payer_multicall(opts),
+           :ok <- ensure_sponsorable(challenge, valid_before) do
+        built
+      end
     else
       fee_token = provider.fee_token || charge.currency
       Builder.build_signed_multicall(Keyword.put(opts, :fee_token, fee_token))
@@ -512,6 +520,32 @@ defmodule MPP.Client.Providers.Tempo do
       {expires, requested} -> min(requested, expires)
     end
   end
+
+  # The fee payer refuses a sponsored transaction with less than the
+  # remaining-validity floor, so neither the challenge nor `validBefore` may be
+  # that close to expiry when signing (refs/mppx/src/tempo/client/Charge.ts:290-307,
+  # refs/mpp-rs/src/client/tempo/charge/mod.rs:209-253).
+  defp ensure_sponsorable(challenge, valid_before) do
+    floor_ms = FeePayerPolicy.min_remaining_validity_seconds() * 1000
+    now_ms = System.os_time(:millisecond)
+
+    expires_ms = challenge_expires_ms(challenge)
+
+    cond do
+      is_integer(expires_ms) and expires_ms - now_ms < floor_ms -> {:error, :sponsored_challenge_expiring}
+      valid_before * 1000 - now_ms < floor_ms -> {:error, :sponsored_validity_too_short}
+      true -> :ok
+    end
+  end
+
+  defp challenge_expires_ms(%Challenge{expires: expires}) when is_binary(expires) do
+    case DateTime.from_iso8601(expires) do
+      {:ok, datetime, _offset} -> DateTime.to_unix(datetime, :millisecond)
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp challenge_expires_ms(_challenge), do: nil
 
   defp challenge_expires_unix(%Challenge{expires: nil}), do: nil
 

@@ -22,9 +22,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
     * `max_fee_per_gas` in `1..policy.max_fee_per_gas`
     * `gas_limit * max_fee_per_gas <= policy.max_total_fee` (worst-case budget cap)
     * `max_priority_fee_per_gas <= max_fee_per_gas` and `<= policy.max_priority_fee_per_gas`
-    * expiring nonce key required; `valid_before` present, in the future, and
-      within `policy.max_validity_window_seconds` of now (bounds how long a
-      sponsorship the server co-signs can sit broadcastable)
+    * expiring nonce key required; `valid_before` present, at least
+      `min_remaining_validity_seconds/0` (15s) after now rounded up to the next
+      whole second, and within `policy.max_validity_window_seconds` of that
+      same rounded-up now (bounds how long a sponsorship the server co-signs
+      can sit broadcastable); a policy window below the 15s floor is rejected
     * access list empty (fee-payer call scopes never need one)
     * EIP-7702 authorization list empty (a sponsored payment never delegates
       account code; each entry is intrinsic gas the sponsor would pay)
@@ -101,6 +103,11 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @max_validity_window_seconds_default 15 * 60
   @max_in_flight_total_fee_default @max_total_fee_default * 10
   @max_in_flight_reservations_default 100
+
+  # Minimum remaining validity a sponsored transaction must carry at co-sign and
+  # again right before broadcast (mpp-rs `FEE_PAYER_MIN_REMAINING_VALIDITY_SECS`,
+  # mppx `defaults.minRemainingValiditySeconds`).
+  @min_remaining_validity_seconds 15
 
   @typedoc "Resolved sponsor gas-economics and validity-window ceilings."
   @type t :: %__MODULE__{
@@ -217,6 +224,58 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   end
 
   @doc """
+  Minimum seconds of remaining validity a sponsored transaction must carry.
+
+  Matches mpp-rs `FEE_PAYER_MIN_REMAINING_VALIDITY_SECS` and mppx
+  `defaults.minRemainingValiditySeconds`.
+
+  ## Examples
+
+      iex> MPP.Methods.Tempo.FeePayerPolicy.min_remaining_validity_seconds()
+      15
+  """
+  @spec min_remaining_validity_seconds() :: pos_integer()
+  def min_remaining_validity_seconds, do: @min_remaining_validity_seconds
+
+  @doc """
+  Current unix time in seconds, rounded up to the next whole second.
+
+  The reference point for every validity comparison in this module (mpp-rs
+  `now.as_secs() + (subsec_nanos > 0)`, mppx `Math.ceil(now / 1000)`).
+  """
+  @spec ceil_now() :: integer()
+  def ceil_now, do: div(System.os_time(:millisecond) + 999, 1000)
+
+  @doc """
+  Check that `valid_before` leaves at least `min_remaining_validity_seconds/0`
+  after `now` (unix seconds, already rounded up; defaults to `ceil_now/0`).
+
+  Runs before co-signing and again immediately before broadcasting a sponsored
+  transaction. Returns `:ok` or `{:error, reason}` (binary).
+
+  ## Examples
+
+      iex> MPP.Methods.Tempo.FeePayerPolicy.check_remaining_validity(1_015, 1_000)
+      :ok
+
+      iex> {:error, _reason} = MPP.Methods.Tempo.FeePayerPolicy.check_remaining_validity(1_014, 1_000)
+  """
+  @spec check_remaining_validity(non_neg_integer() | nil, integer()) :: :ok | {:error, String.t()}
+  def check_remaining_validity(valid_before, now \\ ceil_now())
+
+  def check_remaining_validity(valid_before, now) when is_integer(valid_before) and is_integer(now) do
+    if valid_before < now + @min_remaining_validity_seconds do
+      {:error,
+       "fee-payer transaction needs at least #{@min_remaining_validity_seconds}s of remaining validity " <>
+         "(valid_before #{valid_before}, now #{now})"}
+    else
+      :ok
+    end
+  end
+
+  def check_remaining_validity(_valid_before, _now), do: {:error, "fee-payer transaction must declare valid_before"}
+
+  @doc """
   Pin the key-authorization field the sponsored transaction must carry.
 
   A sponsored `0x76` envelope may not carry a key authorization at all unless
@@ -236,8 +295,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
 
   Returns `:ok` or `{:error, reason}` (binary). Fields are read from the parsed
   `0x76` envelope. The validity-window check is evaluated against the current
-  system time; pass `validate/3` with an explicit `now` (unix seconds) to make
-  the comparison deterministic.
+  system time rounded up to the next whole second (`ceil_now/0`); pass
+  `validate/3` with an explicit `now` (unix seconds) to make the comparison
+  deterministic.
   """
   @spec validate(Transaction.t(), t()) :: :ok | {:error, String.t()}
   def validate(%Transaction{} = tx, %__MODULE__{} = policy) do
@@ -268,7 +328,7 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   @spec measure(Transaction.t(), t()) ::
           {:ok, %{total_fee: pos_integer(), valid_before: pos_integer()}} | {:error, String.t()}
   def measure(%Transaction{} = tx, %__MODULE__{} = policy) do
-    measure(tx, policy, System.os_time(:second))
+    measure(tx, policy, ceil_now())
   end
 
   @doc """
@@ -339,8 +399,14 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
       is_nil(valid_before) ->
         {:error, "fee-payer transaction must declare valid_before"}
 
+      max < @min_remaining_validity_seconds ->
+        {:error, "sponsor max_validity_window_seconds #{max} is below the #{@min_remaining_validity_seconds}s minimum"}
+
       valid_before <= now ->
         {:error, "fee-payer transaction already expired (valid_before #{valid_before} <= now #{now})"}
+
+      valid_before < now + @min_remaining_validity_seconds ->
+        check_remaining_validity(valid_before, now)
 
       valid_before - now > max ->
         {:error, "fee-payer validity window #{valid_before - now}s exceeds maximum #{max}s"}

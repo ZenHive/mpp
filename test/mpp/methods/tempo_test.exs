@@ -10,6 +10,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Errors
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
+  alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -2747,6 +2748,16 @@ defmodule MPP.Methods.TempoTest do
         "store" => ConCacheStore
       }
 
+      for value <- [14, 0, -1, "900"] do
+        config = put_in(base["fee_payer_policy"], %{"max_validity_window_seconds" => value})
+
+        assert_raise ArgumentError, ~r/max_validity_window_seconds must be an integer of at least 15/, fn ->
+          Tempo.validate_config!(config)
+        end
+      end
+
+      assert :ok = Tempo.validate_config!(put_in(base["fee_payer_policy"], %{"max_validity_window_seconds" => 15}))
+
       for value <- [0, -1, "100"] do
         config = put_in(base["fee_payer_policy"], %{"max_in_flight_reservations" => value})
 
@@ -3206,6 +3217,62 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.detail =~ "reverted"
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "rejects a sponsored transaction under the remaining-validity floor before co-sign", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 11, valid_before: FeePayerPolicy.ceil_now() + 5)
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:rpc_call, Jason.decode!(body)["method"]})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "needs at least 15s of remaining validity"
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+      refute_received {:rpc_call, _method}
+    end
+
+    test "re-checks remaining validity before broadcast and releases budget and dedup claim", %{charge: charge} do
+      valid_before = FeePayerPolicy.ceil_now() + 16
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 12, valid_before: valid_before)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      dedup_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        method = Jason.decode!(body)["method"]
+        send(test_pid, {:rpc_call, method})
+
+        case method do
+          "eth_simulateV1" ->
+            send(test_pid, {:held_during_simulate, sponsor_budget_state(charge, @fee_payer_private_key)})
+            # Simulation outlasts the margin, leaving less than the floor.
+            Process.sleep(max((valid_before - 15) * 1000 - System.os_time(:millisecond) + 50, 0))
+            Req.Test.json(conn, simulate_success_body())
+
+          _ ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+        end
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "needs at least 15s of remaining validity"
+
+      assert_received {:held_during_simulate, {:ok, %{reservations: held}}}
+      assert map_size(held) == 1
+      assert_received {:rpc_call, "eth_simulateV1"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+      refute_received {:rpc_call, "eth_sendRawTransaction"}
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+      assert :not_found = ConCacheStore.get(dedup_key, store_opts)
     end
 
     test "retains async sponsorship and rejects the next request with retry timing", %{charge: charge} do
@@ -4437,7 +4504,7 @@ defmodule MPP.Methods.TempoTest do
       gas_limit: 1_000_000,
       nonce: Keyword.fetch!(opts, :nonce),
       nonce_key: expiring_nonce_key_int(),
-      valid_before: future_valid_before()
+      valid_before: Keyword.get(opts, :valid_before, future_valid_before())
     )
   end
 
