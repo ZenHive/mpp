@@ -168,7 +168,7 @@ defmodule MPP.Methods.Tempo.Subscription do
       {:error, :already_current, record} -> {:ok, receipt(record)}
       {:error, :renewal_in_flight} -> {:error, Errors.new(:verification_failed, @renewal_in_flight_error)}
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, error_message(reason))}
+      {:error, reason} -> {:error, subscription_error(reason)}
     end
   end
 
@@ -229,7 +229,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     case due_period(record) do
       {:ok, _period} -> renew(record.subscription_id, config)
       {:error, :already_current, record} -> {:ok, receipt(record)}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, error_message(reason))}
+      {:error, reason} -> {:error, subscription_error(reason)}
     end
   end
 
@@ -518,7 +518,8 @@ defmodule MPP.Methods.Tempo.Subscription do
         :ok
 
       {:ok, %{body: %{"error" => error}}} ->
-        {:error, "subscription sponsorship simulation rejected: #{inspect(error)}"}
+        Logger.warning("Tempo subscription sponsorship simulation rejected: #{inspect(error)}")
+        {:error, "subscription sponsorship simulation rejected"}
 
       {:ok, _response} ->
         {:error, "subscription sponsorship simulation failed"}
@@ -609,10 +610,18 @@ defmodule MPP.Methods.Tempo.Subscription do
 
   defp normalize_result({:ok, %Receipt{}} = result), do: result
   defp normalize_result({:error, %Errors{}} = error), do: error
-  defp normalize_result({:error, reason}), do: {:error, Errors.new(:verification_failed, error_message(reason))}
+  defp normalize_result({:error, reason}), do: {:error, subscription_error(reason)}
 
-  defp error_message(reason) when is_binary(reason), do: reason
-  defp error_message(:subscription_not_found), do: "subscription not found"
-  defp error_message(:subscription_expired), do: "subscription expired"
-  defp error_message(reason), do: "subscription operation failed: #{inspect(reason)}"
+  defp subscription_error(reason) when is_binary(reason), do: Errors.new(:verification_failed, reason)
+  defp subscription_error(:subscription_not_found), do: Errors.new(:verification_failed, "subscription not found")
+  defp subscription_error(:subscription_expired), do: Errors.new(:verification_failed, "subscription expired")
+
+  defp subscription_error(:renewal_claim_mismatch),
+    do: Errors.new(:verification_failed, "subscription renewal claim no longer matches the stored record")
+
+  # Store and adapter terms stay in the server log, never in the problem detail.
+  defp subscription_error(reason) do
+    Logger.error("Tempo subscription operation failed: #{inspect(reason)}")
+    Shared.internal_payment_error()
+  end
 end

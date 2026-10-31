@@ -5,6 +5,7 @@ defmodule MPP.Transports.WebSocketTest do
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
   alias MPP.Errors
+  alias MPP.Methods.Shared
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
   alias MPP.Session.Store
@@ -383,10 +384,30 @@ defmodule MPP.Transports.WebSocketTest do
 
   defmodule ErrorStore do
     @moduledoc false
-    def get(_channel_id), do: {:error, :down}
+    def get(_channel_id), do: {:error, {:down, "store-shard-4c2e"}}
     def put(_channel), do: :ok
-    def update(_channel_id, _fun), do: {:error, :timeout}
+    def update(_channel_id, _fun), do: {:error, {:timeout, "store-shard-4c2e"}}
     def delete(_channel_id), do: :ok
+  end
+
+  defmodule SpendFailStore do
+    @moduledoc false
+    # Delegates to the ETS store kept in the calling process's dictionary and
+    # fails only the update that would raise `spent`.
+    def get(channel_id), do: Store.get(backing(), channel_id)
+    def put(channel), do: Store.put(backing(), channel)
+    def delete(channel_id), do: Store.delete(backing(), channel_id)
+
+    def update(channel_id, fun) do
+      {:ok, current} = Store.get(backing(), channel_id)
+
+      case fun.(current) do
+        {:ok, %Channel{spent: spent}} when spent > current.spent -> {:error, {:db_conn_refused, "replica-a17b"}}
+        _other -> Store.update(backing(), channel_id, fun)
+      end
+    end
+
+    defp backing, do: Process.get(:spend_fail_backing_store)
   end
 
   describe "session metering" do
@@ -838,11 +859,38 @@ defmodule MPP.Transports.WebSocketTest do
       refute bound.meter.channel_id
     end
 
-    test "finish reports a store get error" do
+    test "finish reports a store get error as the generic internal error and logs the term" do
       {sess, _} = WebSocket.open(meter_session(__MODULE__.ErrorStore, generate: []))
       sess = %{sess | status: :authorized}
-      {_sess, [frame]} = WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
-      assert frame["error"] =~ "session store error"
+
+      {{_sess, [frame]}, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          WebSocket.start_metering(sess, channel_id: @channel_id, generate: [], tick_cost: 50)
+        end)
+
+      assert frame["error"] == Shared.internal_payment_error().detail
+      refute frame["error"] =~ "store-shard-4c2e"
+      assert log =~ "store-shard-4c2e"
+      assert log =~ @channel_id
+    end
+
+    test "a failed spend update reports the generic internal error and logs the term" do
+      backing = session_store()
+      put_channel!(backing, cumulative: 100, spent: 0)
+      Process.put(:spend_fail_backing_store, backing)
+      {sess, _} = WebSocket.open(meter_session(__MODULE__.SpendFailStore, generate: []))
+      sess = %{sess | status: :authorized}
+
+      {{_sess, frames}, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          WebSocket.start_metering(sess, channel_id: @channel_id, generate: ["chunk-1"], tick_cost: 50)
+        end)
+
+      assert [%{"type" => "error", "error" => error}] = frames
+      assert error == Shared.internal_payment_error().detail
+      refute error =~ "replica-a17b"
+      assert log =~ "replica-a17b"
+      assert log =~ @channel_id
     end
 
     test "tick reports a store update error" do

@@ -12,12 +12,15 @@ defmodule MPP.Transports.WebSocket.Session do
 
   alias MPP.Errors
   alias MPP.Intents.Session, as: SessionIntent
+  alias MPP.Methods.Shared
   alias MPP.Plug.Config
   alias MPP.Session.Actions
   alias MPP.Session.Channel
   alias MPP.Session.Store
   alias MPP.Transports.WebSocket
   alias MPP.Transports.WebSocket.Frame
+
+  require Logger
 
   defmodule Meter do
     @moduledoc false
@@ -157,7 +160,7 @@ defmodule MPP.Transports.WebSocket.Session do
         {session, [Frame.error_frame("session channel not found")]}
 
       {:error, reason} ->
-        {session, [Frame.error_frame("session store error: #{inspect(reason)}")]}
+        {session, [internal_error_frame("receipt", meter.channel_id, reason)]}
     end
   end
 
@@ -231,8 +234,15 @@ defmodule MPP.Transports.WebSocket.Session do
         {:error, session, Frame.error_frame("session channel not found")}
 
       {:error, reason} ->
-        {:error, session, Frame.error_frame("session deduct failed: #{inspect(reason)}")}
+        {:error, session, internal_error_frame("deduct", meter.channel_id, reason)}
     end
+  end
+
+  # Store and adapter terms stay in the server log; the client frame carries
+  # only the fixed internal-payment-error detail.
+  defp internal_error_frame(action, channel_id, reason) do
+    Logger.error("MPP WebSocket session #{action} store failure (channel_id: #{channel_id}): #{inspect(reason)}")
+    Frame.error_frame(Shared.internal_payment_error().detail)
   end
 
   defp emit_next(%WebSocket{meter: %Meter{remaining: [item | rest]} = meter} = session) do

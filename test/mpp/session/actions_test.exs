@@ -279,9 +279,14 @@ defmodule MPP.Session.ActionsTest do
                  Keyword.put(opts, :verify_channel_state, fn _, _ -> {:error, rpc_down} end)
                )
 
-      for malformed <- [{:ok, %{deposit: 1_000}}, {:ok, state(%{deposit: 1_000, settled: 2_000})}, :timeout] do
-        assert {:error, %Errors{detail: "channel state verification failed: " <> _}} =
-                 Actions.dispatch(voucher_payload(80), Keyword.put(opts, :verify_channel_state, fn _, _ -> malformed end))
+      for malformed <- [
+            {:ok, %{deposit: 1_000}},
+            {:ok, state(%{deposit: 1_000, settled: 2_000})},
+            {:timeout, "escrow-rpc-5e1d"}
+          ] do
+        assert_internal_failure(malformed, fn ->
+          Actions.dispatch(voucher_payload(80), Keyword.put(opts, :verify_channel_state, fn _, _ -> malformed end))
+        end)
       end
 
       assert {:ok, %Channel{cumulative_amount: 50, close_requested: false}} = Store.get(store, @channel_id)
@@ -510,15 +515,14 @@ defmodule MPP.Session.ActionsTest do
             {:ok, 1_400},
             {:ok, state(%{deposit: "1400"})},
             {:ok, state(%{deposit: -1})},
-            {:error, :rpc_down}
+            {:error, {:rpc_down, "archive-node-b812"}}
           ] do
-        assert {:error, %Errors{detail: detail}} =
-                 Actions.dispatch(
-                   top_up_payload(400),
-                   Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> result end)
-                 )
-
-        assert detail =~ "funding verification failed"
+        assert_internal_failure(result, fn ->
+          Actions.dispatch(
+            top_up_payload(400),
+            Keyword.put(opts, :verify_top_up, fn _payload, _channel, _opts -> result end)
+          )
+        end)
       end
 
       assert {:ok, %Channel{deposit: 1_000}} = Store.get(store, @channel_id)
@@ -721,12 +725,14 @@ defmodule MPP.Session.ActionsTest do
             {:ok, %{tx_hash: "0xdead"}},
             {:ok, %{tx_hash: "0x" <> String.duplicate("zz", 32)}},
             {:ok, %{tx_hash: String.duplicate("ab", 32)}},
-            {:error, :timeout}
+            {:error, {:timeout, "settler-queue-3d4f"}}
           ] do
-        assert {:error, %Errors{} = error} =
-                 Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> result end))
+        log =
+          assert_internal_failure(result, fn ->
+            Actions.dispatch(close_payload(50), Keyword.put(opts, :settle_close, fn _, _, _ -> result end))
+          end)
 
-        assert error.detail =~ "channel left pending close"
+        assert log =~ "channel left pending close"
         assert {:ok, %Channel{status: :active, closing: true}} = Store.get(store, @channel_id)
 
         assert {:error, %Errors{} = voucher} = Actions.dispatch(voucher_payload(80), opts)
@@ -1217,11 +1223,11 @@ defmodule MPP.Session.ActionsTest do
             {:ok, state(%{deposit: -1})},
             {:ok, state(%{deposit: "1000"})},
             :ok,
-            {:error, :timeout}
+            {:error, {:timeout, "escrow-db-91aa"}}
           ] do
         opts = Keyword.put(opts, :verify_open, fn _, _ -> result end)
-        assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
-        assert detail =~ "open funding verification failed"
+        log = assert_internal_failure(result, fn -> Actions.dispatch(open_payload(50), opts) end)
+        assert log =~ "open funding verifier returned an unrecognized result"
       end
 
       assert :not_found = Store.get(store, @channel_id)
@@ -1455,16 +1461,16 @@ defmodule MPP.Session.ActionsTest do
 
       for state <- malformed.(1_000) do
         opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state} end)
-        assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
-        assert detail =~ "open funding verification failed"
+        log = assert_internal_failure({:ok, state}, fn -> Actions.dispatch(open_payload(50), opts) end)
+        assert log =~ "open funding verifier"
       end
 
       assert {:ok, _} = Actions.dispatch(open_payload(50), opts)
 
       for state <- malformed.(2_000) do
         opts = Keyword.put(opts, :verify_top_up, fn _, _, _ -> {:ok, state} end)
-        assert {:error, %Errors{detail: detail}} = Actions.dispatch(top_up_payload(400), opts)
-        assert detail =~ "topUp funding verification failed"
+        log = assert_internal_failure({:ok, state}, fn -> Actions.dispatch(top_up_payload(400), opts) end)
+        assert log =~ "topUp funding verifier"
       end
     end
 
@@ -1474,8 +1480,8 @@ defmodule MPP.Session.ActionsTest do
       for key <- [:deposit, :settled, :close_requested, :finalized] do
         result = {:ok, Map.delete(complete, key)}
         opts = Keyword.put(opts, :verify_open, fn _, _ -> result end)
-        assert {:error, %Errors{detail: detail}} = Actions.dispatch(open_payload(50), opts)
-        assert detail =~ "open funding verification failed"
+        log = assert_internal_failure(result, fn -> Actions.dispatch(open_payload(50), opts) end)
+        assert log =~ "open funding verifier"
         assert :not_found = Store.get(store, @channel_id)
       end
 
@@ -1484,8 +1490,8 @@ defmodule MPP.Session.ActionsTest do
       for key <- [:deposit, :settled, :close_requested, :finalized] do
         result = {:ok, Map.delete(state(%{deposit: 2_000}), key)}
         opts = Keyword.put(opts, :verify_top_up, fn _, _, _ -> result end)
-        assert {:error, %Errors{detail: detail}} = Actions.dispatch(top_up_payload(400), opts)
-        assert detail =~ "topUp funding verification failed"
+        log = assert_internal_failure(result, fn -> Actions.dispatch(top_up_payload(400), opts) end)
+        assert log =~ "topUp funding verifier"
       end
 
       assert {:ok, %Channel{deposit: 1_000}} = Store.get(store, @channel_id)
@@ -1608,6 +1614,17 @@ defmodule MPP.Session.ActionsTest do
       end
 
     Enum.map(tasks, &Task.await/1)
+  end
+
+  # The callback result reaches only the log; the client sees the fixed
+  # internal-payment-error problem.
+  defp assert_internal_failure(callback_result, dispatch) do
+    {result, log} = ExUnit.CaptureLog.with_log(dispatch)
+    error = InternalPaymentError.assert_error(result)
+    refute error.detail =~ inspect(callback_result)
+    assert log =~ inspect(callback_result)
+    assert log =~ @channel_id
+    log
   end
 
   defp open_payload(amount) do

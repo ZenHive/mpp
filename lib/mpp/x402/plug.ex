@@ -46,6 +46,7 @@ defmodule MPP.X402.Plug do
 
   alias MPP.BodyDigest
   alias MPP.Errors
+  alias MPP.Methods.Shared
   alias MPP.X402
   alias MPP.X402.Facilitator
   alias MPP.X402.Headers
@@ -53,6 +54,8 @@ defmodule MPP.X402.Plug do
   alias MPP.X402.Replay
   alias Onchain.Address
   alias Plug.Conn
+
+  require Logger
 
   @route_scope_keys ["digest", "opaque", "_mppx_scope"]
   @mppx_binding_schema %{
@@ -152,7 +155,7 @@ defmodule MPP.X402.Plug do
     else
       {:error, %Errors{} = error} -> {:error, error}
       {:error, :already_used} -> {:error, Errors.new(:verification_failed, "x402 payment has already been settled")}
-      {:error, reason} -> {:error, Errors.new(:verification_failed, x402_error(reason))}
+      {:error, reason} -> {:error, x402_error(reason)}
     end
   end
 
@@ -384,7 +387,12 @@ defmodule MPP.X402.Plug do
     raise ArgumentError, "MPP.Plug :x402 :#{key} conflicts with the route :#{key}"
   end
 
-  defp x402_error(reason) when is_atom(reason), do: "x402 #{reason}"
-  defp x402_error(reason) when is_binary(reason), do: reason
-  defp x402_error(reason), do: "x402 settlement failed: #{inspect(reason)}"
+  defp x402_error(reason) when is_atom(reason), do: Errors.new(:verification_failed, "x402 #{reason}")
+  defp x402_error(reason) when is_binary(reason), do: Errors.new(:verification_failed, reason)
+
+  # Facilitator transport/HTTP and callback terms stay in the server log.
+  defp x402_error(reason) do
+    Logger.error("MPP x402 facilitator failure: #{inspect(reason)}")
+    Shared.internal_payment_error()
+  end
 end

@@ -311,8 +311,9 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
 
       stub_sponsorship_failure(:rejected)
 
-      assert {:error, %Errors{} = error} = Subscription.renew(activation.subscription_id, config)
-      assert error.detail =~ "subscription sponsorship simulation rejected"
+      {result, log} = ExUnit.CaptureLog.with_log(fn -> Subscription.renew(activation.subscription_id, config) end)
+      assert {:error, %Errors{status: 402, detail: "subscription sponsorship simulation rejected"}} = result
+      assert log =~ "execution rejected"
 
       assert {:ok, held} = Store.get(store, activation.subscription_id)
       assert held.in_flight_period == nil
@@ -527,8 +528,11 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
             assert {:error, %Errors{status: 402, detail: "subscription not found"}} = result
 
           :mismatch ->
-            assert {:error, %Errors{status: 402, detail: "subscription operation failed: :renewal_claim_mismatch"}} =
-                     result
+            assert {:error,
+                    %Errors{
+                      status: 402,
+                      detail: "subscription renewal claim no longer matches the stored record"
+                    }} = result
         end
 
         assert_received {:rpc, "eth_sendRawTransactionSync", [_raw]}

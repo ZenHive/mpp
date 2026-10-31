@@ -14,6 +14,8 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
   alias Onchain.Tempo.TIP20
   alias Onchain.Tempo.Transaction
 
+  require Logger
+
   @tempo_transaction_type 0x76
   @keychain_v2_type 0x04
   @default_max_priority_fee_per_gas 1_000_000_000
@@ -51,8 +53,12 @@ defmodule MPP.Methods.Tempo.SubscriptionTransaction do
          {:ok, tx} <- maybe_cosign(tx, config) do
       {:ok, tx, hex(memo)}
     else
-      {:error, reason} when is_binary(reason) -> {:error, reason}
-      {:error, reason} -> {:error, inspect(reason)}
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        Logger.error("Tempo subscription transaction build failed: #{inspect(reason)}")
+        {:error, "subscription transaction could not be built"}
     end
   end
 

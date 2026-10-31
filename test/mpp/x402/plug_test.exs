@@ -304,7 +304,6 @@ defmodule MPP.X402.PlugTest do
     for {stage, response, expected} <- [
           {:verify, {:ok, %{"isValid" => false}}, "verify_failed"},
           {:verify, {:ok, %{"isValid" => false, "invalidMessage" => "declined"}}, "declined"},
-          {:verify, {:error, {:transport, :offline}}, "transport"},
           {:settle, {:ok, %{"success" => false, "network" => "eip155:84532", "transaction" => ""}}, "settle_failed"},
           {:settle, {:error, Errors.new(:verification_failed, "custom failure")}, "custom failure"}
         ] do
@@ -318,6 +317,26 @@ defmodule MPP.X402.PlugTest do
       assert Plug.Conn.get_resp_header(failed, "payment-response") == []
       assert problem_detail(settle(opts, payload)) =~ "already been settled"
       refute_received {:settle, _, _}
+    end
+  end
+
+  test "facilitator transport and HTTP failures return the generic internal error and log the term" do
+    for {stage, response, term} <- [
+          {:verify, {:error, {:transport, :facilitator_db_offline_7f3a}}, "facilitator_db_offline_7f3a"},
+          {:settle, {:error, {:facilitator_http, 503, %{"trace" => "pg-replica-9c1d"}}}, "pg-replica-9c1d"}
+        ] do
+      opts = plug_opts(self(), store: start_replay_store!())
+      payload = signed_payload(opts)
+      client = Map.put(opts.x402.facilitator, stage, fn _, _ -> response end)
+      opts = %{opts | x402: %{opts.x402 | facilitator: client}}
+
+      {failed, log} = ExUnit.CaptureLog.with_log(fn -> settle(opts, payload) end)
+
+      assert failed.status == 500
+      assert problem_detail(failed) == MPP.Methods.Shared.internal_payment_error().detail
+      refute problem_detail(failed) =~ term
+      assert log =~ term
+      assert Plug.Conn.get_resp_header(failed, "payment-response") == []
     end
   end
 

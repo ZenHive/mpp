@@ -131,6 +131,8 @@ defmodule MPP.Session.Actions do
   alias MPP.Session.Voucher
   alias Onchain.Address
 
+  require Logger
+
   @type opts :: keyword()
 
   @doc "Parse a session payload and apply the matching channel-state handler."
@@ -229,7 +231,7 @@ defmodule MPP.Session.Actions do
   defp verify_top_up(payload, channel, opts) do
     case Keyword.get(opts, :verify_top_up) do
       fun when is_function(fun, 3) ->
-        payload |> fun.(channel, opts) |> escrow_state("topUp")
+        payload |> fun.(channel, opts) |> escrow_state("topUp", payload.channel_id)
 
       _ ->
         {:error,
@@ -290,7 +292,7 @@ defmodule MPP.Session.Actions do
   defp read_channel_state(channel, opts) do
     case Keyword.get(opts, :verify_channel_state) do
       fun when is_function(fun, 2) ->
-        channel |> fun.(opts) |> live_state()
+        channel |> fun.(opts) |> live_state(channel.channel_id)
 
       _ ->
         {:error,
@@ -302,15 +304,15 @@ defmodule MPP.Session.Actions do
   end
 
   # Same result shape as the funding verifiers; every key is required.
-  defp live_state({:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result) do
-    if well_formed_escrow?(state), do: {:ok, state}, else: channel_state_failure(result)
+  defp live_state({:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result, channel_id) do
+    if well_formed_escrow?(state), do: {:ok, state}, else: channel_state_failure(result, channel_id)
   end
 
-  defp live_state({:error, %Errors{}} = error), do: error
-  defp live_state(other), do: channel_state_failure(other)
+  defp live_state({:error, %Errors{}} = error, _channel_id), do: error
+  defp live_state(other, channel_id), do: channel_state_failure(other, channel_id)
 
-  defp channel_state_failure(result),
-    do: {:error, Errors.new(:verification_failed, "channel state verification failed: #{inspect(result)}")}
+  defp channel_state_failure(result, channel_id),
+    do: internal_failure("verify_channel_state returned an unrecognized result", channel_id, result)
 
   defp apply_channel_state(:not_found, _state), do: {:error, Errors.new(:channel_not_found, "channel not found")}
 
@@ -392,20 +394,20 @@ defmodule MPP.Session.Actions do
     failed
   end
 
-  defp settle_reserved(_payload, {:ok, %{tx_hash: "0x" <> hex}}, _opts) when byte_size(hex) == 64 do
+  defp settle_reserved(payload, {:ok, %{tx_hash: "0x" <> hex}}, _opts) when byte_size(hex) == 64 do
     if MPP.Hex.hex_string?(hex),
       do: {:ok, "0x" <> String.downcase(hex)},
-      else: unknown_settlement({:ok, %{tx_hash: "0x" <> hex}})
+      else: unknown_settlement(payload, {:ok, %{tx_hash: "0x" <> hex}})
   end
 
-  defp settle_reserved(_payload, result, _opts), do: unknown_settlement(result)
+  defp settle_reserved(payload, result, _opts), do: unknown_settlement(payload, result)
 
-  defp unknown_settlement(result) do
-    {:error,
-     Errors.new(
-       :verification_failed,
-       "close settlement returned an unrecognized result; channel left pending close: #{inspect(result)}"
-     )}
+  defp unknown_settlement(payload, result) do
+    internal_failure(
+      "settle_close returned an unrecognized result; channel left pending close",
+      payload.channel_id,
+      result
+    )
   end
 
   defp finalize_close(payload, tx_hash, opts) do
@@ -651,7 +653,7 @@ defmodule MPP.Session.Actions do
   defp verify_open(payload, opts) do
     case Keyword.get(opts, :verify_open) do
       fun when is_function(fun, 2) ->
-        payload |> fun.(opts) |> escrow_state("open")
+        payload |> fun.(opts) |> escrow_state("open", payload.channel_id)
 
       _ ->
         {:error,
@@ -665,15 +667,26 @@ defmodule MPP.Session.Actions do
   # Normalizes a funding verifier result into the confirmed escrow state,
   # rejecting unfunded, closing, and finalized channels.
   # Every state key is required: an omitted flag must not read as "open".
-  defp escrow_state({:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result, action) do
-    if well_formed_escrow?(state), do: escrow_status(state), else: escrow_failure(result, action)
+  defp escrow_state(
+         {:ok, %{deposit: _, settled: _, close_requested: _, finalized: _} = state} = result,
+         action,
+         channel_id
+       ) do
+    if well_formed_escrow?(state), do: escrow_status(state), else: escrow_failure(result, action, channel_id)
   end
 
-  defp escrow_state({:error, %Errors{} = error}, _action), do: {:error, error}
-  defp escrow_state(other, action), do: escrow_failure(other, action)
+  defp escrow_state({:error, %Errors{} = error}, _action, _channel_id), do: {:error, error}
+  defp escrow_state(other, action, channel_id), do: escrow_failure(other, action, channel_id)
 
-  defp escrow_failure(result, action),
-    do: {:error, Errors.new(:verification_failed, "#{action} funding verification failed: #{inspect(result)}")}
+  defp escrow_failure(result, action, channel_id),
+    do: internal_failure("#{action} funding verifier returned an unrecognized result", channel_id, result)
+
+  # Operator callback results stay server-side: the client gets the fixed
+  # internal-payment-error detail, the log gets the term.
+  defp internal_failure(message, channel_id, result) do
+    Logger.error("MPP.Session.Actions: #{message} (channel_id: #{channel_id}): #{inspect(result)}")
+    {:error, Shared.internal_payment_error()}
+  end
 
   defp well_formed_escrow?(%{deposit: deposit, settled: settled} = state) do
     is_integer(deposit) and is_integer(settled) and settled >= 0 and settled <= deposit and

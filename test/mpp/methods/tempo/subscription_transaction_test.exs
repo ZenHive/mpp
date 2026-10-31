@@ -178,6 +178,38 @@ defmodule MPP.Methods.Tempo.SubscriptionTransactionTest do
     assert_received {:rpc, %{"method" => "eth_getTransactionCount"}}
   end
 
+  test "a non-string build failure returns fixed text and logs the term" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      Req.Test.json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "error" => %{"code" => -32_000, "message" => "nonce-backend-6b2e"}
+      })
+    end)
+
+    configured =
+      config()
+      |> Map.delete("subscription_nonce")
+      |> Map.put("req_options", plug: {Req.Test, __MODULE__})
+
+    {result, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        SubscriptionTransaction.build(
+          SubscriptionHelpers.subscription(),
+          nil,
+          SubscriptionHelpers.root_address(),
+          configured,
+          "renewal"
+        )
+      end)
+
+    assert {:error, "subscription transaction could not be built"} = result
+    assert log =~ "nonce-backend-6b2e"
+  end
+
   test "rejects disallowed fee tokens, invalid fee-payer keys, and over-budget sponsorship" do
     subscription = SubscriptionHelpers.subscription()
     {_serialized, authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
