@@ -64,9 +64,12 @@ defmodule MPP.Methods.Tempo do
       broadcastable far into the future. The same map accepts
       `"max_in_flight_total_fee"` and `"max_in_flight_reservations"` for aggregate
       worst-case exposure. See `MPP.Methods.Tempo.FeePayerPolicy`.
-    * `"clock"` — (optional) zero-arity function returning unix milliseconds,
-      read for every sponsored remaining-validity check. Defaults to the system
-      clock; inject one for deterministic time in tests.
+    * `"clock"` — (optional, server-only) zero-arity function returning the
+      current Unix time in milliseconds, read for every sponsored
+      remaining-validity check. It must track and advance with real time: the
+      checks before co-sign and before send measure elapsed time, so a frozen
+      or backdated clock disables them. Defaults to the system clock; inject
+      one for deterministic time in tests.
     * `"sponsor_budget_reconcile"` — (optional, defaults to `false`) when `true`, an
       at-capacity request checks a bounded set of pending async transaction receipts
       before rejecting.
@@ -712,11 +715,13 @@ defmodule MPP.Methods.Tempo do
   # refs/mpp-rs/src/protocol/methods/tempo/mod.rs:213-253): a sponsored pull
   # charge whose challenge expires sooner than the co-signer's remaining-validity
   # floor is unpayable. `MPP.Plug` stamps `expires` as issuance time plus the
-  # endpoint `"expires_in"`, so that TTL is the exact remaining lifetime at
-  # issuance. Zero-amount proofs and push-only routes never use the fee payer.
+  # endpoint TTL and passes that TTL as `:endpoint_expires_in`, which a
+  # method_config "expires_in" cannot override, so it is the exact remaining
+  # lifetime at issuance ("expires_in" is only the fallback for direct callers).
+  # Zero-amount proofs and push-only routes never use the fee payer.
   defp reject_short_sponsored_expiry!(%Charge{amount: amount}, config) do
     floor = FeePayerPolicy.min_remaining_validity_seconds()
-    expires_in = config["expires_in"]
+    expires_in = Map.get(config, :endpoint_expires_in, config["expires_in"])
     modes = advertised_supported_modes(config)
 
     if fee_payer_enabled?(config) and positive_amount?(amount) and (is_nil(modes) or "pull" in modes) and

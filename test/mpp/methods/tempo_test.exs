@@ -227,6 +227,20 @@ defmodule MPP.Methods.TempoTest do
       assert %{} = init.("1000000", 15, %{})
       assert %{} = init.("0", 14, %{})
       assert %{} = init.("1000000", 14, %{"supported_modes" => ["push"]})
+
+      # The floor follows the TTL challenges are issued with, not a
+      # method_config "expires_in" override in either direction.
+      assert_raise ArgumentError, ~r/must expire at least 15 seconds after issuance \(expires_in 14\)/, fn ->
+        init.("1000000", 14, %{"expires_in" => 300})
+      end
+
+      config = init.("1000000", 15, %{"expires_in" => 5})
+      conn = MPP.Plug.call(Plug.Test.conn(:get, "/resource"), config)
+      assert conn.status == 402
+      [header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+      {:ok, challenge} = MPP.Headers.parse_challenge(header)
+      {:ok, expires, _offset} = DateTime.from_iso8601(challenge.expires)
+      assert DateTime.diff(expires, DateTime.utc_now()) in 14..15
     end
 
     test "accepts boolean require_presenter_binding" do

@@ -325,7 +325,11 @@ defmodule MPP.Plug do
 
     # Pass method_config via charge.method_details so challenge_method_details
     # can read config (e.g., network_id) and return public-facing fields only
-    charge_with_config = %{charge | method_details: method_config}
+    # `:endpoint_expires_in` is the TTL challenges are actually issued with
+    # (`Config.expires_in`). It is set unconditionally, unlike the overridable
+    # "expires_in" above, so issuance-time checks see the real lifetime. It is
+    # only visible to challenge_method_details/1, never stored in the entry.
+    charge_with_config = %{charge | method_details: Map.put(method_config, :endpoint_expires_in, expires_in)}
 
     charge =
       case method.challenge_method_details(charge_with_config) do

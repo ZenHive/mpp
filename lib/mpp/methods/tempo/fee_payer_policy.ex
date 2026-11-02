@@ -243,8 +243,9 @@ defmodule MPP.Methods.Tempo.FeePayerPolicy do
   The reference point for every validity comparison in this module (mpp-rs
   `now.as_secs() + (subsec_nanos > 0)`, mppx `Math.ceil(now / 1000)`).
 
-  `clock` is an optional zero-arity function returning unix milliseconds (the
-  Tempo `"clock"` method_config key); `nil` reads the system clock.
+  `clock` is the Tempo `"clock"` method_config key: an optional zero-arity
+  function returning the current unix time in milliseconds, which must advance
+  with real time. `nil` reads the system clock.
   """
   @spec ceil_now((-> integer()) | nil) :: integer()
   def ceil_now(clock \\ nil)
