@@ -102,8 +102,12 @@ defmodule MPP.Test.TempoTestHelpers do
   @doc "The expiring nonce key (U256::MAX) as an integer — for builder `:nonce_key` opts."
   def expiring_nonce_key_int, do: :binary.decode_unsigned(@expiring_nonce_key)
 
-  @doc "A `valid_before` unix timestamp inside Moderato's 30s-past-block-timestamp expiring-nonce window."
-  def future_valid_before, do: System.os_time(:second) + 20
+  @doc """
+  A `valid_before` unix timestamp inside Moderato's 30s-past-block-timestamp
+  expiring-nonce window. 25s matches `MPP.Client.Providers.Tempo` (and mppx),
+  leaving room above the 15s fee-payer remaining-validity floor.
+  """
+  def future_valid_before, do: System.os_time(:second) + 25
 
   @doc "Builds a single call tuple [to, value, input] for RLP encoding (zero value)."
   def build_call(to_hex, input), do: [TIP20.decode_address(to_hex), <<>>, input]
