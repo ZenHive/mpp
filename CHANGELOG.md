@@ -6,6 +6,54 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [0.22.0] — 2026-11-03
+
+### Breaking
+
+- **WebSocket inbound frames are size-bounded.** `MPP.Transports.WebSocket`
+  rejects an inbound frame larger than `:max_incoming_message_bytes`
+  (default 64 KiB) before decoding it. `handle_frame/2` then returns a
+  `:close` of `{1009, "payment message is too large"}`, and the host must
+  close the socket with that code. `decode_frame` returns
+  `{:error, :message_too_large}` for an oversized frame.
+- **The paid retry never follows redirects.** `MPP.Client.Req` returns a 3xx
+  response to the request that carries the payment credential to the caller,
+  same-origin included, instead of following it; the legacy
+  `:follow_redirects` option is cleared on that request as well.
+- **x402 routes require a route binding by default.** `MPP.Plug`'s `:x402`
+  `:route_binding` defaults to `:required`: on a scoped route (one with
+  `:digest` or `:opaque`) a payment without the route's `extensions.mppx`
+  binding is rejected with `route_binding_required`. `:resource` keeps the
+  previous resource-URL match. Every x402 challenge carries an
+  `extensions.mppx` binding derived from the method, the route digest and
+  the opaque value; the route `:digest` / `:opaque` now scope x402 payments,
+  and nested and top-level values must agree (`ArgumentError` at init).
+- **Internal payment errors render a fixed client detail.**
+  `:internal_payment_error` problems carry "An internal payment error
+  occurred." on every transport (HTTP problem details, MCP / JSON-RPC
+  errors, WebSocket frames); the original detail is logged server-side.
+  Several internal-failure paths (store errors, unexpected facilitator
+  responses) now answer 500 instead of 402. Raw x402 facilitator errors are
+  normalized to a 500 internal error.
+- **Tempo fee sponsorship requires 15 seconds of remaining validity.** A
+  sponsored transaction is co-signed and broadcast only when its
+  `valid_before` leaves at least 15 seconds, re-checked with a fresh clock
+  before co-signing and again right before send.
+  `max_validity_window_seconds` must be at least 15, and `MPP.Plug` refuses
+  at init a sponsored pull charge endpoint whose `expires_in` is under 15
+  (the endpoint TTL, not a method-config `"expires_in"` override).
+  `MPP.Client.Providers.Tempo` returns `:sponsored_challenge_expiring` /
+  `:sponsored_validity_too_short` instead of producing such a transaction.
+
+### Added
+
+- Optional `MPP.Method.validate_challenge_ttl!/2` callback: `MPP.Plug` calls
+  it at init with the endpoint's `:expires_in`, so a method can refuse a
+  challenge lifetime it cannot accept. `MPP.Methods.Tempo` implements it.
+- Tempo `"clock"` method-config key (server-only): a zero-arity function
+  returning the current Unix time in milliseconds, used for the sponsored
+  remaining-validity checks. It must advance with real time.
+
 ## [0.21.0] — 2026-10-31
 
 ### Breaking
