@@ -90,6 +90,20 @@ defmodule MPP.PlugTest do
     def challenge_method_details(charge), do: charge.method_details
   end
 
+  defmodule MockMethodStringKeyDetails do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mockstringkeys"
+
+    @impl MPP.Method
+    def verify(_payload, _charge), do: {:error, Errors.new(:invalid_payload, "unused")}
+
+    @impl MPP.Method
+    def challenge_method_details(charge), do: Map.new(charge.method_details, fn {k, v} -> {to_string(k), v} end)
+  end
+
   defmodule MockMethodUnexpectedError do
     @moduledoc false
     use MPP.Method
@@ -307,23 +321,26 @@ defmodule MPP.PlugTest do
       assert is_binary(entry.request)
     end
 
-    test "keeps plug-internal keys out of details a method passes through" do
-      config =
-        PaymentPlug.init(
-          secret_key: @secret_key,
-          realm: "api.test.com",
-          method: MockMethodPassThroughDetails,
-          amount: "1000",
-          currency: "usd",
-          method_config: %{"network" => "testnet"}
-        )
+    test "hands challenge_method_details only the method config" do
+      for method <- [MockMethodPassThroughDetails, MockMethodStringKeyDetails] do
+        config =
+          PaymentPlug.init(
+            secret_key: @secret_key,
+            realm: "api.test.com",
+            method: method,
+            amount: "1000",
+            currency: "usd",
+            expires_in: 120,
+            method_config: %{"network" => "testnet"}
+          )
 
-      [entry] = config.method_entries
-      refute Map.has_key?(entry.charge.method_details, :endpoint_expires_in)
+        [entry] = config.method_entries
+        expected = %{"network" => "testnet", "expires_in" => 120}
+        assert entry.charge.method_details == expected
 
-      request = entry.request |> Base.url_decode64!(padding: false) |> Jason.decode!()
-      assert request["methodDetails"]["network"] == "testnet"
-      refute Map.has_key?(request["methodDetails"], "endpoint_expires_in")
+        request = entry.request |> Base.url_decode64!(padding: false) |> Jason.decode!()
+        assert request["methodDetails"] == expected
+      end
     end
 
     test "raises on missing required opts" do

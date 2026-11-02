@@ -114,7 +114,23 @@ defmodule MPP.Method do
   """
   @callback credential_types() :: [String.t()]
 
-  @optional_callbacks [challenge_method_details: 1, validate_config!: 1, credential_types: 0]
+  @doc """
+  Validates the endpoint's challenge TTL at init time. Raises when the method
+  cannot accept payment for challenges issued with that lifetime.
+
+  Optional. `MPP.Plug` calls it during init with the intent (carrying the
+  method config as `method_details`, like `challenge_method_details/1`) and the
+  endpoint's `:expires_in` in seconds, which is the lifetime every challenge is
+  issued with regardless of a method_config `"expires_in"` value.
+  """
+  @callback validate_challenge_ttl!(intent :: intent(), expires_in :: pos_integer()) :: :ok
+
+  @optional_callbacks [
+    challenge_method_details: 1,
+    validate_config!: 1,
+    credential_types: 0,
+    validate_challenge_ttl!: 2
+  ]
 
   @doc false
   @spec __using__(term()) :: Macro.t()

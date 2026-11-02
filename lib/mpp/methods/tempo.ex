@@ -460,7 +460,6 @@ defmodule MPP.Methods.Tempo do
   def challenge_method_details(%Charge{} = charge) do
     config = charge.method_details || %{}
     reject_machine_token_currency!(charge.currency, config["chain_id"] || @moderato_chain_id)
-    reject_short_sponsored_expiry!(charge, config)
 
     details = %{
       "chainId" => config["chain_id"] || @moderato_chain_id,
@@ -491,6 +490,13 @@ defmodule MPP.Methods.Tempo do
   @spec challenge_method_details(Subscription.t()) :: map()
   def challenge_method_details(%Subscription{} = subscription),
     do: TempoSubscription.challenge_method_details(subscription)
+
+  @impl MPP.Method
+  @spec validate_challenge_ttl!(MPP.Method.intent(), pos_integer()) :: :ok
+  def validate_challenge_ttl!(%Charge{} = charge, expires_in),
+    do: reject_short_sponsored_expiry!(charge, charge.method_details || %{}, expires_in)
+
+  def validate_challenge_ttl!(_intent, _expires_in), do: :ok
 
   # --- Private helpers ---
 
@@ -714,14 +720,11 @@ defmodule MPP.Methods.Tempo do
   # Issuance floor (refs/mppx/src/tempo/server/Charge.ts:559-573,
   # refs/mpp-rs/src/protocol/methods/tempo/mod.rs:213-253): a sponsored pull
   # charge whose challenge expires sooner than the co-signer's remaining-validity
-  # floor is unpayable. `MPP.Plug` stamps `expires` as issuance time plus the
-  # endpoint TTL and passes that TTL as `:endpoint_expires_in`, which a
-  # method_config "expires_in" cannot override, so it is the exact remaining
-  # lifetime at issuance ("expires_in" is only the fallback for direct callers).
+  # floor is unpayable. `expires_in` is the endpoint TTL `MPP.Plug` stamps every
+  # challenge with, so it is the exact remaining lifetime at issuance.
   # Zero-amount proofs and push-only routes never use the fee payer.
-  defp reject_short_sponsored_expiry!(%Charge{amount: amount}, config) do
+  defp reject_short_sponsored_expiry!(%Charge{amount: amount}, config, expires_in) do
     floor = FeePayerPolicy.min_remaining_validity_seconds()
-    expires_in = Map.get(config, :endpoint_expires_in, config["expires_in"])
     modes = advertised_supported_modes(config)
 
     if fee_payer_enabled?(config) and positive_amount?(amount) and (is_nil(modes) or "pull" in modes) and

@@ -325,17 +325,19 @@ defmodule MPP.Plug do
 
     # Pass method_config via charge.method_details so challenge_method_details
     # can read config (e.g., network_id) and return public-facing fields only
-    # `:endpoint_expires_in` is the TTL challenges are actually issued with
-    # (`Config.expires_in`). It is set unconditionally, unlike the overridable
-    # "expires_in" above, so issuance-time checks see the real lifetime. It is
-    # removed from whatever the callback returns, so a method that passes its
-    # input through never serializes it.
-    charge_with_config = %{charge | method_details: Map.put(method_config, :endpoint_expires_in, expires_in)}
+    charge_with_config = %{charge | method_details: method_config}
+
+    # The TTL challenges are actually issued with (`Config.expires_in`), which
+    # the method_config "expires_in" above may override; methods that bound
+    # issuance on it opt in through the optional callback.
+    if function_exported?(method, :validate_challenge_ttl!, 2) do
+      method.validate_challenge_ttl!(charge_with_config, expires_in)
+    end
 
     charge =
       case method.challenge_method_details(charge_with_config) do
         nil -> charge
-        details when is_map(details) -> %{charge | method_details: Map.delete(details, :endpoint_expires_in)}
+        details when is_map(details) -> %{charge | method_details: details}
       end
 
     request =
