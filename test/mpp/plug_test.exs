@@ -76,6 +76,20 @@ defmodule MPP.PlugTest do
     end
   end
 
+  defmodule MockMethodPassThroughDetails do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mockpassthrough"
+
+    @impl MPP.Method
+    def verify(_payload, _charge), do: {:error, Errors.new(:invalid_payload, "unused")}
+
+    @impl MPP.Method
+    def challenge_method_details(charge), do: charge.method_details
+  end
+
   defmodule MockMethodUnexpectedError do
     @moduledoc false
     use MPP.Method
@@ -291,6 +305,25 @@ defmodule MPP.PlugTest do
       assert entry.method == MockMethod
       assert %Charge{amount: "1000", currency: "usd"} = entry.charge
       assert is_binary(entry.request)
+    end
+
+    test "keeps plug-internal keys out of details a method passes through" do
+      config =
+        PaymentPlug.init(
+          secret_key: @secret_key,
+          realm: "api.test.com",
+          method: MockMethodPassThroughDetails,
+          amount: "1000",
+          currency: "usd",
+          method_config: %{"network" => "testnet"}
+        )
+
+      [entry] = config.method_entries
+      refute Map.has_key?(entry.charge.method_details, :endpoint_expires_in)
+
+      request = entry.request |> Base.url_decode64!(padding: false) |> Jason.decode!()
+      assert request["methodDetails"]["network"] == "testnet"
+      refute Map.has_key?(request["methodDetails"], "endpoint_expires_in")
     end
 
     test "raises on missing required opts" do

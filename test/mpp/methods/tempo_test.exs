@@ -235,12 +235,15 @@ defmodule MPP.Methods.TempoTest do
       end
 
       config = init.("1000000", 15, %{"expires_in" => 5})
+      before = DateTime.utc_now()
       conn = MPP.Plug.call(Plug.Test.conn(:get, "/resource"), config)
+      issued_by = DateTime.utc_now()
       assert conn.status == 402
       [header] = Plug.Conn.get_resp_header(conn, "www-authenticate")
       {:ok, challenge} = MPP.Headers.parse_challenge(header)
       {:ok, expires, _offset} = DateTime.from_iso8601(challenge.expires)
-      assert DateTime.diff(expires, DateTime.utc_now()) in 14..15
+      assert DateTime.diff(expires, before) >= 14
+      assert DateTime.diff(expires, issued_by) <= 15
     end
 
     test "accepts boolean require_presenter_binding" do

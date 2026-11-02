@@ -328,13 +328,14 @@ defmodule MPP.Plug do
     # `:endpoint_expires_in` is the TTL challenges are actually issued with
     # (`Config.expires_in`). It is set unconditionally, unlike the overridable
     # "expires_in" above, so issuance-time checks see the real lifetime. It is
-    # only visible to challenge_method_details/1, never stored in the entry.
+    # removed from whatever the callback returns, so a method that passes its
+    # input through never serializes it.
     charge_with_config = %{charge | method_details: Map.put(method_config, :endpoint_expires_in, expires_in)}
 
     charge =
       case method.challenge_method_details(charge_with_config) do
         nil -> charge
-        details when is_map(details) -> %{charge | method_details: details}
+        details when is_map(details) -> %{charge | method_details: Map.delete(details, :endpoint_expires_in)}
       end
 
     request =
