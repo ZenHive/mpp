@@ -361,25 +361,67 @@ defmodule MPP.X402.PlugTest do
     refute_received {:verify, _, _}
   end
 
-  test "digest binding checks cached and empty request bodies" do
-    opts = plug_opts(self(), digest: MPP.BodyDigest.compute("expected"))
-    payload = signed_payload(opts)
-    {:ok, header} = Headers.encode_payment_signature(payload)
-    x402 = opts.x402
-
-    for body <- ["expected", ""] do
-      conn = :get |> Plug.Test.conn(@url) |> Plug.Conn.put_req_header("payment-signature", header)
-      conn = Plug.Conn.put_private(conn, :raw_body, body)
-      assert {:ok, _} = X402.Plug.maybe_settle(conn, x402, nil)
+  describe "digest binding" do
+    setup do
+      opts = plug_opts(self(), digest: MPP.BodyDigest.compute("expected"))
+      {:ok, header} = opts |> signed_payload() |> Headers.encode_payment_signature()
+      %{opts: opts, header: header}
     end
 
-    conn = :post |> Plug.Test.conn(@url, "wrong") |> Plug.Conn.put_req_header("payment-signature", header)
-    conn = Plug.Conn.put_private(conn, :raw_body, "wrong")
-    assert {:error, error} = X402.Plug.maybe_settle(conn, x402, nil)
-    assert error.detail =~ "body_digest_mismatch"
+    defp digest_conn(header, method, req_headers, raw_body, protocol \\ :"HTTP/1.1") do
+      conn =
+        method
+        |> Plug.Test.conn(@url)
+        |> Plug.Test.put_http_protocol(protocol)
+        |> Plug.Conn.put_req_header("payment-signature", header)
 
-    moved = put_in(payload, ["resource", "url"], @url <> "/other")
-    assert problem_detail(settle(%{opts | x402: x402}, moved)) =~ "resource_mismatch"
+      conn = Enum.reduce(req_headers, conn, fn {k, v}, acc -> Plug.Conn.put_req_header(acc, k, v) end)
+      if raw_body, do: Plug.Conn.put_private(conn, :raw_body, raw_body), else: conn
+    end
+
+    test "accepts the cached body the digest pins", %{opts: opts, header: header} do
+      conn = digest_conn(header, :get, [{"content-length", "8"}], "expected")
+      assert {:ok, _} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+    end
+
+    test "skips binding only for a request without a body", %{opts: opts, header: header} do
+      for raw_body <- [nil, ""] do
+        assert {:ok, _} = X402.Plug.maybe_settle(digest_conn(header, :get, [], raw_body), opts.x402, nil)
+      end
+    end
+
+    test "checks an empty body against the digest", %{opts: opts, header: header} do
+      for raw_body <- [nil, ""] do
+        conn = digest_conn(header, :get, [{"content-length", "0"}], raw_body)
+        assert {:error, error} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+        assert error.detail =~ "body_digest_mismatch"
+      end
+    end
+
+    test "rejects a cached body that does not match", %{opts: opts, header: header} do
+      conn = digest_conn(header, :get, [{"content-length", "5"}], "wrong")
+      assert {:error, error} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+      assert error.detail =~ "body_digest_mismatch"
+    end
+
+    test "fails closed when the body was not cached", %{opts: opts, header: header} do
+      for {headers, protocol} <- [
+            {[{"content-length", "8"}], :"HTTP/1.1"},
+            {[{"transfer-encoding", "chunked"}], :"HTTP/1.1"},
+            {[], :"HTTP/2"}
+          ] do
+        conn = digest_conn(header, :get, headers, nil, protocol)
+        assert {:error, error} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+        assert error.detail =~ "body_digest_unavailable"
+      end
+
+      refute_received {:verify, _, _}
+    end
+
+    test "binds the route resource alongside the digest", %{opts: opts} do
+      moved = put_in(signed_payload(opts), ["resource", "url"], @url <> "/other")
+      assert problem_detail(settle(opts, moved)) =~ "resource_mismatch"
+    end
   end
 
   test "resource defaults to request URL and settlement response is limited to successful HTTP responses" do

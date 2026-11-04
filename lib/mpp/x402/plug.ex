@@ -42,6 +42,14 @@ defmodule MPP.X402.Plug do
   Unscoped routes accept plain x402 exact payloads in either mode; an echoed
   `resource.url` must still match. Route-bound credentials are always checked
   in full (resource, extensions, recomputed nonce).
+
+  ## Body digest
+
+  A route with a digest verifies it against the raw request body, which the
+  host must cache in `conn.private.raw_body` (for example with a
+  `Plug.Parsers` `:body_reader`). An empty body is checked like any other.
+  Only a request without a body skips the check; a body that was not cached
+  is rejected (`body_digest_unavailable`).
   """
 
   alias MPP.BodyDigest
@@ -243,13 +251,14 @@ defmodule MPP.X402.Plug do
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
 
+  # Skips only a request without a body (mppx `input.body === null`); a body
+  # that was not cached in `conn.private.raw_body` cannot be bound and fails
+  # closed (`EvmCharge.ts:456-469`).
   defp match_digest(%Conn{} = conn, %__MODULE__{digest: digest}) when is_binary(digest) do
-    body = raw_body(conn)
-
-    if body == "" or BodyDigest.verify(digest, body) do
-      :ok
-    else
-      {:error, :body_digest_mismatch}
+    case request_body(conn) do
+      :none -> :ok
+      :unavailable -> {:error, :body_digest_unavailable}
+      {:ok, body} -> if BodyDigest.verify(digest, body), do: :ok, else: {:error, :body_digest_mismatch}
     end
   end
 
@@ -368,9 +377,25 @@ defmodule MPP.X402.Plug do
     get_in(payload, ["payload", "authorization", "nonce"]) || ""
   end
 
-  defp raw_body(%Conn{private: %{raw_body: body}}) when is_binary(body), do: body
-  defp raw_body(%Conn{adapter: {_, %{body: body}}}) when is_binary(body), do: body
-  defp raw_body(_conn), do: ""
+  defp request_body(%Conn{private: %{raw_body: body}} = conn) when is_binary(body) do
+    if body == "" and bodyless?(conn), do: :none, else: {:ok, body}
+  end
+
+  defp request_body(conn) do
+    cond do
+      Conn.get_req_header(conn, "content-length") == ["0"] -> {:ok, ""}
+      bodyless?(conn) -> :none
+      true -> :unavailable
+    end
+  end
+
+  # HTTP/1.x framing: a request without Content-Length or Transfer-Encoding has
+  # no body. HTTP/2 and later may carry a body without either header.
+  defp bodyless?(conn) do
+    Conn.get_http_protocol(conn) in [:"HTTP/1.0", :"HTTP/1.1"] and
+      Conn.get_req_header(conn, "content-length") == [] and
+      Conn.get_req_header(conn, "transfer-encoding") == []
+  end
 
   defp normalize_accepts(opts) do
     case Map.get(opts, :accepts) do
