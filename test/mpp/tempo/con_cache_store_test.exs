@@ -35,7 +35,7 @@ defmodule MPP.Tempo.ConCacheStoreTest do
 
       assert spec.id == {ConCacheStore, :mpp_tempo_dedup}
 
-      assert {ConCache, :start_link, [[name: :mpp_tempo_dedup, ttl_check_interval: _, global_ttl: global_ttl]]} =
+      assert {ConCacheStore, :start_link, [[name: :mpp_tempo_dedup, ttl_check_interval: _, global_ttl: global_ttl]]} =
                spec.start
 
       assert global_ttl == to_timeout(minute: 10)
@@ -46,7 +46,8 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       spec = ConCacheStore.child_spec(name: cache_name)
 
       assert spec.id == {ConCacheStore, cache_name}
-      assert {ConCache, :start_link, [[name: ^cache_name, ttl_check_interval: _, global_ttl: _]]} = spec.start
+      assert {ConCacheStore, :start_link, [[name: ^cache_name, ttl_check_interval: _, global_ttl: _]]} = spec.start
+      assert spec.type == :supervisor
     end
   end
 
@@ -70,6 +71,37 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       assert {:ok, :seen} = ConCacheStore.get(key, store_opts)
 
       assert_eventually_not_found(key, store_opts)
+    end
+  end
+
+  describe "check_and_mark/3 with :min_ttl_ms" do
+    @tag :short_ttl
+    test "keeps a mark past the cache TTL until :min_ttl_ms", %{store_opts: store_opts} do
+      assert :ok =
+               ConCacheStore.check_and_mark("mpp:proof:long", :seen, Keyword.put(store_opts, :min_ttl_ms, @long_ttl_ms))
+
+      assert :ok = ConCacheStore.check_and_mark("mpp:proof:short", :seen, store_opts)
+
+      assert_eventually_not_found("mpp:proof:short", store_opts)
+      assert {:ok, :seen} = ConCacheStore.get("mpp:proof:long", store_opts)
+
+      assert {:error, :already_exists} =
+               ConCacheStore.check_and_mark("mpp:proof:long", :again, Keyword.put(store_opts, :min_ttl_ms, @long_ttl_ms))
+    end
+
+    @tag :short_ttl
+    test "never shortens a mark below the cache TTL", %{store_opts: store_opts} do
+      assert :ok = ConCacheStore.check_and_mark("mpp:proof:min", :seen, Keyword.put(store_opts, :min_ttl_ms, 1))
+      assert {:ok, :seen} = ConCacheStore.get("mpp:proof:min", store_opts)
+      assert_eventually_not_found("mpp:proof:min", store_opts)
+    end
+
+    test "keeps the cache default for a cache not started by child_spec/1" do
+      cache_name = unique_cache_name()
+      start_supervised!({ConCache, name: cache_name, ttl_check_interval: false})
+
+      assert :ok = ConCacheStore.check_and_mark("mpp:proof:plain", :seen, name: cache_name, min_ttl_ms: @long_ttl_ms)
+      assert {:ok, :seen} = ConCacheStore.get("mpp:proof:plain", name: cache_name)
     end
   end
 

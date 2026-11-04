@@ -39,12 +39,12 @@ defmodule MPP.Tempo.ConCacheStore do
 
   ## TTL and Challenge Expiry
 
-  The store's TTL **must be ≥ your challenge `expires_in`** to prevent replay.
-  If the cache evicts a tx hash before the challenge expires, the same tx can
-  be replayed. A good default is 2× the challenge expiry.
-
-  Example: if your Plug uses `expires_in: 300` (5 min), set the store TTL to
-  at least `to_timeout(minute: 10)`.
+  A mark bound to a challenge (`MPP.Tempo.Store.check_and_mark/4`) is kept
+  until the challenge expires plus 30 seconds when that is later than the
+  store's TTL, so a long `expires_in` cannot outlive its replay mark. Other
+  entries expire after the TTL. This needs the TTL recorded by `child_spec/1`:
+  for a ConCache started any other way the TTL **must be ≥ your challenge
+  `expires_in`**. A good default is 2× the challenge expiry.
 
   ## Sponsor-budget scope
 
@@ -91,9 +91,20 @@ defmodule MPP.Tempo.ConCacheStore do
     ttl = Keyword.get(opts, :ttl, @default_ttl_ms)
     check_interval = Keyword.get(opts, :ttl_check_interval, @default_check_interval_ms)
 
-    [name: name, ttl_check_interval: check_interval, global_ttl: ttl]
+    concache_opts = [name: name, ttl_check_interval: check_interval, global_ttl: ttl]
+
+    concache_opts
     |> ConCache.child_spec()
-    |> Map.put(:id, {__MODULE__, name})
+    |> Map.merge(%{id: {__MODULE__, name}, start: {__MODULE__, :start_link, [concache_opts]}})
+  end
+
+  @doc false
+  # Records the cache TTL so challenge-bound marks can tell when they must
+  # outlive it.
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(concache_opts) do
+    :persistent_term.put({__MODULE__, :ttl, concache_opts[:name]}, concache_opts[:global_ttl])
+    ConCache.start_link(concache_opts)
   end
 
   @impl Store
@@ -145,6 +156,8 @@ defmodule MPP.Tempo.ConCacheStore do
   Atomically reserves a dedup key, optionally using a non-default ConCache name from opts.
 
   Same as `check_and_mark/2` when `opts` is `[]`.
+  `:min_ttl_ms` keeps the mark at least that long when it exceeds the TTL
+  recorded by `child_spec/1`.
   """
   @spec check_and_mark(String.t(), term(), keyword()) :: :ok | {:error, :already_exists}
   def check_and_mark(key, value, opts) do
@@ -154,13 +167,31 @@ defmodule MPP.Tempo.ConCacheStore do
     ConCache.isolated(cache_name, storage_key, fn ->
       case ConCache.get(cache_name, storage_key) do
         nil ->
-          ConCache.put(cache_name, storage_key, value)
+          ConCache.put(cache_name, storage_key, mark_item(cache_name, value, opts[:min_ttl_ms]))
           :ok
 
         _existing ->
           {:error, :already_exists}
       end
     end)
+  end
+
+  @impl Store
+  @doc """
+  Atomically reserves a dedup key in the default ConCache for at least `ttl_ms`.
+  """
+  @spec check_and_mark_ttl(String.t(), term(), pos_integer()) :: :ok | {:error, :already_exists}
+  def check_and_mark_ttl(key, value, ttl_ms), do: check_and_mark(key, value, min_ttl_ms: ttl_ms)
+
+  # Only ever extends a mark past the cache TTL; an unknown or infinite TTL
+  # keeps the cache default.
+  defp mark_item(_cache_name, value, nil), do: value
+
+  defp mark_item(cache_name, value, min_ttl_ms) do
+    case :persistent_term.get({__MODULE__, :ttl, cache_name}, nil) do
+      ttl when is_integer(ttl) and min_ttl_ms > ttl -> %ConCache.Item{value: value, ttl: min_ttl_ms}
+      _keep_default -> value
+    end
   end
 
   @impl Store

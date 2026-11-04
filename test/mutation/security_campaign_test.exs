@@ -38,7 +38,7 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
     assert Enum.all?(get_in(ledger, ["campaign", "mutations"]), &(&1["status"] == "killed"))
   end
 
-  test "canonicalization, pinning and authorization dispatch canaries are mandatory" do
+  test "canonicalization, pinning, authorization dispatch and single-use canaries are mandatory" do
     canary_ids =
       SecurityMutations.all()
       |> Enum.filter(& &1.canary)
@@ -50,7 +50,8 @@ defmodule MPP.Test.SecurityMutationCampaignTest do
                "verifier-request-pin-bypassed",
                "evm-authorization-dispatch-hash-routed",
                "tempo-unknown-dispatch-accepted",
-               "tempo-reserve-key-caller-bytes"
+               "tempo-reserve-key-caller-bytes",
+               "tempo-proof-single-use-bypassed"
              ])
   end
 

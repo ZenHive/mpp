@@ -66,6 +66,18 @@ defmodule MPP.ReplayTest do
   end
 
   describe "check_unused/2 and mark_used/2 with a live store" do
+    test "keeps the mark until the challenge expires, past the store TTL" do
+      cache_name = :"#{__MODULE__}.Ttl.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: cache_name, ttl: 20, ttl_check_interval: 10), id: cache_name)
+      store = {ConCacheStore, name: cache_name}
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+      credential = put_in(@credential.challenge.expires, expires)
+
+      assert :ok = Replay.mark_used(store, credential)
+      Process.sleep(150)
+      assert {:error, %MPP.Errors{detail: "Payment credential already used"}} = Replay.check_unused(store, credential)
+    end
+
     setup do
       name = :"replay_unit_#{System.unique_integer([:positive])}"
       start_supervised!({ConCacheStore, name: name})

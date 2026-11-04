@@ -210,6 +210,15 @@ defmodule MPP.Test.SecurityMutations do
         """,
         ["test/mpp/methods/tempo_test.exs"],
         true
+      ),
+      mutation(
+        "tempo-proof-single-use-bypassed",
+        "tempo-proof-single-use",
+        "lib/mpp/methods/tempo.ex",
+        "commit_store_mark(store, @proof_store_key_prefix <> challenge_id, config)",
+        "_unused = {store, challenge_id, config}\n    :ok",
+        ["test/mpp/methods/tempo_test.exs"],
+        true
       )
     ]
   end

@@ -7,9 +7,14 @@ defmodule MPP.Tempo.Store do
   prevents a client from resubmitting the same signed transaction within
   the store's TTL window.
 
-  **Important:** The store's TTL must be ≥ your challenge `expires_in` to
-  ensure a tx hash cannot be evicted and replayed while the challenge is
-  still valid. A good default is 2× the challenge expiry.
+  Single-use marks bound to a challenge are kept at least until the challenge
+  expires plus 30 seconds (mpp-rs `tempo.rs` proof reservations), whatever the
+  endpoint's `expires_in`: `MPP.Tempo.ConCacheStore` extends such a mark beyond
+  its TTL when needed, and a custom store does the same by exporting the
+  optional `c:check_and_mark_ttl/3`. A custom store without it keeps every mark
+  for its own TTL, which must then be ≥ your challenge `expires_in` so a mark
+  cannot be evicted while the challenge is still valid. A good default is 2×
+  the challenge expiry.
 
   ## Built-in Store
 
@@ -282,7 +287,20 @@ defmodule MPP.Tempo.Store do
   """
   @callback delete(key :: String.t(), expected :: term()) :: :ok | {:error, term()}
 
-  @optional_callbacks [update: 3, delete: 2]
+  @doc """
+  Atomically check and mark a key, keeping the mark for at least `ttl_ms`.
+
+  Same contract as `c:check_and_mark/2`. `ttl_ms` is a lower bound: a store
+  with a longer TTL keeps its own. Called for marks bound to a challenge, with
+  the time until the challenge expires plus a margin.
+
+  Optional. A store without it gets `c:check_and_mark/2`, and its TTL must
+  then cover the challenge `expires_in`.
+  """
+  @callback check_and_mark_ttl(key :: String.t(), value :: term(), ttl_ms :: pos_integer()) ::
+              :ok | {:error, :already_exists} | {:error, term()}
+
+  @optional_callbacks [update: 3, delete: 2, check_and_mark_ttl: 3]
 
   @doc """
   Look up a key using either a store module or `{MPP.Tempo.ConCacheStore, opts}`.
@@ -306,6 +324,47 @@ defmodule MPP.Tempo.Store do
           :ok | {:error, :already_exists} | {:error, term()}
   def check_and_mark({ConCacheStore, opts}, key, value), do: ConCacheStore.check_and_mark(key, value, opts)
   def check_and_mark(store, key, value), do: store.check_and_mark(key, value)
+
+  @doc """
+  Atomically check and mark a key bound to a challenge.
+
+  `:challenge_expires` (the challenge's RFC 3339 `expires`, or `nil`) keeps
+  the mark until that time plus 30 seconds, through
+  `c:check_and_mark_ttl/3` where the store supports it. Without an expiry this
+  is `check_and_mark/3`.
+  """
+  @spec check_and_mark(store_ref(), String.t(), term(), keyword()) ::
+          :ok | {:error, :already_exists} | {:error, term()}
+  def check_and_mark(store, key, value, opts) do
+    case mark_ttl_ms(Keyword.get(opts, :challenge_expires)) do
+      nil -> check_and_mark(store, key, value)
+      ttl_ms -> check_and_mark_ttl(store, key, value, ttl_ms)
+    end
+  end
+
+  defp check_and_mark_ttl({ConCacheStore, opts}, key, value, ttl_ms),
+    do: ConCacheStore.check_and_mark(key, value, Keyword.put(opts, :min_ttl_ms, ttl_ms))
+
+  defp check_and_mark_ttl(store, key, value, ttl_ms) do
+    if Code.ensure_loaded?(store) and function_exported?(store, :check_and_mark_ttl, 3) do
+      store.check_and_mark_ttl(key, value, ttl_ms)
+    else
+      store.check_and_mark(key, value)
+    end
+  end
+
+  # mpp-rs reserves proofs until `expires + 30 s`
+  # (`refs/mpp-rs/src/protocol/methods/tempo/method/proof_credential.rs`, #673).
+  @mark_margin_ms 30_000
+
+  defp mark_ttl_ms(expires) when is_binary(expires) do
+    case DateTime.from_iso8601(expires) do
+      {:ok, expires_at, _offset} -> max(DateTime.diff(expires_at, DateTime.utc_now(), :millisecond), 0) + @mark_margin_ms
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp mark_ttl_ms(_expires), do: nil
 
   @doc """
   Atomically update a key using either a store module or configured `ConCacheStore`.

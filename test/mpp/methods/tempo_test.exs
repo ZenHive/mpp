@@ -3931,6 +3931,32 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
     end
 
+    test "rejects a reused proof credential", %{charge: charge} do
+      cache_name = :"#{__MODULE__}.Proof.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: cache_name), id: cache_name)
+      charge = put_in(charge.method_details["store"], {ConCacheStore, name: cache_name})
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+    end
+
+    test "keeps a proof single-use until its challenge expires, past the store TTL", %{charge: charge} do
+      cache_name = :"#{__MODULE__}.ProofTtl.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: cache_name, ttl: 20, ttl_check_interval: 10), id: cache_name)
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+
+      details =
+        Map.merge(charge.method_details, %{"store" => {ConCacheStore, name: cache_name}, "challenge_expires" => expires})
+
+      charge = %{charge | method_details: details}
+      payload = %{"type" => "proof", "signature" => @proof_signature}
+
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      Process.sleep(150)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+    end
+
     test "accepts a valid proof for a zero amount with leading zeros", %{charge: charge} do
       charge = %{
         charge

@@ -118,6 +118,63 @@ defmodule MPP.Tempo.StoreTest do
     end
   end
 
+  defmodule TtlRecordingStore do
+    @moduledoc false
+    @behaviour Store
+
+    @impl Store
+    def get(_key), do: :not_found
+    @impl Store
+    def put(_key, _value), do: :ok
+    @impl Store
+    def check_and_mark(key, _value) do
+      send(self(), {:check_and_mark, key})
+      :ok
+    end
+
+    @impl Store
+    def check_and_mark_ttl(key, _value, ttl_ms) do
+      send(self(), {:check_and_mark_ttl, key, ttl_ms})
+      :ok
+    end
+  end
+
+  describe "check_and_mark/4" do
+    test "passes the time until challenge expiry plus 30 seconds to check_and_mark_ttl/3" do
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+
+      assert :ok = Store.check_and_mark(TtlRecordingStore, "ttl-key", :v, challenge_expires: expires)
+      assert_received {:check_and_mark_ttl, "ttl-key", ttl_ms}
+      assert ttl_ms in (3_600_000 + 25_000)..(3_600_000 + 30_000)
+    end
+
+    test "uses check_and_mark/2 without an expiry or without check_and_mark_ttl/3" do
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+
+      assert :ok = Store.check_and_mark(TtlRecordingStore, "no-expiry", :v, challenge_expires: nil)
+      assert_received {:check_and_mark, "no-expiry"}
+
+      assert :ok = Store.check_and_mark(TempoMemoryStore, "plain", :first, challenge_expires: expires)
+
+      assert {:error, :already_exists} =
+               Store.check_and_mark(TempoMemoryStore, "plain", :second, challenge_expires: expires)
+    end
+
+    test "extends a ConCacheStore tuple mark past the cache TTL" do
+      cache_name = unique_cache_name()
+      start_supervised!(ConCacheStore.child_spec(name: cache_name, ttl: 20, ttl_check_interval: 10), id: cache_name)
+      store = {ConCacheStore, name: cache_name}
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+
+      assert :ok = Store.check_and_mark(store, "bound", :first, challenge_expires: expires)
+      assert :ok = Store.check_and_mark(store, "unbound", :first)
+      Process.sleep(150)
+
+      assert :not_found = Store.get(store, "unbound")
+      assert {:error, :already_exists} = Store.check_and_mark(store, "bound", :second, challenge_expires: expires)
+    end
+  end
+
   describe "dedup_capable?/1 and update_capable?/1" do
     test "detect callbacks on a store module that is not loaded yet" do
       # Regression: a bare function_exported?/3 answers false for a compiled but

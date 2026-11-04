@@ -324,7 +324,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, source} <- require_proof_source(config["credential_source"]),
          {:ok, parsed} <- parse_proof_source(source, expected_chain_id),
          :ok <- verify_proof_signature(parsed, config, signature),
-         :ok <- commit_proof_used(store, config["challenge_id"]) do
+         :ok <- commit_proof_used(store, config) do
       reference = config["challenge_id"] || "proof"
       {:ok, Receipt.new(method: "tempo", reference: reference, external_id: charge.external_id)}
     end
@@ -354,7 +354,7 @@ defmodule MPP.Methods.Tempo do
          :ok <- Shared.check_receipt_status(receipt),
          {:ok, sender_policy} <- hash_sender_policy(hash, rpc_url, config),
          {:ok, transfer} <- find_matching_transfer(receipt, charge, source, sender_policy),
-         :ok <- commit_hash_used(store, hash) do
+         :ok <- commit_hash_used(store, hash, config) do
       {:ok,
        Receipt.new(
          method: "tempo",
@@ -1046,13 +1046,13 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp commit_proof_used(nil, _challenge_id), do: :ok
+  defp commit_proof_used(nil, _config), do: :ok
 
-  defp commit_proof_used(_store, nil), do: :ok
-
-  defp commit_proof_used(store, challenge_id) do
-    commit_store_mark(store, @proof_store_key_prefix <> challenge_id)
+  defp commit_proof_used(store, %{"challenge_id" => challenge_id} = config) when is_binary(challenge_id) do
+    commit_store_mark(store, @proof_store_key_prefix <> challenge_id, config)
   end
+
+  defp commit_proof_used(_store, _config), do: :ok
 
   defp check_fee_token_allowed(config, _token) do
     chain_id = config["chain_id"] || @moderato_chain_id
@@ -1272,7 +1272,7 @@ defmodule MPP.Methods.Tempo do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),
          :ok <- maybe_validate_fee_payer_envelope(tx, config),
          {:ok, _payment} <- check_matched_memo_binding(payment, config),
-         {:ok, token} <- reserve_hash_atomic(store, hash) do
+         {:ok, token} <- reserve_hash_atomic(store, hash, config) do
       finish_reserved_transaction(tx, config, store, hash, token)
     end
   end
@@ -1532,25 +1532,25 @@ defmodule MPP.Methods.Tempo do
   # one wins and the loser gets "already used". Atomicity is guaranteed by
   # validate_store!/1 (a non-atomic store is rejected at init), so there is no
   # non-atomic fallback (GHSA-w8j7-7qc3-5f24).
-  defp commit_hash_used(nil, _hash), do: :ok
+  defp commit_hash_used(nil, _hash, _config), do: :ok
 
-  defp commit_hash_used(store, hash) do
-    commit_store_mark(store, store_key(hash))
+  defp commit_hash_used(store, hash, config) do
+    commit_store_mark(store, store_key(hash), config)
   end
 
-  defp commit_store_mark(store, key) do
-    claim_atomic(store, key, System.system_time(:millisecond))
+  defp commit_store_mark(store, key, config) do
+    claim_atomic(store, key, System.system_time(:millisecond), config)
   end
 
   # Atomically reserves a hash before broadcast. Used by the transaction path to
   # prevent concurrent duplicate broadcasts of the same signed tx. The stored
   # value is an attempt token used later for compare-and-delete release.
-  defp reserve_hash_atomic(nil, _hash), do: {:ok, nil}
+  defp reserve_hash_atomic(nil, _hash, _config), do: {:ok, nil}
 
-  defp reserve_hash_atomic(store, hash) do
+  defp reserve_hash_atomic(store, hash, config) do
     token = attempt_token()
 
-    case claim_atomic(store, store_key(hash), token) do
+    case claim_atomic(store, store_key(hash), token, config) do
       :ok -> {:ok, token}
       {:error, _reason} = error -> error
     end
@@ -1571,9 +1571,10 @@ defmodule MPP.Methods.Tempo do
 
   # Atomic single-use claim via the store's check_and_mark/2. Shared by the
   # pre-broadcast reserve (transaction path) and the post-verification commit
-  # (hash path) — both treat :already_exists as a replay rejection.
-  defp claim_atomic(store, key, ts) do
-    case store_check_and_mark(store, key, ts) do
+  # (hash path) — both treat :already_exists as a replay rejection. The mark
+  # outlives the challenge however long the endpoint's `expires_in` is.
+  defp claim_atomic(store, key, value, config) do
+    case Store.check_and_mark(store, key, value, challenge_expires: config["challenge_expires"]) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
@@ -1625,8 +1626,6 @@ defmodule MPP.Methods.Tempo do
   defp store_get(store, key), do: Store.get(store, key)
 
   defp store_put(store, key, value), do: Store.put(store, key, value)
-
-  defp store_check_and_mark(store, key, value), do: Store.check_and_mark(store, key, value)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 
