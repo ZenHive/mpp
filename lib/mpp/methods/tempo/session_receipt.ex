@@ -79,6 +79,7 @@ defmodule MPP.Methods.Tempo.SessionReceipt do
   # Matches mpp-rs MAX_TOKEN_LEN (refs/mpp-rs/src/protocol/core/headers.rs:18) and
   # mppx maxRequestParameterLength (refs/mppx/src/Challenge.ts:10) — both `16 * 1024`.
   # At-limit input still parses; only over-limit is rejected.
+  # mpp-rs #669 dropped its receipt cap to match mppx; we keep it for receipts too.
   @max_token_len 16 * 1024
 
   api(:new, "Create a new Tempo session receipt with defaults for method/intent/status/timestamp.",

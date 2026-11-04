@@ -174,6 +174,11 @@ open-items note below).
 | mpp-rs #641 (commit 2a26d58) reject unbound Stripe externalId | PaymentIntent reuse across challenges | Missing or mismatched `externalId` → `invalid_challenge` before any PaymentIntent call — `methods/stripe.ex` |
 | mpp-rs #658 / #657 (commits 06343e8, 80f02e8) close-state cleanup and voucher commit ordering | Late handler clobbering a newer close; state committed before authentication | Exclusive close reservation with no automatic stale cleanup; voucher signature checked inside the same atomic update before commit — `session/channel.ex`, `session/actions.ex` |
 | mpp-specs #375 (commit 50309c8) client-arranged fee payer | Rejecting valid client-paid envelopes carrying a third-party fee-payer signature | Placeholder enforced only when server sponsorship is on; otherwise the envelope passes through unchanged — `methods/tempo.ex` |
+| mpp-rs #666 (commit f99b1e3) reject proof keychain envelopes naming another account | Proof signed by an access key of a different account | Keychain `user_address` must equal the proof source before key recovery; nested keychains rejected — `methods/tempo/proof.ex` (test `proof_test.exs` "rejects keychain envelope when user address does not match source") |
+| mppx #1156 (commit 2ca12d1) charge request-priced session content before handlers | Handler running before the request is charged | `open`/`voucher` charge the request amount in the same atomic store update that accepts the voucher, before `MPP.Plug` passes the request on; no SSE session transport — `session/actions.ex` |
+| mppx #1152 (commit afb9924) bound websocket payment close reasons | Oversized close reason leaving a rejected socket open | Only a constant 29-byte close reason is emitted; rejections are error frames — `transports/websocket.ex` |
+| mpp-rs #669 (commit 15b4038) drop the receipt size cap | — (upstream removed a bound) | Stricter: the 16 KiB pre-decode cap stays on receipt tokens — `headers.ex`, `methods/tempo/session_receipt.ex` |
+| mpp-rs #668 (commit 1b58c93) require a string fundingCurrency | Non-string receipt metadata | Non-string values rejected; core keys win over extensions — `receipt.ex` |
 
 ## 📋 Tracked as roadmap work (parity pending)
 
@@ -186,7 +191,7 @@ open-items note below).
 
 ## Open hardening items
 
-**0 open items** as of 2026-11-04.
+**3 open items** as of 2026-11-04.
 
 Previously resolved items: the five low draft advisories from the 2026-10-31 review shipped in 0.22.0 and were published after the Hex release (`GHSA-pggm-gm7c-2f4j`, `GHSA-76qc-4p5p-v35x`, `GHSA-8pv3-83vq-77rr`, `GHSA-wwp2-w5hw-hw3r`, `GHSA-89vp-6m4q-7hhp`).
 

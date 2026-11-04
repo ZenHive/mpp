@@ -40,13 +40,13 @@
 | Task 105 | ✅ | 🎁 **core-protocol** · Support the `header` challenge parameter and the Payment-Authorization credential header [D:6/B:8/U:8 → Eff:1.33?] 📋 |
 | Task 125 | ✅ | 🎁 **core-protocol** · Align stale Payment header cleanup with credential scheme parsing [D:3/B:4/U:4 → Eff:1.33?] 📋 |
 | Task 138 | ✅ | 🎁 **testnet-funding** · Replace the per-file Tempo, Solana and XRPL funding helpers in integration tests with faucet_ex [D:3/B:5/U:7 → Eff:2.0?] 🎯 |
-| Task 144 | ✅ | 🎁 **core-protocol** · Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
-| Task 145 | ✅ | 🎁 **core-protocol** · Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447) [D:5/B:6/U:5 → Eff:1.1] 📋 |
-| Task 146 | ✅ | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33] 📋 |
-| Task 151 `[P]` | ✅ | 🎁 **core-protocol** · Map remaining method infrastructure failures to internal-payment-error [D:5/B:7/U:6 → Eff:1.3] 📋 |
-| Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
-| Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83] 🚀 |
-| Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33] 📋 |
+| Task 144 | ✅ | 🎁 **core-protocol** · Map internal and RPC failures to internal-payment-error and align problem types with the spec (mpp-rs #496/#430, #514) [D:4/B:7/U:6 → Eff:1.62?] 🚀 |
+| Task 145 | ✅ | 🎁 **core-protocol** · Challenge header wire-format parity: ASCII-only escaping, Latin-1 client decoding, empty auth-params, header field, legacy opaque (mpp-rs #450/#489/#505/#453/#490, #447) [D:5/B:6/U:5 → Eff:1.1?] 📋 |
+| Task 146 | ✅ | 🎁 **core-protocol** · Tighten Accept-Payment qvalue and protocol-amount grammar (mpp-rs #488, #485) [D:3/B:4/U:4 → Eff:1.33?] 📋 |
+| Task 151 `[P]` | ✅ | 🎁 **core-protocol** · Map remaining method infrastructure failures to internal-payment-error [D:5/B:7/U:6 → Eff:1.3?] 📋 |
+| Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
+| Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
+| Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33?] 📋 |
 | Task 156 `[P]` | ⬜ | 🎁 **core-protocol** · Answer replayed or settled credentials with 403 credential-replayed [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 157 `[P]` | ⬜ | 🎁 **core-protocol** · Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯 |
 | Task 158 `[P]` | ⬜ | 🎁 **stripe** · Standardize Stripe PaymentIntent analytics metadata [D:2/B:4/U:3 → Eff:1.75] 🚀 |
@@ -63,6 +63,11 @@
 | Task 169 | ✅ | 🎁 **session** · Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq) [D:6/B:8/U:9 → Eff:1.42] 📋 |
 | Task 170 | ✅ | 🎁 **session** · Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9) [D:5/B:7/U:8 → Eff:1.5] 🚀 |
 | Task 171 `[P]` | ✅ | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
+| Task 172 `[P]` | ⬜ | 🎁 **utilities** · Accept RFC 9530 digest forms in BodyDigest.verify [D:2/B:5/U:4 → Eff:2.25] 🎯 |
+| Task 173 `[P]` | ⬜ | 🎁 **client-sdk** · Honor a caller-set Accept-Payment header in MPP.Client.Req challenge selection [D:3/B:4/U:3 → Eff:1.17] 📋 |
+| Task 174 `[P]` | ⬜ | 🎁 **core-protocol** · Accept custom challenge intent values on the client parser [D:2/B:3/U:2 → Eff:1.25] 📋 |
+| Task 175 `[P]` | ⬜ | 🎁 **tempo** · Give hosted fee-payer requests their own Req options with redirects disabled [D:2/B:3/U:3 → Eff:1.5] 🚀 |
+| Task 176 `[P]` | ⬜ | 🎁 **tempo** · Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯 |
 <!-- TASKS:END -->
 
 ---
@@ -172,7 +177,7 @@
 | Task 111 | ✅ | 🎁 **session** · 🔒 Every accepted session voucher must add funds — align voucher acceptance with mpp-rs #415 [D:3/B:9/U:8 → Eff:2.83?] 🎯 |
 | Task 112 | ✅ | 🎁 **session** · 🔒 Bind Tempo subscription key authorizations to the issuing challenge and accept the ox witness / admin / account tuple fields (mppx #882) [D:5/B:8/U:8 → Eff:1.6?] 🚀 |
 | Task 113 | ✅ | 🎁 **tempo** · Isolate ConCache invalid-update assertions from expiry timing [D:2/B:3/U:3 → Eff:1.5?] 🚀 |
-| Task 148 | ✅ | 🎁 **session** · Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550) [D:4/B:5/U:5 → Eff:1.25] 📋 |
+| Task 148 | ✅ | 🎁 **session** · Session parity: receipt fields, pre-broadcast open validation, and a property suite for channel invariants (mpp-rs #495, #494, #550) [D:4/B:5/U:5 → Eff:1.25?] 📋 |
 <!-- TASKS:END -->
 
 ---
@@ -204,7 +209,7 @@
 | Task 89 `[P]` | ✅ | 🎁 **client-sdk** · Tempo client provider: machine-token charge construction [D:6/B:8/U:6 → Eff:1.17?] 📋 |
 | Task 108 | ✅ | 🎁 **client-sdk** · Enforce a client-side recipient allowlist in the built-in Tempo provider (primary and split recipients) [D:3/B:6/U:6 → Eff:2.0?] 🎯 |
 | Task 140 | ✅ | 🎁 **client-sdk** · Drop the x402 client resource-URL match so query-string and redirected offers stay payable (mppx #908 parity) [D:2/B:4/U:4 → Eff:2.0?] 🎯 |
-| Task 150 | ✅ | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17] 📋 |
+| Task 150 | ✅ | 🎁 **client-sdk** · Client Tempo charge guards: cap caller-supplied valid_before at challenge expiry and honour supportedModes (mpp-rs #470, #455) [D:3/B:4/U:3 → Eff:1.17?] 📋 |
 <!-- TASKS:END -->
 
 ---

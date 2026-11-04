@@ -6906,9 +6906,11 @@
         "An ambiguous broadcast followed by a confirmed receipt returns a successful receipt within the polling bound (stubbed RPC test)",
         "A retry of the same credential after confirmation returns the original receipt rather than already-used, or the task documents why that is unsafe",
         "No path releases a claim for a transaction that may have been included (regression test)",
-        "Moderato :integration test covers the happy path and flunks loudly without credentials"
+        "Moderato :integration test covers the happy path and flunks loudly without credentials",
+        "An ExpiringNonceReplay broadcast error is classified as ambiguous and triggers the same receipt recovery (mppx #1164 2b747bf)",
+        "A hosted-sponsorship retry after an unknown broadcast outcome reconciles against the receipt instead of failing already-used (mpp-rs #664 75a0538)"
       ],
-      "body": "After an ambiguous sync-broadcast failure (timeout, 'already known', RPC error) MPP.Methods.Tempo keeps the hash claim (fail-safe) and fails; a retry of the same credential then gets 'already used' even when the transaction confirmed. Both SDKs add bounded receipt polling and return success when the receipt confirms (mppx #1028 7271a85, #1040 29855e8, #1041 08fa745; mpp-rs #625 29366d9). Keep the fail-safe claim policy (Task 91 / renewal) intact: never release a claim that may be included; add recovery on top.",
+      "body": "After an ambiguous sync-broadcast failure (timeout, 'already known', RPC error) MPP.Methods.Tempo keeps the hash claim (fail-safe) and fails; a retry of the same credential then gets 'already used' even when the transaction confirmed. Both SDKs add bounded receipt polling and return success when the receipt confirms (mppx #1028 7271a85, #1040 29855e8, #1041 08fa745; mpp-rs #625 29366d9). Keep the fail-safe claim policy (Task 91 / renewal) intact: never release a claim that may be included; add recovery on top. 2026-11-04 sdk-delta-watch: mppx #1164 adds ExpiringNonceReplay to the receipt-recovery error set; mpp-rs #664 also reconciles hosted-sponsorship retries — both folded in as criteria.",
       "created_at": "2026-10-31",
       "scored_at": "2026-10-31",
       "cross_repo": []
@@ -7222,6 +7224,156 @@
       "verified": true,
       "verified_by": "codex",
       "verification_ref": "herdr codex adversarial review",
+      "cross_repo": []
+    },
+    {
+      "id": "172",
+      "phase": 1,
+      "bundle": "utilities",
+      "status": "pending",
+      "title": "Accept RFC 9530 digest forms in BodyDigest.verify",
+      "scores": {
+        "d": 2,
+        "b": 5,
+        "u": 4
+      },
+      "eff": 2.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "BodyDigest.verify/2 accepts bare padded sha-256=<b64>=, bare unpadded, and the structured-field byte sequence sha-256=:<b64>: for the same body, comparing in constant time",
+        "Malformed shapes are rejected with tests: missing or doubled colons, trailing whitespace or parameters, uppercase SHA-256, other algorithms, empty ::, lists",
+        "Digests produced by mppx and mpp-rs for a fixed body verify (vectors taken from refs/mppx/src/BodyDigest.test.ts and refs/mpp-rs/src/body_digest.rs)",
+        "The task states whether compute/1 switches to padded output to match both refs, and the CHANGELOG says so if it does"
+      ],
+      "body": "mppx #1154 (ed76e8e) and mpp-rs #672 (7f09efd) normalize RFC 9530 byte-sequence digests in BodyDigest.verify; both refs emit padded bare base64. MPP.BodyDigest.verify/2 is an exact string compare against our own unpadded compute/1 output, so it rejects the refs' padded form and the spec's structured form (refs/mpp-specs/specs/core/draft-httpauth-payment-01.md digest examples). Challenge-side digest parsing already accepts both shapes; only verify is off. Interop gap, fails closed.",
+      "created_at": "2026-11-04",
+      "scored_at": "2026-11-04",
+      "cross_repo": []
+    },
+    {
+      "id": "173",
+      "phase": 1,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Honor a caller-set Accept-Payment header in MPP.Client.Req challenge selection",
+      "scores": {
+        "d": 3,
+        "b": 4,
+        "u": 3
+      },
+      "eff": 1.17,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A request carrying its own Accept-Payment header ranks and excludes (q=0) challenges by that header instead of the attach/2 config (test)",
+        "Behavior for a present but empty or unparseable caller header is chosen (mpp-rs refuses to pay; mppx falls back to config) and documented",
+        "Requests without a caller header keep current behavior (regression test)"
+      ],
+      "body": "mpp-rs #671 (da7c974) makes its MCP client honor caller Accept-Payment preferences; both SDKs' HTTP clients already let the caller's header win for ranking and exclusions (refs/mpp-rs/src/client/flow.rs:153-185, refs/mppx/src/client/internal/Fetch.ts:1175-1193). MPP.Client.Req keeps the caller's header on the wire but selects using only the attach/2 config.",
+      "created_at": "2026-11-04",
+      "scored_at": "2026-11-04",
+      "cross_repo": []
+    },
+    {
+      "id": "174",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Accept custom challenge intent values on the client parser",
+      "scores": {
+        "d": 2,
+        "b": 3,
+        "u": 2
+      },
+      "eff": 1.25,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A challenge whose intent is any non-empty string without '|' parses (e.g. 'payment plan'), matching mppx z.string() and mpp-rs #670",
+        "format_www_authenticate escapes quote and backslash and still rejects CR/LF in the intent (tests)",
+        "Server-side intent pinning is unchanged (regression test)"
+      ],
+      "body": "mpp-rs #670 (0e5290a) relaxed intent validation to match mppx (refs/mppx/src/Challenge.ts:36, refs/mpp-rs/src/protocol/core/headers.rs:138-143). MPP.Challenge still requires [A-Za-z0-9_-]+, so our client drops challenges advertising other intents.",
+      "created_at": "2026-11-04",
+      "scored_at": "2026-11-04",
+      "cross_repo": []
+    },
+    {
+      "id": "175",
+      "phase": 1,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Give hosted fee-payer requests their own Req options with redirects disabled",
+      "scores": {
+        "d": 2,
+        "b": 3,
+        "u": 3
+      },
+      "eff": 1.5,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "Hosted fee-payer calls use options separate from the chain RPC req_options, so headers configured for one host are never sent to the other (test)",
+        "Hosted fee-payer calls do not follow redirects (test with a redirecting stub)",
+        "Existing hosted fee-payer :integration path stays green or flunks loudly without credentials"
+      ],
+      "body": "mpp-rs #664 (75a0538, src/protocol/methods/tempo/hosted_fee_payer.rs) disables redirects and scopes headers to the fee-payer host. Our config req_options are shared between rpc_url and fee_payer_url and use Req's redirect defaults. Hardening of operator-configured hosts.",
+      "created_at": "2026-11-04",
+      "scored_at": "2026-11-04",
+      "cross_repo": []
+    },
+    {
+      "id": "176",
+      "phase": 1,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Add the reference keychain-V2 proof signature as a cross-implementation vector",
+      "scores": {
+        "d": 1,
+        "b": 3,
+        "u": 2
+      },
+      "eff": 2.5,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "parallel"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A test verifies the viem-generated keychain V2 proof signature from mpp-rs #664 tests (VIEM_KEYCHAIN_SIGNATURE) through MPP.Methods.Tempo.Proof",
+        "The vector's source commit and path are cited in the test"
+      ],
+      "body": "Our keychain V2 proof payload keccak(0x04||digest||user) agrees with mppx and tempo-primitives, but our V2 test fixture is self-built. mpp-rs #664 (75a0538) adds a viem-generated vector; port it as an independent oracle.",
+      "created_at": "2026-11-04",
+      "scored_at": "2026-11-04",
       "cross_repo": []
     }
   ]
