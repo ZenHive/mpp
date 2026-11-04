@@ -76,6 +76,9 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-8pv3-83vq-77rr` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | x402 route binding defaulted to resource-echo matching on scoped routes; `:route_binding` now defaults to `:required` with an `extensions.mppx` binding on every challenge |
 | `GHSA-wwp2-w5hw-hw3r` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Internal error terms were echoed into client-visible WebSocket frames and problem details; internal errors now carry a fixed client detail and are logged server-side |
 | `GHSA-89vp-6m4q-7hhp` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Sponsored Tempo transactions were co-signed without a minimum remaining validity; co-sign and broadcast now require 15 seconds of validity, re-checked with a fresh clock, and short sponsored endpoint TTLs are refused at init |
+| `GHSA-r5w8-h5v2-3g34` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | Client paid for a non-GET/HEAD request after Req followed a redirect and rewrote it to GET; such requests are now refused with `:redirected_request` (mppx `Fetch.ts`, mpp-rs `flow.rs` parity) |
+| `GHSA-388w-957g-grcq` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | x402 route digest binding was skipped for empty or uncached request bodies; digests now bind empty bodies and fail closed when the body is unavailable (mppx `EvmCharge.ts` parity) |
+| `GHSA-4j54-j2qx-w4c9` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | Single-use payment markers could expire before the challenge when `expires_in` exceeded the dedup store TTL; markers are now kept until challenge expiry plus 30 seconds (mpp-rs #673 parity) |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18. The four 0.16.2 advisories
@@ -191,9 +194,11 @@ open-items note below).
 
 ## Open hardening items
 
-**3 open items** as of 2026-11-04.
+**0 open items** as of 2026-11-05.
 
-Previously resolved items: the five low draft advisories from the 2026-10-31 review shipped in 0.22.0 and were published after the Hex release (`GHSA-pggm-gm7c-2f4j`, `GHSA-76qc-4p5p-v35x`, `GHSA-8pv3-83vq-77rr`, `GHSA-wwp2-w5hw-hw3r`, `GHSA-89vp-6m4q-7hhp`).
+Previously resolved items: the three low draft advisories from the 2026-11-04 upstream sweep shipped in 0.22.1 and were published after the Hex release (`GHSA-r5w8-h5v2-3g34`, `GHSA-388w-957g-grcq`, `GHSA-4j54-j2qx-w4c9`).
+
+Earlier: the five low draft advisories from the 2026-10-31 review shipped in 0.22.0 and were published after the Hex release (`GHSA-pggm-gm7c-2f4j`, `GHSA-76qc-4p5p-v35x`, `GHSA-8pv3-83vq-77rr`, `GHSA-wwp2-w5hw-hw3r`, `GHSA-89vp-6m4q-7hhp`).
 
 Earlier: the four medium draft advisories from the 2026-10-31 review shipped in 0.21.0 and were published the same day (`GHSA-f382-x4g8-jg9q`, `GHSA-fqv7-fp33-2mxq`, `GHSA-2grw-xqfc-q2x9`, `GHSA-4rf9-cqhr-4924`).
 
