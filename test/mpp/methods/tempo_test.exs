@@ -2237,8 +2237,9 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
     end
 
-    test "post-broadcast store.put crash does not fail the request", %{charge: charge} do
-      # Store that succeeds on check_and_mark but raises on put (post-broadcast path)
+    test "post-broadcast mark crash does not fail the request", %{charge: charge} do
+      # Store that accepts the pre-broadcast reservation but raises on the
+      # post-broadcast mark of the distinct on-chain hash
       defmodule CrashingPutStore do
         @moduledoc false
         @behaviour Store
@@ -2254,7 +2255,12 @@ defmodule MPP.Methods.TempoTest do
           end
         end
 
-        def put(_key, _value), do: raise("store crashed!")
+        def put(key, value), do: Agent.update(__MODULE__, &Map.put(&1, key, value))
+
+        def check_and_mark("mpp:charge:0x" <> "efef" <> _rest, _value) do
+          send(Agent.get(__MODULE__, &Map.fetch!(&1, :test_pid)), :post_broadcast_mark)
+          raise "store crashed!"
+        end
 
         def check_and_mark(key, value) do
           Agent.get_and_update(__MODULE__, fn state ->
@@ -2268,6 +2274,8 @@ defmodule MPP.Methods.TempoTest do
       end
 
       start_supervised!(CrashingPutStore)
+      test_pid = self()
+      Agent.update(CrashingPutStore, &Map.put(&1, :test_pid, test_pid))
 
       charge = %{
         charge
@@ -2297,8 +2305,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      # Should succeed despite post-broadcast store.put raising
       assert {:ok, %Receipt{reference: ^different_hash}} = Tempo.verify(payload, charge)
+      assert_received :post_broadcast_mark
     end
 
     test "post-broadcast dead store process does not fail the request", %{charge: charge} do
