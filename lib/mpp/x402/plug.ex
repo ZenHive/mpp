@@ -49,7 +49,11 @@ defmodule MPP.X402.Plug do
   host must cache in `conn.private.raw_body` (for example with a
   `Plug.Parsers` `:body_reader`). An empty body is checked like any other.
   Only a request without a body skips the check; a body that was not cached
-  is rejected (`body_digest_unavailable`).
+  is rejected (`body_digest_unavailable`). Without a body means an HTTP/1.x
+  request with neither `content-length` nor `transfer-encoding`, which the
+  adapter did not mark as having a body (Cowboy's `has_body`). An HTTP/2
+  request whose body was not cached is always rejected, because the absence
+  of a body cannot be established from its headers.
   """
 
   alias MPP.BodyDigest
@@ -390,12 +394,19 @@ defmodule MPP.X402.Plug do
   end
 
   # HTTP/1.x framing: a request without Content-Length or Transfer-Encoding has
-  # no body. HTTP/2 and later may carry a body without either header.
+  # no body. HTTP/2 and later may carry a body without either header. Cowboy
+  # decodes chunked bodies itself and drops the Transfer-Encoding header, so its
+  # request map's `has_body` is the only sign of a chunked body
+  # (`cowboy_http.erl` `parse_hd_before_value`, `cowboy_req:has_body/1`).
   defp bodyless?(conn) do
     Conn.get_http_protocol(conn) in [:"HTTP/1.0", :"HTTP/1.1"] and
       Conn.get_req_header(conn, "content-length") == [] and
-      Conn.get_req_header(conn, "transfer-encoding") == []
+      Conn.get_req_header(conn, "transfer-encoding") == [] and
+      not adapter_has_body?(conn.adapter)
   end
+
+  defp adapter_has_body?({_adapter, %{has_body: has_body}}), do: has_body != false
+  defp adapter_has_body?(_adapter), do: false
 
   defp normalize_accepts(opts) do
     case Map.get(opts, :accepts) do

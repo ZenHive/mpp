@@ -368,6 +368,9 @@ defmodule MPP.X402.PlugTest do
       %{opts: opts, header: header}
     end
 
+    defp put_adapter_has_body(%Plug.Conn{adapter: {adapter, state}} = conn, has_body),
+      do: %{conn | adapter: {adapter, Map.put(state, :has_body, has_body)}}
+
     defp digest_conn(header, method, req_headers, raw_body, protocol \\ :"HTTP/1.1") do
       conn =
         method
@@ -388,6 +391,20 @@ defmodule MPP.X402.PlugTest do
       for raw_body <- [nil, ""] do
         assert {:ok, _} = X402.Plug.maybe_settle(digest_conn(header, :get, [], raw_body), opts.x402, nil)
       end
+    end
+
+    # Cowboy decodes chunked bodies and drops `transfer-encoding`; only the
+    # adapter's request map (`has_body`) shows that a body is present.
+    test "an adapter-reported body without framing headers is never skipped", %{opts: opts, header: header} do
+      for raw_body <- [nil, ""] do
+        conn = header |> digest_conn(:get, [], raw_body) |> put_adapter_has_body(true)
+        assert {:error, error} = X402.Plug.maybe_settle(conn, opts.x402, nil)
+        expected = if raw_body, do: "body_digest_mismatch", else: "body_digest_unavailable"
+        assert error.detail =~ expected
+      end
+
+      conn = header |> digest_conn(:get, [], nil) |> put_adapter_has_body(false)
+      assert {:ok, _} = X402.Plug.maybe_settle(conn, opts.x402, nil)
     end
 
     test "checks an empty body against the digest", %{opts: opts, header: header} do
