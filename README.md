@@ -573,11 +573,12 @@ transaction or a zero-amount proof. Address comparison is checksum-agnostic. Omi
 the option to keep the previous unrestricted-recipient behaviour.
 A payment credential must never be created or attached after a redirect changed the
 request origin — `Req` follows redirects by default. `MPP.Client.Req.attach/2` refuses
-that path (`:cross_origin_redirect`, mpp-rs #379). Callers that drive
+that path (`:cross_origin_redirect`, mpp-rs #379), and pays a non-GET/HEAD request
+only at the URL it was sent to (`:redirected_request`). Callers that drive
 `MPP.Client.Transport.HTTP` themselves must apply the same rule: do not call
 `set_credential/2` on a request whose origin (scheme/host/port) differs from the
-URL the caller asked for. They must also disable redirects on the request that
-carries the credential; `MPP.Client.Req` does this only for its own paid retry.
+URL the caller asked for, nor on a non-GET/HEAD request redirected to another URL.
+They must also disable redirects on the request that carries the credential; `MPP.Client.Req` does this only for its own paid retry.
 
 ```elixir
 client = MPP.Client.MCP.new(provider: my_provider)

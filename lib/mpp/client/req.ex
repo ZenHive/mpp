@@ -16,6 +16,10 @@ defmodule MPP.Client.Req do
   A 402 that arrives after a redirect changed the request origin is refused
   (`:cross_origin_redirect`) so a payment credential is never attached to a
   different host, scheme, or port than the caller asked for (mpp-rs #379).
+  A request whose method is not GET or HEAD is paid only at the URL the caller
+  asked for: after a redirect to another resource it is refused
+  (`:redirected_request`) before any payment, and a later 402 is returned as-is
+  (mpp-rs `flow.rs`, mppx `Fetch.ts`).
 
   The request that carries the payment credential never follows redirects: a
   3xx answer to the paid retry is returned to the caller as-is, whichever header
@@ -153,10 +157,17 @@ defmodule MPP.Client.Req do
     end
   end
 
+  # Request steps rerun on every redirect hop, so only the first run records
+  # the caller's request.
   defp snapshot_origin(request) do
     case Req.Request.get_private(request, :mpp_request_origin) do
-      nil -> Req.Request.put_private(request, :mpp_request_origin, origin(request.url))
-      _existing -> request
+      nil ->
+        request
+        |> Req.Request.put_private(:mpp_request_origin, origin(request.url))
+        |> Req.Request.put_private(:mpp_request_target, {request.method, resource(request.url)})
+
+      _existing ->
+        request
     end
   end
 
@@ -188,6 +199,7 @@ defmodule MPP.Client.Req do
 
   defp pay_and_retry(request, response, config, retries) do
     with :ok <- ensure_same_origin(request),
+         :ok <- ensure_same_resource(request, retries, response),
          {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
          :ok <- Transport.approve(challenge, config.on_payment_required),
@@ -227,6 +239,28 @@ defmodule MPP.Client.Req do
       {:error, :cross_origin_redirect}
     end
   end
+
+  # Req rewrites a redirected POST (301/302) or any non-GET/HEAD (303) to a
+  # bodyless GET. Paying for a different resource than the caller's non-safe
+  # request would buy something the caller never asked for.
+  defp ensure_same_resource(request, retries, response) do
+    case Req.Request.get_private(request, :mpp_request_target) do
+      {method, url} ->
+        cond do
+          safe_method?(method) or url == resource(request.url) -> :ok
+          retries > 0 -> {:passthrough, response}
+          true -> {:error, :redirected_request}
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  # Req keeps `method:` as given, so `"POST"` and `:POST` reach here too.
+  defp safe_method?(method), do: Enum.member?(["get", "head"], String.downcase(to_string(method)))
+
+  defp resource(%URI{} = uri), do: URI.to_string(%{uri | fragment: nil})
 
   defp origin(%URI{} = uri) do
     host = if is_binary(uri.host), do: String.downcase(uri.host)
@@ -278,6 +312,9 @@ defmodule MPP.Client.Req do
   defp error_message(:no_supported_challenge), do: "no configured provider supports the offered payment challenges"
 
   defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
+
+  defp error_message(:redirected_request),
+    do: "refusing to pay for a redirected non-GET/HEAD request; the redirect changed the requested resource"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
 

@@ -124,6 +124,22 @@ defmodule MPP.Client.ReqTest do
     end
   end
 
+  defp redirect_to_paid_plug(status, challenge_header) do
+    fn conn ->
+      case conn.request_path do
+        "/start" ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "/resource")
+          |> Plug.Conn.send_resp(status, "")
+
+        "/resource" ->
+          conn
+          |> Plug.Conn.put_resp_header("www-authenticate", challenge_header)
+          |> Plug.Conn.send_resp(402, "pay")
+      end
+    end
+  end
+
   defp client(plug, opts) do
     [plug: plug]
     |> Req.new()
@@ -544,6 +560,52 @@ defmodule MPP.Client.ReqTest do
 
       assert {:ok, %Req.Response{status: 200, body: "paid"}} =
                Req.get(req, url: "http://example.com/start")
+
+      assert_received {:paid, "tempo"}
+    end
+
+    for {status, method} <- [{301, :post}, {302, :post}, {303, :post}, {303, :put}, {307, :post}] do
+      test "refuses to pay after a #{status} redirect of a #{method} to another resource" do
+        plug = redirect_to_paid_plug(unquote(status), challenge_header("tempo"))
+        req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+        assert {:error, %ClientReq.Error{reason: :redirected_request} = error} =
+                 Req.request(req, method: unquote(method), url: "http://example.com/start", body: "order")
+
+        assert Exception.message(error) =~ "redirected non-GET/HEAD request"
+        refute_received {:paid, _}
+      end
+    end
+
+    test "refuses a redirected request whose method was given as a string" do
+      plug = redirect_to_paid_plug(307, challenge_header("tempo"))
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, %ClientReq.Error{reason: :redirected_request}} =
+               Req.request(req, method: "POST", url: "http://example.com/start", body: "order")
+
+      refute_received {:paid, _}
+    end
+
+    test "pays a non-GET request answered with 402 at its own URL, ignoring the fragment" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+
+          _auth ->
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} =
+               Req.request(req, method: :post, url: "http://example.com/start#frag", body: "order")
 
       assert_received {:paid, "tempo"}
     end
