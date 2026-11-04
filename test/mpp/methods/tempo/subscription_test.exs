@@ -7,6 +7,7 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
   alias MPP.Subscription.ETSStore
   alias MPP.Subscription.Record
   alias MPP.Subscription.Store
+  alias MPP.Tempo.ConCacheStore
   alias MPP.Test.InternalPaymentError
   alias MPP.Test.RPCShapes
   alias MPP.Test.SubscriptionHelpers
@@ -394,6 +395,32 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       payload = %{"type" => "keyAuthorization", "signature" => signature}
 
       assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+
+      assert {:error, %Errors{detail: "subscription activation credential already used"}} =
+               Subscription.verify(payload, subscription)
+    end
+
+    test "keeps an activation credential single-use until its challenge expires, past the store TTL", %{store: store} do
+      stub_successful_chain()
+      cache = :"#{__MODULE__}.ActivationTtl.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: cache, ttl: 20, ttl_check_interval: 10), id: cache)
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+
+      config =
+        store
+        |> config()
+        |> Map.merge(%{
+          "challenge_id" => SubscriptionHelpers.unique_challenge_id(),
+          "challenge_expires" => expires,
+          "store" => {ConCacheStore, name: cache}
+        })
+
+      subscription = subscription(config)
+      {signature, _authorization, _rpc} = SubscriptionHelpers.signed_authorization(subscription)
+      payload = %{"type" => "keyAuthorization", "signature" => signature}
+
+      assert {:ok, %Receipt{}} = Subscription.verify(payload, subscription)
+      Process.sleep(150)
 
       assert {:error, %Errors{detail: "subscription activation credential already used"}} =
                Subscription.verify(payload, subscription)

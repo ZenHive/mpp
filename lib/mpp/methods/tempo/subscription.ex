@@ -371,7 +371,9 @@ defmodule MPP.Methods.Tempo.Subscription do
       store ->
         key = activation_dedup_key(config, signature)
 
-        case TempoStore.check_and_mark(store, key, System.system_time(:millisecond)) do
+        case TempoStore.check_and_mark(store, key, System.system_time(:millisecond),
+               challenge_expires: config["challenge_expires"]
+             ) do
           :ok -> :ok
           {:error, :already_exists} -> {:error, @activation_already_used}
           {:error, _reason} -> store_unavailable()

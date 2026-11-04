@@ -103,8 +103,10 @@ defmodule MPP.Tempo.ConCacheStore do
   # outlive it.
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(concache_opts) do
-    :persistent_term.put({__MODULE__, :ttl, concache_opts[:name]}, concache_opts[:global_ttl])
-    ConCache.start_link(concache_opts)
+    with {:ok, pid} <- ConCache.start_link(concache_opts) do
+      :persistent_term.put({__MODULE__, :ttl, concache_opts[:name]}, concache_opts[:global_ttl])
+      {:ok, pid}
+    end
   end
 
   @impl Store

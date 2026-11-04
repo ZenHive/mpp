@@ -311,7 +311,7 @@ defmodule MPP.Client.Req do
   defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
 
   defp error_message(:redirected_request),
-    do: "refusing to pay for a redirected non-GET/HEAD request; the redirect changed the requested resource"
+    do: "refusing to pay for a non-GET/HEAD request after Req followed a redirect for it"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
 

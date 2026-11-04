@@ -572,7 +572,7 @@ defmodule MPP.Client.ReqTest do
         assert {:error, %ClientReq.Error{reason: :redirected_request} = error} =
                  Req.request(req, method: unquote(method), url: "http://example.com/start", body: "order")
 
-        assert Exception.message(error) =~ "redirected non-GET/HEAD request"
+        assert Exception.message(error) =~ "non-GET/HEAD request after Req followed a redirect"
         refute_received {:paid, _}
       end
     end

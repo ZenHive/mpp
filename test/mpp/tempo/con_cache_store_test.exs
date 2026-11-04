@@ -96,6 +96,29 @@ defmodule MPP.Tempo.ConCacheStoreTest do
       assert_eventually_not_found("mpp:proof:min", store_opts)
     end
 
+    test "a failed duplicate start keeps the running cache's TTL" do
+      cache_name = unique_cache_name()
+
+      start_supervised!(
+        ConCacheStore.child_spec(name: cache_name, ttl: @ttl_ms, ttl_check_interval: @ttl_check_interval_ms)
+      )
+
+      opts = [name: cache_name]
+
+      assert {:error, {:already_started, _pid}} =
+               ConCacheStore.start_link(
+                 name: cache_name,
+                 global_ttl: @long_ttl_ms * 120,
+                 ttl_check_interval: @ttl_check_interval_ms
+               )
+
+      assert :ok = ConCacheStore.check_and_mark("mpp:proof:dup", :seen, Keyword.put(opts, :min_ttl_ms, @long_ttl_ms))
+      assert :ok = ConCacheStore.check_and_mark("mpp:proof:plain", :seen, opts)
+
+      assert_eventually_not_found("mpp:proof:plain", opts)
+      assert {:ok, :seen} = ConCacheStore.get("mpp:proof:dup", opts)
+    end
+
     test "keeps the cache default for a cache not started by child_spec/1" do
       cache_name = unique_cache_name()
       start_supervised!({ConCache, name: cache_name, ttl_check_interval: false})

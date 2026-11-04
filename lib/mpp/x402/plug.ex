@@ -52,8 +52,9 @@ defmodule MPP.X402.Plug do
   is rejected (`body_digest_unavailable`). Without a body means an HTTP/1.x
   request with neither `content-length` nor `transfer-encoding`, which the
   adapter did not mark as having a body (Cowboy's `has_body`). An HTTP/2
-  request whose body was not cached is always rejected, because the absence
-  of a body cannot be established from its headers.
+  request whose body was not cached is rejected unless it carries
+  `content-length: 0`, because the absence of a body cannot be established
+  from its headers.
   """
 
   alias MPP.BodyDigest
