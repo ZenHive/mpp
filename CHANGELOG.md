@@ -6,6 +6,39 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [0.22.1] — 2026-11-04
+
+### Breaking
+
+- **`MPP.Client.Req` does not pay a redirected non-GET/HEAD request.** When
+  Req followed a redirect for a request whose method is not GET or HEAD
+  (301/302/303/307/308, same URL included), a 402 answer is refused with
+  `:redirected_request` before any payment instead of being paid. GET and
+  HEAD redirects are unchanged; cross-origin redirects are still refused with
+  `:cross_origin_redirect`.
+- **x402 route digests fail closed on unbindable bodies.** A route with a
+  `:digest` checks an explicitly empty body (`content-length: 0`, or a cached
+  empty `conn.private.raw_body` on a request that has a body) against the
+  digest, and rejects a body that was not cached in `conn.private.raw_body`
+  with `body_digest_unavailable`. Hosts with digest routes must cache the raw
+  body (for example with a `Plug.Parsers` `:body_reader`). An HTTP/2 request
+  without a cached body is rejected unless it carries `content-length: 0`,
+  because the absence of a body cannot be established from its headers. The adapter body fallback that
+  `Plug.Test` connections previously hit is gone.
+
+### Changed
+
+- Single-use marks (the shared credential replay mark; the transaction
+  hash, signature and challenge marks of the Tempo, EVM, Solana, Stellar,
+  XRPL and USDC methods; Tempo proofs and subscription activation) are kept
+  until the challenge expires plus 30 seconds, also when the endpoint's
+  `expires_in` is longer than the store TTL. `MPP.Tempo.ConCacheStore`
+  extends such a mark beyond its global TTL (never shortens it); a custom
+  `MPP.Tempo.Store` receives the TTL through the new optional
+  `c:MPP.Tempo.Store.check_and_mark_ttl/3` and otherwise keeps its own
+  `check_and_mark/2` behaviour. New `MPP.Tempo.Store.check_and_mark/4` and
+  `MPP.Methods.USDC.Replay.with_claims/4`.
+
 ## [0.22.0] — 2026-11-03
 
 ### Breaking
