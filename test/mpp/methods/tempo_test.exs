@@ -4467,8 +4467,8 @@ defmodule MPP.Methods.TempoTest do
       {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0, valid_before: valid_before)
       test_pid = self()
 
-      :ok =
-        SponsorLifecycleStore.configure(999, %{check_and_mark: margin_hook(set_clock, valid_before, @hosted_budget_key)})
+      hook = margin_hook(set_clock, valid_before, @hosted_budget_key)
+      :ok = SponsorLifecycleStore.configure(999, %{check_and_mark: hook})
 
       charge =
         charge

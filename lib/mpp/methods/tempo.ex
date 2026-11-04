@@ -623,13 +623,7 @@ defmodule MPP.Methods.Tempo do
       end
     end)
 
-    min_window = FeePayerPolicy.min_remaining_validity_seconds()
-
-    if Map.has_key?(overrides, "max_validity_window_seconds") and
-         !(is_integer(overrides["max_validity_window_seconds"]) and overrides["max_validity_window_seconds"] >= min_window) do
-      raise ArgumentError,
-            "MPP.Methods.Tempo fee_payer_policy max_validity_window_seconds must be an integer of at least #{min_window}"
-    end
+    validate_validity_window!(overrides)
 
     chain_id = config["chain_id"] || @moderato_chain_id
     policy = FeePayerPolicy.resolve(chain_id, overrides)
@@ -639,6 +633,17 @@ defmodule MPP.Methods.Tempo do
             "MPP.Methods.Tempo max_in_flight_total_fee must be greater than or equal to max_total_fee"
     end
   end
+
+  defp validate_validity_window!(%{"max_validity_window_seconds" => window}) do
+    min_window = FeePayerPolicy.min_remaining_validity_seconds()
+
+    if !(is_integer(window) and window >= min_window) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_policy max_validity_window_seconds must be an integer of at least #{min_window}"
+    end
+  end
+
+  defp validate_validity_window!(_overrides), do: :ok
 
   defp validate_sponsor_identity!(%{"fee_payer_url" => url} = config) when is_binary(url) do
     case normalize_sponsor_id(config["sponsor_budget_id"]) do
