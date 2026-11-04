@@ -565,7 +565,7 @@ defmodule MPP.Client.ReqTest do
     end
 
     for {status, method} <- [{301, :post}, {302, :post}, {303, :post}, {303, :put}, {307, :post}] do
-      test "refuses to pay after a #{status} redirect of a #{method} to another resource" do
+      test "refuses to pay after a #{status} redirect of a #{method}" do
         plug = redirect_to_paid_plug(unquote(status), challenge_header("tempo"))
         req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
 
@@ -575,6 +575,61 @@ defmodule MPP.Client.ReqTest do
         assert Exception.message(error) =~ "redirected non-GET/HEAD request"
         refute_received {:paid, _}
       end
+    end
+
+    test "refuses a POST redirected back to its own URL" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case {conn.method, conn.request_path} do
+          {"POST", "/start"} ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "/start")
+            |> Plug.Conn.send_resp(302, "")
+
+          {"GET", "/start"} ->
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, %ClientReq.Error{reason: :redirected_request}} =
+               Req.request(req, method: :post, url: "http://example.com/start", body: "order")
+
+      refute_received {:paid, _}
+    end
+
+    test "refuses a POST redirected away and back to its own URL" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case {conn.method, conn.request_path} do
+          {"POST", "/start"} ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "/other")
+            |> Plug.Conn.send_resp(302, "")
+
+          {"GET", "/other"} ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "/start")
+            |> Plug.Conn.send_resp(302, "")
+
+          {"GET", "/start"} ->
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, %ClientReq.Error{reason: :redirected_request}} =
+               Req.request(req, method: :post, url: "http://example.com/start", body: "order")
+
+      refute_received {:paid, _}
     end
 
     test "refuses a redirected request whose method was given as a string" do
@@ -587,7 +642,7 @@ defmodule MPP.Client.ReqTest do
       refute_received {:paid, _}
     end
 
-    test "pays a non-GET request answered with 402 at its own URL, ignoring the fragment" do
+    test "pays a non-GET request answered with 402 without a redirect" do
       header = challenge_header("tempo")
 
       plug = fn conn ->

@@ -16,10 +16,9 @@ defmodule MPP.Client.Req do
   A 402 that arrives after a redirect changed the request origin is refused
   (`:cross_origin_redirect`) so a payment credential is never attached to a
   different host, scheme, or port than the caller asked for (mpp-rs #379).
-  A request whose method is not GET or HEAD is paid only at the URL the caller
-  asked for: after a redirect to another resource it is refused
-  (`:redirected_request`) before any payment, and a later 402 is returned as-is
-  (mpp-rs `flow.rs`, mppx `Fetch.ts`).
+  A request whose method is not GET or HEAD is not paid once Req followed a
+  redirect for it, even back to the same URL: it is refused
+  (`:redirected_request`) before any payment (mppx `Fetch.ts` `response.redirected`, mpp-rs `flow.rs`).
 
   The request that carries the payment credential never follows redirects: a
   3xx answer to the paid retry is returned to the caller as-is, whichever header
@@ -164,7 +163,7 @@ defmodule MPP.Client.Req do
       nil ->
         request
         |> Req.Request.put_private(:mpp_request_origin, origin(request.url))
-        |> Req.Request.put_private(:mpp_request_target, {request.method, resource(request.url)})
+        |> Req.Request.put_private(:mpp_request_target, {request.method, redirect_count(request)})
 
       _existing ->
         request
@@ -199,7 +198,7 @@ defmodule MPP.Client.Req do
 
   defp pay_and_retry(request, response, config, retries) do
     with :ok <- ensure_same_origin(request),
-         :ok <- ensure_same_resource(request, retries, response),
+         :ok <- ensure_not_redirected(request),
          {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
          :ok <- Transport.approve(challenge, config.on_payment_required),
@@ -241,26 +240,24 @@ defmodule MPP.Client.Req do
   end
 
   # Req rewrites a redirected POST (301/302) or any non-GET/HEAD (303) to a
-  # bodyless GET. Paying for a different resource than the caller's non-safe
-  # request would buy something the caller never asked for.
-  defp ensure_same_resource(request, retries, response) do
+  # bodyless GET, also on a redirect back to the same URL. Req counts every hop
+  # in `:req_redirect_count` (mppx checks `response.redirected`, `Fetch.ts`).
+  # The paid retry never follows redirects, so only the first 402 can get here
+  # redirected.
+  defp ensure_not_redirected(request) do
     case Req.Request.get_private(request, :mpp_request_target) do
-      {method, url} ->
-        cond do
-          safe_method?(method) or url == resource(request.url) -> :ok
-          retries > 0 -> {:passthrough, response}
-          true -> {:error, :redirected_request}
-        end
+      {method, hops} ->
+        if safe_method?(method) or redirect_count(request) == hops, do: :ok, else: {:error, :redirected_request}
 
       nil ->
         :ok
     end
   end
 
+  defp redirect_count(request), do: Req.Request.get_private(request, :req_redirect_count, 0)
+
   # Req keeps `method:` as given, so `"POST"` and `:POST` reach here too.
   defp safe_method?(method), do: Enum.member?(["get", "head"], String.downcase(to_string(method)))
-
-  defp resource(%URI{} = uri), do: URI.to_string(%{uri | fragment: nil})
 
   defp origin(%URI{} = uri) do
     host = if is_binary(uri.host), do: String.downcase(uri.host)

@@ -15,8 +15,8 @@ defmodule MPP.Client.Transport.HTTP do
   refuse that path — the same guard as mpp-rs `HttpError::CrossOriginRedirect`
   (`refs/mpp-rs/src/client/fetch.rs:256-272`, #379). `MPP.Client.Req.attach/2`
   enforces this; this module documents the contract for hand-rolled transports.
-  The same callers must not pay for a non-GET/HEAD request that a redirect
-  moved to another URL: `Req` rewrites a redirected POST (301/302) or any
+  The same callers must not pay for a non-GET/HEAD request after any
+  redirect, including one back to the same URL: `Req` rewrites a redirected POST (301/302) or any
   non-GET/HEAD (303) to a bodyless GET (`refs/mpp-rs/src/client/flow.rs`).
   A caller that attaches a credential with `set_credential/2` must also disable
   redirects on that request; `MPP.Client.Req` does this only for its own paid
