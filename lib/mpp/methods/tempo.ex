@@ -491,6 +491,16 @@ defmodule MPP.Methods.Tempo do
   def challenge_method_details(%Subscription{} = subscription),
     do: TempoSubscription.challenge_method_details(subscription)
 
+  api(
+    :validate_challenge_ttl!,
+    "Refuse at init a sponsored pull charge endpoint whose challenge TTL leaves under 15 seconds of validity.",
+    params: [
+      intent: [kind: :value, description: "Charge or subscription intent with the endpoint's method config"],
+      expires_in: [kind: :value, description: "Endpoint challenge TTL in seconds (`MPP.Plug` `:expires_in`)"]
+    ],
+    returns: %{type: :atom, description: "`:ok`; raises `ArgumentError` when the TTL is too short for sponsorship"}
+  )
+
   @impl MPP.Method
   @spec validate_challenge_ttl!(MPP.Method.intent(), pos_integer()) :: :ok
   def validate_challenge_ttl!(%Charge{} = charge, expires_in),
