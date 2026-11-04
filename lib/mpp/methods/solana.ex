@@ -330,8 +330,8 @@ defmodule MPP.Methods.Solana do
          {:ok, rpc_tx} <- fetch_transaction(signature, rpc_url, config),
          :ok <- Instructions.verify_parsed(rpc_tx, charge, instruction_opts(charge, config)),
          :ok <- verify_push_memo(rpc_tx, expected_memo),
-         :ok <- commit_signature_used(store, signature),
-         :ok <- mark_settled(store, signature) do
+         :ok <- commit_signature_used(store, signature, config),
+         :ok <- mark_settled(store, signature, config) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
   end
@@ -349,13 +349,13 @@ defmodule MPP.Methods.Solana do
          {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
          {:ok, signature} <- transaction_signature(tx),
          {:ok, signature} <- settle_pull(tx, signature, charge, config, {store, rpc_url, wait?}),
-         :ok <- mark_settled(store, signature) do
+         :ok <- mark_settled(store, signature, config) do
       {:ok, Receipt.new(method: "solana", reference: signature, external_id: charge.external_id)}
     end
   end
 
   defp settle_pull(tx, signature, charge, config, {store, rpc_url, wait?}) do
-    case claim_signature(store, signature, config["challenge_id"]) do
+    case claim_signature(store, signature, config) do
       {:ok, token} ->
         with :ok <- simulate_reserved(tx, rpc_url, config, {store, signature, token}),
              {:ok, signature} <- broadcast_transaction(tx, rpc_url, config, wait?),
@@ -393,7 +393,7 @@ defmodule MPP.Methods.Solana do
          :ok <- Confidential.verify_bundle(transactions, charge, max_transactions, instruction_opts(charge, config)),
          {:ok, transactions} <- cosign_bundle(transactions, config),
          {:ok, signature} <- transactions |> List.last() |> transaction_signature(),
-         {:ok, token} <- reserve_signature(store, signature),
+         {:ok, token} <- reserve_signature(store, signature, config),
          reservation = {store, signature, token},
          snapshot = Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
          {:ok, previous} <- release_on_error(snapshot, reservation),
@@ -402,7 +402,7 @@ defmodule MPP.Methods.Solana do
          :ok <- Confidential.verify_confirmed(confirmed),
          {:ok, current} <- Confidential.fetch_snapshot(charge, rpc_opts(rpc_url, config)),
          :ok <- Confidential.verify_amount(previous, current, charge.amount, config["recipient_elgamal_secret_key"]),
-         :ok <- mark_settled(store, signature) do
+         :ok <- mark_settled(store, signature, config) do
       {:ok,
        Receipt.new(
          method: "solana",
@@ -1053,10 +1053,12 @@ defmodule MPP.Methods.Solana do
     end
   end
 
-  defp commit_signature_used(nil, _signature), do: :ok
+  defp commit_signature_used(nil, _signature, _config), do: :ok
 
-  defp commit_signature_used(store, signature) do
-    case Store.check_and_mark(store, store_key(signature), System.system_time(:millisecond)) do
+  defp commit_signature_used(store, signature, config) do
+    case Store.check_and_mark(store, store_key(signature), System.system_time(:millisecond),
+           challenge_expires: config["challenge_expires"]
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}
@@ -1079,20 +1081,20 @@ defmodule MPP.Methods.Solana do
   # always "already used". A release is also skipped once the settled key
   # exists (or cannot be read), but that check is not atomic with the delete
   # and is not what the guarantee relies on.
-  defp claim_signature(nil, _signature, _challenge_id), do: {:ok, nil}
+  defp claim_signature(nil, _signature, _config), do: {:ok, nil}
 
-  defp claim_signature(store, signature, challenge_id) do
-    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower) <> ":" <> challenge_binding(challenge_id)
+  defp claim_signature(store, signature, config) do
+    token = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower) <> ":" <> challenge_binding(config["challenge_id"])
 
-    case Store.check_and_mark(store, store_key(signature), token) do
+    case Store.check_and_mark(store, store_key(signature), token, challenge_expires: config["challenge_expires"]) do
       :ok -> {:ok, token}
       {:error, :already_exists} -> {:error, :already_exists}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
 
-  defp reserve_signature(store, signature) do
-    case claim_signature(store, signature, nil) do
+  defp reserve_signature(store, signature, config) do
+    case claim_signature(store, signature, Map.delete(config, "challenge_id")) do
       {:error, :already_exists} -> {:error, signature_used_error()}
       result -> result
     end
@@ -1124,10 +1126,12 @@ defmodule MPP.Methods.Solana do
     end
   end
 
-  defp mark_settled(nil, _signature), do: :ok
+  defp mark_settled(nil, _signature, _config), do: :ok
 
-  defp mark_settled(store, signature) do
-    case Store.check_and_mark(store, settled_key(signature), System.system_time(:millisecond)) do
+  defp mark_settled(store, signature, config) do
+    case Store.check_and_mark(store, settled_key(signature), System.system_time(:millisecond),
+           challenge_expires: config["challenge_expires"]
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, signature_used_error()}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}

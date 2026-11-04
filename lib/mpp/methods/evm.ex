@@ -224,7 +224,7 @@ defmodule MPP.Methods.EVM do
          {:ok, hash} <- Transaction.broadcast(prepared, charge),
          :ok <- match_broadcast_hash(prepared.hash, hash),
          {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config),
-         :ok <- commit_hash_used(store, hash) do
+         :ok <- commit_hash_used(store, hash, config) do
       {:ok, receipt}
     end
   end
@@ -240,7 +240,7 @@ defmodule MPP.Methods.EVM do
          {:ok, hash} <- Authorization.settle(payload, charge),
          :ok <- check_hash_unused(store, hash),
          {:ok, receipt} <- verify_erc20_transfer(hash, charge, rpc_url, config, payload["from"]),
-         :ok <- commit_hash_used(store, hash) do
+         :ok <- commit_hash_used(store, hash, config) do
       {:ok, receipt}
     end
   end
@@ -257,7 +257,7 @@ defmodule MPP.Methods.EVM do
          :ok <- require_recipient(charge),
          :ok <- check_hash_unused(store, hash),
          {:ok, receipt} <- verify_transfer(hash, charge, rpc_url, config),
-         :ok <- commit_hash_used(store, hash) do
+         :ok <- commit_hash_used(store, hash, config) do
       {:ok, receipt}
     end
   end
@@ -482,10 +482,12 @@ defmodule MPP.Methods.EVM do
   # atomic check_and_mark/2: concurrent same-hash requests collide here, so exactly
   # one wins and the loser gets "already used". Atomicity is guaranteed by
   # validate_store!/1 (a non-atomic store is rejected at init) — no fallback (GHSA-w8j7-7qc3-5f24).
-  defp commit_hash_used(nil, _hash), do: :ok
+  defp commit_hash_used(nil, _hash, _config), do: :ok
 
-  defp commit_hash_used(store, hash) do
-    case Store.check_and_mark(store, store_key(hash), System.system_time(:millisecond)) do
+  defp commit_hash_used(store, hash, config) do
+    case Store.check_and_mark(store, store_key(hash), System.system_time(:millisecond),
+           challenge_expires: config["challenge_expires"]
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}

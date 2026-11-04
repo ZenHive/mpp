@@ -118,7 +118,7 @@ defmodule MPP.Methods.Stellar do
          :ok <- success_status(result),
          {:ok, inspected} <- envelope_xdr(result),
          :ok <- match_transfer(inspected, charge, amount),
-         :ok <- mark(store, hash_key(hash)),
+         :ok <- mark(store, hash_key(hash), config),
          :ok <- mark_challenge(store, config) do
       receipt(hash, charge)
     end
@@ -145,7 +145,7 @@ defmodule MPP.Methods.Stellar do
          {:ok, submitted} <- settle_pull(inspected, xdr, simulated, config, sponsored?),
          {:ok, result} <- RPC.await_transaction(submitted, config),
          :ok <- settled(result),
-         :ok <- mark(store, hash_key(submitted)),
+         :ok <- mark(store, hash_key(submitted), config),
          :ok <- mark_challenge(store, config) do
       receipt(submitted, charge)
     end
@@ -407,10 +407,12 @@ defmodule MPP.Methods.Stellar do
     {:error, Errors.new(:verification_failed, "Stellar method missing required config: challenge_id")}
   end
 
-  defp mark(nil, _key), do: :ok
+  defp mark(nil, _key, _config), do: :ok
 
-  defp mark(store, key) do
-    case Store.check_and_mark(store, key, System.system_time(:millisecond)) do
+  defp mark(store, key, config) do
+    case Store.check_and_mark(store, key, System.system_time(:millisecond),
+           challenge_expires: config["challenge_expires"]
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Stellar credential has already been used")}
       {:error, _} -> {:error, Shared.internal_payment_error()}
@@ -419,8 +421,8 @@ defmodule MPP.Methods.Stellar do
 
   defp mark_challenge(nil, _config), do: :ok
 
-  defp mark_challenge(store, %{"challenge_id" => id}) when is_binary(id) and id != "" do
-    mark(store, @store_key_prefix <> "challenge:" <> id)
+  defp mark_challenge(store, %{"challenge_id" => id} = config) when is_binary(id) and id != "" do
+    mark(store, @store_key_prefix <> "challenge:" <> id, config)
   end
 
   defp hash_key(hash), do: @store_key_prefix <> "tx:" <> hash

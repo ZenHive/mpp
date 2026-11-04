@@ -27,10 +27,18 @@ defmodule MPP.Methods.USDC.Replay do
   """
   @spec with_claims(term(), [{String.t(), String.t()}], (-> result)) :: result
         when result: {:ok, term()} | {:error, Errors.t()}
-  def with_claims(nil, _keys, fun) when is_function(fun, 0), do: fun.()
+  def with_claims(store, keys, fun), do: with_claims(store, keys, nil, fun)
 
-  def with_claims(store, keys, fun) when is_list(keys) and is_function(fun, 0) do
-    case claim_all(store, keys, []) do
+  @doc """
+  Like `with_claims/3`, keeping each claim until `challenge_expires` (an
+  RFC 3339 timestamp) plus 30 seconds when the store supports per-mark TTLs.
+  """
+  @spec with_claims(term(), [{String.t(), String.t()}], String.t() | nil, (-> result)) :: result
+        when result: {:ok, term()} | {:error, Errors.t()}
+  def with_claims(nil, _keys, _challenge_expires, fun) when is_function(fun, 0), do: fun.()
+
+  def with_claims(store, keys, challenge_expires, fun) when is_list(keys) and is_function(fun, 0) do
+    case claim_all(store, keys, challenge_expires, []) do
       {:ok, claimed} ->
         case fun.() do
           {:ok, _value} = ok ->
@@ -46,19 +54,19 @@ defmodule MPP.Methods.USDC.Replay do
     end
   end
 
-  defp claim_all(_store, [], claimed), do: {:ok, Enum.reverse(claimed)}
+  defp claim_all(_store, [], _challenge_expires, claimed), do: {:ok, Enum.reverse(claimed)}
 
-  defp claim_all(store, [{key, detail} | rest], claimed) do
-    case claim(store, key, detail) do
-      {:ok, token} -> claim_all(store, rest, [{key, token} | claimed])
+  defp claim_all(store, [{key, detail} | rest], challenge_expires, claimed) do
+    case claim(store, key, detail, challenge_expires) do
+      {:ok, token} -> claim_all(store, rest, challenge_expires, [{key, token} | claimed])
       {:error, %Errors{}} = error -> release_and_return(store, claimed, error)
     end
   end
 
-  defp claim(store, key, detail) do
+  defp claim(store, key, detail, challenge_expires) do
     token = System.unique_integer([:positive])
 
-    case Store.check_and_mark(store, @prefix <> key, token) do
+    case Store.check_and_mark(store, @prefix <> key, token, challenge_expires: challenge_expires) do
       :ok -> {:ok, token}
       {:error, :already_exists} -> {:error, Errors.new(:verification_failed, detail)}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}

@@ -1033,6 +1033,52 @@ defmodule MPP.Methods.EVMTest do
     end
   end
 
+  describe "verify/2 — dedup retention" do
+    # The shared credential mark keys the raw payload; the method mark keys the
+    # canonical hash, so a casing variant reaches the method mark.
+    test "rejects a casing variant of a used hash until the challenge expires, past the store TTL",
+         %{charge: charge} do
+      stub_success()
+      name = :"#{__MODULE__}.Retention.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: name, ttl: 20, ttl_check_interval: 10), id: name)
+      store = {ConCacheStore, name: name}
+
+      config =
+        PaymentPlug.init(
+          secret_key: "hmac-secret-for-evm-challenge-test",
+          realm: "api.example.com",
+          method: EVM,
+          amount: @amount,
+          currency: @token_address,
+          recipient: @recipient,
+          expires_in: 3600,
+          store: store,
+          method_config: Map.put(charge.method_details, "store", store)
+        )
+
+      unpaid = :get |> Plug.Test.conn("/resource") |> PaymentPlug.call(config)
+      [header] = Plug.Conn.get_resp_header(unpaid, "www-authenticate")
+      {:ok, challenge} = Headers.parse_challenge(header)
+      credential = %MPP.Credential{challenge: challenge, payload: %{"hash" => @tx_hash}}
+
+      paid = paid_request(config, credential)
+      refute paid.halted
+      Process.sleep(150)
+
+      upper = %{credential | payload: %{"hash" => "0x" <> String.upcase(String.duplicate("ab", 32))}}
+      again = paid_request(config, upper)
+      assert again.status == 402
+      assert Jason.decode!(again.resp_body)["detail"] =~ "already used"
+    end
+  end
+
+  defp paid_request(config, credential) do
+    :get
+    |> Plug.Test.conn("/resource")
+    |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+    |> PaymentPlug.call(config)
+  end
+
   describe "verify/2 — dedup store failures" do
     test "read failure in the pre-check surfaces a generic dedup error", %{charge: charge} do
       # get/1 fails before the receipt is even fetched — no RPC stub needed.

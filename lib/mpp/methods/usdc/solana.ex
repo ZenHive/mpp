@@ -440,7 +440,7 @@ defmodule MPP.Methods.USDC.Solana do
     store = Store.resolve(config["store"])
     digest = "solana:#{profile["network"]}:" <> Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
 
-    Replay.with_claims(store, replay_keys(charge, digest), fn ->
+    Replay.with_claims(store, replay_keys(charge, digest), config["challenge_expires"], fn ->
       case SolanaMethod.verify(payload, solana_charge(charge, config, profile)) do
         {:ok, %Receipt{reference: reference}} when is_binary(reference) -> {:ok, reference}
         {:error, %Errors{}} = error -> error

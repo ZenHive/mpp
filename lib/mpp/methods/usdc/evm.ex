@@ -259,7 +259,7 @@ defmodule MPP.Methods.USDC.EVM do
     store = Store.resolve(config["store"])
     settled = settlement_charge(charge, name, version)
 
-    case Replay.with_claims(store, replay_keys(charge, chain_id, parsed), fn ->
+    case Replay.with_claims(store, replay_keys(charge, chain_id, parsed), config["challenge_expires"], fn ->
            Authorization.settle(payload_of(parsed), settled, expected_nonce: parsed.nonce)
          end) do
       {:ok, hash} ->

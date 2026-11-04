@@ -420,7 +420,9 @@ defmodule MPP.Methods.XRPL do
   end
 
   defp mark(config, suffix) do
-    case Store.check_and_mark(config["store"], store_key(config, suffix), true) do
+    case Store.check_and_mark(config["store"], store_key(config, suffix), true,
+           challenge_expires: config["challenge_expires"]
+         ) do
       :ok -> :ok
       {:error, :already_exists} -> invalid_challenge()
       {:error, _} -> {:error, Shared.internal_payment_error()}
