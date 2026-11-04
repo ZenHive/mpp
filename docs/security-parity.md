@@ -71,6 +71,11 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-fqv7-fp33-2mxq` | — (to be requested from the EEF CNA) | MEDIUM | 0.21.0 | Session vouchers and WebSocket metering were accepted without re-reading escrow channel state; sessions now require a `verify_channel_state` callback and metering re-verifies with a bounded cache |
 | `GHSA-2grw-xqfc-q2x9` | — (to be requested from the EEF CNA) | MEDIUM | 0.21.0 | EIP-712 session close was authorized by the voucher signature alone; close now requires a dedicated `CloseAuthorization` signature |
 | `GHSA-4rf9-cqhr-4924` | — (to be requested from the EEF CNA) | MEDIUM | 0.21.0 | WebSocket client could pay again after a reconnect; reconnects stop after the first payment and payments are capped by `:max_payments` |
+| `GHSA-pggm-gm7c-2f4j` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Inbound WebSocket payment frames were decoded without a size bound; frames over `:max_incoming_message_bytes` (default 64 KiB) are rejected before decoding with close code 1009 (mppx #968, mpp-rs #623 parity) |
+| `GHSA-76qc-4p5p-v35x` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Client paid retry followed redirects and could forward payment headers cross-origin; the paid retry never follows redirects |
+| `GHSA-8pv3-83vq-77rr` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | x402 route binding defaulted to resource-echo matching on scoped routes; `:route_binding` now defaults to `:required` with an `extensions.mppx` binding on every challenge |
+| `GHSA-wwp2-w5hw-hw3r` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Internal error terms were echoed into client-visible WebSocket frames and problem details; internal errors now carry a fixed client detail and are logged server-side |
+| `GHSA-89vp-6m4q-7hhp` | — (not requested: LOW-severity hardening) | LOW | 0.22.0 | Sponsored Tempo transactions were co-signed without a minimum remaining validity; co-sign and broadcast now require 15 seconds of validity, re-checked with a fresh clock, and short sponsored endpoint TTLs are refused at init |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18. The four 0.16.2 advisories
@@ -181,9 +186,11 @@ open-items note below).
 
 ## Open hardening items
 
-**5 open items** as of 2026-10-31.
+**0 open items** as of 2026-11-04.
 
-Previously resolved items: the four medium draft advisories from the 2026-10-31 review shipped in 0.21.0 and were published the same day (`GHSA-f382-x4g8-jg9q`, `GHSA-fqv7-fp33-2mxq`, `GHSA-2grw-xqfc-q2x9`, `GHSA-4rf9-cqhr-4924`).
+Previously resolved items: the five low draft advisories from the 2026-10-31 review shipped in 0.22.0 and were published after the Hex release (`GHSA-pggm-gm7c-2f4j`, `GHSA-76qc-4p5p-v35x`, `GHSA-8pv3-83vq-77rr`, `GHSA-wwp2-w5hw-hw3r`, `GHSA-89vp-6m4q-7hhp`).
+
+Earlier: the four medium draft advisories from the 2026-10-31 review shipped in 0.21.0 and were published the same day (`GHSA-f382-x4g8-jg9q`, `GHSA-fqv7-fp33-2mxq`, `GHSA-2grw-xqfc-q2x9`, `GHSA-4rf9-cqhr-4924`).
 
 Earlier: the four draft advisories from the 2026-10-02 upstream sweep shipped in 0.20.1 and were published the same day (`GHSA-g95p-rmq5-gpxm`, `GHSA-69rf-j8gf-4525`, `GHSA-4rg3-425j-59hj`, `GHSA-c8mm-74wp-238x`; 0.20.0 was tagged but never published to Hex).
 Earlier: the three inbound reports triaged 2026-09-24 and the two related session findings from their review shipped in 0.19.0 and were published the same day (`GHSA-6xg7-3f46-g3g5`, `GHSA-2g9q-rg79-676x`, `GHSA-25v8-3q3q-3m7j`, `GHSA-9c4m-cr2r-c3px`, `GHSA-c33f-jwgj-rw53`).
