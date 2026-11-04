@@ -1326,7 +1326,7 @@ defmodule MPP.Methods.Tempo do
     with :ok <- begin_budget_broadcast(budget),
          :ok <- check_send_boundary(tx, config),
          {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget) do
-      safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx))
+      safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx), config)
 
       {:ok,
        Receipt.new(
@@ -1589,13 +1589,15 @@ defmodule MPP.Methods.Tempo do
   # supplementary protection against hash malleability.
   # Logger.warning is intentional: payment already settled on-chain, so this
   # supplementary dedup write must never fail the HTTP response.
-  defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash), do: :ok
+  defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash, _config), do: :ok
 
-  defp safe_dedup_post_broadcast(store, tx_hash, input_hash) do
+  defp safe_dedup_post_broadcast(store, tx_hash, input_hash, config) do
     swallow_store_fault("post-broadcast dedup store", fn ->
       if String.downcase(tx_hash) != String.downcase(input_hash) do
-        key = store_key(tx_hash)
-        store_put(store, key, System.system_time(:millisecond))
+        # An existing mark already blocks the hash, so :already_exists is fine.
+        Store.check_and_mark(store, store_key(tx_hash), System.system_time(:millisecond),
+          challenge_expires: config["challenge_expires"]
+        )
       end
 
       :ok
@@ -1624,8 +1626,6 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp store_get(store, key), do: Store.get(store, key)
-
-  defp store_put(store, key, value), do: Store.put(store, key, value)
 
   defp store_key(hash), do: @store_key_prefix <> String.downcase(hash)
 

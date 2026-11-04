@@ -1912,6 +1912,47 @@ defmodule MPP.Methods.TempoTest do
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> String.downcase(tx_hex))
     end
 
+    test "keeps a distinct on-chain hash marked until the challenge expires, past the store TTL", %{charge: charge} do
+      cache = :"#{__MODULE__}.OnchainHashTtl.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: cache, ttl: 20, ttl_check_interval: 10), id: cache)
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+      store = {ConCacheStore, name: cache}
+
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"store" => store, "challenge_expires" => expires})
+      }
+
+      different_on_chain_hash = "0x" <> String.duplicate("cd", 32)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            receipt = %{success_receipt() | "transactionHash" => different_on_chain_hash}
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        end
+      end)
+
+      calldata = transfer_calldata(@recipient, 1_000_000)
+      call = build_call(@token_address, calldata)
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      canonical_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+      onchain_key = "mpp:charge:" <> String.downcase(different_on_chain_hash)
+      Process.sleep(150)
+      assert {:ok, _} = MPP.Tempo.Store.get(store, canonical_key)
+      assert {:ok, _} = MPP.Tempo.Store.get(store, onchain_key)
+    end
+
     test "store get error surfaces as verification_failed", %{charge: charge} do
       # Override store with a failing module
       defmodule FailingStore do

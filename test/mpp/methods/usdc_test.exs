@@ -957,6 +957,35 @@ defmodule MPP.Methods.USDCTest do
     }
   end
 
+  describe "Solana mark retention" do
+    test "keeps the delegated Solana marks until the challenge expires, past the store TTL" do
+      {payer, seed} = keypair()
+      {recipient, _} = keypair()
+      name = :"#{__MODULE__}.SolanaRetention.#{System.unique_integer([:positive])}"
+      start_supervised!(ConCacheStore.child_spec(name: name, ttl: 20, ttl_check_interval: 10), id: name)
+      store = {ConCacheStore, name: name}
+      expires = DateTime.utc_now() |> DateTime.shift(hour: 1) |> DateTime.to_iso8601()
+      charge = %{solana_charge() | recipient: Keys.to_address(recipient)}
+
+      charge = %{
+        charge
+        | method_details: Map.merge(charge.method_details, %{"store" => store, "challenge_expires" => expires})
+      }
+
+      payload = encoded_transfer(payer, seed, recipient)
+      {:ok, tx} = payload["transaction"] |> Base.decode64!() |> Transaction.deserialize()
+      signature = Base58.encode(hd(tx.signatures))
+      stub_solana_success(payer, recipient, signature)
+
+      assert {:ok, %Receipt{}} = USDC.verify(payload, charge)
+      Process.sleep(150)
+
+      assert {:error, replay} = USDC.verify(payload, charge)
+      assert replay.detail == "Solana transaction already used"
+      assert {:ok, _} = Store.get(store, "mpp:solana-settled:" <> signature)
+    end
+  end
+
   defp solana_charge do
     {:ok, charge} = Charge.new(amount: "1", currency: @devnet_usdc, recipient: "11111111111111111111111111111111")
 

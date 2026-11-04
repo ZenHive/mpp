@@ -468,6 +468,7 @@ defmodule MPP.Methods.USDC.Solana do
         "req_options" => config["req_options"],
         "rpc_url" => config["rpc_url"],
         "allow_primary_ata" => true,
+        "challenge_expires" => config["challenge_expires"],
         "store" => config["store"],
         "token_program" => @token_program,
         "wait_for_confirmation" => config["wait_for_confirmation"]
