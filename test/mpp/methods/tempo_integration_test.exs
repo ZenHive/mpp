@@ -29,6 +29,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
   alias MPP.Test.TempoAccessKey
   alias MPP.Test.TempoMemoryStore
   alias MPP.Test.TempoTestHelpers
+  alias Onchain.Signer.Secp256k1
+  alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
 
   @moduletag :integration
@@ -1302,6 +1304,117 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
+  describe "sponsored simulation bills the fee payer" do
+    # Tempo nodes v1.18+ bill the fee payer recovered from `feePayerSignature`
+    # in eth_call, and the sender when it is absent (mppx #1179, mpp-rs #691).
+    # The sender here holds pathUSD to pay with but none of the sponsor's fee
+    # token (AlphaUSD), so the payment settles only if the simulation carries
+    # the sponsor's signature.
+    @alpha_usd "0x20c0000000000000000000000000000000000001"
+
+    setup %{recipient: recipient_address, rpc_url: rpc_url} do
+      funder = FaucetWallet.tempo!(rpc_url)
+      {:ok, sender} = Faucet.EVM.fresh_wallet()
+
+      {:ok, funding_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: funder.private_key,
+          token: @path_usd,
+          recipient: sender.address_hex,
+          amount: @transfer_amount * 2,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd,
+          nonce: 0
+        )
+
+      broadcast_raw_transaction_sync!(funding_tx, rpc_url)
+      assert token_balance!(@alpha_usd, sender.address_hex, rpc_url) == 0
+      start_supervised!(TempoMemoryStore)
+
+      config =
+        tempo_config(recipient_address, rpc_url, %{
+          "fee_payer" => true,
+          "fee_payer_private_key" => fresh_fee_payer_hex!(rpc_url),
+          "fee_token" => @alpha_usd,
+          "fee_payer_allowed_fee_tokens" => [@path_usd, @alpha_usd],
+          "store" => TempoMemoryStore
+        })
+
+      {:ok, sender: sender, config: config}
+    end
+
+    test "a sender without the sponsor's fee token passes simulation and settles", %{
+      sender: sender,
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      challenge = request_challenge!(config)
+      {:ok, signed_tx} = build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge, [])
+
+      assert_sponsored_settles!(config, challenge, signed_tx, rpc_url)
+      assert token_balance!(@alpha_usd, sender.address_hex, rpc_url) == 0
+    end
+
+    test "a sponsored transaction with a validAfter settles", %{
+      sender: sender,
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      challenge = request_challenge!(config)
+
+      {:ok, signed_tx} =
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge,
+          valid_after: System.os_time(:second) - 60
+        )
+
+      assert {:ok, %{valid_after: valid_after}} = Transaction.deserialize(signed_tx)
+      assert valid_after > 0
+      assert_sponsored_settles!(config, challenge, signed_tx, rpc_url)
+    end
+
+    test "a sponsored transaction signed by an access key settles", %{
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      root = FaucetWallet.tempo!(rpc_url)
+
+      %{access_private_key: access_key, access_key_address: access_address, root_address: root_address} =
+        TempoAccessKey.authorize!(root.private_key, rpc_url: rpc_url, chain_id: @chain_id)
+
+      challenge = request_challenge!(config)
+      # The builder estimates gas for the root key; keychain verification costs more.
+      {:ok, root_tx} =
+        build_bound_fee_payer_tx(root, recipient_address, @transfer_amount, rpc_url, challenge, gas_limit: 300_000)
+
+      {:ok, root_bytes} = Onchain.Address.validate(root_address)
+      {:ok, access_bytes} = Onchain.Address.validate(access_address)
+      signed_tx = keychain_resign!(root_tx, access_key, access_bytes, root_bytes)
+
+      assert {:ok, %{signature: {:keychain, 2, ^root_bytes, _inner}}} = Transaction.deserialize(signed_tx)
+      assert_sponsored_settles!(config, challenge, signed_tx, rpc_url)
+    end
+
+    test "an under-gassed sponsored transaction is rejected before broadcast", %{
+      sender: sender,
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      challenge = request_challenge!(config)
+
+      {:ok, signed_tx} =
+        build_bound_fee_payer_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge, gas_limit: 30_000)
+
+      body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
+      assert body["type"] =~ "verification-failed"
+      assert body["detail"] =~ "Pre-broadcast simulation rejected"
+    end
+  end
+
   describe "fee payer + optimistic broadcast" do
     test "fee payer co-signs and optimistically broadcasts transfer", %{
       recipient: recipient_address,
@@ -1658,6 +1771,34 @@ defmodule MPP.Methods.TempoIntegrationTest do
     |> TempoTxBuilder.build_fee_payer_multicall()
   end
 
+  defp assert_sponsored_settles!(config, challenge, signed_tx, rpc_url) do
+    credential = %Credential{challenge: challenge, payload: %{"type" => "transaction", "signature" => signed_tx}}
+
+    conn =
+      :get
+      |> Plug.Test.conn("/api/data")
+      |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+      |> MPP.Plug.call(config)
+
+    assert conn.status == nil, "Sponsored payment should pass through, got #{conn.status}: #{conn.resp_body}"
+    assert %Receipt{status: "success", reference: tx_hash} = conn.assigns[:mpp_receipt]
+    assert wait_for_receipt!(tx_hash, rpc_url: rpc_url).status == 1
+  end
+
+  # Re-signs a client transaction as a V2 keychain signature: the access key
+  # signs keccak256(0x04 || sig_hash || user_address) on behalf of the root.
+  defp keychain_resign!(raw, access_key, access_address, root_address) do
+    {:ok, tx} = Transaction.deserialize(raw)
+    {:ok, sig_hash} = Transaction.signing_hash(tx)
+    digest = Onchain.Hash.keccak(<<0x04>> <> sig_hash <> root_address)
+    {:ok, sig} = Secp256k1.sign_payload(digest, access_key)
+    sig = Onchain.Recover.normalize_low_s(sig)
+    {:ok, recid} = Onchain.Recover.find_recid_from_digest(digest, sig, access_address)
+    inner = {:secp256k1, %{r: sig.r, s: sig.s, y_parity: recid}}
+    {:ok, signed} = Transaction.serialize(%{tx | signature: {:keychain, 2, root_address, inner}})
+    signed
+  end
+
   defp typed_calls(calls), do: Enum.map(calls, &TempoTestHelpers.typed_call/1)
 
   defp bound_payment_call(recipient_address, amount, challenge) do
@@ -1706,11 +1847,13 @@ defmodule MPP.Methods.TempoIntegrationTest do
   end
 
   # Reads the pathUSD balance of `address_hex` via `eth_call balanceOf`.
-  defp fee_token_balance!(address_hex, rpc_url) do
+  defp fee_token_balance!(address_hex, rpc_url), do: token_balance!(@path_usd, address_hex, rpc_url)
+
+  defp token_balance!(token, address_hex, rpc_url) do
     {:ok, address_bin} = Onchain.Address.validate(address_hex)
     data = "0x" <> Base.encode16(Onchain.Tempo.TIP20.balance_of_calldata(address_bin), case: :lower)
 
-    case Onchain.RPC.eth_call(@path_usd, data, rpc_url: rpc_url) do
+    case Onchain.RPC.eth_call(token, data, rpc_url: rpc_url) do
       {:ok, "0x" <> hex} -> String.to_integer(hex, 16)
       {:error, reason} -> flunk("Failed to read fee-payer balance: #{inspect(reason)}")
     end
@@ -2058,7 +2201,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
   defp sign_proof_payload!(digest, private_key, address) do
     addr_bytes = Onchain.Hex.decode_hex!(String.replace_prefix(address, "0x", ""))
 
-    {:ok, sig} = Onchain.Signer.Secp256k1.sign_payload(digest, private_key)
+    {:ok, sig} = Secp256k1.sign_payload(digest, private_key)
     sig = Onchain.Recover.normalize_low_s(sig)
     {:ok, recid} = Onchain.Recover.find_recid_from_digest(digest, sig, addr_bytes)
 

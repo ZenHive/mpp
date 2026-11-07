@@ -6,6 +6,26 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Sponsored Tempo transactions are simulated with the fee payer's
+  signature.** Tempo nodes v1.18 and later bill the fee payer recovered from
+  `feePayerSignature` in `eth_call` and the sender when it is absent, so a
+  sender holding none of the sponsor's fee token was rejected before
+  broadcast. A fee-sponsored transaction now runs two `eth_call`
+  simulations, matching mppx and mpp-rs: the sender's transaction at its own
+  gas limit with zero fees and no fee token before the sponsor signs, then
+  the co-signed transaction with its fee token and `feePayerSignature`. A
+  failure in the second that is only the node's gas-limit error is accepted;
+  reverts and fee-balance errors still reject. Both simulations carry every
+  signed envelope field (`nonceKey`, `validBefore`, `validAfter`,
+  `keyAuthorization`) and the sender signature's `keyType` / `keyData` /
+  `keyId` hints, so the node charges the gas a P-256, WebAuthn or access-key
+  sender pays. The subscription sponsorship simulation also carries
+  `feePayerSignature` and the signed envelope fields.
+
 ## [0.22.1] — 2026-11-04
 
 ### Breaking

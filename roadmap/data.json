@@ -7381,7 +7381,7 @@
       "id": "177",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Simulate sponsored Tempo transactions with the fee payer signature",
       "scores": {
         "d": 4,
@@ -7410,7 +7410,9 @@
       ],
       "body": "mppx #1179 (7a18dac) and mpp-rs #691 (ca28dde): Tempo nodes v1.18 and later bill the fee payer recovered from `feePayerSignature` in an `eth_call` / `eth_simulateV1` request and the sender when it is absent; a bare `feePayer` address is ignored. Our pre-broadcast simulation of the co-signed charge transaction builds its request with `Onchain.Tempo.Transaction.simulate_request/1`, which carries no `feePayerSignature`, and the subscription path's `simulate_sponsored` builds its own request without one either. Verified live 2026-11-07 on Moderato (tempo/v1.18.2): for a co-signed transaction from an unfunded sender with a funded sponsor, both eth_simulateV1 and eth_call of the simulate_request/1 request answer -32003 \"insufficient fee token balance: required 8929, but only have 0\"; the same request plus feePayerSignature ({r, s, yParity} as hex quantities) succeeds (status 0x1). onchain_tempo's RPC.simulate returns that -32003 as {:error, _}, which simulate_cosigned_tx maps to internal_payment_error, so such an honest sponsored payer currently gets a server error instead of a payment.\n\nPort the upstream shape: the sponsored simulation carries the sponsor's signature (the hosted fee payer's from the fill response, the local fee payer's from the co-sign), the anti-drain property stays (an under-gassed transaction is still rejected before broadcast), and an out-of-gas-only failure of a sponsored simulation without full gas headroom is handled as upstream does (recognized only from the node's own JSON-RPC message starting with \"out of gas\" or \"intrinsic gas too low\", never from a revert). Upstream also keeps a signed zero `maxPriorityFeePerGas` (mppx #1202 f54a1c9); ours already encodes 0 as \"0x0\" — keep it pinned by a test.\n\nIf the request field belongs in `onchain_tempo`, that is a change in the onchain_tempo repo released with a version bump and consumed as a Hex version, never a git or path pin; adding the field on the mpp side is also acceptable. Authority: a live Moderato call (one success, one relevant rejection) plus refs/mppx/src/tempo/internal/fee-payer.ts and refs/mpp-rs/src/protocol/methods/tempo/method/simulate.rs, cross-checked.\n",
       "created_at": "2026-11-07",
+      "done_at": "2026-11-07",
       "scored_at": "2026-11-07",
+      "implemented": "MPP.Methods.Tempo.SponsoredSimulation runs two eth_call simulations for fee-sponsored transactions (mppx preflightSponsorship / mpp-rs simulate.rs): the sender transaction at its gas limit with zero fees and no fee token before co-sign, then the co-signed transaction with feeToken and feePayerSignature, tolerating only the node's own gas-limit error. Both requests carry every signed envelope field (nonceKey, validBefore, validAfter, keyAuthorization) and keyType/keyData/keyId sender hints; the subscription eth_simulateV1 request gains feePayerSignature and the envelope fields. Live Moderato: unfunded-fee-token sender, validAfter and keychain-signed sponsored charges settle, under-gassed rejected, subscription_integration_test 8/8. Codex review (herdr) findings fixed, re-review PASS.",
       "cross_repo": []
     }
   ]

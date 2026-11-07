@@ -77,9 +77,11 @@ defmodule MPP.Methods.Tempo do
       Every Tempo charge must carry a challenge-bound attribution memo; that check is
       already the default verification path (mppx #904 / mpp-rs #421).
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
-      for on-chain confirmation. Pre-simulates the full co-signed transaction via
-      `eth_simulateV1` first (same guard as the default path) to reject a tx that would
-      revert before broadcast, then broadcasts async and returns an optimistic receipt.
+      for on-chain confirmation. Pre-simulates the transaction first (same guard as the
+      default path: `eth_simulateV1` of the full transaction, or for a sponsored one an
+      `eth_call` of the sender's calls before co-sign and of the co-signed transaction
+      with its fee payer signature) to reject a tx that would revert before broadcast,
+      then broadcasts async and returns an optimistic receipt.
       Default `true`.
     * `"store"` — (optional) replay-dedup store. **On by default** — when absent, the
       app-started `MPP.Tempo.ConCacheStore` is used so replay protection is enabled out of
@@ -182,6 +184,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Methods.Tempo.Proof
   alias MPP.Methods.Tempo.SponsorBudget
+  alias MPP.Methods.Tempo.SponsoredSimulation
   alias MPP.Methods.Tempo.Subscription, as: TempoSubscription
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -1290,10 +1293,10 @@ defmodule MPP.Methods.Tempo do
 
   defp complete_reserved_transaction(tx, config) do
     with :ok <- check_sponsored_validity(tx, config),
-         {:ok, tx} <- maybe_cosign_fee_payer(tx, config),
-         {:ok, tx, _hash} <- canonicalize_transaction(tx),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
-         :ok <- simulate_cosigned_tx(tx.raw, rpc_url, config) do
+         {:ok, tx} <- maybe_cosign_fee_payer(tx, rpc_url, config),
+         {:ok, tx, _hash} <- canonicalize_transaction(tx),
+         :ok <- simulate_cosigned_tx(tx, rpc_url, config) do
       {:ok, tx, rpc_url}
     end
   end
@@ -1409,11 +1412,15 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp maybe_cosign_fee_payer(tx, %{"fee_payer_url" => url} = config) when is_binary(url) do
+  # The sender simulation runs after the local envelope checks and before the
+  # sponsor signs or the hosted fee payer fills, so a reverting or under-gassed
+  # transaction never reaches a signer.
+  defp maybe_cosign_fee_payer(tx, rpc_url, %{"fee_payer_url" => url} = config) when is_binary(url) do
     chain_id = config["chain_id"] || @moderato_chain_id
 
     with :ok <- check_fee_payer_placeholder(tx),
          :ok <- check_fee_token_empty(tx),
+         :ok <- simulate_sender_calls(tx, rpc_url, config),
          {:ok, cosigned} <- fill_hosted_transaction(tx, url, config),
          {:ok, fee_token_hex} <- fee_token_hex(cosigned),
          :ok <- check_returned_fee_token_allowed(config, fee_token_hex, chain_id) do
@@ -1422,18 +1429,19 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Co-signs transaction as fee payer when fee_payer is enabled locally.
-  defp maybe_cosign_fee_payer(tx, %{"fee_payer" => true} = config) do
+  defp maybe_cosign_fee_payer(tx, rpc_url, %{"fee_payer" => true} = config) do
     with {:ok, key} <- decode_hex_key(config["fee_payer_private_key"]),
          {:ok, token} <- decode_hex_address(config["fee_token"]),
          :ok <- check_fee_payer_placeholder(tx),
          :ok <- check_fee_token_empty(tx),
-         :ok <- check_fee_token_allowed(config, token) do
+         :ok <- check_fee_token_allowed(config, token),
+         :ok <- simulate_sender_calls(tx, rpc_url, config) do
       Transaction.cosign_fee_payer(tx, key, token)
     end
   end
 
   # No local or hosted fee payer is configured.
-  defp maybe_cosign_fee_payer(tx, _config), do: {:ok, tx}
+  defp maybe_cosign_fee_payer(tx, _rpc_url, _config), do: {:ok, tx}
 
   defp maybe_validate_fee_payer_envelope(tx, config) do
     if fee_payer_enabled?(config) do
@@ -1691,6 +1699,14 @@ defmodule MPP.Methods.Tempo do
     {:error, "Chain ID mismatch: expected #{expected}, got #{actual}"}
   end
 
+  # A sponsored transaction is simulated as two eth_calls instead (see
+  # MPP.Methods.Tempo.SponsoredSimulation): the sender's calls before co-sign,
+  # which bound gas at the broadcast limit, and the co-signed transaction with
+  # its fee payer signature, so the node bills the sponsor and not the sender.
+  defp simulate_sender_calls(tx, rpc_url, config) do
+    tx |> SponsoredSimulation.simulate_sender(rpc_url, rpc_options(config)[:req_options]) |> simulation_result()
+  end
+
   # Simulates the FULL co-signed 0x76 transaction via eth_simulateV1 before
   # broadcasting. This is the fee-payer gas-drain DoS guard: a malicious client
   # can underfund gas_limit so the call runs out of gas on-chain — the sponsor's
@@ -1709,7 +1725,15 @@ defmodule MPP.Methods.Tempo do
   #                           closed like the simulation (mpp-rs #475)
   #   * {:error, reason}    → operational RPC failure; fail closed — never
   #                           broadcast a transaction we could not validate
-  defp simulate_cosigned_tx(raw_hex, rpc_url, config) do
+  defp simulate_cosigned_tx(tx, rpc_url, config) do
+    if fee_payer_enabled?(config) do
+      tx |> SponsoredSimulation.simulate_sponsored(rpc_url, rpc_options(config)[:req_options]) |> simulation_result()
+    else
+      simulate_unsponsored_tx(tx.raw, rpc_url, config)
+    end
+  end
+
+  defp simulate_unsponsored_tx(raw_hex, rpc_url, config) do
     case RPC.simulate(raw_hex, rpc_url, rpc_options(config)) do
       {:ok, :success} ->
         :ok
@@ -1724,6 +1748,12 @@ defmodule MPP.Methods.Tempo do
         {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
+
+  defp simulation_result(:ok), do: :ok
+  defp simulation_result({:error, :rejected}), do: {:error, Errors.new(:verification_failed, @simulation_rejected_detail)}
+
+  defp simulation_result({:error, :unavailable}),
+    do: {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
 
   defp rpc_options(config), do: [req_options: config["req_options"] || []]
 

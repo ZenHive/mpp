@@ -3145,8 +3145,8 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
-          "eth_simulateV1" ->
-            Req.Test.json(conn, simulate_success_body())
+          "eth_call" ->
+            Req.Test.json(conn, eth_call_success_body())
 
           _ ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
@@ -3191,8 +3191,8 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
-          "eth_simulateV1" ->
-            Req.Test.json(conn, simulate_success_body())
+          "eth_call" ->
+            Req.Test.json(conn, eth_call_success_body())
 
           _ ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
@@ -3202,7 +3202,17 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} =
                Tempo.verify(%{"type" => "transaction", "signature" => raw_hex}, charge)
 
-      assert_received {:rpc_call, "eth_simulateV1", _}
+      # Sender simulation before co-sign: no fee token, zero fees, no sponsor signature.
+      assert_received {:rpc_call, "eth_call", [sender_call, "latest"]}
+      refute Map.has_key?(sender_call, "feeToken")
+      refute Map.has_key?(sender_call, "feePayerSignature")
+      assert %{"maxFeePerGas" => "0x0", "maxPriorityFeePerGas" => "0x0", "gas" => "0xf4240"} = sender_call
+
+      # Sponsored simulation after co-sign: the sponsor's signature and fee token.
+      assert_received {:rpc_call, "eth_call", [sponsored_call, "latest"]}
+      assert %{"feePayerSignature" => %{"r" => "0x" <> _, "s" => "0x" <> _, "yParity" => "0x" <> _}} = sponsored_call
+      assert String.downcase(sponsored_call["feeToken"]) == String.downcase(@fee_token_address)
+
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
       refute String.downcase(broadcast_hex) == String.downcase(raw_hex)
       assert String.starts_with?(broadcast_hex, "0x76")
@@ -3211,7 +3221,7 @@ defmodule MPP.Methods.TempoTest do
                Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert error.detail =~ "already used"
-      refute_received {:rpc_call, "eth_simulateV1", _}
+      refute_received {:rpc_call, "eth_call", _}
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
 
@@ -3241,11 +3251,11 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
-          "eth_simulateV1" ->
-            # Co-signed tx would run out of gas / revert on-chain → status 0x0.
+          "eth_call" ->
+            # The transaction would revert on-chain → JSON-RPC code 3.
             Req.Test.json(conn, %{
               "jsonrpc" => "2.0",
-              "result" => [%{"calls" => [%{"status" => "0x0"}]}],
+              "error" => %{"code" => 3, "message" => "execution reverted"},
               "id" => 1
             })
 
@@ -3260,9 +3270,89 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "Pre-broadcast simulation rejected"
 
       # The co-signed tx was simulated, but the sponsor NEVER broadcast it.
-      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_call"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       refute_received {:rpc_call, "eth_sendRawTransaction"}
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    # Answers the sender simulation (no feePayerSignature) and the sponsored
+    # simulation (with one) separately; any other method returns a receipt.
+    defp stub_sponsored_simulations(test_pid, sender_response, sponsored_response) do
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case {request["method"], request["params"]} do
+          {"eth_call", [%{"feePayerSignature" => _}, _]} -> sponsored_response.(conn)
+          {"eth_call", _} -> sender_response.(conn)
+          _ -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+    end
+
+    defp rpc_error(code, message),
+      do: &Req.Test.json(&1, %{"jsonrpc" => "2.0", "error" => %{"code" => code, "message" => message}, "id" => 1})
+
+    defp eth_call_ok, do: &Req.Test.json(&1, eth_call_success_body())
+
+    test "rejects an under-gassed sponsored tx in the sender simulation before co-sign", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
+      out_of_gas = rpc_error(-32_003, "out of gas: gas exhausted during precompiled contract execution: 45000")
+      stub_sponsored_simulations(self(), out_of_gas, eth_call_ok())
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+
+      assert_received {:rpc_call, "eth_call", [%{"gas" => "0xf4240"} = sender_call, "latest"]}
+      refute Map.has_key?(sender_call, "feePayerSignature")
+      refute_received {:rpc_call, "eth_call", _}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "rejects a sponsor fee-balance shortfall as a verification failure, not a server error", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
+      shortfall = rpc_error(-32_003, "insufficient fee token balance: required 8929, but only have 0")
+      stub_sponsored_simulations(self(), eth_call_ok(), shortfall)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert error.type =~ "verification-failed"
+      assert error.detail =~ "Pre-broadcast simulation rejected"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+      assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
+    end
+
+    test "tolerates a gas-limit-only failure of the sponsored simulation after the sender simulation passed", %{
+      charge: charge
+    } do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
+      out_of_gas = rpc_error(-32_003, "out of gas: gas exhausted during precompiled contract execution: 1000000")
+      stub_sponsored_simulations(self(), eth_call_ok(), out_of_gas)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", _}
+    end
+
+    test "rejects a sponsored simulation revert whose reason mentions gas", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
+      stub_sponsored_simulations(self(), eth_call_ok(), rpc_error(3, "out of gas"))
+
+      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert error.type =~ "verification-failed"
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+    end
+
+    test "fails closed with an internal error when a sponsored simulation cannot run", %{charge: charge} do
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
+      stub_sponsored_simulations(self(), eth_call_ok(), &Req.Test.transport_error(&1, :econnrefused))
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
 
@@ -3323,7 +3413,7 @@ defmodule MPP.Methods.TempoTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
 
         case Jason.decode!(body)["method"] do
-          "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
+          "eth_call" -> Req.Test.json(conn, eth_call_success_body())
           "eth_sendRawTransactionSync" -> Req.Test.transport_error(conn, :timeout)
         end
       end)
@@ -3377,11 +3467,11 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, method})
 
         case method do
-          "eth_simulateV1" ->
+          "eth_call" ->
             send(test_pid, {:held_during_simulate, sponsor_budget_state(charge, @fee_payer_private_key)})
             # Simulation outlasts the margin, leaving less than the floor.
             set_clock.((valid_before - 14) * 1000)
-            Req.Test.json(conn, simulate_success_body())
+            Req.Test.json(conn, eth_call_success_body())
 
           _ ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
@@ -3395,7 +3485,7 @@ defmodule MPP.Methods.TempoTest do
 
       assert_received {:held_during_simulate, {:ok, %{reservations: held}}}
       assert map_size(held) == 1
-      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_call"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       refute_received {:rpc_call, "eth_sendRawTransaction"}
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
@@ -3428,7 +3518,7 @@ defmodule MPP.Methods.TempoTest do
         assert error.type =~ "verification-failed"
         assert error.detail =~ "needs at least 15s of remaining validity"
 
-        assert_received {:rpc_call, "eth_simulateV1"}
+        assert_received {:rpc_call, "eth_call"}
         refute_received {:rpc_call, "eth_sendRawTransactionSync"}
         refute_received {:rpc_call, "eth_sendRawTransaction"}
         assert_received {:held_budget, {:ok, %{reservations: held}}} when map_size(held) == 1
@@ -3880,6 +3970,9 @@ defmodule MPP.Methods.TempoTest do
         "eth_simulateV1" ->
           Req.Test.json(conn, simulate_success_body())
 
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_success_body())
+
         "eth_sendRawTransaction" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => tx_hash, "id" => 1})
       end
@@ -3912,6 +4005,9 @@ defmodule MPP.Methods.TempoTest do
       case request["method"] do
         "eth_simulateV1" ->
           Req.Test.json(conn, simulate_success_body())
+
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_success_body())
 
         "eth_sendRawTransactionSync" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
@@ -3952,6 +4048,11 @@ defmodule MPP.Methods.TempoTest do
   # eth_simulateV1 success response body: one block, one call with status 0x1.
   defp simulate_success_body do
     %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x1"}]}], "id" => 1}
+  end
+
+  # eth_call success response body for a sponsored transaction's simulations.
+  defp eth_call_success_body do
+    %{"jsonrpc" => "2.0", "result" => "0x" <> String.duplicate("0", 63) <> "1", "id" => 1}
   end
 
   describe "verify/2 — proof credentials (zero-amount)" do
@@ -4567,18 +4668,20 @@ defmodule MPP.Methods.TempoTest do
       {:ok, tx_hex} = build_hosted_client_tx()
       {:ok, tx} = Transaction.deserialize(tx_hex)
       fill_tx = hosted_fill_tx_map(tx)
+      test_pid = self()
 
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         response =
           case request["method"] do
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
-            "eth_simulateV1" ->
-              simulate_success_body()
+            "eth_call" ->
+              eth_call_success_body()
 
             _ ->
               %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
@@ -4591,6 +4694,20 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
+
+      # The sender simulation precedes the fill; the sponsored one carries the
+      # hosted fee payer's signature, re-encoded as hex quantities.
+      assert_received {:rpc_call, "eth_call", [sender_call, "latest"]}
+      refute Map.has_key?(sender_call, "feePayerSignature")
+      assert_received {:rpc_call, "eth_fillTransaction", _}
+      assert_received {:rpc_call, "eth_call", [sponsored_call, "latest"]}
+      %{"r" => r, "s" => s, "yParity" => y_parity} = fill_tx["feePayerSignature"]
+
+      assert sponsored_call["feePayerSignature"] == %{
+               "r" => String.downcase(r),
+               "s" => String.downcase(s),
+               "yParity" => "0x#{y_parity}"
+             }
     end
 
     test "two encodings of the same hosted tx reserve one slot with no duplicate fill or broadcast", %{
@@ -4615,8 +4732,8 @@ defmodule MPP.Methods.TempoTest do
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
-            "eth_simulateV1" ->
-              simulate_success_body()
+            "eth_call" ->
+              eth_call_success_body()
 
             _ ->
               %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
@@ -4629,7 +4746,8 @@ defmodule MPP.Methods.TempoTest do
                Tempo.verify(%{"type" => "transaction", "signature" => alternate_hex}, charge)
 
       assert_received {:rpc_call, "eth_fillTransaction"}
-      assert_received {:rpc_call, "eth_simulateV1"}
+      assert_received {:rpc_call, "eth_call"}
+      assert_received {:rpc_call, "eth_call"}
       assert_received {:rpc_call, "eth_sendRawTransactionSync"}
 
       assert {:error, %Errors{} = error} =
@@ -4637,7 +4755,7 @@ defmodule MPP.Methods.TempoTest do
 
       assert error.detail =~ "already used"
       refute_received {:rpc_call, "eth_fillTransaction"}
-      refute_received {:rpc_call, "eth_simulateV1"}
+      refute_received {:rpc_call, "eth_call"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
     end
 
@@ -4682,8 +4800,8 @@ defmodule MPP.Methods.TempoTest do
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
-            "eth_simulateV1" ->
-              simulate_success_body()
+            "eth_call" ->
+              eth_call_success_body()
 
             _ ->
               %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
@@ -4708,8 +4826,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         response =
-          if request["method"] == "eth_fillTransaction" do
-            %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+          case request["method"] do
+            "eth_fillTransaction" -> %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+            "eth_call" -> eth_call_success_body()
           end
 
         Req.Test.json(conn, response)
@@ -4753,7 +4872,7 @@ defmodule MPP.Methods.TempoTest do
       send(test_pid, {:rpc_call, request["method"]})
 
       case request["method"] do
-        "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
+        "eth_call" -> Req.Test.json(conn, eth_call_success_body())
         _ -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]})
       end
     end)

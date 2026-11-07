@@ -22,6 +22,7 @@ defmodule MPP.Methods.Tempo.Subscription do
   alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.KeyAuthorization
+  alias MPP.Methods.Tempo.SponsoredSimulation
   alias MPP.Methods.Tempo.SubscriptionTransaction
   alias MPP.Receipt
   alias MPP.Subscription.Record
@@ -490,21 +491,28 @@ defmodule MPP.Methods.Tempo.Subscription do
     rpc_url = config["rpc_url"]
     [call] = tx.calls
 
-    request = %{
-      "from" => source,
-      "to" => hex(call.to),
-      "value" => hex_quantity(call.value),
-      "input" => hex(call.input),
-      "gas" => hex_quantity(tx.gas_limit),
-      "nonce" => hex_quantity(tx.nonce),
-      "maxFeePerGas" => hex_quantity(tx.max_fee_per_gas),
-      "maxPriorityFeePerGas" => hex_quantity(tx.max_priority_fee_per_gas),
-      "chainId" => hex_quantity(tx.chain_id),
-      "type" => "0x76",
-      "keyType" => KeyAuthorization.key_type_name(key_type),
-      "keyId" => elem(access_key(config), 1),
-      "feeToken" => hex(tx.fee_token)
-    }
+    request =
+      tx
+      |> SponsoredSimulation.envelope_fields()
+      |> Map.merge(%{
+        "from" => source,
+        "to" => hex(call.to),
+        "value" => hex_quantity(call.value),
+        "input" => hex(call.input),
+        "gas" => hex_quantity(tx.gas_limit),
+        "nonce" => hex_quantity(tx.nonce),
+        "maxFeePerGas" => hex_quantity(tx.max_fee_per_gas),
+        "maxPriorityFeePerGas" => hex_quantity(tx.max_priority_fee_per_gas),
+        "chainId" => hex_quantity(tx.chain_id),
+        "type" => "0x76",
+        "keyType" => KeyAuthorization.key_type_name(key_type),
+        "keyId" => elem(access_key(config), 1),
+        "feeToken" => hex(tx.fee_token),
+        # The node bills the fee payer it recovers from this signature over the
+        # envelope fields above, and the sender when it is absent (see
+        # MPP.Methods.Tempo.SponsoredSimulation).
+        "feePayerSignature" => SponsoredSimulation.rpc_signature(tx.fee_payer_signature)
+      })
 
     payload = %{
       "jsonrpc" => "2.0",

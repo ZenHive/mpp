@@ -606,8 +606,15 @@ defmodule MPP.Methods.Tempo.SubscriptionTest do
       assert request["keyId"] == SubscriptionHelpers.access_address()
       assert_received {:rpc, "eth_sendRawTransactionSync", [raw]}
       assert {:ok, tx} = Transaction.deserialize(raw)
-      assert %{r: _r, s: _s, y_parity: _y_parity} = tx.fee_payer_signature
+      assert %{r: r, s: s, y_parity: y_parity} = tx.fee_payer_signature
       refute Transaction.has_fee_payer_placeholder?(tx)
+
+      # The node bills the fee payer recovered from this signature, not the source.
+      assert request["feePayerSignature"] == %{
+               "r" => "0x" <> String.downcase(Integer.to_string(r, 16)),
+               "s" => "0x" <> String.downcase(Integer.to_string(s, 16)),
+               "yParity" => "0x#{y_parity}"
+             }
     end
 
     test "skips activation broadcast and releases the claim when validity runs short before send", %{store: store} do

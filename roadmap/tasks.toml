@@ -4658,7 +4658,7 @@ scored_at = "2026-11-04"
 id = "177"
 phase = 1
 bundle = "tempo"
-status = "pending"
+status = "done"
 title = "Simulate sponsored Tempo transactions with the fee payer signature"
 scores = { d = 4, b = 6, u = 5 }
 acceptance_criteria = ["A sponsored payment from an unfunded sender no longer ends in internal_payment_error; an actual sponsor fee-balance shortfall is a verification failure, not a server error", "Sponsored charge simulation (local co-sign and hosted fill) sends the fee payer signature, and a sponsored payment from a sender without the sponsor's fee token passes simulation and settles (Moderato :integration test that flunks loudly without credentials)", "The sponsored subscription simulation sends the fee payer signature the same way", "An under-gassed sponsored transaction is still rejected before broadcast (regression test)", "Out-of-gas tolerance, if ported, keys only on the node's JSON-RPC error message and never on a revert (code 3) or revert data (test)", "A zero maxPriorityFeePerGas stays in the simulation request (test)", "Wire field names and the signature encoding are cited against refs/mppx and refs/mpp-rs"]
@@ -4672,8 +4672,10 @@ Port the upstream shape: the sponsored simulation carries the sponsor's signatur
 
 If the request field belongs in `onchain_tempo`, that is a change in the onchain_tempo repo released with a version bump and consumed as a Hex version, never a git or path pin; adding the field on the mpp side is also acceptable. Authority: a live Moderato call (one success, one relevant rejection) plus refs/mppx/src/tempo/internal/fee-payer.ts and refs/mpp-rs/src/protocol/methods/tempo/method/simulate.rs, cross-checked.
 """
+implemented = "MPP.Methods.Tempo.SponsoredSimulation runs two eth_call simulations for fee-sponsored transactions (mppx preflightSponsorship / mpp-rs simulate.rs): the sender transaction at its gas limit with zero fees and no fee token before co-sign, then the co-signed transaction with feeToken and feePayerSignature, tolerating only the node's own gas-limit error. Both requests carry every signed envelope field (nonceKey, validBefore, validAfter, keyAuthorization) and keyType/keyData/keyId sender hints; the subscription eth_simulateV1 request gains feePayerSignature and the envelope fields. Live Moderato: unfunded-fee-token sender, validAfter and keychain-signed sponsored charges settle, under-gassed rejected, subscription_integration_test 8/8. Codex review (herdr) findings fixed, re-review PASS."
 created_at = "2026-11-07"
 scored_at = "2026-11-07"
+done_at = "2026-11-07"
 
 [bundles.testnet-funding]
 phase = 1
