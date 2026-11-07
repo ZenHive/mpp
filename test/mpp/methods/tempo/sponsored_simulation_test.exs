@@ -204,7 +204,8 @@ defmodule MPP.Methods.Tempo.SponsoredSimulationTest do
           ] do
         stub_eth_call(rpc_error(error))
         assert {:error, :rejected} = SponsoredSimulation.simulate_sender(client_tx(), @rpc_url, @req_options)
-        assert {:error, :rejected} = SponsoredSimulation.simulate_sponsored(cosigned(client_tx()), @rpc_url, @req_options)
+        sponsored = cosigned(client_tx())
+        assert {:error, :rejected} = SponsoredSimulation.simulate_sponsored(sponsored, @rpc_url, @req_options)
       end
     end
 

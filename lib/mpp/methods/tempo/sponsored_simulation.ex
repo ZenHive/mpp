@@ -50,6 +50,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
 
   @type result :: :ok | {:error, :rejected | :unavailable}
 
+  @doc false
   @spec simulate_sender(Transaction.t(), String.t(), keyword()) :: result()
   def simulate_sender(%Transaction{} = tx, rpc_url, req_options) do
     with {:ok, request} <- sender_request(tx) do
@@ -57,6 +58,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
     end
   end
 
+  @doc false
   @spec simulate_sponsored(Transaction.t(), String.t(), keyword()) :: result()
   def simulate_sponsored(%Transaction{} = tx, rpc_url, req_options) do
     with {:ok, request} <- sponsored_request(tx) do
@@ -64,6 +66,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
     end
   end
 
+  @doc false
   @spec sender_request(Transaction.t()) :: {:ok, map()} | {:error, :unavailable}
   def sender_request(%Transaction{} = tx) do
     with {:ok, request} <- base_request(tx) do
@@ -74,6 +77,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
     end
   end
 
+  @doc false
   @spec sponsored_request(Transaction.t()) :: {:ok, map()} | {:error, :unavailable}
   def sponsored_request(%Transaction{fee_payer_signature: %{r: _, s: _, y_parity: _} = signature} = tx) do
     with {:ok, request} <- base_request(tx) do
@@ -85,6 +89,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
 
   # The signed envelope fields `Transaction.simulate_request/1` leaves out or
   # omits when zero, each only when set.
+  @doc false
   @spec envelope_fields(Transaction.t()) :: map()
   def envelope_fields(%Transaction{} = tx) do
     %{}
@@ -140,6 +145,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
 
   # JSON-RPC signature form, hex quantities (ox `Signature.toRpc`;
   # simulate.rs:79 `rpc_signature`).
+  @doc false
   @spec rpc_signature(%{r: non_neg_integer(), s: non_neg_integer(), y_parity: 0 | 1}) :: map()
   def rpc_signature(%{r: r, s: s, y_parity: y_parity}) do
     %{"r" => hex_quantity(r), "s" => hex_quantity(s), "yParity" => hex_quantity(y_parity)}
@@ -151,6 +157,7 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
   # cannot tell them apart; a revert (code 3) or revert data never counts,
   # because the reverting contract chooses that text (simulate.rs:88-127,
   # fee-payer.ts:544 `isOutOfGasError`).
+  @doc false
   @spec gas_limit_error?(term()) :: boolean()
   def gas_limit_error?(%{"code" => code, "message" => message} = error)
       when is_integer(code) and code != @execution_reverted and is_binary(message) do
