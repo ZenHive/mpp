@@ -6,7 +6,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
-## [Unreleased]
+## [0.22.2] — 2026-11-07
 
 ### Fixed
 
