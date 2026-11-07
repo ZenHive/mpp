@@ -1360,8 +1360,8 @@
       "unlocks": 1,
       "markers": [],
       "depends_on": [],
-      "assignee": "grok",
-      "model": "grok-4.6",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "Implements MPP.Method behaviour",
         "A fresh BOLT11 invoice is issued per challenge, not once at Plug build time: MPP.Plug currently calls challenge_method_details/1 a single time in build_method_entry (lib/mpp/plug.ex:267-285), so the Method contract or the Plug gains a per-request challenge-details hook and this task ships it",
@@ -1402,8 +1402,8 @@
       "depends_on": [
         19
       ],
-      "assignee": "grok",
-      "model": "grok-4.6",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "Session lifecycle: open → bearer → topUp → close",
         "Per-unit metering with serialized balance updates (no lost update under concurrent bearer actions)",
@@ -1884,8 +1884,8 @@
       "unlocks": 0,
       "markers": [],
       "depends_on": [],
-      "assignee": "grok",
-      "model": "grok-4.6",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "MPP.Methods.Hedera implements both credential types of draft-hedera-charge-00: push (type=hash, default) and pull (type=transaction), with separate live success and rejection evidence per mode",
         "Attribution memo binding, distinct split legs, Mirror Node indexing delay handling, pre-broadcast validation and atomic transaction-ID consumption are asserted (draft-hedera-charge-00.md:297-375,609,645,724,779,810,835)",
@@ -5147,8 +5147,8 @@
       "depends_on": [
         80
       ],
-      "assignee": "grok",
-      "model": "grok-4.7",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "MPP.Methods.USDC accepts the Stacks USDCx/SIP-010 direct profile of draft-usdc-charge-00.md:355-399 alongside the EVM and Solana profiles delivered by Task 80, with profile exclusivity enforced (a credential for one profile is rejected under another, draft:258)",
         "USDC-specific native-asset identity, token-control (blocklist/pause, draft:923-939), replay and receipt requirements hold for the Stacks leg",
@@ -6751,8 +6751,8 @@
         "parallel"
       ],
       "depends_on": [],
-      "assignee": "cursor",
-      "model": "cursor-grok-4.6-high",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "After a successful Tempo, EVM and Stripe verification the conn carries the verified payer; tests assert the value equals the on-chain sender / Stripe customer the method verified",
         "No payer is assigned when verification fails or the method cannot attest a payer",
@@ -6781,8 +6781,8 @@
         "parallel"
       ],
       "depends_on": [],
-      "assignee": "grok",
-      "model": "grok-4.7",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "PaymentIntent metadata keys and values match refs/mppx and refs/mpp-rs (cited)",
         "Stripe :integration test creates a PaymentIntent and reads the new metadata back from the live test API",
@@ -6842,8 +6842,8 @@
         "parallel"
       ],
       "depends_on": [],
-      "assignee": "cursor",
-      "model": "cursor-grok-4.6-high",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "A credential just under 64 KiB parses; one over 64 KiB is rejected before base64/JSON decoding (tests at both boundaries)",
         "The bound is cited against refs/mppx and refs/mpp-rs",
@@ -6934,8 +6934,8 @@
         "parallel"
       ],
       "depends_on": [],
-      "assignee": "cursor",
-      "model": "cursor-grok-4.6-high",
+      "assignee": "codex",
+      "model": "gpt-6-astra",
       "acceptance_criteria": [
         "With two offered challenges where the provider refuses the first, the client pays the second (test)",
         "A provider error after a credential was sent does not trigger another payment",

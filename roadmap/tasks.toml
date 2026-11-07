@@ -1112,8 +1112,8 @@ acceptance_criteria = [
   "Authority named in the delivery: the MPP Lightning draft for wire and lifecycle, BOLT11 for invoices, the chosen node's RPC contract (LND gRPC or CLN REST) for node calls; no Elixir Lightning client exists on Hex at scoring time, so the node client is part of the deliverable"
 ]
 touches = ["mix.exs", "lib/mpp/method.ex", "lib/mpp/plug.ex", "lib/mpp/methods/lightning.ex", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
-assignee = "grok"
-model = "grok-4.6"
+assignee = "codex"
+model = "gpt-6-astra"
 blocked_reason = "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service."
 body = """
 Implement `MPP.Methods.Lightning` for charge intent. Server generates a BOLT11 invoice per request, issues 402 with invoice + payment hash. Client pays via Lightning Network, receives preimage on HTLC settlement, retries with preimage as credential. Server verifies SHA256(preimage) == stored payment_hash. Challenge details include invoice string, paymentHash (hex), network (mainnet/regtest/signet), amount in satoshis. Credential payload: `preimage` (32-byte lowercase hex). Requires Lightning node client library (external dep TBD — LND gRPC or similar).
@@ -1139,8 +1139,8 @@ acceptance_criteria = [
   "Live regtest session-lifecycle integration: open → bearer → topUp → close with real invoice settlement and a real refund on close, plus a relevant live error such as invalid top-up preimage or rejected refund invoice; missing node/credentials flunk loudly with exact setup instructions"
 ]
 touches = ["mix.exs", "lib/mpp/methods/lightning.ex", "lib/mpp/session/", "test/mpp/methods/lightning_test.exs", "test/mpp/methods/lightning_integration_test.exs"]
-assignee = "grok"
-model = "grok-4.6"
+assignee = "codex"
+model = "gpt-6-astra"
 blocked_reason = "No Lightning regtest node (LND/CLN) exists on the harness host or anywhere reachable; the live-integration ACs cannot run. Unblock: provision a regtest node on ex63-eth (or Polar) and export its RPC endpoint + macaroon/rune into ~/.secrets there, then restart harness.service."
 body = """
 Implement prepaid streaming sessions for metered payments (e.g., LLM token generation). Client opens session by paying deposit invoice, provides return invoice for refunds. Server deducts per-unit cost from balance during streaming, emits SSE "need-topup" when balance low. Client can topUp with new deposit or close session (server refunds unspent balance via return invoice). Stateful — needs session store (unlike all other methods). Credential actions: open, bearer, topUp, close (Lightning uses preimage-as-bearer-token, not Tempo's cumulative-voucher model — see `draft-lightning-session-00.md`). Task 19's charge-method delivery is the only sequencing gate.
@@ -1469,8 +1469,8 @@ acceptance_criteria = [
   "Live Hedera testnet integration pins at least one successful settlement and one relevant rejected credential/transaction per mode; missing credentials flunk loudly with exact setup instructions"
 ]
 touches = ["mix.exs", "lib/mpp/methods/hedera.ex", "test/mpp/methods/hedera_test.exs", "test/mpp/methods/hedera_integration_test.exs"]
-assignee = "grok"
-model = "grok-4.6"
+assignee = "codex"
+model = "gpt-6-astra"
 blocked_reason = "No Hedera testnet account: portal.hedera.com signup is an operator step. Unblock: create the account, export HEDERA_TESTNET_ACCOUNT_ID + HEDERA_TESTNET_PRIVATE_KEY in ~/.secrets on the harness host, restart harness.service."
 body = """
 Implement Hedera charge per `paymentauth.org` and `refs/mpp-specs/specs/methods/hedera/draft-hedera-charge-*.md`. Establish network semantics from Hedera-owned documentation and live testnet behavior; cross-check whichever MPP SDKs implement the method at pickup as compatibility evidence.
@@ -3379,8 +3379,8 @@ depends_on = [80]
 acceptance_criteria = ["MPP.Methods.USDC accepts the Stacks USDCx/SIP-010 direct profile of draft-usdc-charge-00.md:355-399 alongside the EVM and Solana profiles delivered by Task 80, with profile exclusivity enforced (a credential for one profile is rejected under another, draft:258)", "USDC-specific native-asset identity, token-control (blocklist/pause, draft:923-939), replay and receipt requirements hold for the Stacks leg", "Live Stacks testnet evidence: at least one successful charge and one relevant rejection; integration tests pin observed request/response/error semantics and mocks are derived only afterward; missing credentials flunk loudly with exact setup instructions", "The Stacks RPC/transaction client is dev-scoped or a runtime dep only if it is a maintained Hex package; the delivery records the choice", "mix ci passes; touched critical modules stay at or above 95% coverage"]
 out_of_scope = ["EVM and Solana USDC profiles (Task 80)", "Circle Gateway Transfer profile (its own task)"]
 touches = ["mix.exs", "lib/mpp/methods/usdc.ex", "lib/mpp/methods/stacks.ex", "test/mpp/methods/usdc_test.exs", "test/mpp/methods/usdc_integration_test.exs"]
-assignee = "grok"
-model = "grok-4.7"
+assignee = "codex"
+model = "gpt-6-astra"
 body = """
 Split out of Task 80 on 2026-09-16 (review: four live environments in one dispatch cycle is not reviewable as one diff). Stacks is a new chain with no primitives in this repo or its deps, so this profile is its own implement-review-land cycle on top of the `usdc` acceptance surface Task 80 ships for EVM and Solana.
 
@@ -4337,8 +4337,8 @@ title = "Expose the verified payer on payment success"
 scores = { d = 2, b = 5, u = 3 }
 markers = ["parallel"]
 acceptance_criteria = ["After a successful Tempo, EVM and Stripe verification the conn carries the verified payer; tests assert the value equals the on-chain sender / Stripe customer the method verified", "No payer is assigned when verification fails or the method cannot attest a payer", "Documented in MPP.Plug moduledoc"]
-assignee = "cursor"
-model = "cursor-grok-4.6-high"
+assignee = "codex"
+model = "gpt-6-astra"
 body = "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
@@ -4352,8 +4352,8 @@ title = "Standardize Stripe PaymentIntent analytics metadata"
 scores = { d = 2, b = 4, u = 3 }
 markers = ["parallel"]
 acceptance_criteria = ["PaymentIntent metadata keys and values match refs/mppx and refs/mpp-rs (cited)", "Stripe :integration test creates a PaymentIntent and reads the new metadata back from the live test API", "Old keys are no longer sent"]
-assignee = "grok"
-model = "grok-4.7"
+assignee = "codex"
+model = "gpt-6-astra"
 body = "Both SDKs replaced the MPP PaymentIntent metadata keys (mpp-rs #617 7bf2630, #615 ff2a8fe; refs/mppx/src/stripe/internal/constants.ts): add machine_payment, mpp_sdk, mpp_intent; drop mpp_version, mpp_is_mpp, mpp_server_id. Our keys are in MPP.Methods.Stripe. Authority: refs/mppx + refs/mpp-rs agreeing, and the live Stripe test API accepting the metadata."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
@@ -4382,8 +4382,8 @@ title = "Raise the credential token cap to the reference SDKs' 64 KiB"
 scores = { d = 1, b = 4, u = 4 }
 markers = ["parallel"]
 acceptance_criteria = ["A credential just under 64 KiB parses; one over 64 KiB is rejected before base64/JSON decoding (tests at both boundaries)", "The bound is cited against refs/mppx and refs/mpp-rs", "MCP/JSON-RPC credential paths use the same bound"]
-assignee = "cursor"
-model = "cursor-grok-4.6-high"
+assignee = "codex"
+model = "gpt-6-astra"
 body = "MPP.Headers caps the Authorization credential token at 16 KiB; mppx (src/Credential.ts) and mpp-rs (src/protocol/core/headers.rs, #611 12bf82a) both bound the Authorization value at 64 KiB before extraction. Credentials echoing a large request/opaque are rejected by us but accepted by both SDKs. Align the bound (still applied before any decoding)."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
@@ -4426,8 +4426,8 @@ title = "MCP client pays the next supported challenge when the preferred one fai
 scores = { d = 2, b = 3, u = 2 }
 markers = ["parallel"]
 acceptance_criteria = ["With two offered challenges where the provider refuses the first, the client pays the second (test)", "A provider error after a credential was sent does not trigger another payment", "Total payment attempts stay bounded as today"]
-assignee = "cursor"
-model = "cursor-grok-4.6-high"
+assignee = "codex"
+model = "gpt-6-astra"
 body = "mpp-rs #602 (cedb328): when paying the preferred MCP challenge fails locally (provider refuses, unsupported currency), try the next supported challenge instead of giving up. MPP.Client.MCP stops at the first. Keep the existing at-most-two-payment-attempts bound. 2026-11-07 sdk-delta-watch: mpp-rs #686 (252f9bc) also stops MCP offer fallback once a payment outcome is unknown; the second criterion covers it, since our server broadcasts the client-signed transaction and a fallback could pay twice."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
