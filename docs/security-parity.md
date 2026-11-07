@@ -79,6 +79,7 @@ OSV carries both the `CVE-` and the `EEF-CVE-` alias.
 | `GHSA-r5w8-h5v2-3g34` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | Client paid for a non-GET/HEAD request after Req followed a redirect and rewrote it to GET; such requests are now refused with `:redirected_request` (mppx `Fetch.ts`, mpp-rs `flow.rs` parity) |
 | `GHSA-388w-957g-grcq` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | x402 route digest binding was skipped for empty or uncached request bodies; digests now bind empty bodies and fail closed when the body is unavailable (mppx `EvmCharge.ts` parity) |
 | `GHSA-4j54-j2qx-w4c9` | — (not requested: LOW-severity hardening) | LOW | 0.22.1 | Single-use payment markers could expire before the challenge when `expires_in` exceeded the dedup store TTL; markers are now kept until challenge expiry plus 30 seconds (mpp-rs #673 parity) |
+| `GHSA-7fqv-4rff-v232` | — (to be requested from the EEF CNA) | HIGH | 0.22.3 | Tempo fee-sponsored charge settled under an unclaimed on-chain hash — the same payment could be redeemed again with a hash credential on a route sharing the dedup store |
 
 The first three were reported by Kian Kai Ang (University of Sydney). CVE assignment for the
 remaining four was requested from the EEF CNA on 2026-08-18. The four 0.16.2 advisories
