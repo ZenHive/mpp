@@ -120,6 +120,43 @@ defmodule MPP.Methods.Tempo.SponsoredSimulationTest do
     end
   end
 
+  describe "P-256 sender key hints" do
+    @p256_order 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+
+    # Signs `digest` with a fresh P-256 key, low-s, without prehashing.
+    defp p256_signed(digest) do
+      {<<4, x::binary-size(32), y::binary-size(32)>>, private} = :crypto.generate_key(:ecdh, :secp256r1)
+      der = :crypto.sign(:ecdsa, :sha256, {:digest, digest}, [private, :secp256r1])
+      {:"ECDSA-Sig-Value", r, s} = :public_key.der_decode(:"ECDSA-Sig-Value", der)
+      s = min(s, @p256_order - s)
+      key_id = "0x" <> Base.encode16(binary_part(Onchain.Hash.keccak(x <> y), 12, 20), case: :lower)
+      {{:p256, %{r: <<r::256>>, s: <<s::256>>, pub_key_x: x, pub_key_y: y, pre_hash: false}}, key_id}
+    end
+
+    test "name the key type of a P-256 sender" do
+      tx = client_tx()
+      {:ok, sig_hash} = Transaction.signing_hash(tx)
+      {signature, address} = p256_signed(sig_hash)
+
+      assert {:ok, request} = SponsoredSimulation.sender_request(%{tx | signature: signature})
+      assert request["keyType"] == "p256"
+      assert request["from"] == address
+      refute Map.has_key?(request, "keyId")
+    end
+
+    test "name the P-256 access key of a keychain sender" do
+      tx = client_tx()
+      user = :binary.copy(<<0x33>>, 20)
+      {:ok, sig_hash} = Transaction.signing_hash(tx)
+      {signature, key_id} = p256_signed(Onchain.Hash.keccak(<<0x04>> <> sig_hash <> user))
+
+      assert {:ok, request} = SponsoredSimulation.sender_request(%{tx | signature: {:keychain, 2, user, signature}})
+      assert request["keyType"] == "p256"
+      assert request["keyId"] == key_id
+      assert request["from"] == "0x" <> Base.encode16(user, case: :lower)
+    end
+  end
+
   describe "sponsored_request/1" do
     test "carries the fee token and the fee payer signature as hex quantities" do
       tx = cosigned(client_tx())

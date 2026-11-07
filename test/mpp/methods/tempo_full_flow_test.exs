@@ -469,6 +469,10 @@ defmodule MPP.Methods.TempoFullFlowTest do
         "eth_sendRawTransactionSync" ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
 
+        # The sponsored simulation of a fee-payer transaction.
+        "eth_call" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
+
         _other ->
           Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
       end

@@ -1812,13 +1812,7 @@ defmodule MPP.Methods.Tempo do
   end
 
   # Post-broadcast dedup: if the on-chain tx hash differs from the canonical
-  # keccak256 we reserved, record the on-chain hash too.
-  # Payment already succeeded on-chain at this point — a store crash (e.g. dead
-  # Agent process, network partition to Redis) must not fail the HTTP response.
-  # The pre-broadcast reserve_hash_atomic is the critical gate; this is
-  # supplementary protection against hash malleability.
-  # Logger.warning is intentional: payment already settled on-chain, so this
-  # supplementary dedup write must never fail the HTTP response.
+  # keccak256 we reserved, claim the on-chain hash too.
   defp claim_settled_hash(nil, _tx_hash, _input_hash, _config), do: :ok
 
   defp claim_settled_hash(store, tx_hash, input_hash, config) do

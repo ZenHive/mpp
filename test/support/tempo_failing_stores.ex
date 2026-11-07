@@ -81,3 +81,45 @@ defmodule MPP.Test.FaultyDeleteStore do
     end
   end
 end
+
+defmodule MPP.Test.HostedRecordFaultStore do
+  @moduledoc """
+  `MPP.Tempo.ConCacheStore` on the cache named by `cache/0` whose hosted-fill
+  record writes fail on demand: the calling process sets
+  `:hosted_record_fault` to `:put` or `:delete`.
+  """
+  @behaviour MPP.Tempo.Store
+
+  alias MPP.Tempo.ConCacheStore
+
+  @hosted_prefix "mpp:charge:hosted:"
+  @opts [name: __MODULE__.Cache]
+
+  @spec cache() :: atom()
+  def cache, do: Keyword.fetch!(@opts, :name)
+
+  @impl true
+  def get(key), do: ConCacheStore.get(key, @opts)
+
+  @impl true
+  def check_and_mark(key, value), do: ConCacheStore.check_and_mark(key, value, @opts)
+
+  @impl true
+  def update(key, fun, opts), do: ConCacheStore.update(key, fun, Keyword.merge(opts, @opts))
+
+  @impl true
+  def put(@hosted_prefix <> _hash = key, value) do
+    if Process.get(:hosted_record_fault) == :put, do: {:error, :unavailable}, else: ConCacheStore.put(key, value, @opts)
+  end
+
+  def put(key, value), do: ConCacheStore.put(key, value, @opts)
+
+  @impl true
+  def delete(@hosted_prefix <> _hash = key, expected) do
+    if Process.get(:hosted_record_fault) == :delete,
+      do: {:error, :unavailable},
+      else: ConCacheStore.delete(key, expected, @opts)
+  end
+
+  def delete(key, expected), do: ConCacheStore.delete(key, expected, @opts)
+end

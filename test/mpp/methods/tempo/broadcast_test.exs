@@ -129,6 +129,27 @@ defmodule MPP.Methods.Tempo.BroadcastTest do
       assert lookups() == 0
     end
 
+    test "a definitive rejection is final" do
+      for answer <- [
+            rpc_error(-32_003, "insufficient funds for gas"),
+            &Req.Test.json(&1, %{"error" => %{"code" => -32_602}})
+          ] do
+        stub(answer)
+        assert {:error, :rejected} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
+        assert lookups() == 0
+      end
+    end
+
+    test "a success answer without a hash or without a result is ambiguous" do
+      for answer <- [
+            &Req.Test.json(&1, %{"jsonrpc" => "2.0", "result" => 7, "id" => 1}),
+            &Req.Test.json(&1, %{"jsonrpc" => "2.0", "id" => 1})
+          ] do
+        stub(answer, fn -> @receipt end)
+        assert {:ok, @hash, _receipt} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
+      end
+    end
+
     test "an ambiguous answer makes one lookup" do
       stub(rpc_error(-32_000, "expiring nonce transaction already included"))
       assert {:error, :unresolved} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())

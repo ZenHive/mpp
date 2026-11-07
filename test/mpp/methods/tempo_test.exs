@@ -16,6 +16,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Tempo.ConCacheStore
   alias MPP.Test.FailingPutStore
   alias MPP.Test.FaultyDeleteStore
+  alias MPP.Test.HostedRecordFaultStore
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
   alias Onchain.Signer.Secp256k1
@@ -2453,9 +2454,20 @@ defmodule MPP.Methods.TempoTest do
 
         def put(key, value), do: Agent.update(__MODULE__, &Map.put(&1, key, value))
 
+        def delete(key, expected) do
+          Agent.update(__MODULE__, fn state ->
+            if Map.get(state, key) == expected, do: Map.delete(state, key), else: state
+          end)
+        end
+
         def check_and_mark("mpp:charge:0x" <> "efef" <> _rest, _value) do
           send(Agent.get(__MODULE__, &Map.fetch!(&1, :test_pid)), :post_broadcast_mark)
-          raise "store crashed!"
+
+          case Agent.get(__MODULE__, &Map.get(&1, :fault, :raise)) do
+            :raise -> raise "store crashed!"
+            :error -> {:error, :unavailable}
+            :exit -> exit(:store_down)
+          end
         end
 
         def check_and_mark(key, value) do
@@ -2501,9 +2513,13 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      # The reservation does not guard the settled hash, so an unrecorded claim must not settle.
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
-      assert_received :post_broadcast_mark
+      # The reservation does not guard the settled hash, so an unrecorded claim must not settle,
+      # whether the store raises, answers an error, or exits.
+      for fault <- [:raise, :error, :exit] do
+        Agent.update(CrashingPutStore, &Map.put(&1, :fault, fault))
+        assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+        assert_received :post_broadcast_mark
+      end
     end
 
     test "post-broadcast dead store process does not fail the request", %{charge: charge} do
@@ -3754,6 +3770,38 @@ defmodule MPP.Methods.TempoTest do
       assert_received {:held_budget, {:ok, %{reservations: held}}} when map_size(held) == 1
       assert :not_found = SponsorLifecycleStore.get(lifecycle_budget_key())
       assert :not_found = SponsorLifecycleStore.get("mpp:charge:" <> keccak256_hex(tx_hex))
+    end
+
+    test "an async resend the node already holds settles by its receipt and frees the reservation", %{
+      charge: charge
+    } do
+      charge = %{charge | method_details: Map.put(charge.method_details, "wait_for_confirmation", false)}
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 11)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_call" ->
+            Req.Test.json(conn, eth_call_success_body())
+
+          "eth_sendRawTransaction" ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "already known"},
+              "id" => 1
+            })
+
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert sponsor_budget_state(charge, @fee_payer_private_key) in [:not_found, {:ok, %{reservations: %{}}}]
     end
 
     test "retains async sponsorship and rejects the next request with retry timing", %{charge: charge} do
@@ -5061,6 +5109,61 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_fillTransaction"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       assert {:ok, "0xnot-a-transaction"} = ConCacheStore.get(record_key, store_opts)
+      assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
+    end
+
+    test "a hosted fill that cannot be recorded is not sent and frees the transaction", %{charge: charge} do
+      start_supervised!(ConCacheStore.child_spec(name: HostedRecordFaultStore.cache()))
+      charge = %{charge | method_details: Map.put(charge.method_details, "store", HostedRecordFaultStore)}
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: true)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      Process.put(:hosted_record_fault, :put)
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      assert Agent.get(chain, & &1.sent_hash) == nil
+
+      Process.delete(:hosted_record_fault)
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
+
+    test "a settled hosted fill whose record cannot be removed still settles", %{charge: charge} do
+      start_supervised!(ConCacheStore.child_spec(name: HostedRecordFaultStore.cache()))
+      charge = %{charge | method_details: Map.put(charge.method_details, "store", HostedRecordFaultStore)}
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      stub_hosted_chain(hosted_fill_tx_map(tx), mined: true)
+
+      Process.put(:hosted_record_fault, :delete)
+      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, "0x" <> _raw} = HostedRecordFaultStore.get("mpp:charge:hosted:" <> keccak256_hex(tx_hex))
+    end
+
+    test "a failed hosted fill is not sent and frees the transaction", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        method = Jason.decode!(body)["method"]
+        send(test_pid, {:rpc_call, method})
+
+        if method == "eth_fillTransaction",
+          do:
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "sponsor unavailable"},
+              "id" => 1
+            }),
+          else: Req.Test.json(conn, eth_call_success_body())
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      assert_received {:rpc_call, "eth_fillTransaction"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
     end
 

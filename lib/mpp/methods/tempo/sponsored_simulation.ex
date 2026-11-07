@@ -125,7 +125,6 @@ defmodule MPP.Methods.Tempo.SponsoredSimulation do
   end
 
   defp key_hints(%Transaction{signature: {_type, _signature} = signature}), do: {:ok, primitive_hints(signature)}
-  defp key_hints(%Transaction{}), do: {:error, :unavailable}
 
   defp primitive_hints({:secp256k1, _signature}), do: %{"keyType" => "secp256k1"}
   defp primitive_hints({:p256, _signature}), do: %{"keyType" => "p256"}
