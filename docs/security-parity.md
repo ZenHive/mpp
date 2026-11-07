@@ -182,6 +182,9 @@ open-items note below).
 | mppx #1152 (commit afb9924) bound websocket payment close reasons | Oversized close reason leaving a rejected socket open | Only a constant 29-byte close reason is emitted; rejections are error frames — `transports/websocket.ex` |
 | mpp-rs #669 (commit 15b4038) drop the receipt size cap | — (upstream removed a bound) | Stricter: the 16 KiB pre-decode cap stays on receipt tokens — `headers.ex`, `methods/tempo/session_receipt.ex` |
 | mpp-rs #668 (commit 1b58c93) require a string fundingCurrency | Non-string receipt metadata | Non-string values rejected; core keys win over extensions — `receipt.ex` |
+| mppx #1168 / mpp-rs #689 (commits 2060c5f, 5c52ae3) session realm and channel origin boundaries | A client signing session vouchers for a realm or reusing a stored channel across HTTP origins | Not applicable: no client session provider. Zero-amount Tempo proofs are signed only for a realm the requested server owns or a pinned one — `client/providers/tempo.ex` (`:trusted_tempo_proof_realms`); `MPP.Client.MCP` runs the approval hook before every payment — `client/mcp.ex` |
+| mppx #1168 (commit 2060c5f) answer payment challenges before buffering unpaid uploads | Unpaid request bodies buffered before the 402 | `MPP.Plug` never reads the body (see the mpp-rs #457 row) — `plug.ex` |
+| mpp-rs #686 (commit 252f9bc) push broadcasts with an unknown outcome | A client re-paying after its own broadcast had an ambiguous result | Not applicable: the Tempo client provider builds pull credentials only and the server broadcasts — `client/providers/tempo.ex`; MCP fallback after a sent credential is excluded by Task 163's criteria |
 
 ## 📋 Tracked as roadmap work (parity pending)
 
@@ -194,7 +197,7 @@ open-items note below).
 
 ## Open hardening items
 
-**0 open items** as of 2026-11-05.
+**0 open items** as of 2026-11-07.
 
 Previously resolved items: the three low draft advisories from the 2026-11-04 upstream sweep shipped in 0.22.1 and were published after the Hex release (`GHSA-r5w8-h5v2-3g34`, `GHSA-388w-957g-grcq`, `GHSA-4j54-j2qx-w4c9`).
 
