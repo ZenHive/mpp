@@ -293,6 +293,79 @@ defmodule MPP.Methods.Tempo.SponsorBudgetTest do
     end
   end
 
+  describe "adopt/5 and settle/4" do
+    test "a resend takes over the pending reservation of its hash and keeps the count" do
+      assert {:ok, first} = SponsorBudget.reserve(TempoMemoryStore, params(), now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, first, :broadcasting, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, first, {:pending, "0xAbC"}, now: @now)
+
+      assert :none = SponsorBudget.adopt(TempoMemoryStore, 42_431, "sponsor-wallet", "0xdef", now: @now)
+      assert {:ok, adopted} = SponsorBudget.adopt(TempoMemoryStore, 42_431, "Sponsor-Wallet", "0xabc", now: @now)
+      assert adopted == first
+
+      assert {:ok, state} = TempoMemoryStore.get(budget_key())
+      assert [%{phase: :broadcasting, tx_hash: "0xAbC"}] = Map.values(state.reservations)
+
+      # Taken over once: a concurrent resend finds nothing pending.
+      assert :none = SponsorBudget.adopt(TempoMemoryStore, 42_431, "sponsor-wallet", "0xabc", now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, adopted, {:pending, "0xabc"}, now: @now)
+    end
+
+    test "adopt ignores expired reservations and fails closed on bad state or input" do
+      assert {:ok, handle} = SponsorBudget.reserve(TempoMemoryStore, params(), now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, handle, :broadcasting, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, handle, {:pending, "0xabc"}, now: @now)
+      expired = params().valid_before + @clock_skew_margin_seconds + 1
+
+      assert :none = SponsorBudget.adopt(TempoMemoryStore, 42_431, "sponsor-wallet", "0xabc", now: expired)
+      assert {:error, :invalid_request} = SponsorBudget.adopt(TempoMemoryStore, -1, "sponsor-wallet", "0xabc")
+      assert {:error, :store_unavailable} = SponsorBudget.adopt(FailingStore, 42_431, "sponsor-wallet", "0xabc")
+
+      TempoMemoryStore.put(budget_key(), %{version: :bogus})
+      assert {:error, :incompatible_state} = SponsorBudget.adopt(TempoMemoryStore, 42_431, "sponsor-wallet", "0xabc")
+    end
+
+    test "a receipt settles an adopted reservation, and its stale owner cannot restore it" do
+      assert {:ok, first} = SponsorBudget.reserve(TempoMemoryStore, params(), now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, first, :broadcasting, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, first, {:pending, "0xabc"}, now: @now)
+      assert {:ok, adopted} = SponsorBudget.adopt(TempoMemoryStore, 42_431, "sponsor-wallet", "0xabc", now: @now)
+      assert {:ok, unrelated} = SponsorBudget.reserve(TempoMemoryStore, params(), now: @now)
+      scope = SponsorBudget.scope(42_431, "sponsor-wallet")
+
+      # A concurrent request sees the receipt and settles while the adopter is still in flight.
+      assert :ok = SponsorBudget.settle(TempoMemoryStore, scope, "0xabc", now: @now)
+
+      assert {:error, :ownership_lost} =
+               SponsorBudget.transition(TempoMemoryStore, adopted, {:pending, "0xabc"}, now: @now)
+
+      assert {:ok, state} = TempoMemoryStore.get(budget_key())
+      assert Map.keys(state.reservations) == [unrelated.reservation_id]
+    end
+
+    test "a confirmed hash releases the owned reservation and every reservation pending on it" do
+      params = params(total_limit: 30, count_limit: 3)
+      assert {:ok, older} = SponsorBudget.reserve(TempoMemoryStore, params, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, older, :broadcasting, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, older, {:pending, "0xABC"}, now: @now)
+      assert {:ok, other} = SponsorBudget.reserve(TempoMemoryStore, params, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, other, :broadcasting, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, other, {:pending, "0xdef"}, now: @now)
+      assert {:ok, owned} = SponsorBudget.reserve(TempoMemoryStore, params, now: @now)
+      assert :ok = SponsorBudget.transition(TempoMemoryStore, owned, :broadcasting, now: @now)
+
+      assert :ok = SponsorBudget.settle(TempoMemoryStore, owned, "0xabc", now: @now)
+      assert {:ok, state} = TempoMemoryStore.get(budget_key())
+      assert Map.keys(state.reservations) == [other.reservation_id]
+
+      scope = SponsorBudget.scope(42_431, "sponsor-wallet")
+      assert :ok = SponsorBudget.settle(TempoMemoryStore, scope, "0xdef", now: @now)
+      assert :not_found = TempoMemoryStore.get(budget_key())
+      assert :ok = SponsorBudget.settle(TempoMemoryStore, scope, "0xdef", now: @now)
+      assert {:error, :invalid_request} = SponsorBudget.settle(TempoMemoryStore, %{}, "0xdef")
+    end
+  end
+
   describe "bounded pending reconciliation" do
     test "failed or absent receipts retain pending capacity; a terminal receipt frees it" do
       assert {:ok, handle} =

@@ -139,7 +139,9 @@ defmodule MPP.Methods.TempoTest do
           "rpc_url" => @rpc_url,
           "chain_id" => 42_431,
           "req_options" => [plug: {Req.Test, Tempo}],
-          "store" => false
+          "store" => false,
+          "confirmation_timeout_ms" => 200,
+          "receipt_poll_interval_ms" => 5
         }
     }
 
@@ -1150,6 +1152,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1237,6 +1242,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1248,7 +1256,8 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "internal-payment-error"
-      assert error.detail == "An internal payment error occurred."
+      assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
+      assert Errors.client_detail(error) == "An internal payment error occurred."
     end
 
     test "returns error on unexpected broadcast response body", %{charge: charge, tx_hex: tx_hex} do
@@ -1257,6 +1266,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1270,7 +1282,8 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "internal-payment-error"
-      assert error.detail == "An internal payment error occurred."
+      assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
+      assert Errors.client_detail(error) == "An internal payment error occurred."
     end
   end
 
@@ -1455,6 +1468,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1519,6 +1535,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             # Simulation succeeds
             Req.Test.json(conn, simulate_success_body())
@@ -1532,7 +1551,8 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "internal-payment-error"
-      assert error.detail == "An internal payment error occurred."
+      assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
+      assert Errors.client_detail(error) == "An internal payment error occurred."
     end
 
     test "async broadcast unexpected response status returns error", %{charge: charge, tx_hex: tx_hex} do
@@ -1541,6 +1561,9 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1555,7 +1578,8 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
       assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
       assert error.type =~ "internal-payment-error"
-      assert error.detail == "An internal payment error occurred."
+      assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
+      assert Errors.client_detail(error) == "An internal payment error occurred."
     end
 
     test "multicall: simulates the full co-signed transaction before broadcast", %{charge: charge} do
@@ -2145,36 +2169,208 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, _} = FaultyDeleteStore.get(expected_key)
     end
 
-    test "timeout after eth_sendRawTransactionSync retains the slot", %{charge: charge} do
-      calldata = transfer_calldata(@recipient, 1_000_000)
-      call = build_call(@token_address, calldata)
-      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
-      payload = %{"type" => "transaction", "signature" => tx_hex}
-      expected_key = "mpp:charge:" <> keccak256_hex(tx_hex)
+    test "an ambiguous sync send recovers the confirmed receipt within the polling bound", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
       test_pid = self()
+      {:ok, lookups} = Agent.start_link(fn -> 0 end)
+
+      stub_send_outcome(
+        fn conn, "eth_sendRawTransactionSync" ->
+          send(test_pid, :broadcast_issued)
+          Req.Test.transport_error(conn, :timeout)
+        end,
+        fn ->
+          # The receipt shows up on the third lookup.
+          if Agent.get_and_update(lookups, &{&1, &1 + 1}) >= 2, do: success_receipt()
+        end
+      )
+
+      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert reference == keccak256_hex(payload["signature"])
+      assert_received :broadcast_issued
+      assert Agent.get(lookups, & &1) == 3
+      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+    end
+
+    test "each ambiguous send error recovers the receipt", %{charge: charge} do
+      outcomes = [
+        &Req.Test.transport_error(&1, :timeout),
+        &Req.Test.transport_error(&1, :closed),
+        &(&1 |> Plug.Conn.put_status(502) |> Plug.Conn.send_resp(502, "error code: 502\n")),
+        &Req.Test.json(&1, %{"jsonrpc" => "2.0", "error" => %{"code" => 4, "message" => "timeout"}, "id" => 1}),
+        &Req.Test.json(&1, %{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "already known"}, "id" => 1}),
+        &Req.Test.json(&1, %{
+          "jsonrpc" => "2.0",
+          "error" => %{"code" => -32_000, "message" => "ExpiringNonceReplay"},
+          "id" => 1
+        }),
+        &Req.Test.json(&1, %{
+          "jsonrpc" => "2.0",
+          "error" => %{"code" => -32_000, "message" => "expiring nonce transaction already included"},
+          "id" => 1
+        }),
+        &Req.Test.json(&1, %{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "nonce too low"}, "id" => 1})
+      ]
+
+      for {outcome, nonce} <- Enum.with_index(outcomes) do
+        {payload, _key} = plain_transaction_payload(gas_limit: 21_000 + nonce)
+        stub_send_outcome(fn conn, _method -> outcome.(conn) end, fn -> success_receipt() end)
+        assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      end
+    end
+
+    test "a definitive rejection is not polled for a receipt", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
+      test_pid = self()
+
+      stub_send_outcome(
+        fn conn, _method ->
+          Req.Test.json(conn, %{
+            "jsonrpc" => "2.0",
+            "error" => %{"code" => -32_003, "message" => "insufficient funds for gas"},
+            "id" => 1
+          })
+        end,
+        fn ->
+          send(test_pid, :receipt_lookup)
+          nil
+        end
+      )
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      refute_received :receipt_lookup
+      assert :not_found = TempoMemoryStore.get(expected_key)
+    end
+
+    test "an unresolved sync send names the transaction hash and validBefore", %{charge: charge} do
+      valid_before = System.os_time(:second) + 600
+      {payload, _key} = plain_transaction_payload(valid_before: valid_before, nonce_key: expiring_nonce_key())
+      stub_send_outcome(fn conn, _method -> Req.Test.transport_error(conn, :timeout) end, fn -> nil end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      hash = keccak256_hex(payload["signature"])
+      assert error.detail == unresolved_detail(hash, valid_before)
+      assert Errors.client_detail(error) == "An internal payment error occurred."
+    end
+
+    test "an unresolved async send names the transaction hash and validBefore", %{charge: charge} do
+      charge = put_in(charge.method_details["wait_for_confirmation"], false)
+      valid_before = System.os_time(:second) + 600
+      {payload, _key} = plain_transaction_payload(valid_before: valid_before, nonce_key: expiring_nonce_key())
+      stub_send_outcome(fn conn, "eth_sendRawTransaction" -> Req.Test.transport_error(conn, :timeout) end, fn -> nil end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail == unresolved_detail(keccak256_hex(payload["signature"]), valid_before)
+    end
+
+    test "an expired validBefore ends polling with one final lookup", %{charge: charge} do
+      charge = put_in(charge.method_details["confirmation_timeout_ms"], 60_000)
+      valid_before = System.os_time(:second) - 10
+      {payload, _key} = plain_transaction_payload(valid_before: valid_before, nonce_key: expiring_nonce_key())
+      {:ok, lookups} = Agent.start_link(fn -> 0 end)
+
+      stub_send_outcome(fn conn, _method -> Req.Test.transport_error(conn, :timeout) end, fn ->
+        Agent.update(lookups, &(&1 + 1))
+        nil
+      end)
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert Agent.get(lookups, & &1) == 2
+    end
+
+    test "a retry after an unresolved send recovers the receipt, and only once", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+      test_pid = self()
+
+      stub_send_outcome(
+        fn conn, "eth_sendRawTransactionSync" ->
+          send(test_pid, :broadcast_issued)
+
+          if Agent.get(mined?, & &1) do
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_000, "message" => "expiring nonce transaction already included"},
+              "id" => 1
+            })
+          else
+            Req.Test.transport_error(conn, :timeout)
+          end
+        end,
+        fn -> if Agent.get(mined?, & &1), do: success_receipt() end
+      )
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      # Only a settled payment consumes the credential.
+      assert :not_found = TempoMemoryStore.get(expected_key)
+
+      Agent.update(mined?, fn _ -> true end)
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+
+      # A settled transaction is never accepted again, whether resent or presented by hash.
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+
+      hash_payload = %{"type" => "hash", "hash" => keccak256_hex(payload["signature"])}
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(hash_payload, charge)
+      assert_received :broadcast_issued
+      assert_received :broadcast_issued
+      refute_received :broadcast_issued
+    end
+
+    test "a concurrent retry during an in-flight send is rejected, so one send settles once", %{charge: charge} do
+      {payload, _key} = plain_transaction_payload()
+      parent = self()
+
+      stub_send_outcome(
+        fn conn, "eth_sendRawTransactionSync" ->
+          send(parent, {:send_entered, self()})
+
+          receive do
+            :release_send -> Req.Test.transport_error(conn, :timeout)
+          after
+            to_timeout(second: 5) -> Req.Test.transport_error(conn, :timeout)
+          end
+        end,
+        fn -> success_receipt() end
+      )
+
+      first = Task.async(fn -> Tempo.verify(payload, charge) end)
+      assert_receive {:send_entered, send_pid}, to_timeout(second: 5)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      send(send_pid, :release_send)
+      assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
+    end
+
+    test "an already-included transaction passes simulation and settles by its receipt", %{charge: charge} do
+      {payload, _key} = plain_transaction_payload()
 
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
-        request = Jason.decode!(body)
 
-        case request["method"] do
-          "eth_simulateV1" ->
-            Req.Test.json(conn, simulate_success_body())
+        case Jason.decode!(body)["method"] do
+          method when method in ["eth_simulateV1", "eth_sendRawTransactionSync"] ->
+            Req.Test.json(conn, %{
+              "jsonrpc" => "2.0",
+              "error" => %{"code" => -32_003, "message" => "expiring nonce transaction already included"},
+              "id" => 1
+            })
 
-          "eth_sendRawTransactionSync" ->
-            send(test_pid, :broadcast_issued)
-            Req.Test.transport_error(conn, :timeout)
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
         end
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
-      assert error.detail == "An internal payment error occurred."
-      assert_received :broadcast_issued
-      assert {:ok, _} = TempoMemoryStore.get(expected_key)
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+    end
 
-      stub_broadcast_and_receipt(success_receipt())
-      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
-      assert retry_error.detail =~ "already used"
+    test "a recovered receipt that reverted is not accepted", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
+      stub_send_outcome(fn conn, _method -> Req.Test.transport_error(conn, :timeout) end, fn -> reverted_receipt() end)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert error.detail =~ "reverted"
+      assert :not_found = TempoMemoryStore.get(expected_key)
     end
 
     test "missing rpc_url after reserve leaves the signed tx retriable", %{charge: charge} do
@@ -2237,7 +2433,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
     end
 
-    test "post-broadcast mark crash does not fail the request", %{charge: charge} do
+    test "a settled-hash mark crash fails closed and frees the transaction for a retry", %{charge: charge} do
       # Store that accepts the pre-broadcast reservation but raises on the
       # post-broadcast mark of the distinct on-chain hash
       defmodule CrashingPutStore do
@@ -2305,7 +2501,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:ok, %Receipt{reference: ^different_hash}} = Tempo.verify(payload, charge)
+      # The reservation does not guard the settled hash, so an unrecorded claim must not settle.
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
       assert_received :post_broadcast_mark
     end
 
@@ -3406,7 +3603,9 @@ defmodule MPP.Methods.TempoTest do
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
 
-    test "retains a broadcasting reservation when the broadcast response is lost", %{charge: charge} do
+    test "keeps the sponsor reservation pending on the sent hash when the broadcast response is lost", %{
+      charge: charge
+    } do
       {:ok, tx_hex} = build_sponsored_client_tx(nonce: 7)
 
       Req.Test.stub(Tempo, fn conn ->
@@ -3415,13 +3614,14 @@ defmodule MPP.Methods.TempoTest do
         case Jason.decode!(body)["method"] do
           "eth_call" -> Req.Test.json(conn, eth_call_success_body())
           "eth_sendRawTransactionSync" -> Req.Test.transport_error(conn, :timeout)
+          "eth_getTransactionReceipt" -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
         end
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
       assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
-      assert [%{phase: :broadcasting}] = Map.values(state.reservations)
+      assert [%{phase: :pending, tx_hash: "0x" <> _sent_hash}] = Map.values(state.reservations)
     end
 
     test "releases on a terminal receipt before payment-domain validation", %{charge: charge} do
@@ -3993,6 +4193,32 @@ defmodule MPP.Methods.TempoTest do
         "error" => %{"code" => -32_000, "message" => "Unexpected RPC call"}
       })
     end)
+  end
+
+  defp plain_transaction_payload(opts \\ []) do
+    call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
+    tx_hex = build_tempo_tx(Keyword.merge([calls: [call], chain_id: 42_431], opts))
+    {%{"type" => "transaction", "signature" => tx_hex}, "mpp:charge:" <> keccak256_hex(tx_hex)}
+  end
+
+  # Simulation passes, the send answers with `send.(conn, method)`, and each
+  # receipt lookup answers with `receipt.()` (nil while the transaction is unknown).
+  defp stub_send_outcome(send, receipt) do
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case Jason.decode!(body)["method"] do
+        "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
+        "eth_call" -> Req.Test.json(conn, eth_call_success_body())
+        "eth_getTransactionReceipt" -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt.(), "id" => 1})
+        method -> send.(conn, method)
+      end
+    end)
+  end
+
+  defp unresolved_detail(hash, valid_before) do
+    "Broadcast outcome is unknown for transaction #{hash} (validBefore: #{valid_before}). " <>
+      "Look up its receipt before retrying."
   end
 
   # Stubs the confirmation flow: pre-broadcast eth_simulateV1 succeeds, then
@@ -4759,6 +4985,233 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
     end
 
+    test "a retry after an unresolved hosted broadcast settles by the recorded fill's receipt", %{
+      charge: charge
+    } do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      record_key = "mpp:charge:hosted:" <> keccak256_hex(tx_hex)
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_fillTransaction" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+
+          "eth_call" ->
+            Req.Test.json(conn, eth_call_success_body())
+
+          "eth_sendRawTransactionSync" ->
+            if Agent.get(mined?, & &1),
+              do:
+                Req.Test.json(conn, %{
+                  "jsonrpc" => "2.0",
+                  "error" => %{"code" => -32_000, "message" => "expiring nonce transaction already included"},
+                  "id" => 1
+                }),
+              else: Req.Test.transport_error(conn, :timeout)
+
+          "eth_getTransactionReceipt" ->
+            receipt = if Agent.get(mined?, & &1), do: success_receipt()
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+        end
+      end)
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert_received {:rpc_call, "eth_fillTransaction", _}
+      assert_received {:rpc_call, "eth_sendRawTransactionSync", [filled_hex]}
+      assert {:ok, ^filled_hex} = ConCacheStore.get(record_key, store_opts)
+
+      Agent.update(mined?, fn _ -> true end)
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+
+      # The retry neither asks for a new fill nor sends again: the recorded fill's receipt settles it.
+      refute_received {:rpc_call, "eth_fillTransaction", _}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
+      assert_received {:rpc_call, "eth_getTransactionReceipt", [filled_hash]}
+      assert filled_hash == keccak256_hex(filled_hex)
+      assert :not_found = ConCacheStore.get(record_key, store_opts)
+      assert {:ok, _} = ConCacheStore.get("mpp:charge:" <> filled_hash, store_opts)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+    end
+
+    test "an unreadable recorded fill fails closed and leaves the record for an operator", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      record_key = "mpp:charge:hosted:" <> keccak256_hex(tx_hex)
+      :ok = ConCacheStore.put(record_key, "0xnot-a-transaction", store_opts)
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:rpc_call, Jason.decode!(body)["method"]})
+        Req.Test.json(conn, eth_call_success_body())
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      refute_received {:rpc_call, "eth_fillTransaction"}
+      refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+      assert {:ok, "0xnot-a-transaction"} = ConCacheStore.get(record_key, store_opts)
+      assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
+    end
+
+    test "a settled sponsored transaction claims its on-chain hash against a hash credential", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: true)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert reference == Agent.get(chain, & &1.sent_hash)
+      refute reference == keccak256_hex(tx_hex)
+      assert {:ok, _} = ConCacheStore.get("mpp:charge:" <> reference, store_opts)
+
+      # A route without sponsorship that shares the store sees the hash as used.
+      unsponsored = %{charge | method_details: Map.drop(charge.method_details, ["fee_payer_url", "sponsor_budget_id"])}
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               Tempo.verify(%{"type" => "hash", "hash" => reference}, unsponsored)
+    end
+
+    test "a recovered sponsored transaction whose on-chain hash was claimed first is rejected", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      sent_hash = Agent.get(chain, & &1.sent_hash)
+
+      # Another request settled the same on-chain transaction under its own hash.
+      :ok = ConCacheStore.check_and_mark("mpp:charge:" <> sent_hash, 1, store_opts)
+      Agent.update(chain, &%{&1 | mined?: true})
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
+    end
+
+    test "unresolved resends of a recorded fill share one sponsor reservation that its receipt releases", %{
+      charge: charge
+    } do
+      charge = put_in(charge.method_details["fee_payer_policy"], %{"max_in_flight_reservations" => 1})
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      # With room for one reservation, every resend still fits: it reuses the first one.
+      for _attempt <- 1..3 do
+        assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+        sent_hash = Agent.get(chain, & &1.sent_hash)
+        assert {:ok, state} = ConCacheStore.get(@hosted_budget_key, store_opts)
+        assert [%{phase: :pending, tx_hash: ^sent_hash}] = Map.values(state.reservations)
+      end
+
+      Agent.update(chain, &%{&1 | mined?: true})
+      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert :not_found = ConCacheStore.get(@hosted_budget_key, store_opts)
+    end
+
+    test "a resend that fails before sending keeps the earlier send's reservation pending", %{charge: charge} do
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      sent_hash = Agent.get(chain, & &1.sent_hash)
+
+      # A retry under another challenge adopts the reservation, then fails the memo binding.
+      rebound =
+        update_in(charge.method_details, &Map.merge(&1, %{"challenge_id" => "another-challenge", "realm" => "api.test"}))
+
+      assert {:error, %Errors{detail: "Payment memo is not bound to this challenge"}} = Tempo.verify(payload, rebound)
+      assert {:ok, state} = ConCacheStore.get(@hosted_budget_key, store_opts)
+      assert [%{phase: :pending, tx_hash: ^sent_hash}] = Map.values(state.reservations)
+    end
+
+    test "a reverted receipt of a recorded fill frees its sponsor reservation and is not accepted", %{charge: charge} do
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      sent_hash = Agent.get(chain, & &1.sent_hash)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        "eth_getTransactionReceipt" = Jason.decode!(body)["method"]
+        receipt = %{success_receipt() | "transactionHash" => sent_hash, "status" => "0x0"}
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+      end)
+
+      assert {:error, %Errors{detail: "Transaction failed on-chain (reverted)"}} = Tempo.verify(payload, charge)
+      assert :not_found = ConCacheStore.get(@hosted_budget_key, store_opts)
+    end
+
+    test "the receipt lookup of a recorded fill is bounded by the confirmation budget", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+
+      sent_hash = Agent.get(chain, & &1.sent_hash)
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_getTransactionReceipt" ->
+            Process.sleep(1_000)
+            receipt = %{success_receipt() | "transactionHash" => sent_hash}
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
+
+          "eth_sendRawTransactionSync" ->
+            Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      started = System.monotonic_time(:millisecond)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert System.monotonic_time(:millisecond) - started < 600
+    end
+
+    test "a recorded hosted fill settles by its receipt after the signing-validity floor has passed", %{
+      charge: charge
+    } do
+      valid_before = FeePayerPolicy.ceil_now() + 600
+      {clock, set_clock} = fake_clock()
+      charge = put_in(charge.method_details["clock"], clock)
+      {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0, valid_before: valid_before)
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+
+      # Five seconds of validity left: too little to sponsor, enough to settle what was sent.
+      set_clock.((valid_before - 5) * 1_000)
+      Agent.update(chain, &%{&1 | mined?: true})
+      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert reference == Agent.get(chain, & &1.sent_hash)
+    end
+
     test "transient hosted fill failure releases the slot so the same bytes retry", %{charge: charge} do
       {:ok, tx_hex} = build_hosted_client_tx()
       {:ok, tx} = Transaction.deserialize(tx_hex)
@@ -4903,6 +5356,52 @@ defmodule MPP.Methods.TempoTest do
       nonce_key: expiring_nonce_key_int(),
       valid_before: Keyword.get(opts, :valid_before, future_valid_before())
     )
+  end
+
+  # A hosted fee payer and node: fills with `fill_tx`, times out every send
+  # while the transaction is unmined and answers "already included" once it
+  # is, and serves the receipt of the sent transaction only once mined.
+  defp stub_hosted_chain(fill_tx, mined: mined?) do
+    chain = start_supervised!({Agent, fn -> %{mined?: mined?, sent_hash: nil} end}, id: make_ref())
+
+    Req.Test.stub(Tempo, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+      state = Agent.get(chain, & &1)
+
+      case request["method"] do
+        "eth_fillTransaction" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_success_body())
+
+        "eth_sendRawTransactionSync" ->
+          [sent_hex] = request["params"]
+          Agent.update(chain, &%{&1 | sent_hash: keccak256_hex(sent_hex)})
+
+          hosted_send_answer(conn, state.mined?)
+
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => hosted_receipt(state), "id" => 1})
+      end
+    end)
+
+    chain
+  end
+
+  defp hosted_send_answer(conn, true = _mined?), do: Req.Test.json(conn, already_included_body())
+  defp hosted_send_answer(conn, false), do: Req.Test.transport_error(conn, :timeout)
+
+  defp hosted_receipt(%{mined?: true, sent_hash: hash}), do: %{success_receipt() | "transactionHash" => hash}
+  defp hosted_receipt(_state), do: nil
+
+  defp already_included_body do
+    %{
+      "jsonrpc" => "2.0",
+      "error" => %{"code" => -32_000, "message" => "expiring nonce transaction already included"},
+      "id" => 1
+    }
   end
 
   defp build_hosted_client_tx do

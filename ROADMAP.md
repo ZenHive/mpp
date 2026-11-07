@@ -53,7 +53,7 @@
 | Task 159 `[P]` | ⬜ | 🎁 **client-sdk** · Tempo client provider: spending caps, expiry rounding and MACH gas token [D:4/B:6/U:4 → Eff:1.25] 📋 |
 | Task 160 `[P]` | ⬜ | 🎁 **core-protocol** · Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯 |
 | Task 161 `[P]` | ⬜ | 🎁 **tempo** · Accept sponsored Tempo swaps that acquire only the shortfall [D:2/B:4/U:3 → Eff:1.75] 🚀 |
-| Task 162 | ⬜ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
+| Task 162 | ✅ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
 | Task 163 `[P]` | ⬜ | 🎁 **mcp** · MCP client pays the next supported challenge when the preferred one fails [D:2/B:3/U:2 → Eff:1.25] 📋 |
 | Task 164 | ⬜ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:4/U:3 → Eff:0.88] ⚠️ |
 | Task 165 | ⬜ | 🎁 **solana** · Implement the solana/subscription intent [D:7/B:4/U:2 → Eff:0.43] ⚠️ |

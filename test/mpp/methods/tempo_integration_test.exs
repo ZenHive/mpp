@@ -877,6 +877,45 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
     end
 
+    # Task 162: the server's own send of an already-included transaction gets
+    # "nonce too low" (regular nonce) or "expiring nonce transaction already
+    # included" (expiring nonce) from Moderato, and settles by its receipt.
+    for {label, nonce_opts} <- [
+          {"regular", Macro.escape([])},
+          {"expiring",
+           quote(
+             do: [
+               nonce_key: TempoTestHelpers.expiring_nonce_key_int(),
+               valid_before: TempoTestHelpers.future_valid_before()
+             ]
+           )}
+        ] do
+      test "a transaction already included before the server sends it settles by its receipt (#{label} nonce)", %{
+        recipient: recipient_address,
+        rpc_url: rpc_url
+      } do
+        sender = FaucetWallet.tempo!(rpc_url)
+        start_supervised!(TempoMemoryStore)
+
+        config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+        challenge = request_challenge!(config)
+
+        {:ok, signed_tx} =
+          build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge, unquote(nonce_opts))
+
+        tx_hash = broadcast_raw_transaction_sync!(signed_tx, rpc_url)
+        payload = %{"type" => "transaction", "signature" => signed_tx}
+
+        conn = submit_credential_conn(config, challenge, payload)
+        assert conn.status == nil, "Expected the included transaction to settle, got #{inspect(conn.resp_body)}"
+        assert %Receipt{reference: ^tx_hash} = conn.assigns[:mpp_receipt]
+
+        body = submit_credential!(config, challenge, payload)
+        assert body["type"] =~ "verification-failed"
+        assert body["detail"] =~ "already used"
+      end
+    end
+
     test "same signed transaction under two encodings yields one receipt", %{
       recipient: recipient_address,
       rpc_url: rpc_url

@@ -83,6 +83,20 @@ defmodule MPP.Methods.Tempo do
       with its fee payer signature) to reject a tx that would revert before broadcast,
       then broadcasts async and returns an optimistic receipt.
       Default `true`.
+    * `"confirmation_timeout_ms"` — (optional, default `30_000`) the receipt wait of a
+      confirming broadcast. The synchronous send may use two thirds of it. When the
+      send's outcome is ambiguous (a timeout, a lost connection, an HTTP 5xx, or the
+      node already holding the transaction), the receipt is polled until this
+      deadline, or until 2 s after the transaction's `validBefore` plus one final
+      lookup, and a confirmed receipt settles the charge. A send without a receipt
+      wait makes one lookup instead. An outcome that stays open fails with an
+      `internal_payment_error` whose detail names the transaction hash and
+      `validBefore` (clients receive the fixed internal-error text). A failed
+      settlement does not consume the credential: resending it resends the same
+      signed transaction and recovers its receipt, and a settled one is rejected
+      as already used.
+    * `"receipt_poll_interval_ms"` — (optional, default `1_000`) the interval of that
+      receipt polling.
     * `"store"` — (optional) replay-dedup store. **On by default** — when absent, the
       app-started `MPP.Tempo.ConCacheStore` is used so replay protection is enabled out of
       the box (issue #7). Pass a module implementing `MPP.Tempo.Store` (Redis,
@@ -179,6 +193,7 @@ defmodule MPP.Methods.Tempo do
   alias MPP.Intents.Subscription
   alias MPP.Methods.Shared
   alias MPP.Methods.Tempo.AccessKey
+  alias MPP.Methods.Tempo.Broadcast
   alias MPP.Methods.Tempo.FeePayerPolicy
   alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.MachineToken
@@ -208,6 +223,9 @@ defmodule MPP.Methods.Tempo do
   @attribution_client_fingerprint_length 10
   @attribution_nonce_length 7
   @store_key_prefix "mpp:charge:"
+  @hosted_fill_key_prefix "mpp:charge:hosted:"
+  @default_confirmation_timeout_ms 30_000
+  @default_receipt_poll_interval_ms 1_000
   @proof_store_key_prefix "mpp:proof:"
   @internal_payment_error_detail "An internal payment error occurred."
   @simulation_rejected_detail "Pre-broadcast simulation rejected the transaction"
@@ -253,6 +271,8 @@ defmodule MPP.Methods.Tempo do
     validate_machine_token!(config)
     validate_supported_modes!(config["supported_modes"])
     validate_clock!(config["clock"])
+    validate_positive_ms!(config, "confirmation_timeout_ms")
+    validate_positive_ms!(config, "receipt_poll_interval_ms")
     if config["intent"] == "subscription", do: TempoSubscription.validate_config!(config)
     :ok
   end
@@ -430,7 +450,8 @@ defmodule MPP.Methods.Tempo do
            :ok <- verify_transaction_presenter_binding(payload, tx, expected_chain_id, config),
            {:ok, payment} <- find_transaction_payment(tx, charge, config),
            :ok <- maybe_validate_call_scope(tx, charge, config, payment),
-           {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id) do
+           {:continue, recorded_hash} <- recover_recorded_fill(tx, payment, charge, config, store),
+           {:ok, budget} <- maybe_reserve_sponsor_budget(tx, config, expected_chain_id, recorded_hash) do
         verify_transaction_after_budget(tx, payment, charge, config, store, wait?, budget)
       end
 
@@ -766,6 +787,14 @@ defmodule MPP.Methods.Tempo do
 
   defp validate_clock!(_clock) do
     raise ArgumentError, "MPP.Methods.Tempo clock must be a zero-arity function returning unix milliseconds"
+  end
+
+  defp validate_positive_ms!(config, key) do
+    case config[key] do
+      nil -> :ok
+      ms when is_integer(ms) and ms > 0 -> :ok
+      other -> raise ArgumentError, "MPP.Methods.Tempo #{key} must be a positive integer, got: #{inspect(other)}"
+    end
   end
 
   defp validate_supported_modes!(nil), do: :ok
@@ -1171,20 +1200,32 @@ defmodule MPP.Methods.Tempo do
     )
   end
 
-  defp maybe_reserve_sponsor_budget(tx, config, chain_id) do
+  defp maybe_reserve_sponsor_budget(tx, config, chain_id, recorded_hash) do
     if fee_payer_enabled?(config) do
       policy = FeePayerPolicy.resolve(chain_id, config["fee_payer_policy"])
 
       with {:ok, measurement} <- FeePayerPolicy.measure(tx, policy, FeePayerPolicy.ceil_now(config["clock"])),
            {:ok, store} <- sponsor_store(config),
-           {:ok, sponsor_id} <- sponsor_identity(config) do
+           {:ok, sponsor_id} <- sponsor_identity(config),
+           :none <- adopt_sponsor_budget(store, chain_id, sponsor_id, recorded_hash) do
         reserve_sponsor_budget(store, config, chain_id, sponsor_id, policy, measurement)
       else
+        {:ok, _budget} = adopted -> adopted
         {:error, reason} when is_binary(reason) -> {:error, reason}
         {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
       end
     else
       {:ok, nil}
+    end
+  end
+
+  defp adopt_sponsor_budget(_store, _chain_id, _sponsor_id, nil), do: :none
+
+  defp adopt_sponsor_budget(store, chain_id, sponsor_id, recorded_hash) do
+    case SponsorBudget.adopt(store, chain_id, sponsor_id, recorded_hash) do
+      {:ok, handle} -> {:ok, %{handle: handle, store: store, adopted_hash: recorded_hash}}
+      :none -> :none
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 
@@ -1281,7 +1322,7 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp finish_reserved_transaction(tx, config, store, hash, token) do
-    case complete_reserved_transaction(tx, config) do
+    case complete_reserved_transaction(tx, config, store, hash) do
       {:ok, tx, rpc_url} ->
         {:ok, tx, rpc_url, hash, token}
 
@@ -1291,15 +1332,135 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp complete_reserved_transaction(tx, config) do
+  defp complete_reserved_transaction(tx, config, store, hash) do
     with :ok <- check_sponsored_validity(tx, config),
-         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
-         {:ok, tx} <- maybe_cosign_fee_payer(tx, rpc_url, config),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo") do
+      case recorded_hosted_fill(store, hash, config) do
+        {:ok, filled} -> {:ok, filled, rpc_url}
+        :none -> sponsor_and_simulate(tx, rpc_url, config)
+        {:error, _reason} = error -> error
+      end
+    end
+  end
+
+  defp sponsor_and_simulate(tx, rpc_url, config) do
+    with {:ok, tx} <- maybe_cosign_fee_payer(tx, rpc_url, config),
          {:ok, tx, _hash} <- canonicalize_transaction(tx),
          :ok <- simulate_cosigned_tx(tx, rpc_url, config) do
       {:ok, tx, rpc_url}
     end
   end
+
+  # A retry of a hosted sponsorship whose recorded fill is already included
+  # settles by that receipt alone: it signs nothing and spends no sponsor
+  # budget, so the validity floor and budget capacity a fresh sponsorship
+  # needs do not apply. Without a receipt the normal path resends the record.
+  #
+  # The lookup is bounded like the broadcast's own lookups; a record without a
+  # visible receipt continues with its hash so the resend is accounted to the
+  # sponsor reservation the first send left pending.
+  defp recover_recorded_fill(tx, payment, charge, %{"fee_payer_url" => url} = config, store)
+       when is_binary(url) and not is_nil(store) do
+    with {:ok, _tx, hash} <- canonicalize_transaction(tx),
+         {:ok, filled} <- recorded_hosted_fill(store, hash, config),
+         {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo") do
+      filled_hash = transaction_hash(filled)
+
+      case Broadcast.lookup(filled_hash, rpc_url, broadcast_options(filled, config)) do
+        # A receipt is terminal for the sponsor exposure whatever the payment
+        # verdict, as on the broadcast path (mppx Charge.ts:979-980).
+        {:ok, receipt} ->
+          settle_recorded_budget(config, filled_hash)
+          funding_currency = transaction_funding_currency(filled, payment, charge, config)
+          settle_recorded_fill(filled, receipt, hash, charge, config, store, funding_currency)
+
+        :not_found ->
+          {:continue, filled_hash}
+      end
+    else
+      {:error, %Errors{}} = error -> error
+      _not_recoverable -> {:continue, nil}
+    end
+  end
+
+  defp recover_recorded_fill(_tx, _payment, _charge, _config, _store), do: {:continue, nil}
+
+  defp settle_recorded_fill(filled, receipt, hash, charge, config, store, funding_currency) do
+    with {:ok, token} <- reserve_hash_atomic(store, hash, config) do
+      with {:ok, tx_hash} <- verify_settled_receipt(filled, transaction_hash(filled), receipt, charge, config),
+           :ok <- claim_settled_hash(store, tx_hash, hash, config) do
+        drop_hosted_fill(store, hash, filled, config)
+
+        {:ok,
+         Receipt.new(
+           method: "tempo",
+           reference: tx_hash,
+           external_id: charge.external_id,
+           funding_currency: funding_currency
+         )}
+      else
+        {:error, _reason} = error ->
+          safe_dedup_release(store, hash, token)
+          error
+      end
+    end
+  end
+
+  defp settle_recorded_budget(config, tx_hash) do
+    with {:ok, store} <- sponsor_store(config),
+         {:ok, sponsor_id} <- sponsor_identity(config) do
+      scope = SponsorBudget.scope(config["chain_id"] || @moderato_chain_id, sponsor_id)
+      safe_budget_settle(%{store: store, handle: scope}, tx_hash)
+    end
+  end
+
+  # A hosted fee payer may answer a second fill with another fee token or
+  # signature, and so another transaction hash, which a retry could never
+  # recover the first broadcast's receipt by. The exact filled transaction is
+  # recorded under the client envelope's hash right before it is sent, and a
+  # retry of the same envelope broadcasts that transaction again instead of
+  # asking for a new fill (mpp-rs #664,
+  # refs/mpp-rs/src/protocol/methods/tempo/method/transaction_credential.rs:383-427,511-517,606-617).
+  # It passed both simulations before it was recorded; simulating it again
+  # would fail once it is included.
+  defp recorded_hosted_fill(nil, _hash, _config), do: :none
+
+  defp recorded_hosted_fill(store, hash, %{"fee_payer_url" => url}) when is_binary(url) do
+    with {:ok, raw} when is_binary(raw) <- store_get(store, hosted_fill_key(hash)),
+         {:ok, filled} <- Transaction.deserialize(raw) do
+      {:ok, filled}
+    else
+      :not_found -> :none
+      _unusable -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+    end
+  end
+
+  defp recorded_hosted_fill(_store, _hash, _config), do: :none
+
+  defp record_hosted_fill(store, hash, %Transaction{raw: raw}, %{"fee_payer_url" => url})
+       when is_binary(url) and not is_nil(store) do
+    case Store.put(store, hosted_fill_key(hash), raw) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, {:pre_broadcast, Errors.new(:internal_payment_error, @internal_payment_error_detail)}}
+    end
+  end
+
+  defp record_hosted_fill(_store, _hash, _tx, _config), do: :ok
+
+  # Settled: the reservation and the transaction hash claim now guard it.
+  defp drop_hosted_fill(store, hash, %Transaction{raw: raw}, %{"fee_payer_url" => url})
+       when is_binary(url) and not is_nil(store) do
+    swallow_store_fault("hosted fill record removal", fn ->
+      case Store.delete(store, hosted_fill_key(hash), raw) do
+        :ok -> :ok
+        {:error, reason} -> Logger.warning("MPP.Methods.Tempo: hosted fill record removal failed: #{inspect(reason)}")
+      end
+    end)
+  end
+
+  defp drop_hosted_fill(_store, _hash, _tx, _config), do: :ok
+
+  defp hosted_fill_key(hash), do: @hosted_fill_key_prefix <> String.downcase(hash)
 
   # Store calls, co-sign/fill and simulation all take time out of the validity
   # window, so the remaining-validity floor is re-checked against a fresh clock
@@ -1328,8 +1489,10 @@ defmodule MPP.Methods.Tempo do
        }) do
     with :ok <- begin_budget_broadcast(budget),
          :ok <- check_send_boundary(tx, config),
-         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget) do
-      safe_dedup_post_broadcast(store, tx_hash, transaction_hash(tx), config)
+         :ok <- record_hosted_fill(store, reserved_hash, tx, config),
+         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget),
+         :ok <- claim_settled_hash(store, tx_hash, reserved_hash, config) do
+      drop_hosted_fill(store, reserved_hash, tx, config)
 
       {:ok,
        Receipt.new(
@@ -1350,12 +1513,22 @@ defmodule MPP.Methods.Tempo do
         safe_dedup_release(store, reserved_hash, token)
         {:error, reason}
 
+      # Sent but not settled. The sponsor budget stays held, as pending on the
+      # sent transaction's hash, until a reconciled receipt or its expiry
+      # settles it; the reservation is released, so a retry of the same signed
+      # transaction resends it and recovers its receipt. A signed transaction
+      # is included at most once, and it is accepted only while this
+      # reservation is held, so a released one cannot be accepted twice
+      # (mppx Charge.ts:1024-1037, mpp-rs transaction_credential.rs:606-617).
       {:error, _reason} = error ->
+        safe_budget_pending(budget, transaction_hash(tx))
+        safe_dedup_release(store, reserved_hash, token)
         error
     end
   end
 
   defp begin_budget_broadcast(nil), do: :ok
+  defp begin_budget_broadcast(%{adopted_hash: _hash}), do: :ok
 
   defp begin_budget_broadcast(%{store: store, handle: handle}) do
     case SponsorBudget.transition(store, handle, :broadcasting) do
@@ -1365,38 +1538,87 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, true, budget) do
-    case rpc_broadcast_sync(raw_hex, rpc_url, rpc_options(config)) do
+    case Broadcast.send_sync(raw_hex, transaction_hash(tx), rpc_url, broadcast_options(tx, config)) do
       {:ok, tx_hash, receipt} ->
-        safe_budget_release(budget)
+        safe_budget_settle(budget, tx_hash)
+        verify_settled_receipt(tx, tx_hash, receipt, charge, config)
 
-        with :ok <- Shared.check_receipt_status(receipt),
-             {:ok, sender_policy} <- transaction_sender_policy(tx, config),
-             {:ok, _transfer} <- find_matching_transfer(receipt, charge, nil, sender_policy) do
-          {:ok, tx_hash}
-        end
-
-      {:error, _reason} = error ->
-        error
+      {:error, outcome} ->
+        {:error, broadcast_error(outcome, tx)}
     end
   end
 
-  defp broadcast_with_budget(%Transaction{raw: raw_hex}, rpc_url, config, _charge, false, budget) do
-    case rpc_broadcast_async(raw_hex, rpc_url, rpc_options(config)) do
+  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, false, budget) do
+    case Broadcast.send_async(raw_hex, transaction_hash(tx), rpc_url, broadcast_options(tx, config)) do
       {:ok, tx_hash} ->
         safe_budget_pending(budget, tx_hash)
         {:ok, tx_hash}
 
-      {:error, _reason} = error ->
-        error
+      {:ok, tx_hash, receipt} ->
+        safe_budget_settle(budget, tx_hash)
+        verify_settled_receipt(tx, tx_hash, receipt, charge, config)
+
+      {:error, outcome} ->
+        {:error, broadcast_error(outcome, tx)}
     end
   end
 
+  defp verify_settled_receipt(tx, tx_hash, receipt, charge, config) do
+    with :ok <- Shared.check_receipt_status(receipt),
+         {:ok, sender_policy} <- transaction_sender_policy(tx, config),
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, nil, sender_policy) do
+      {:ok, tx_hash}
+    end
+  end
+
+  defp broadcast_options(tx, config) do
+    [
+      req_options: config["req_options"] || [],
+      timeout_ms: config["confirmation_timeout_ms"] || @default_confirmation_timeout_ms,
+      interval_ms: config["receipt_poll_interval_ms"] || @default_receipt_poll_interval_ms,
+      valid_before: tx.valid_before,
+      clock: config["clock"]
+    ]
+  end
+
+  # An unresolved send names the transaction so an operator can settle it by
+  # its receipt; clients still see the fixed internal-error text, and
+  # `MPP.Errors.client_detail/1` logs this detail when it renders the error.
+  # Once `validBefore` has passed, one receipt lookup is final (mppx #1199 /
+  # #1213 `BroadcastOutcomeUnknownError`).
+  defp broadcast_error(:unresolved, tx) do
+    tx_hash = transaction_hash(tx)
+    valid_before = if is_nil(tx.valid_before), do: "none", else: Integer.to_string(tx.valid_before)
+
+    detail =
+      "Broadcast outcome is unknown for transaction #{tx_hash} (validBefore: #{valid_before}). " <>
+        "Look up its receipt before retrying."
+
+    Errors.new(:internal_payment_error, detail)
+  end
+
+  defp broadcast_error(:rejected, _tx), do: Errors.new(:internal_payment_error, @internal_payment_error_detail)
+
   defp safe_budget_release(nil), do: :ok
+
+  # An adopted reservation backs a transaction an earlier attempt already
+  # sent, which can still be included, so a failure before this attempt sends
+  # anything returns it to pending on that hash instead of freeing it.
+  defp safe_budget_release(%{adopted_hash: tx_hash} = budget), do: safe_budget_pending(budget, tx_hash)
 
   defp safe_budget_release(%{store: store, handle: handle}) do
     case SponsorBudget.release(store, handle) do
       :ok -> :ok
       {:error, reason} -> Logger.warning("MPP.Methods.Tempo: sponsor budget release failed: #{inspect(reason)}")
+    end
+  end
+
+  defp safe_budget_settle(nil, _tx_hash), do: :ok
+
+  defp safe_budget_settle(%{store: store, handle: handle}, tx_hash) do
+    case SponsorBudget.settle(store, handle, tx_hash) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("MPP.Methods.Tempo: sponsor budget settle failed: #{inspect(reason)}")
     end
   end
 
@@ -1597,19 +1819,42 @@ defmodule MPP.Methods.Tempo do
   # supplementary protection against hash malleability.
   # Logger.warning is intentional: payment already settled on-chain, so this
   # supplementary dedup write must never fail the HTTP response.
-  defp safe_dedup_post_broadcast(nil, _tx_hash, _input_hash, _config), do: :ok
+  defp claim_settled_hash(nil, _tx_hash, _input_hash, _config), do: :ok
 
-  defp safe_dedup_post_broadcast(store, tx_hash, input_hash, config) do
-    swallow_store_fault("post-broadcast dedup store", fn ->
-      if String.downcase(tx_hash) != String.downcase(input_hash) do
-        # An existing mark already blocks the hash, so :already_exists is fine.
-        Store.check_and_mark(store, store_key(tx_hash), System.system_time(:millisecond),
-          challenge_expires: config["challenge_expires"]
-        )
-      end
-
+  defp claim_settled_hash(store, tx_hash, input_hash, config) do
+    if String.downcase(tx_hash) == String.downcase(input_hash) do
       :ok
-    end)
+    else
+      settled_hash_claim(store, tx_hash, config)
+    end
+  end
+
+  # A sponsored transaction settles under another hash than the client
+  # envelope it was reserved by, and a hash credential would present that one,
+  # so it is claimed too (mppx Charge.ts:857-864 `finalHash`; mpp-rs
+  # transaction_credential.rs:582-600). Already claimed is a replay. A store
+  # fault fails closed: the client-hash reservation does not guard this key,
+  # and a retry recovers the receipt and claims it again.
+  defp settled_hash_claim(store, tx_hash, config) do
+    store
+    |> Store.check_and_mark(store_key(tx_hash), System.system_time(:millisecond),
+      challenge_expires: config["challenge_expires"]
+    )
+    |> case do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, reason} -> settled_claim_fault(inspect(reason))
+    end
+  rescue
+    # reach:disable-next-line bare_rescue
+    exception -> settled_claim_fault(Exception.message(exception))
+  catch
+    :exit, reason -> settled_claim_fault(inspect(reason))
+  end
+
+  defp settled_claim_fault(reason) do
+    Logger.warning("MPP.Methods.Tempo: settled-hash dedup store failed: #{reason}")
+    {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
   end
 
   # Shared exception/exit barrier for store side effects that must not replace
@@ -1744,9 +1989,18 @@ defmodule MPP.Methods.Tempo do
       {:ok, :unsupported} ->
         simulate_with_eth_call(raw_hex, rpc_url, config)
 
-      {:error, _reason} ->
-        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+      {:error, reason} ->
+        already_held_simulation(reason)
     end
+  end
+
+  # A retry of a transaction the node already included fails simulation with
+  # "expiring nonce transaction already included" (Moderato, probed
+  # 2026-11-07). Sending it again is harmless and recovers its receipt.
+  defp already_held_simulation(reason) do
+    if Broadcast.already_held?(reason),
+      do: :ok,
+      else: {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
   end
 
   defp simulation_result(:ok), do: :ok
@@ -1768,20 +2022,6 @@ defmodule MPP.Methods.Tempo do
     case config["req_options"] do
       nil -> []
       opts -> [req_options: opts]
-    end
-  end
-
-  defp rpc_broadcast_async(raw_hex, rpc_url, opts) do
-    case RPC.broadcast_async(raw_hex, rpc_url, opts) do
-      {:ok, _tx_hash} = ok -> ok
-      {:error, _msg} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
-    end
-  end
-
-  defp rpc_broadcast_sync(raw_hex, rpc_url, opts) do
-    case RPC.broadcast_sync(raw_hex, rpc_url, opts) do
-      {:ok, _tx_hash, _receipt} = ok -> ok
-      {:error, _msg} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
 

@@ -6,6 +6,39 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Tempo charges recover from an ambiguous broadcast.** When the send of a
+  signed transaction times out, loses its connection, gets an HTTP 5xx, or
+  the node answers that it already holds the transaction (`already known`,
+  `ExpiringNonceReplay`, `expiring nonce transaction already included`, JSON-RPC
+  code 4), the receipt is polled within the new `"confirmation_timeout_ms"`
+  (default 30 s, polled every `"receipt_poll_interval_ms"`, default 1 s), and
+  never past the transaction's `validBefore`. A confirmed receipt settles the
+  charge after the usual receipt checks. Matches mppx and mpp-rs.
+- **A failed settlement no longer consumes the credential.** Resending the
+  same transaction credential after an unresolved or failed broadcast resends
+  the same signed transaction and settles it by its receipt; a settled one is
+  still rejected as already used. A hosted fee-payer retry resends the exact
+  transaction filled the first time instead of asking for a new fill.
+- **An unresolved broadcast names the transaction.** The
+  `internal_payment_error` detail (logged, never sent to the client) carries
+  the transaction hash and `validBefore`, for the confirming and the
+  `wait_for_confirmation: false` path.
+- **Every Tempo RPC call in a broadcast is bounded.** The send and each
+  receipt lookup run under a whole-call deadline inside
+  `"confirmation_timeout_ms"`, and the send is never retried by the transport.
+- **Sponsor budget follows the transaction across retries.** An attempted
+  send leaves its reservation pending on the sent hash; a resend of a hosted
+  fill takes that reservation over instead of reserving again; a terminal
+  receipt releases every reservation for its hash. A hosted retry whose
+  recorded fill is already included settles by that receipt without a new
+  sponsorship check.
+- **The settled hash of a sponsored transaction is claimed strictly.** A
+  failure to record it fails the request instead of passing it.
+
 ## [0.22.2] — 2026-11-07
 
 ### Fixed

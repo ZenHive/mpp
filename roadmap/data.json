@@ -6888,7 +6888,7 @@
       "id": "162",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Recover confirmed Tempo charges after ambiguous broadcast errors",
       "scores": {
         "d": 4,
@@ -6913,7 +6913,9 @@
       ],
       "body": "After an ambiguous sync-broadcast failure (timeout, 'already known', RPC error) MPP.Methods.Tempo keeps the hash claim (fail-safe) and fails; a retry of the same credential then gets 'already used' even when the transaction confirmed. Both SDKs add bounded receipt polling and return success when the receipt confirms (mppx #1028 7271a85, #1040 29855e8, #1041 08fa745; mpp-rs #625 29366d9). Keep the fail-safe claim policy (Task 91 / renewal) intact: never release a claim that may be included; add recovery on top. 2026-11-04 sdk-delta-watch: mppx #1164 adds ExpiringNonceReplay to the receipt-recovery error set; mpp-rs #664 also reconciles hosted-sponsorship retries — both folded in as criteria. 2026-11-07 sdk-delta-watch: mppx #1199 / #1213 surface the transaction hash and validBefore when an ambiguous broadcast stays unresolved (BroadcastOutcomeUnknownError); today both broadcast wrappers in tempo.ex collapse it to a generic internal_payment_error.",
       "created_at": "2026-10-31",
+      "done_at": "2026-11-07",
       "scored_at": "2026-10-31",
+      "implemented": "MPP.Methods.Tempo.Broadcast: ambiguous sends (transport error, HTTP 5xx before any JSON body, malformed success, JSON-RPC 4, already known / ExpiringNonceReplay / already included) poll the receipt within confirmation_timeout_ms (2/3 send budget, capped at validBefore+2s, one final lookup); every send and lookup runs under a whole-call task deadline; nonce too low gets one lookup. Unresolved errors log the tx hash and validBefore on sync and async paths. Deliberate override of the body's 'never release a claim': like mppx and mpp-rs, the credential reservation is released after a failed or unresolved send, so a retry resends the same signed transaction and settles by its receipt; acceptance happens only while the reservation is held, it is kept after success, and the sponsored final hash is claimed strictly (fail closed), so a regression test shows no double acceptance (AC2: a retry after confirmation settles, a settled one is rejected as already used). Hosted retries settle a recorded fill by its bounded receipt before fresh sponsorship checks, else resend the recorded fill. SponsorBudget gains adopt/settle/scope: attempted sends stay pending on their hash, resends adopt that reservation, terminal receipts release all reservations for the hash. Moderato :integration tests for already-included regular and expiring-nonce transactions. Advisory Codex review via herdr (4 rounds) found 9 issues, all fixed. Subscription broadcast is out of scope.",
       "cross_repo": []
     },
     {

@@ -32,7 +32,7 @@ defmodule MPP.Methods.Tempo.SponsorBudget do
         }
 
   @typedoc "Opaque ownership handle returned by `reserve/3`."
-  @type handle :: %{key: String.t(), reservation_id: String.t()}
+  @type handle :: %{key: String.t(), reservation_id: String.t() | nil}
 
   @typedoc "Reservation request accepted by `reserve/3`."
   @type reservation_params :: %{
@@ -114,6 +114,57 @@ defmodule MPP.Methods.Tempo.SponsorBudget do
   end
 
   def release(_store, _handle, _opts), do: {:error, :invalid_request}
+
+  @doc """
+  Take over the pending reservation of an already sent transaction.
+
+  A resend of a transaction whose outcome stayed open spends no new sponsor
+  exposure, so it is accounted to the reservation the first send left pending
+  on its hash instead of a fresh one (mppx keys the reservation by the final
+  transaction hash, refs/mppx/src/tempo/server/Charge.ts:887-899). The taken
+  reservation moves back to `:broadcasting`, keeping its hash, and is owned
+  by the returned handle; `:none` means no live reservation is pending on
+  that hash.
+  """
+  @spec adopt(Store.store_ref(), non_neg_integer(), String.t(), String.t(), keyword()) ::
+          {:ok, handle()} | :none | {:error, error_reason()}
+  def adopt(store, chain_id, sponsor_id, tx_hash, opts \\ [])
+
+  def adopt(store, chain_id, sponsor_id, tx_hash, opts)
+      when is_integer(chain_id) and chain_id >= 0 and is_binary(sponsor_id) and is_binary(tx_hash) do
+    now = Keyword.get(opts, :now, System.os_time(:second))
+    key = budget_key(chain_id, sponsor_id)
+
+    update_store(store, key, adopt_fun(key, String.downcase(tx_hash), now), now)
+  end
+
+  def adopt(_store, _chain_id, _sponsor_id, _tx_hash, _opts), do: {:error, :invalid_request}
+
+  @doc """
+  Release capacity for a transaction whose receipt confirmed it.
+
+  Drops the reservation `handle` owns, if any, together with every
+  reservation sent with `tx_hash`, pending or adopted: a confirmed
+  transaction holds no in-flight exposure, whichever attempt reserved it.
+  A settled reservation is gone, so a later `transition/4` of its handle
+  fails and cannot restore it. Pass `scope/2` as the
+  handle when no reservation is owned.
+  """
+  @spec settle(Store.store_ref(), handle(), String.t(), keyword()) :: :ok | {:error, error_reason()}
+  def settle(store, handle, tx_hash, opts \\ [])
+
+  def settle(store, %{key: key, reservation_id: reservation_id}, tx_hash, opts)
+      when is_binary(key) and (is_binary(reservation_id) or is_nil(reservation_id)) and is_binary(tx_hash) do
+    now = Keyword.get(opts, :now, System.os_time(:second))
+
+    update_store(store, key, settle_fun(reservation_id, String.downcase(tx_hash), now), now)
+  end
+
+  def settle(_store, _handle, _tx_hash, _opts), do: {:error, :invalid_request}
+
+  @doc "A handle that owns no reservation, for `settle/4` on a budget."
+  @spec scope(non_neg_integer(), String.t()) :: handle()
+  def scope(chain_id, sponsor_id), do: %{key: budget_key(chain_id, sponsor_id), reservation_id: nil}
 
   @doc """
   Purely remove expired reservations at `now`.
@@ -228,6 +279,63 @@ defmodule MPP.Methods.Tempo.SponsorBudget do
       )
     end
   end
+
+  @spec adopt_fun(String.t(), String.t(), integer()) :: (term() -> term())
+  defp adopt_fun(key, tx_hash, now) do
+    fn
+      :not_found ->
+        {:noop, :none}
+
+      state ->
+        if valid_state?(state) do
+          swept_state = %{state | reservations: sweep(state.reservations, now)}
+          adopt_from_state(state, swept_state, key, tx_hash)
+        else
+          {:noop, {:error, :incompatible_state}}
+        end
+    end
+  end
+
+  defp adopt_from_state(state, swept_state, key, tx_hash) do
+    pending =
+      Enum.find(swept_state.reservations, fn {_id, reservation} ->
+        reservation.phase == :pending and pending_on?(reservation, tx_hash)
+      end)
+
+    case pending do
+      {reservation_id, reservation} ->
+        # It keeps its hash, so a concurrent receipt can still settle it.
+        updated = put_in(swept_state, [:reservations, reservation_id], %{reservation | phase: :broadcasting})
+        {:put, updated, {:ok, %{key: key, reservation_id: reservation_id}}}
+
+      nil ->
+        write_if_swept(state, swept_state, :none)
+    end
+  end
+
+  @spec settle_fun(String.t() | nil, String.t(), integer()) :: (term() -> term())
+  defp settle_fun(reservation_id, tx_hash, now) do
+    fn
+      :not_found ->
+        {:noop, :ok}
+
+      state ->
+        if valid_state?(state) do
+          swept_state = %{state | reservations: sweep(state.reservations, now)}
+          remaining = Map.reject(swept_state.reservations, &settled?(&1, reservation_id, tx_hash))
+          write_if_swept(state, %{swept_state | reservations: remaining}, :ok)
+        else
+          {:noop, {:error, :incompatible_state}}
+        end
+    end
+  end
+
+  defp settled?({id, reservation}, reservation_id, tx_hash) do
+    id == reservation_id or pending_on?(reservation, tx_hash)
+  end
+
+  defp pending_on?(%{tx_hash: hash}, tx_hash) when is_binary(hash), do: String.downcase(hash) == tx_hash
+  defp pending_on?(_reservation, _tx_hash), do: false
 
   @spec release_fun(String.t(), integer()) :: (term() -> term())
   defp release_fun(reservation_id, now) do
@@ -446,6 +554,8 @@ defmodule MPP.Methods.Tempo.SponsorBudget do
 
   @spec valid_phase?(term(), term()) :: boolean()
   defp valid_phase?(phase, nil) when phase in [:prepared, :broadcasting], do: true
+  # An adopted reservation is broadcasting again for its known hash.
+  defp valid_phase?(:broadcasting, tx_hash) when is_binary(tx_hash), do: tx_hash != ""
   defp valid_phase?(:pending, tx_hash) when is_binary(tx_hash), do: tx_hash != ""
   defp valid_phase?(_phase, _tx_hash), do: false
 
