@@ -7417,6 +7417,38 @@
       "scored_at": "2026-11-07",
       "implemented": "MPP.Methods.Tempo.SponsoredSimulation runs two eth_call simulations for fee-sponsored transactions (mppx preflightSponsorship / mpp-rs simulate.rs): the sender transaction at its gas limit with zero fees and no fee token before co-sign, then the co-signed transaction with feeToken and feePayerSignature, tolerating only the node's own gas-limit error. Both requests carry every signed envelope field (nonceKey, validBefore, validAfter, keyAuthorization) and keyType/keyData/keyId sender hints; the subscription eth_simulateV1 request gains feePayerSignature and the envelope fields. Live Moderato: unfunded-fee-token sender, validAfter and keychain-signed sponsored charges settle, under-gassed rejected, subscription_integration_test 8/8. Codex review (herdr) findings fixed, re-review PASS.",
       "cross_repo": []
+    },
+    {
+      "id": "178",
+      "phase": 1,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Report an unknown payment outcome when the paid retry fails without a verdict",
+      "scores": {
+        "d": 4,
+        "b": 6,
+        "u": 5
+      },
+      "eff": 1.38,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A paid retry that returns HTTP 5xx or fails in transport surfaces a distinct unknown-outcome error, not a plain response or generic error, and the client does not pay again",
+        "The error carries the challenge, the credential, and the transaction hash when derivable from the credential",
+        "MPP.Errors has the payment-outcome-unknown problem type and `mix test.json --only cross_validation` passes",
+        "Focused tests cover 5xx, transport failure, and a 4xx/2xx paid retry that keeps today's behaviour"
+      ],
+      "out_of_scope": [
+        "Server-side broadcast outcome handling (shipped in Task 162)"
+      ],
+      "body": "mppx #1043 (1e692c3) makes the client raise PaymentOutcomeUnknownError (problem type https://paymentauth.org/problems/payment-outcome-unknown) when the paid retry returns a 5xx or throws: the credential was sent, so the payment may have settled, and the caller must not blindly retry. The error carries the challenge, the serialized credential, and the on-chain transaction hash when the credential lets the client derive it (Tempo transaction and push-hash credentials). MPP.Client.Req returns the 5xx response unchanged today and has no such signal; MPP.Client.MCP and the other client transports likewise. Port the behaviour to the client transports where a paid retry can fail without a verdict, matching mppx's semantics (refs/mppx/src/Errors.ts PaymentOutcomeUnknownError; read the client changes in 1e692c3). Check mpp-rs for an equivalent before settling the shape. The cross-validation test 'error_code/1 matches mppx Mcp.errorCode behaviour' (test/mpp/mcp_test.exs) currently fails because MPP.Errors has no counterpart for this type.",
+      "created_at": "2026-11-07",
+      "scored_at": "2026-11-07",
+      "cross_repo": []
     }
   ]
 }

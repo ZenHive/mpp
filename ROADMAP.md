@@ -69,6 +69,7 @@
 | Task 175 `[P]` | ⬜ | 🎁 **tempo** · Give hosted fee-payer requests their own Req options with redirects disabled [D:2/B:3/U:3 → Eff:1.5] 🚀 |
 | Task 176 `[P]` | ⬜ | 🎁 **tempo** · Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯 |
 | Task 177 | ✅ | 🎁 **tempo** · Simulate sponsored Tempo transactions with the fee payer signature [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 178 | ⬜ | 🎁 **client-sdk** · Report an unknown payment outcome when the paid retry fails without a verdict [D:4/B:6/U:5 → Eff:1.38] 📋 |
 <!-- TASKS:END -->
 
 ---
