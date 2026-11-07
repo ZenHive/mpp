@@ -4418,6 +4418,7 @@ implemented = "MPP.Methods.Tempo.Broadcast: ambiguous sends (transport error, HT
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 done_at = "2026-11-07"
+shipped_in = "e43d1cb60c207f441fbc873133c271f699bda9e3"
 
 [[task]]
 id = "163"
