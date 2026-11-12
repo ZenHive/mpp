@@ -7454,7 +7454,7 @@
       "id": "179",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Refuse the default in-node replay store on a multi-instance runtime (mppx #1249)",
       "scores": {
         "d": 4,
@@ -7480,16 +7480,19 @@
         "Shipping a Redis or Postgres store backend",
         "Sponsor budgets (already require an explicitly selected store, Task 78)"
       ],
+      "shipped_in": "09212173c206061b6843f921071dfcf3eca6c904",
       "body": "mppx #1249 (802a27a, 2026-11-09) makes `tempo.charge()`, `tempo.session()`, `tempo.subscription()` throw at construction when no `store` is passed and the runtime is production or a multi-instance platform, instead of silently keeping replay protection in per-instance memory. Our default is the app-started `MPP.Tempo.ConCacheStore` (lib/mpp/tempo/store.ex `resolve/1`), which is per node; README and the Store moduledoc already say multi-node deployments must share a store, but nothing enforces it.\n\nDecision (vetoable): raise at init rather than warn, matching mppx, and treat an explicitly passed `MPP.Tempo.ConCacheStore` as the operator's acknowledgement. Detection is the mppx platform-variable list plus `Node.list/0 != []`; do not use `MIX_ENV`/prod detection, a single-node production release is a valid deployment. Reading these platform variables is a safety check, not configuration, so it does not conflict with the no-ENV-fallback rule for credentials. Evidence gate: if init runs at compile time for `plug` macros in a way that makes the runtime check unreliable (releases compile on a build machine), move the check to first call and say so in the delivery.\n",
       "created_at": "2026-11-12",
+      "done_at": "2026-11-12",
       "scored_at": "2026-11-12",
+      "implemented": "Falling back to an in-node default store (MPP.Tempo.ConCacheStore, MPP.Session.ETSStore, MPP.Subscription.ETSStore) raises ArgumentError at request time when the runtime looks multi-instance (connected nodes or a platform variable). Covers every method's method_config store, the plug-level :store for non-Tempo methods and x402 payments, session stores (incl. direct Actions.dispatch/handle) and subscription stores. Explicit stores and store: false are unchanged. Checked at request time, not in Plug init (init runs at compile time for plug macros). Reviewed by Codex; both findings fixed.",
       "cross_repo": []
     },
     {
       "id": "180",
       "phase": 1,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "done",
       "title": "Carry the MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712)",
       "scores": {
         "d": 4,
@@ -7514,9 +7517,12 @@
         "CLI balance ranking (mppx cli)",
         "Session client (not implemented here)"
       ],
+      "shipped_in": "09212173c206061b6843f921071dfcf3eca6c904",
       "body": "mppx #1265 (4071a6c) and mpp-rs #712/#713/#714 (fbccd2a, 1fddb91, 4486382) add a MACH onramp link for payers short of MACH on Tempo mainnet: `PaymentError` gained an optional `fundingUrl`, serialized as an RFC 9457 extension member, and both SDKs build the link from the payer address and the amount to buy. We have the machine-token charge route (MPP.Methods.Tempo.MachineToken) but no funding link and no `fundingUrl` member in MPP.Errors. Port it to the surfaces we implement: MPP.Errors, the Tempo client provider, the server charge path and server session insufficient-balance. Read both SDKs for the URL constant and rounding before writing it; they agree, and that agreement is the spec. Our charge path reserves the canonical hash before simulating, so the replay-before-shortfall ordering mppx had to add already holds; keep it and pin it with a test.\n",
       "created_at": "2026-11-12",
+      "done_at": "2026-11-12",
       "scored_at": "2026-11-12",
+      "implemented": "MachineToken.funding_url/3 (mainnet only, checksummed payer, amount rounded up to cents, two decimals), funding_url?/1, shortfall/4; MPP.Errors funding_url + put_funding_url/2 serialized as the fundingUrl member, accepted only in the helper's shape on verification-failed and session/insufficient-balance, never read from detail. Attached by the Tempo charge method after a pre-broadcast simulation rejection on a MACH route (replay answered first), by MACH session channels, and by the Tempo client provider before signing. Finding: mppx and mpp-rs differ in amount rendering (mppx trims trailing zeros, mpp-rs always two decimals); the two-decimal form is emitted.",
       "cross_repo": []
     }
   ]
