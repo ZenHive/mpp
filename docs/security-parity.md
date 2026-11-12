@@ -15,7 +15,7 @@ our unpatched weaknesses in a deployed, money-handling library would be an attac
 **Source basis.** The reference clones in `refs/` are shallow (mpp-rs 72 commits, mppx 174,
 mpp-specs 24, truncated ~2026-03). The **four published advisories below (2026-03-26) are the
 authoritative historical security record**; every named fix falls inside the visible window, so
-the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watch sweep: 2026-10-02.
+the parity set is well-bounded. Last full audit: 2026-06-30; last sdk-delta-watch sweep: 2026-11-12.
 
 ---
 
@@ -186,12 +186,21 @@ open-items note below).
 | mppx #1168 / mpp-rs #689 (commits 2060c5f, 5c52ae3) session realm and channel origin boundaries | A client signing session vouchers for a realm or reusing a stored channel across HTTP origins | Not applicable: no client session provider. Zero-amount Tempo proofs are signed only for a realm the requested server owns or a pinned one — `client/providers/tempo.ex` (`:trusted_tempo_proof_realms`); `MPP.Client.MCP` runs the approval hook before every payment — `client/mcp.ex` |
 | mppx #1168 (commit 2060c5f) answer payment challenges before buffering unpaid uploads | Unpaid request bodies buffered before the 402 | `MPP.Plug` never reads the body (see the mpp-rs #457 row) — `plug.ex` |
 | mpp-rs #686 (commit 252f9bc) push broadcasts with an unknown outcome | A client re-paying after its own broadcast had an ambiguous result | Not applicable: the Tempo client provider builds pull credentials only and the server broadcasts — `client/providers/tempo.ex`; MCP fallback after a sent credential is excluded by Task 163's criteria |
+| mppx #1265 (commit 4071a6c, 2026-11-10) answer a resent settled charge as a replay | A settled transaction sent again failed simulation first and was reported as a balance shortfall instead of a replay | The canonical hash is reserved before fill and simulation, so a resent settled transaction is rejected as already used before any simulation runs — `tempo.ex` (`reserve_hash_atomic`); the funding link itself is 📋 Task 180 |
+| mpp-rs #706 / #708 (commits 6268b67, 6fce798) default replay store on the Tempo charge method | A charge method built without a store accepted a hash credential more than once | Replay dedup is on by default: an unset `store` resolves to the app-started `MPP.Tempo.ConCacheStore` — `tempo/store.ex` (`resolve/1`), Task 76 |
+| mppx #1274 (commit 6e32317) immutable subscription dispatch bindings | A rejected credential mutating the configured route binding | Not applicable by construction: `MPP.Plug.Config` is validated once at init and is immutable data; verification never writes to it — `plug.ex` (`MPP.Plug.Config`) |
+| mpp-rs #716 / #709 / #704 (commits 163bfbe, d78f594, fa567a6) client session spending, chain identity and snapshot origins | A session client prepaying beyond authorized vouchers or importing channel snapshots from another origin | Not applicable: no client session provider |
+| mppx #1254 / #1247 / #1232 / #1231 / #1230 / #1229 Cloudflare `ChannelStore`, Durable Object store and close-supervisor fixes | Settlement retry, lookup and key-namespace defects in mppx's Cloudflare and managed-settlement layer | Not applicable: no Cloudflare store, scheduled settlement or prepaid SSE delivery layer here |
+| mpp-rs #711 (commit 37f26ad) ISO-8601-shaped timestamps | Parser disagreement on calendar-invalid `expires` values | Stricter, fail-closed: `expires` must parse as RFC 3339 or the challenge is rejected at parse and verification — `challenge.ex` (`validate_expires`), `verifier.ex` |
+| mpp-specs #404 (commit 7bb99c8, 2026-11-11) Payment composed with other authentication | Settling a payment for a request other authentication then denies; other credentials forwarded across origins | `MPP.Plug` is mounted after the host app's authentication plugs, so a 401/403 halts before any credential is verified or consumed; `header="Payment-Authorization"` is supported; the client paid retry does not follow redirects (our `GHSA-76qc-4p5p-v35x`) — `plug.ex`, `challenge.ex`, `client/req.ex` |
 
 ## 📋 Tracked as roadmap work (parity pending)
 
 | Upstream fix | Where tracked |
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
+| Fail closed without a shared replay store on a multi-instance runtime (mppx #1249, commit 802a27a) | 📋 **Task 179** |
+| MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712 / #713 / #714) | 📋 **Task 180** |
 | Session integrity parity for published upstream advisories | 📋 **Task 50** (done) built the session machinery; residual hardening is tracked as counted open items, never enumerated here |
 
 ---

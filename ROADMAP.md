@@ -70,6 +70,8 @@
 | Task 176 `[P]` | ⬜ | 🎁 **tempo** · Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯 |
 | Task 177 | ✅ | 🎁 **tempo** · Simulate sponsored Tempo transactions with the fee payer signature [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 178 | ⬜ | 🎁 **client-sdk** · Report an unknown payment outcome when the paid retry fails without a verdict [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 179 | ⬜ | 🎁 **tempo** · Refuse the default in-node replay store on a multi-instance runtime (mppx #1249) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
+| Task 180 | ⬜ | 🎁 **client-sdk** · Carry the MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712) [D:4/B:5/U:4 → Eff:1.12] 📋 |
 <!-- TASKS:END -->
 
 ---

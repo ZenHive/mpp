@@ -7449,6 +7449,75 @@
       "created_at": "2026-11-07",
       "scored_at": "2026-11-07",
       "cross_repo": []
+    },
+    {
+      "id": "179",
+      "phase": 1,
+      "bundle": "tempo",
+      "status": "pending",
+      "title": "Refuse the default in-node replay store on a multi-instance runtime (mppx #1249)",
+      "scores": {
+        "d": 4,
+        "b": 7,
+        "u": 6
+      },
+      "eff": 1.63,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "MPP.Plug init for a Tempo or EVM route with no explicit `store` raises when the runtime looks multi-instance: the node is connected to other nodes or a multi-instance platform variable is set (the list mppx reads in refs/mppx/src/internal/env.ts: FLY_APP_NAME, K_SERVICE, DYNO, RENDER, RAILWAY_ENVIRONMENT, AWS_LAMBDA_FUNCTION_NAME)",
+        "Passing the store explicitly, including `store: MPP.Tempo.ConCacheStore`, keeps instance-local state anywhere without raising; `store: false` is unchanged",
+        "A single local node with none of the variables set starts as today; the suite and `mix mpp.demo` need no change",
+        "The error message names the route's method, the detected signal and both ways out (shared store, explicit ConCacheStore)",
+        "Subscription and session routes that fall back to an app-started ETS store follow the same rule, or the delivery states why one does not",
+        "README and MPP.Tempo.Store moduledoc describe the rule; CHANGELOG lists it under Changed as a behaviour change"
+      ],
+      "out_of_scope": [
+        "Shipping a Redis or Postgres store backend",
+        "Sponsor budgets (already require an explicitly selected store, Task 78)"
+      ],
+      "body": "mppx #1249 (802a27a, 2026-11-09) makes `tempo.charge()`, `tempo.session()`, `tempo.subscription()` throw at construction when no `store` is passed and the runtime is production or a multi-instance platform, instead of silently keeping replay protection in per-instance memory. Our default is the app-started `MPP.Tempo.ConCacheStore` (lib/mpp/tempo/store.ex `resolve/1`), which is per node; README and the Store moduledoc already say multi-node deployments must share a store, but nothing enforces it.\n\nDecision (vetoable): raise at init rather than warn, matching mppx, and treat an explicitly passed `MPP.Tempo.ConCacheStore` as the operator's acknowledgement. Detection is the mppx platform-variable list plus `Node.list/0 != []`; do not use `MIX_ENV`/prod detection, a single-node production release is a valid deployment. Reading these platform variables is a safety check, not configuration, so it does not conflict with the no-ENV-fallback rule for credentials. Evidence gate: if init runs at compile time for `plug` macros in a way that makes the runtime check unreliable (releases compile on a build machine), move the check to first call and say so in the delivery.\n",
+      "created_at": "2026-11-12",
+      "scored_at": "2026-11-12",
+      "cross_repo": []
+    },
+    {
+      "id": "180",
+      "phase": 1,
+      "bundle": "client-sdk",
+      "status": "pending",
+      "title": "Carry the MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712)",
+      "scores": {
+        "d": 4,
+        "b": 5,
+        "u": 4
+      },
+      "eff": 1.13,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "MPP.Errors problem details accept an optional `fundingUrl` extension member and serialize it only when set; `mix test.json --only cross_validation` shows no new failure against refs/mppx/src/Errors.ts",
+        "A helper builds the Tempo Wallet MACH funding URL for a payer address and amount exactly as mppx `Tempo.machineTokenFundingUrl` and mpp-rs `machine_token::funding_url` do (same base URL, parameters and round-up to cents); a cross-validation or fixture test derived from both SDKs pins it",
+        "On Tempo mainnet only: the Tempo client provider returns an insufficient-balance error carrying the link when a MACH or machineTokenEnabled charge cannot be paid, and the server attaches it to a MACH payment rejected before broadcast for a low MACH balance and to session insufficient-balance problems on MACH channels",
+        "The link is reported only from an insufficient-balance reason and only with the address and amount parameters the helper writes (mpp-rs #713, #714): text in another error's detail cannot set or alter `fundingUrl`",
+        "A resent settled transaction is still answered as already used, never as a MACH shortfall"
+      ],
+      "out_of_scope": [
+        "CLI balance ranking (mppx cli)",
+        "Session client (not implemented here)"
+      ],
+      "body": "mppx #1265 (4071a6c) and mpp-rs #712/#713/#714 (fbccd2a, 1fddb91, 4486382) add a MACH onramp link for payers short of MACH on Tempo mainnet: `PaymentError` gained an optional `fundingUrl`, serialized as an RFC 9457 extension member, and both SDKs build the link from the payer address and the amount to buy. We have the machine-token charge route (MPP.Methods.Tempo.MachineToken) but no funding link and no `fundingUrl` member in MPP.Errors. Port it to the surfaces we implement: MPP.Errors, the Tempo client provider, the server charge path and server session insufficient-balance. Read both SDKs for the URL constant and rounding before writing it; they agree, and that agreement is the spec. Our charge path reserves the canonical hash before simulating, so the replay-before-shortfall ordering mppx had to add already holds; keep it and pin it with a test.\n",
+      "created_at": "2026-11-12",
+      "scored_at": "2026-11-12",
+      "cross_repo": []
     }
   ]
 }
