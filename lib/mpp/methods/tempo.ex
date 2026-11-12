@@ -339,7 +339,7 @@ defmodule MPP.Methods.Tempo do
   @spec verify(map(), Charge.t()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%{"type" => "proof"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "tempo")
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with :ok <- require_zero_amount(charge),
@@ -365,7 +365,7 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp verify_hash_credential(payload, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "tempo")
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
     with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
@@ -438,7 +438,7 @@ defmodule MPP.Methods.Tempo do
   defp transaction_funding_currency(_tx, _payment, _charge, _config), do: nil
 
   defp verify_transaction_credential(payload, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "tempo")
     expected_chain_id = config["chain_id"] || @moderato_chain_id
     wait? = config["wait_for_confirmation"] != false
 
@@ -1306,11 +1306,40 @@ defmodule MPP.Methods.Tempo do
           funding_currency: transaction_funding_currency(tx, payment, charge, config)
         })
 
-      {:error, _reason} = error ->
+      {:error, reason} ->
         safe_budget_release(budget)
-        error
+        {:error, explain_machine_token_failure(reason, tx, payment, charge, config)}
     end
   end
+
+  # A MACH-route payment the simulation rejected before broadcast: when the
+  # payer holds too little MACH on Tempo mainnet, say so and link the MACH
+  # onramp (mppx Charge.ts `explainMachineTokenFailure`). The canonical hash is
+  # reserved before the simulation runs, so a resent settled transaction has
+  # already been answered as used and never reaches this.
+  defp explain_machine_token_failure(
+         %Errors{detail: @simulation_rejected_detail} = error,
+         tx,
+         %{machine_token?: true} = payment,
+         charge,
+         config
+       ) do
+    chain_id = config["chain_id"] || @moderato_chain_id
+    rpc_opts = Keyword.merge([rpc_url: config["rpc_url"]], rpc_options(config))
+
+    with true <- MachineToken.mach?(chain_id, transaction_funding_currency(tx, payment, charge, config)),
+         {:ok, payer} <- recover_transaction_sender(tx),
+         {:ok, amount} <- Shared.parse_charge_amount(charge.amount),
+         {:ok, %{reason: reason, funding_url: url}} <- MachineToken.shortfall(chain_id, payer, amount, rpc_opts) do
+      :verification_failed
+      |> Errors.new("insufficient MACH balance (#{reason}).")
+      |> Errors.put_funding_url(url)
+    else
+      _no_shortfall -> error
+    end
+  end
+
+  defp explain_machine_token_failure(error, _tx, _payment, _charge, _config), do: error
 
   defp prepare_sponsored_transaction(tx, payment, config, store) do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),

@@ -103,6 +103,57 @@ defmodule MPP.ErrorsTest do
     end
   end
 
+  describe "put_funding_url/2" do
+    @funding_url "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217" <>
+                   "&address=0x70997970C51812dc3A010C7d01b50e0d17dc79C8&amount=0.75"
+
+    test "serializes the link as the fundingUrl member and appends it to the detail" do
+      for type <- [:verification_failed, :insufficient_balance] do
+        error = type |> Errors.new("insufficient MACH balance.") |> Errors.put_funding_url(@funding_url)
+
+        assert error.funding_url == @funding_url
+        assert error.detail == "insufficient MACH balance. Add funds at #{@funding_url}"
+
+        map = Errors.to_map(error)
+        assert map["fundingUrl"] == @funding_url
+        assert map["detail"] == error.detail
+        assert Jason.decode!(Errors.to_json(error))["fundingUrl"] == @funding_url
+      end
+    end
+
+    test "nil leaves the error unchanged" do
+      error = Errors.new(:insufficient_balance, "insufficient channel balance")
+
+      assert Errors.put_funding_url(error, nil) == error
+      refute Map.has_key?(Errors.to_map(error), "fundingUrl")
+    end
+
+    test "an error is never given the member from its detail text" do
+      error = Errors.new(:verification_failed, "Add funds at #{@funding_url}")
+
+      assert error.funding_url == nil
+      refute Map.has_key?(Errors.to_map(error), "fundingUrl")
+    end
+
+    test "rejects a link the funding helper does not write" do
+      error = Errors.new(:insufficient_balance, "insufficient channel balance")
+
+      for url <- ["https://evil.example/fund", @funding_url <> "&next=https://evil.example", 42] do
+        assert_raise ArgumentError, ~r/accepts only a MACH funding link/, fn ->
+          Errors.put_funding_url(error, url)
+        end
+      end
+    end
+
+    test "rejects every problem that is not a balance shortfall" do
+      for type <- [:payment_required, :invalid_payload, :internal_payment_error, :channel_closed] do
+        assert_raise ArgumentError, ~r/does not apply to/, fn ->
+          type |> Errors.new("detail") |> Errors.put_funding_url(@funding_url)
+        end
+      end
+    end
+  end
+
   describe "to_map/1" do
     test "returns RFC 9457 map with string keys" do
       error = Errors.new(:payment_required, "No credential provided")

@@ -106,7 +106,7 @@ defmodule MPP.Methods.Stellar do
   end
 
   defp verify_hash(hash, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "stellar")
 
     with {:ok, _url} <- Shared.require_config(config, "rpc_url", "Stellar"),
          :ok <- require_recipient(charge),
@@ -125,7 +125,7 @@ defmodule MPP.Methods.Stellar do
   end
 
   defp verify_transaction(payload, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "stellar")
     sponsored? = fee_payer?(config)
 
     with {:ok, xdr} <- extract_transaction(payload),

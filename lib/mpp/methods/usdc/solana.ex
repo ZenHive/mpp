@@ -437,7 +437,7 @@ defmodule MPP.Methods.USDC.Solana do
   end
 
   defp broadcast(bytes, payload, charge, config, profile) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "usdc")
     digest = "solana:#{profile["network"]}:" <> Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
 
     Replay.with_claims(store, replay_keys(charge, digest), config["challenge_expires"], fn ->

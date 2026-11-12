@@ -124,6 +124,7 @@ defmodule MPP.Session.Actions do
   alias MPP.Errors
   alias MPP.Intents.Session
   alias MPP.Methods.Shared
+  alias MPP.Methods.Tempo.MachineToken
   alias MPP.Receipt
   alias MPP.Session.Channel
   alias MPP.Session.Payload
@@ -610,9 +611,28 @@ defmodule MPP.Session.Actions do
   defp store_update_id(channel_id, opts, fun) do
     case Store.update(store(opts), channel_id, &normalize_update(fun.(&1))) do
       {:ok, channel} -> {:ok, channel}
-      {:error, reason} -> {:error, store_error(reason)}
+      {:error, reason} -> {:error, reason |> store_error() |> put_funding_link(reason, channel_id, opts)}
     end
   end
+
+  # A MACH channel on Tempo mainnet that cannot cover a charge links to the
+  # MACH onramp, where the payer gets MACH to top the channel up (mppx
+  # ChannelStore.ts `insufficientBalance`).
+  defp put_funding_link(error, :insufficient_balance, channel_id, opts) do
+    chain_id = Keyword.get(opts, :chain_id)
+
+    case Store.get(store(opts), channel_id) do
+      {:ok, %Channel{token: token, payer: payer}} ->
+        if MachineToken.mach?(chain_id, token),
+          do: Errors.put_funding_url(error, MachineToken.funding_url(chain_id, payer)),
+          else: error
+
+      _unreadable ->
+        error
+    end
+  end
+
+  defp put_funding_link(error, _reason, _channel_id, _opts), do: error
 
   defp store_error(%Errors{} = error), do: error
   defp store_error(:channel_closing), do: Errors.new(:channel_closed, "channel is closing")
@@ -1004,7 +1024,7 @@ defmodule MPP.Session.Actions do
     details = session.method_details || %{}
 
     [
-      store: Map.get(details, "session_store", Store.default_store()),
+      store: Map.get(details, "session_store"),
       payer: Map.get(details, "payer"),
       recipient: Map.get(details, "recipient", session.recipient),
       token: Map.get(details, "token", session.currency),
@@ -1022,7 +1042,14 @@ defmodule MPP.Session.Actions do
     ]
   end
 
-  defp store(opts), do: Keyword.get(opts, :store, Store.default_store())
+  # Every entry point resolves its store here, so a caller of `dispatch/2` or
+  # `handle/2` that passes no `:store` meets the same multi-instance check.
+  defp store(opts) do
+    case Keyword.get(opts, :store) do
+      nil -> Store.for_method(nil, Keyword.get(opts, :method_name) || "session")
+      store -> store
+    end
+  end
 
   defp min_voucher_delta(opts) do
     case parse_amount(Keyword.get(opts, :min_voucher_delta, 1)) do

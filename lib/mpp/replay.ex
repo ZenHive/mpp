@@ -8,6 +8,7 @@ defmodule MPP.Replay do
   # owner of the dedup step; do not re-inline it into either transport.
 
   alias MPP.Errors
+  alias MPP.InstanceLocal
   alias MPP.JCS
   alias MPP.Methods.Shared
   alias MPP.Tempo.Store
@@ -27,9 +28,25 @@ defmodule MPP.Replay do
   @spec store_for(map(), map()) :: module() | {module(), keyword()} | nil
   def store_for(%{store: nil}, _entry), do: nil
 
-  def store_for(%{store: store}, %{method: method}) do
-    if method.method_name() == "tempo", do: nil, else: store
+  def store_for(%{store: store} = config, %{method: method}) do
+    case method.method_name() do
+      "tempo" -> nil
+      name -> checked_store(config, store, name)
+    end
   end
+
+  @doc """
+  Returns the plug-level store for a route that uses it.
+
+  When the route did not configure `:store`, the in-node default is refused on
+  a multi-instance runtime (`MPP.InstanceLocal`).
+  """
+  @spec checked_store(map(), module() | {module(), keyword()}, String.t()) :: module() | {module(), keyword()}
+  def checked_store(%{implicit_store: true}, store, method) when is_atom(store) do
+    InstanceLocal.default!(store, method: method, option: "the :store option", behaviour: Store)
+  end
+
+  def checked_store(_config, store, _method), do: store
 
   @doc """
   Rejects a credential whose challenge-bound key is already present in the store.

@@ -7,6 +7,7 @@ defmodule MPP.Subscription.Store do
   billing period twice. `MPP.Subscription.ETSStore` is the single-node default.
   """
 
+  alias MPP.InstanceLocal
   alias MPP.Subscription.ETSStore
   alias MPP.Subscription.Record
 
@@ -16,6 +17,25 @@ defmodule MPP.Subscription.Store do
   @doc "Return the application-started subscription store."
   @spec default_store() :: module()
   def default_store, do: ETSStore
+
+  @doc """
+  Resolve a route's configured subscription store at runtime.
+
+  `nil` falls back to `default_store/0`, except on a multi-instance runtime
+  (see `MPP.Tempo.Store.for_method/2`), where it raises `ArgumentError`:
+  records kept per node would let one billing period be charged on each
+  instance. Naming the store, `MPP.Subscription.ETSStore` included, never raises.
+  """
+  @spec for_method(store_ref() | nil, String.t()) :: store_ref()
+  def for_method(nil, method) when is_binary(method) do
+    InstanceLocal.default!(ETSStore,
+      method: method,
+      option: ~s(method_config "subscription_store"),
+      behaviour: __MODULE__
+    )
+  end
+
+  def for_method(store, method) when is_binary(method), do: store
 
   @callback get(String.t()) :: {:ok, Record.t()} | :not_found | {:error, term()}
   @callback put(Record.t()) :: :ok | {:error, term()}

@@ -24,6 +24,14 @@ defmodule MPP.Tempo.Store do
   single-node deployments this is all you need; for multi-node, configure a shared
   backend (Redis/Postgres) as your `:store`.
 
+  The default is refused on a runtime that looks multi-instance: a payment on a
+  route with no store configured raises `ArgumentError` when the node is
+  connected to other visible nodes, or when one of `AWS_LAMBDA_FUNCTION_NAME`,
+  `DYNO`, `FLY_APP_NAME`, `K_SERVICE`, `RAILWAY_ENVIRONMENT`, `RENDER` is set.
+  Name `MPP.Tempo.ConCacheStore` explicitly as the store to accept dedup scoped
+  to one instance there. `MPP.Session.Store` and `MPP.Subscription.Store` treat
+  their ETS defaults the same way.
+
   ## Custom Implementations
 
   Implement this behaviour with your choice of backend (Redis, database, etc.)
@@ -111,6 +119,7 @@ defmodule MPP.Tempo.Store do
         }
   """
 
+  alias MPP.InstanceLocal
   alias MPP.Tempo.ConCacheStore
 
   @type store_ref :: module() | {module(), keyword()}
@@ -142,6 +151,24 @@ defmodule MPP.Tempo.Store do
   def resolve(nil), do: @default_store
   def resolve(false), do: nil
   def resolve(store), do: store
+
+  @doc """
+  Resolve a route's configured `:store` at verification time.
+
+  Same policy as `resolve/1`, except that the fall-back to `default_store/0`
+  is refused on a multi-instance runtime: when no store is configured and the
+  node is connected to other nodes, or a multi-instance platform variable is
+  set (`FLY_APP_NAME`, `K_SERVICE`, `DYNO`, `RENDER`, `RAILWAY_ENVIRONMENT`,
+  `AWS_LAMBDA_FUNCTION_NAME`), this raises `ArgumentError`. Naming the store,
+  `MPP.Tempo.ConCacheStore` included, never raises. `method` is the payment
+  method name used in the error message.
+  """
+  @spec for_method(store_ref() | nil | false, String.t()) :: store_ref() | nil
+  def for_method(nil, method) when is_binary(method) do
+    InstanceLocal.default!(@default_store, method: method, option: ~s(method_config "store"), behaviour: __MODULE__)
+  end
+
+  def for_method(store, method) when is_binary(method), do: resolve(store)
 
   @doc """
   Whether `store` exports the dedup callbacks every configured store must provide

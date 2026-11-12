@@ -214,7 +214,7 @@ defmodule MPP.Methods.EVM do
 
   def verify(%{"type" => "transaction"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "evm")
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          :ok <- require_recipient(charge),
@@ -231,7 +231,7 @@ defmodule MPP.Methods.EVM do
 
   def verify(%{"type" => "authorization"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "evm")
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          :ok <- reject_splits(config, "authorization"),
@@ -248,7 +248,7 @@ defmodule MPP.Methods.EVM do
   @impl MPP.Method
   def verify(payload, %Charge{} = charge) do
     config = charge.method_details || %{}
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "evm")
 
     with :ok <- reject_non_proof_for_zero_amount(charge),
          :ok <- reject_splits(config, "hash"),

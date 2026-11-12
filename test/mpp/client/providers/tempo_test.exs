@@ -93,6 +93,43 @@ defmodule MPP.Client.Providers.TempoTest do
       assert reason =~ "No matching transfer"
     end
 
+    test "reports a MACH shortfall on Tempo mainnet before signing" do
+      stub_mainnet_mach_balance(500)
+      challenge = challenge(method_details: %{"chainId" => 4217, "machineTokenEnabled" => true})
+      config = Map.put(provider_config(), :expected_chain_id, 4217)
+
+      assert {:error, {:insufficient_balance, shortfall}} = Tempo.pay(challenge, config)
+      assert shortfall.reason == "requested 0.00125 MACH, available 0.0005 MACH"
+      assert shortfall.shortfall == 750
+
+      {:ok, address} = Onchain.Signer.address_from_key(Base.decode16!(@private_key))
+
+      assert shortfall.funding_url ==
+               "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217" <>
+                 "&address=#{Onchain.Address.checksum!(address)}&amount=0.01"
+
+      assert MachineToken.funding_url?(shortfall.funding_url)
+    end
+
+    test "pays a machine-token charge on Tempo mainnet when the MACH balance covers it" do
+      stub_mainnet_mach_balance(1250)
+      challenge = challenge(method_details: %{"chainId" => 4217, "machineTokenEnabled" => true})
+      config = Map.put(provider_config(), :expected_chain_id, 4217)
+
+      assert {:ok, credential} = Tempo.pay(challenge, config)
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+      assert {:ok, _route} = MachineToken.match_route(tx.calls, 4217, @token, "1250", @recipient, nil)
+    end
+
+    test "does not read the MACH balance for the machineUSD route or a plain transfer" do
+      stub_mainnet_mach_balance(0, fn -> flunk("no balance read expected") end)
+      config = Map.put(provider_config(), :expected_chain_id, 4217)
+
+      legacy = challenge(method_details: %{"chainId" => 4217, "machineTokenEnabled" => true})
+      assert {:ok, _} = Tempo.pay(legacy, Map.put(config, :machine_token_deployment, :machine_usd))
+      assert {:ok, _} = Tempo.pay(challenge(method_details: %{"chainId" => 4217}), config)
+    end
+
     test "supports the machineUSD route for legacy servers" do
       challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
       config = Map.put(provider_config(), :machine_token_deployment, :machine_usd)
@@ -929,6 +966,26 @@ defmodule MPP.Client.Providers.TempoTest do
   end
 
   defp tx_valid_before(%Transaction{valid_before: valid_before}), do: valid_before
+
+  # Mainnet RPC: eth_chainId answers 4217 and balanceOf answers `balance`.
+  defp stub_mainnet_mach_balance(balance, on_balance_read \\ fn -> :ok end) do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      request = Jason.decode!(body)
+
+      result =
+        case request["method"] do
+          "eth_chainId" ->
+            "0x1079"
+
+          "eth_call" ->
+            on_balance_read.()
+            "0x" <> (balance |> Integer.to_string(16) |> String.pad_leading(64, "0"))
+        end
+
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+    end)
+  end
 
   defp stub_chain_id(chain_id) do
     Req.Test.stub(__MODULE__, fn conn ->

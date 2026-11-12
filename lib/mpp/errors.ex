@@ -40,10 +40,14 @@ defmodule MPP.Errors do
 
   use Descripex, namespace: "/protocol"
 
+  alias MPP.Methods.Tempo.MachineToken
+
   require Logger
 
   @base_uri "https://paymentauth.org/problems/"
   @internal_payment_error_uri @base_uri <> "internal-payment-error"
+  # The problems that report a balance shortfall and may carry `fundingUrl`.
+  @funding_problem_uris [@base_uri <> "verification-failed", @base_uri <> "session/insufficient-balance"]
   @internal_payment_error_detail "An internal payment error occurred."
 
   @problem_types %{
@@ -136,11 +140,12 @@ defmodule MPP.Errors do
           title: String.t(),
           status: pos_integer(),
           detail: String.t(),
-          retry_after: pos_integer() | nil
+          retry_after: pos_integer() | nil,
+          funding_url: String.t() | nil
         }
 
   @enforce_keys [:type, :title, :status, :detail]
-  defstruct [:type, :title, :status, :detail, retry_after: nil]
+  defstruct [:type, :title, :status, :detail, retry_after: nil, funding_url: nil]
 
   api(:new, "Create an RFC 9457 Problem Detail error for the given problem type.",
     params: [
@@ -192,13 +197,19 @@ defmodule MPP.Errors do
 
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = error) do
-    %{
-      "type" => error.type,
-      "title" => error.title,
-      "status" => error.status,
-      "detail" => client_detail(error)
-    }
+    put_funding_member(
+      %{
+        "type" => error.type,
+        "title" => error.title,
+        "status" => error.status,
+        "detail" => client_detail(error)
+      },
+      error
+    )
   end
+
+  defp put_funding_member(map, %__MODULE__{funding_url: url}) when is_binary(url), do: Map.put(map, "fundingUrl", url)
+  defp put_funding_member(map, %__MODULE__{}), do: map
 
   api(:client_detail, "Return the detail string that may be sent to a remote client.",
     params: [
@@ -225,6 +236,43 @@ defmodule MPP.Errors do
   end
 
   def client_detail(%__MODULE__{detail: detail}), do: detail
+
+  api(:put_funding_url, "Attach the page where the payer can get the funds a payment lacked.",
+    params: [
+      error: [kind: :value, description: "An insufficient-balance or verification-failed error"],
+      url: [kind: :value, description: "Link built by `MPP.Methods.Tempo.MachineToken.funding_url/3`, or `nil`"]
+    ],
+    returns: %{type: :struct, description: "Error with `funding_url` set and the link appended to `detail`"},
+    composes_with: [:new, :to_map]
+  )
+
+  @doc """
+  Attach the page where the payer can get the funds a payment lacked.
+
+  The link is serialized as the `fundingUrl` RFC 9457 extension member and
+  appended to `detail` as `" Add funds at <url>"` (mppx `PaymentError.fundingUrl`).
+  `nil` returns the error unchanged.
+
+  Only a balance shortfall carries a link, and only one written by
+  `MPP.Methods.Tempo.MachineToken.funding_url/3`: the error must be an
+  insufficient-balance or verification-failed problem and the URL must have
+  that function's shape, otherwise this raises `ArgumentError`. The member is
+  never derived from an error's `detail` text (mpp-rs #713, #714).
+  """
+  @spec put_funding_url(t(), String.t() | nil) :: t()
+  def put_funding_url(%__MODULE__{} = error, nil), do: error
+
+  def put_funding_url(%__MODULE__{type: type} = error, url) when type in @funding_problem_uris do
+    if !MachineToken.funding_url?(url) do
+      raise ArgumentError, "MPP.Errors.put_funding_url/2 accepts only a MACH funding link, got: #{inspect(url)}"
+    end
+
+    %{error | funding_url: url, detail: "#{error.detail} Add funds at #{url}"}
+  end
+
+  def put_funding_url(%__MODULE__{type: type}, _url) do
+    raise ArgumentError, "MPP.Errors.put_funding_url/2 does not apply to #{type}"
+  end
 
   api(:put_retry_after, "Attach a positive Retry-After delta in seconds to an error.")
 

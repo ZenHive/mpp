@@ -69,6 +69,16 @@ defmodule MPP.Client.Providers.Tempo do
   to a transaction credential when the challenge advertises
   `presenterBinding`, since it signs the same proof. Other non-zero charges
   are unaffected.
+
+  ## MACH shortfall
+
+  On Tempo mainnet, a charge that advertises `machineTokenEnabled` and is paid
+  with the default `:mach` deployment first reads the account's MACH balance.
+  When it is below the charge amount, `pay/2` signs nothing and returns
+  `{:error, {:insufficient_balance, %{reason: text, funding_url: url, shortfall: units}}}`,
+  where `funding_url` is the Tempo Wallet page that sells the missing MACH
+  (`MPP.Methods.Tempo.MachineToken.funding_url/3`). A balance that cannot be
+  read does not stop the payment.
   """
 
   use MPP.Client.PaymentProvider
@@ -205,7 +215,8 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   defp create_credential(challenge, charge, details, amount, chain_id, address, provider) do
-    with {:ok, memo} <- payment_memo(challenge, details, provider.client_id),
+    with :ok <- ensure_machine_token_funded(details, amount, chain_id, address, provider),
+         {:ok, memo} <- payment_memo(challenge, details, provider.client_id),
          {:ok, calls} <- payment_calls(charge, details, amount, chain_id, memo, provider.machine_token_deployment),
          {:ok, signature} <- build_transaction(calls, challenge, charge, details, chain_id, provider),
          {:ok, payload} <-
@@ -218,6 +229,27 @@ defmodule MPP.Client.Providers.Tempo do
        }}
     end
   end
+
+  # A machine-token charge is paid through the MACH route only, so an account
+  # short of MACH cannot pay it. On Tempo mainnet that is reported with the
+  # MACH onramp link before anything is signed; elsewhere, and when the
+  # balance cannot be read, the payment proceeds.
+  defp ensure_machine_token_funded(
+         %{"machineTokenEnabled" => true},
+         amount,
+         chain_id,
+         address,
+         %{machine_token_deployment: :mach} = provider
+       ) do
+    rpc_opts = [rpc_url: provider.rpc_url, req_options: provider.req_options]
+
+    case MachineToken.shortfall(chain_id, address, amount, rpc_opts) do
+      {:ok, shortfall} -> {:error, {:insufficient_balance, shortfall}}
+      :none -> :ok
+    end
+  end
+
+  defp ensure_machine_token_funded(_details, _amount, _chain_id, _address, _provider), do: :ok
 
   defp payment_calls(charge, %{"machineTokenEnabled" => true}, amount, chain_id, memo, deployment) do
     with {:ok, _currency} <- Address.validate(charge.currency),

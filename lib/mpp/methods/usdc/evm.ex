@@ -256,7 +256,7 @@ defmodule MPP.Methods.USDC.EVM do
 
   defp settle(parsed, charge, chain_id, {name, version}, rpc_opts) do
     config = charge.method_details || %{}
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "usdc")
     settled = settlement_charge(charge, name, version)
 
     case Replay.with_claims(store, replay_keys(charge, chain_id, parsed), config["challenge_expires"], fn ->

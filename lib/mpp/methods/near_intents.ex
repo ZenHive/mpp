@@ -295,7 +295,7 @@ defmodule MPP.Methods.NearIntents do
   defp check_available_state(_hash, _deposit_address, %{"store" => false}), do: :ok
 
   defp check_available_state(hash, deposit_address, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "nearintents")
 
     with :ok <- check_available_key(store, deposit_key(deposit_address), :deposit) do
       check_available_key(store, hash_key(hash, config), :hash)
@@ -318,7 +318,7 @@ defmodule MPP.Methods.NearIntents do
   defp claim_settlement(_hash, _deposit_address, %{"store" => false}), do: {:ok, nil}
 
   defp claim_settlement(hash, deposit_address, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "nearintents")
     owner = System.unique_integer([:positive, :monotonic])
     lease_ms = poll_timeout_ms(config) + @claim_lease_buffer_ms
     lease_until = System.system_time(:millisecond) + lease_ms

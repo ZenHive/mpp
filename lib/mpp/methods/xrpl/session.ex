@@ -466,7 +466,7 @@ defmodule MPP.Methods.XRPL.Session do
   end
 
   defp store(config) do
-    case Map.get(config, "session_store", Store.default_store()) do
+    case Store.for_method(Map.get(config, "session_store"), "xrpl") do
       ETSStore -> {ETSStore, [network: config["network"]]}
       {ETSStore, opts} when is_list(opts) -> {ETSStore, Keyword.put(opts, :network, config["network"])}
       other -> other

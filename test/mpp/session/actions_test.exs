@@ -1511,6 +1511,31 @@ defmodule MPP.Session.ActionsTest do
       assert {:ok, _} = Actions.dispatch(voucher_payload(60), opts)
     end
 
+    test "a MACH channel on Tempo mainnet links the onramp when it runs out", %{opts: opts} do
+      mach = "0x20c000000000000000000000f37de3740ADec032"
+      opts = Keyword.merge(opts, chain_id: 4217, token: mach)
+      sign = &SessionSigning.sign_voucher(@channel_id, &1, @tip1034_escrow, 4217)
+      open = %{open_payload(10) | "signature" => sign.(10)}
+
+      assert {:ok, _} = Actions.dispatch(open, opts)
+
+      # The open spent the whole accepted amount; 5 more does not cover a request of 10.
+      assert {:error, %Errors{} = error} = Actions.dispatch(%{voucher_payload(15) | "signature" => sign.(15)}, opts)
+      url = "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217&address=#{@payer}"
+
+      assert String.contains?(error.type, "insufficient-balance")
+      assert error.funding_url == url
+      assert error.detail == "insufficient channel balance Add funds at #{url}"
+      assert Errors.to_map(error)["fundingUrl"] == url
+    end
+
+    test "a channel in another token or on another chain carries no link", %{opts: opts} do
+      assert {:ok, _} = Actions.dispatch(open_payload(10), opts)
+      assert {:error, %Errors{funding_url: nil} = error} = Actions.dispatch(voucher_payload(15), opts)
+      assert error.detail == "insufficient channel balance"
+      refute Map.has_key?(Errors.to_map(error), "fundingUrl")
+    end
+
     test "open rejects a voucher below the settled amount", %{opts: opts, store: store} do
       opts = Keyword.put(opts, :verify_open, fn _, _ -> {:ok, state(%{deposit: 1_000, settled: 60})} end)
 

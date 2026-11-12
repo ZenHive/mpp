@@ -13,6 +13,7 @@ defmodule MPP.Session.Store do
   gains the defaults of fields added since.
   """
 
+  alias MPP.InstanceLocal
   alias MPP.Session.Channel
   alias MPP.Session.ETSStore
 
@@ -22,6 +23,21 @@ defmodule MPP.Session.Store do
   @doc "Return the application-started ETS store."
   @spec default_store() :: module()
   def default_store, do: ETSStore
+
+  @doc """
+  Resolve a route's configured session store at verification time.
+
+  `nil` falls back to `default_store/0`, except on a multi-instance runtime
+  (see `MPP.Tempo.Store.for_method/2`), where it raises `ArgumentError`:
+  channel balances kept per node would let one voucher be spent on each
+  instance. Naming the store, `MPP.Session.ETSStore` included, never raises.
+  """
+  @spec for_method(store_ref() | nil, String.t()) :: store_ref()
+  def for_method(nil, method) when is_binary(method) do
+    InstanceLocal.default!(ETSStore, method: method, option: "session_store", behaviour: __MODULE__)
+  end
+
+  def for_method(store, method) when is_binary(method), do: store
 
   @doc "Look up a channel by ID."
   @callback get(channel_id :: String.t()) ::

@@ -199,8 +199,8 @@ open-items note below).
 | Upstream fix | Where tracked |
 |---|---|
 | Hosted fee-payer fills (mppx #536 / #538 / #584) | ✓ `fee_payer_url` + `MPP.Methods.Tempo.HostedFeePayer` |
-| Fail closed without a shared replay store on a multi-instance runtime (mppx #1249, commit 802a27a) | 📋 **Task 179** |
-| MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712 / #713 / #714) | 📋 **Task 180** |
+| Fail closed without a shared replay store on a multi-instance runtime (mppx #1249, commit 802a27a) | ✓ Task 179: falling back to an in-node default store raises on a multi-instance runtime — `instance_local.ex`, `tempo/store.ex`, `replay.ex` |
+| MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712 / #713 / #714) | ✓ Task 180: `MachineToken.funding_url/3`, typed `fundingUrl` member accepted only in the helper's shape and never read from `detail` — `methods/tempo/machine_token.ex`, `errors.ex` |
 | Session integrity parity for published upstream advisories | 📋 **Task 50** (done) built the session machinery; residual hardening is tracked as counted open items, never enumerated here |
 
 ---

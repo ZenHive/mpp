@@ -2388,7 +2388,8 @@ defmodule MPP.Methods.Stripe.Subscription do
   end
 
   defp validate_store!(config) do
-    subscription_store = store(config)
+    # Shape check only; the in-node default is refused at request time.
+    subscription_store = config["subscription_store"] || Store.default_store()
 
     if !Enum.all?([:get, :put, :update, :delete], &store_callback?(subscription_store, &1)) do
       raise ArgumentError,
@@ -2400,7 +2401,7 @@ defmodule MPP.Methods.Stripe.Subscription do
     Map.take(details || %{}, ["network_id", "payment_method_types", "metadata"])
   end
 
-  defp store(config), do: config["subscription_store"] || Store.default_store()
+  defp store(config), do: Store.for_method(config["subscription_store"], "stripe")
 
   defp store_callback?({module, _opts}, callback),
     do: function_exported?(module, callback, store_callback_arity(callback) + 1)

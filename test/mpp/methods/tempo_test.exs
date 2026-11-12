@@ -4207,6 +4207,124 @@ defmodule MPP.Methods.TempoTest do
     end
   end
 
+  describe "verify/2 — MACH shortfall on Tempo mainnet" do
+    @mach "0x20c000000000000000000000f37de3740ADec032"
+    @funding_base "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217"
+
+    setup %{charge: charge} do
+      details = Map.merge(charge.method_details, %{"chain_id" => 4217, "machine_token_enabled" => true})
+      {:ok, charge: %{charge | method_details: details}}
+    end
+
+    defp mach_payment(chain_id, deployment \\ :mach) do
+      memo = Base.decode16!(String.trim_leading(@test_memo, "0x"), case: :mixed)
+
+      {:ok, calls} =
+        MachineToken.settlement_calls(chain_id, @token_address, 1_000_000, @recipient, memo, deployment)
+
+      tx_hex = build_tempo_tx(calls: Enum.map(calls, &[&1.to, <<>>, &1.input]), chain_id: chain_id)
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      {:ok, sender} = Transaction.sender(tx)
+
+      {%{"type" => "transaction", "signature" => tx_hex}, Onchain.Address.checksum!(sender)}
+    end
+
+    # The simulation reverts; balanceOf answers `balance`.
+    defp stub_rejected_simulation(balance) do
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc_call, request["method"], request["params"]})
+
+        case request["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x0"}]}], "id" => 1})
+
+          "eth_call" ->
+            result = "0x" <> (balance |> Integer.to_string(16) |> String.pad_leading(64, "0"))
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
+        end
+      end)
+    end
+
+    test "names the missing MACH and links the onramp", %{charge: charge} do
+      {payload, payer} = mach_payment(4217)
+      stub_rejected_simulation(250_000)
+
+      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      url = "#{@funding_base}&address=#{payer}&amount=0.75"
+
+      assert error.type =~ "verification-failed"
+      assert error.funding_url == url
+
+      assert error.detail ==
+               "insufficient MACH balance (requested 1.00 MACH, available 0.25 MACH). Add funds at #{url}"
+
+      assert Errors.to_map(error)["fundingUrl"] == url
+
+      # The balance read is balanceOf(payer) on MACH; nothing is broadcast.
+      assert_received {:rpc_call, "eth_call", [%{"to" => to, "data" => "0x70a08231" <> owner}, _block]}
+      assert String.downcase(to) == String.downcase(@mach)
+      assert String.ends_with?(owner, payer |> String.downcase() |> String.trim_leading("0x"))
+      refute_received {:rpc_call, "eth_sendRawTransactionSync", _params}
+    end
+
+    test "keeps the plain rejection when the payer holds enough MACH", %{charge: charge} do
+      {payload, _payer} = mach_payment(4217)
+      stub_rejected_simulation(1_000_000)
+
+      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert error.detail == "Pre-broadcast simulation rejected the transaction"
+      refute Map.has_key?(Errors.to_map(error), "fundingUrl")
+    end
+
+    test "keeps the plain rejection for the machineUSD route", %{charge: charge} do
+      {payload, _payer} = mach_payment(4217, :machine_usd)
+      Req.Test.stub(Tempo, fn conn -> reject_simulation_only(conn) end)
+
+      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert error.detail == "Pre-broadcast simulation rejected the transaction"
+    end
+
+    test "keeps the plain rejection on Moderato", %{charge: charge} do
+      charge = %{charge | method_details: Map.put(charge.method_details, "chain_id", 42_431)}
+      {payload, _payer} = mach_payment(42_431)
+      Req.Test.stub(Tempo, fn conn -> reject_simulation_only(conn) end)
+
+      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert error.detail == "Pre-broadcast simulation rejected the transaction"
+    end
+
+    test "a used transaction is answered as used, without a balance read or a link", %{charge: charge} do
+      name = :"mach_shortfall_#{System.unique_integer([:positive])}"
+      start_supervised!({ConCacheStore, name: name})
+      store = {ConCacheStore, name: name}
+      charge = %{charge | method_details: Map.put(charge.method_details, "store", store)}
+
+      {payload, _payer} = mach_payment(4217)
+      :ok = MPP.Tempo.Store.put(store, "mpp:charge:" <> keccak256_hex(payload["signature"]), true)
+      Req.Test.stub(Tempo, fn _conn -> flunk("a used transaction must not reach the RPC") end)
+
+      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      refute error.detail =~ "MACH"
+      refute error.detail =~ "Add funds"
+    end
+
+    defp reject_simulation_only(conn) do
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case Jason.decode!(body) do
+        %{"method" => "eth_simulateV1"} ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x0"}]}], "id" => 1})
+
+        %{"method" => method} ->
+          flunk("unexpected RPC call #{method}")
+      end
+    end
+  end
+
   # Stubs the optimistic flow: pre-broadcast eth_simulateV1 succeeds, then
   # eth_sendRawTransaction returns the tx hash.
   defp stub_optimistic_flow(tx_hash) do

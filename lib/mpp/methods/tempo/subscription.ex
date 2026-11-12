@@ -81,7 +81,8 @@ defmodule MPP.Methods.Tempo.Subscription do
   end
 
   defp validate_store!(config) do
-    store = store(config)
+    # Shape check only; the in-node default is refused at request time.
+    store = config["subscription_store"] || Store.default_store()
 
     if !Enum.all?([:get, :put, :update, :delete], &store_callback?(store, &1)) do
       raise ArgumentError,
@@ -365,7 +366,7 @@ defmodule MPP.Methods.Tempo.Subscription do
   end
 
   defp claim_activation(config, signature) do
-    case TempoStore.resolve(config["store"]) do
+    case TempoStore.for_method(config["store"], "tempo") do
       nil ->
         :ok
 
@@ -383,7 +384,7 @@ defmodule MPP.Methods.Tempo.Subscription do
   end
 
   defp release_activation(config, signature) do
-    case TempoStore.resolve(config["store"]) do
+    case TempoStore.for_method(config["store"], "tempo") do
       nil -> :ok
       store -> release_activation_store(store, config, signature)
     end
@@ -610,7 +611,7 @@ defmodule MPP.Methods.Tempo.Subscription do
     end
   end
 
-  defp store(config), do: config["subscription_store"] || Store.default_store()
+  defp store(config), do: Store.for_method(config["subscription_store"], "tempo")
 
   defp store_callback?({module, _opts}, callback), do: function_exported?(module, callback, callback_arity(callback) + 1)
   defp store_callback?(module, callback), do: function_exported?(module, callback, callback_arity(callback))

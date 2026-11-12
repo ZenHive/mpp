@@ -6,6 +6,58 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **The in-node default stores are refused on a multi-instance runtime.**
+  `MPP.Tempo.ConCacheStore`, `MPP.Session.ETSStore` and
+  `MPP.Subscription.ETSStore` keep their state in one node's memory. When a
+  route falls back to one of them and the runtime looks multi-instance, the
+  request now raises `ArgumentError` naming the route, the option and the
+  signal, instead of accepting the payment against state the other instances
+  cannot see. The signals: the node is connected to other visible nodes
+  (`Node.list/0`), or one of `AWS_LAMBDA_FUNCTION_NAME`, `DYNO`,
+  `FLY_APP_NAME`, `K_SERVICE`, `RAILWAY_ENVIRONMENT`, `RENDER` is set. The
+  check runs when a payment is verified, on the node serving it; challenges
+  are still issued and `MPP.Plug.init/1` is unaffected. It covers every
+  method's `method_config "store"`, the plug-level `:store` (non-Tempo
+  methods and x402), `:session_store` and `method_config "subscription_store"`.
+  **Upgrading:** on such a runtime, configure a shared backend, or name the
+  in-node store explicitly (`store: MPP.Tempo.ConCacheStore`,
+  `"store" => MPP.Tempo.ConCacheStore`, `session_store: MPP.Session.ETSStore`,
+  `"subscription_store" => MPP.Subscription.ETSStore`) to accept state scoped
+  to one instance. A route that takes payments through both the plug-level
+  store and a method store (EVM, Solana, …) names both. A single node with
+  none of the variables set behaves as before, and so does `store: false`.
+  Matches mppx #1249.
+
+### Added
+
+- **MACH shortfalls link the Tempo Wallet onramp.** On Tempo mainnet, a
+  payment that fails because the payer holds too little MACH carries the page
+  where the missing MACH can be bought:
+  - `MPP.Methods.Tempo.MachineToken.funding_url/3` builds the link (payer
+    address, amount rounded up to cents); `nil` on any other chain.
+  - `MPP.Errors` has a `funding_url` field, set with `put_funding_url/2` and
+    serialized as the `fundingUrl` problem member; the link is also appended
+    to `detail`. Only links `funding_url/3` writes are accepted, only on
+    `verification-failed` and `session/insufficient-balance`.
+  - The Tempo charge method answers a MACH-route transaction that fails its
+    pre-broadcast simulation with `insufficient MACH balance (requested X
+    MACH, available Y MACH)` and the link when the payer's MACH balance is
+    below the charge. A transaction that was already used is still answered
+    as used.
+  - A MACH session channel that cannot cover a request carries the link in its
+    `insufficient-balance` problem.
+  - `MPP.Client.Providers.Tempo.pay/2` reads the MACH balance before signing a
+    `machineTokenEnabled` charge and returns
+    `{:error, {:insufficient_balance, %{reason: _, funding_url: _, shortfall: _}}}`
+    when it is short.
+
+  Matches mppx #1265 and mpp-rs #712 / #713 / #714. The amount is written with
+  two decimals (`12.00`), as mpp-rs does; mppx drops trailing zeros (`12`).
+
 ## [0.22.3] — 2026-11-07
 
 ### Changed

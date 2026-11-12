@@ -319,7 +319,7 @@ defmodule MPP.Methods.Solana do
   # --- signature (push) ---
 
   defp verify_signature_credential(payload, charge, config, push_mode) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "solana")
 
     with {:ok, signature} <- extract_signature(payload),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Solana"),
@@ -337,7 +337,7 @@ defmodule MPP.Methods.Solana do
   end
 
   defp verify_transaction_credential(payload, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "solana")
     wait? = config["wait_for_confirmation"] != false
 
     with {:ok, tx} <- extract_transaction(payload),
@@ -383,7 +383,7 @@ defmodule MPP.Methods.Solana do
   end
 
   defp verify_bundle_credential(payload, charge, config) do
-    store = Store.resolve(config["store"])
+    store = Store.for_method(config["store"], "solana")
     max_transactions = config["max_bundle_transactions"] || @default_max_bundle_transactions
 
     with {:ok, transactions} <- extract_bundle(payload, max_transactions),

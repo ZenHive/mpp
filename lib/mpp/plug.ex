@@ -47,10 +47,15 @@ defmodule MPP.Plug do
     * `:expires_in` — (optional) challenge TTL in seconds (integer, defaults to 300)
     * `:digest` — (optional) expected content digest for body-bound challenges
     * `:opaque` — (optional) base64url-encoded server correlation data
-    * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store
+    * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store.
+      Unset, non-Tempo methods and x402 use the application-started
+      `MPP.Tempo.ConCacheStore`; on a runtime that looks multi-instance (see
+      `MPP.Tempo.Store`) a paid request then raises `ArgumentError` until a
+      store is named here
     * `:intent` — (optional) `"charge"` (default), `"session"`, or `"subscription"`
     * `:session_store` — (optional, session intent) `MPP.Session.Store` reference;
-      defaults to the application-started `MPP.Session.ETSStore`
+      defaults to the application-started `MPP.Session.ETSStore`, which is
+      refused on a runtime that looks multi-instance unless named here
     * `:requires_auth` — (optional) when `true`, challenges advertise
       `header="Payment-Authorization"` and credentials are read from that
       field only, leaving `Authorization` free for ordinary authentication
@@ -154,6 +159,7 @@ defmodule MPP.Plug do
             digest: String.t() | nil,
             opaque: String.t() | nil,
             store: module() | {module(), keyword()} | nil,
+            implicit_store: boolean(),
             intent: String.t(),
             session_store: SessionStore.store_ref() | nil,
             requires_auth: boolean(),
@@ -169,6 +175,7 @@ defmodule MPP.Plug do
       :digest,
       :opaque,
       :store,
+      implicit_store: false,
       intent: "charge",
       session_store: nil,
       requires_auth: false,
@@ -187,12 +194,18 @@ defmodule MPP.Plug do
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
     intent = validate_intent!(Keyword.get(opts, :intent, "charge"))
-    session_store = resolve_session_store(intent, Keyword.get(opts, :session_store))
+    configured_session_store = Keyword.get(opts, :session_store)
+    session_store = resolve_session_store(intent, configured_session_store)
     method_lists = Enum.flat_map(normalize_methods(opts), &expand_currencies(&1, intent))
     expires_in = validate_expires_in!(Keyword.get(opts, :expires_in, @default_expires_in_seconds))
-    entries = Enum.map(method_lists, &build_method_entry(&1, intent, session_store, expires_in))
+    # Only a configured session store is written into method_config: the
+    # in-node default is selected at request time, where the multi-instance
+    # check can see the node that serves the request.
+    entries = Enum.map(method_lists, &build_method_entry(&1, intent, configured_session_store, expires_in))
     validate_method_name_format!(entries)
     validate_unique_requests!(entries, intent)
+
+    configured_store = opts |> Keyword.get(:store) |> validate_store!()
 
     %Config{
       secret_key: opts |> require_opt!(:secret_key) |> validate_secret_key!(),
@@ -201,7 +214,8 @@ defmodule MPP.Plug do
       expires_in: expires_in,
       digest: Keyword.get(opts, :digest),
       opaque: Keyword.get(opts, :opaque),
-      store: opts |> Keyword.get(:store) |> validate_store!() |> Store.resolve(),
+      store: Store.resolve(configured_store),
+      implicit_store: is_nil(configured_store),
       intent: intent,
       session_store: session_store,
       requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false)),
@@ -476,6 +490,19 @@ defmodule MPP.Plug do
 
   defp currency_identity(currency), do: currency
 
+  # x402 settlement claims its authorization nonce in the plug-level store.
+  # The store is checked only for a request that carries an x402 payment, so
+  # unpaid requests still get their challenge and native payments are untouched.
+  defp x402_store(_conn, %Config{x402: nil}), do: nil
+  defp x402_store(_conn, %Config{store: nil}), do: nil
+
+  defp x402_store(conn, %Config{store: store} = config) do
+    case Plug.Conn.get_req_header(conn, "payment-signature") do
+      [] -> store
+      _present -> Replay.checked_store(config, store, "x402")
+    end
+  end
+
   @doc """
   Runs the MPP 402 payment handshake for the current request.
 
@@ -487,7 +514,7 @@ defmodule MPP.Plug do
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
   def call(conn, %Config{} = config) do
-    case X402Plug.maybe_settle(conn, config.x402, config.store) do
+    case X402Plug.maybe_settle(conn, config.x402, x402_store(conn, config)) do
       :continue -> native_handshake(conn, config)
       {:ok, conn} -> conn
       {:error, %Errors{} = error} -> respond_error(conn, config, error)

@@ -522,7 +522,7 @@ MPP.AcceptPayment          — Accept-Payment client-preference header: parse/fo
 MPP.Hex                    — Internal hex-string helpers (strip_0x, hex_string?) shared across method/wire modules
 MPP.Codec                  — Internal base64url→JSON decode (decode_base64_json) shared by credential/receipt/session_receipt
 MPP.Methods.Shared         — Internal method-verification helpers (require_config, check_receipt_status, parse_charge_amount)
-MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types
+MPP.Errors                 — RFC 9457 problem types (paymentauth.org/problems/*), includes session error types; put_funding_url/2 for the typed `fundingUrl` member
 MPP.Intents.Charge         — Charge intent request schema (amount, currency, recipient, ...)
 MPP.Intents.Session        — Session intent request schema (per-unit rate, unit_type, suggested_deposit, ...)
 MPP.Intents.Subscription   — Recurring-subscription intent request schema (period_unit, period_count, subscription_expires, ...)
@@ -541,7 +541,7 @@ MPP.Method                 — Behaviour for pluggable payment methods (verify/2
 MPP.Methods.Stripe         — Stripe SPT → PaymentIntent verification (Req, no Stripe SDK); optional server-only Connect settlement routing
 MPP.Methods.Stripe.Subscription — Stripe fixed-price subscription activation, durable renewal (process_invoice/3), and period-end cancellation (cancel/2)
 MPP.Methods.Tempo          — Tempo on-chain TIP-20 transfer verification (delegates chain ops to onchain_tempo)
-MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo)
+MPP.Methods.Tempo.MachineToken — Canonical first-party machine-token (MPP Credits) charge-route match (approve + swapTo); funding_url/3 + shortfall/4 for the MACH onramp link
 MPP.Methods.Tempo.Subscription — Tempo access-key subscription activation, authorize/2 renewals, single-use claim lifecycle
 MPP.Methods.Tempo.KeyAuthorization — Tempo subscription key-authorization wire codec and verifier (RLP layout matches ox/tempo)
 MPP.Methods.EVM            — Generic EVM on-chain transfer verification (any chain: Ethereum, Base, Polygon, etc.)
@@ -604,7 +604,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.InstanceLocal`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 

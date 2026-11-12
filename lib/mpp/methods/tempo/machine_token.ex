@@ -23,6 +23,7 @@ defmodule MPP.Methods.Tempo.MachineToken do
 
   alias MPP.Hex
   alias Onchain.Address
+  alias Onchain.ERC20
   alias Onchain.Tempo.TIP20
 
   @mainnet_chain_id 4217
@@ -37,6 +38,15 @@ defmodule MPP.Methods.Tempo.MachineToken do
   @mach_token "0x20c000000000000000000000f37de3740ADec032"
   @mach_swapper_mainnet "0xF72E5107c32C655ffA7539a3C8e97B7C3cE16A3F"
   @mach_swapper_moderato "0xd05f8EdFBB54Da0d765C9fE9b2B3f7d2E3a8C466"
+
+  # Tempo Wallet page that sells MACH, on Tempo mainnet only. Same constant in
+  # refs/mppx/src/tempo/internal/defaults.ts (`machineTokenFundingBaseUrl`) and
+  # refs/mpp-rs/src/protocol/methods/tempo/machine_token.rs (`MACH_FUNDING_URL`).
+  @funding_base_url "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217"
+  # MACH has 6 decimals and is worth 1 USD: 10^(6 - 2) base units per cent.
+  @mach_decimals 6
+  @units_per_cent 10_000
+  @funding_url_shape ~r/\A#{Regex.escape(@funding_base_url)}(&address=0x[0-9a-fA-F]{40})?(&amount=[0-9]+\.[0-9]{2})?\z/
 
   @type deployment_name :: :mach | :machine_usd
   @type deployment :: %{token: String.t(), swapper: String.t()}
@@ -54,6 +64,117 @@ defmodule MPP.Methods.Tempo.MachineToken do
   end
 
   def machine_token?(_chain_id, _address), do: false
+
+  @doc "Returns whether the address is MACH on this chain."
+  @spec mach?(term(), term()) :: boolean()
+  def mach?(chain_id, address) when is_binary(address) do
+    match?({:ok, _}, deployment(chain_id, :mach)) and Address.equal?(@mach_token, address)
+  end
+
+  def mach?(_chain_id, _address), do: false
+
+  @doc """
+  Builds the Tempo Wallet link where a payer buys MACH.
+
+  Returns `nil` on any chain other than Tempo mainnet (4217), the only chain
+  the wallet sells MACH on. `address` is the payer and is left out when it is
+  not a valid address. `amount` is the MACH to buy in base units (6 decimals),
+  rounded up to whole cents; zero and `nil` are left out.
+
+  The base URL, the two parameters and the round-up match mppx
+  `Tempo.machineTokenFundingUrl` and mpp-rs `machine_token::funding_url`. The
+  amount is written with two decimals, as mpp-rs does.
+
+      iex> MPP.Methods.Tempo.MachineToken.funding_url(4217, nil, 1_250_001)
+      "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217&amount=1.26"
+
+      iex> MPP.Methods.Tempo.MachineToken.funding_url(42_431, nil, 1)
+      nil
+  """
+  @spec funding_url(term(), term(), term()) :: String.t() | nil
+  def funding_url(chain_id, address \\ nil, amount \\ nil)
+
+  def funding_url(@mainnet_chain_id, address, amount) do
+    @funding_base_url <> funding_address(address) <> funding_amount(amount)
+  end
+
+  def funding_url(_chain_id, _address, _amount), do: nil
+
+  defp funding_address(address) when is_binary(address) do
+    case Address.checksum(address) do
+      {:ok, checksummed} -> "&address=" <> checksummed
+      {:error, _reason} -> ""
+    end
+  end
+
+  defp funding_address(_address), do: ""
+
+  defp funding_amount(amount) when is_integer(amount) and amount > 0 do
+    cents = div(amount + @units_per_cent - 1, @units_per_cent)
+    fraction = cents |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")
+    "&amount=#{div(cents, 100)}.#{fraction}"
+  end
+
+  defp funding_amount(_amount), do: ""
+
+  @doc """
+  Returns whether `url` is a link `funding_url/3` writes: the base URL, then an
+  optional `address` of 40 hex digits, then an optional `amount` in dollars
+  and cents, and nothing else.
+  """
+  @spec funding_url?(term()) :: boolean()
+  def funding_url?(url) when is_binary(url), do: Regex.match?(@funding_url_shape, url)
+  def funding_url?(_url), do: false
+
+  @doc """
+  Formats MACH base units as a decimal amount with at least two places, such
+  as `"0.25"` or `"1.000001"` (mpp-rs `machine_token::format_amount`).
+  """
+  @spec format_amount(non_neg_integer()) :: String.t()
+  def format_amount(amount) when is_integer(amount) and amount >= 0 do
+    scale = Integer.pow(10, @mach_decimals)
+
+    fraction =
+      amount
+      |> rem(scale)
+      |> Integer.to_string()
+      |> String.pad_leading(@mach_decimals, "0")
+      |> String.trim_trailing("0")
+      |> String.pad_trailing(2, "0")
+
+    "#{div(amount, scale)}.#{fraction}"
+  end
+
+  @doc """
+  Reports how far `payer`'s MACH balance falls short of `amount` (base units).
+
+  Returns `{:ok, %{reason: text, funding_url: url, shortfall: units}}` when the
+  payer holds less MACH than `amount` on Tempo mainnet, and `:none` otherwise:
+  on another chain, when the balance covers the amount, or when the balance
+  cannot be read. `rpc_opts` are the `Onchain.ERC20.balance_of/3` options
+  (`:rpc_url`, `:req_options`).
+  """
+  @spec shortfall(term(), String.t(), non_neg_integer(), keyword()) ::
+          {:ok, %{reason: String.t(), funding_url: String.t(), shortfall: pos_integer()}} | :none
+  def shortfall(@mainnet_chain_id, payer, amount, rpc_opts)
+      when is_binary(payer) and is_integer(amount) and is_list(rpc_opts) do
+    case ERC20.balance_of(@mach_token, payer, rpc_opts) do
+      {:ok, balance} when is_integer(balance) and balance < amount ->
+        shortfall = amount - balance
+
+        {:ok,
+         %{
+           reason: "requested #{format_amount(amount)} MACH, available #{format_amount(balance)} MACH",
+           funding_url: funding_url(@mainnet_chain_id, payer, shortfall),
+           shortfall: shortfall
+         }}
+
+      _enough_or_unreadable ->
+        :none
+    end
+  end
+
+  def shortfall(_chain_id, _payer, _amount, _rpc_opts), do: :none
 
   @doc "Returns the funding token associated with a canonical settlement sender."
   @spec funding_token(non_neg_integer(), binary()) :: String.t() | nil

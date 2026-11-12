@@ -107,6 +107,13 @@ the funding token can be identified: the charge token for a direct single-call
 payment, or the machine token for its supported swap route. Other multi-call
 routes omit it.
 
+On Tempo mainnet, a payer short of MACH gets a link to the Tempo Wallet page
+that sells it: a `verification-failed` or `session/insufficient-balance`
+problem carries it as the `fundingUrl` member (`error.funding_url`) and at the
+end of `detail`, and `MPP.Client.Providers.Tempo.pay/2` returns
+`{:error, {:insufficient_balance, %{funding_url: url}}}` before signing.
+`MPP.Methods.Tempo.MachineToken.funding_url/3` builds the same link.
+
 ### EVM (Ethereum, Base, Polygon, etc.)
 
 ```elixir
@@ -343,7 +350,7 @@ plug MPP.Plug,
   method_config: quote.method_config
 ```
 
-**Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. For multi-node deployments, configure `method_config["store"]` with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …); a configured store must implement the atomic `check_and_mark/2`, and should also implement the optional token-checked `delete/2` so a pre-broadcast failure releases only that attempt's reserved slot instead of burning the signed transaction until its TTL expires. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
+**Replay protection is on by default.** When you don't configure a `"store"`, MPP uses the app-started `MPP.Tempo.ConCacheStore` so each transaction hash is accepted only once out of the box. That default lives in one node's memory, so it is refused when the server may run as several instances: a payment on a route with no store configured raises `ArgumentError` when the node is connected to other nodes or a multi-instance platform variable is set (`AWS_LAMBDA_FUNCTION_NAME`, `DYNO`, `FLY_APP_NAME`, `K_SERVICE`, `RAILWAY_ENVIRONMENT`, `RENDER`). The same holds for the default session and subscription stores. For multi-node deployments, configure `method_config["store"]` (and the Plug `:store` opt for non-Tempo methods and x402) with a shared `MPP.Tempo.Store` implementation (Redis, Postgres, …), or name `MPP.Tempo.ConCacheStore` explicitly to accept per-instance dedup; a configured store must implement the atomic `check_and_mark/2`, and should also implement the optional token-checked `delete/2` so a pre-broadcast failure releases only that attempt's reserved slot instead of burning the signed transaction until its TTL expires. When multiple endpoints share one `ConCacheStore`, add `key_prefix: "tenant:"` in the store opts to namespace dedup keys. Pass `store: false` (Plug opt) or `"store" => false` (method_config) to explicitly opt out of dedup — not recommended.
 
 ### x402 interoperability
 

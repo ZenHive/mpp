@@ -415,6 +415,145 @@ defmodule MPP.Methods.Tempo.MachineTokenTest do
     end
   end
 
+  describe "funding_url/3" do
+    @funding_base "https://wallet.tempo.xyz/agent?action=fund&intent=mach&chainId=4217"
+    @funding_payer "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+    # refs/mpp-rs/src/protocol/methods/tempo/machine_token.rs:161,418-426.
+    test "matches the mpp-rs vectors" do
+      assert MachineToken.funding_url(4217, @funding_payer, 750_000) ==
+               "#{@funding_base}&address=#{@funding_payer}&amount=0.75"
+
+      assert MachineToken.funding_url(4217, nil, 1) == "#{@funding_base}&amount=0.01"
+      assert MachineToken.funding_url(4217, nil, 12_000_000) == "#{@funding_base}&amount=12.00"
+      assert MachineToken.funding_url(4217, nil, 1_250_001) == "#{@funding_base}&amount=1.26"
+    end
+
+    # refs/mppx/src/tempo/internal/machine-token-charge.test.ts:190,236 — same
+    # base URL, parameter order and value; mppx drops trailing zeros, so only
+    # amounts with two significant decimals render identically.
+    test "matches the mppx vector for an amount with two decimals" do
+      assert MachineToken.funding_url(4217, @funding_payer, 1_250_000) ==
+               "#{@funding_base}&address=#{@funding_payer}&amount=1.25"
+    end
+
+    test "rounds a fraction of a cent up" do
+      assert MachineToken.funding_url(4217, nil, 10_000) == "#{@funding_base}&amount=0.01"
+      assert MachineToken.funding_url(4217, nil, 10_001) == "#{@funding_base}&amount=0.02"
+      assert MachineToken.funding_url(4217, nil, 999_999) == "#{@funding_base}&amount=1.00"
+    end
+
+    test "checksums the address and drops an invalid one" do
+      assert MachineToken.funding_url(4217, String.downcase(@funding_payer)) ==
+               "#{@funding_base}&address=#{@funding_payer}"
+
+      assert MachineToken.funding_url(4217, "evil&amount=9.99") == @funding_base
+      assert MachineToken.funding_url(4217, "0x1234") == @funding_base
+    end
+
+    test "leaves out a zero, negative or non-integer amount" do
+      for amount <- [0, -1, nil, "100", 1.5] do
+        assert MachineToken.funding_url(4217, nil, amount) == @funding_base
+      end
+    end
+
+    test "returns nil off Tempo mainnet" do
+      for chain_id <- [42_431, 1, nil, "4217"] do
+        assert MachineToken.funding_url(chain_id, @funding_payer, 1_000_000) == nil
+      end
+    end
+  end
+
+  describe "funding_url?/1" do
+    test "accepts every link funding_url/3 writes" do
+      for address <- [nil, @funding_payer], amount <- [nil, 1, 750_000, 12_000_000] do
+        assert MachineToken.funding_url?(MachineToken.funding_url(4217, address, amount))
+      end
+    end
+
+    test "rejects anything else" do
+      # The last three are the mpp-rs `funding_url_in` rejections
+      # (refs/mpp-rs/src/protocol/methods/tempo/machine_token.rs:454).
+      for url <- [
+            nil,
+            "",
+            "https://wallet.tempo.xyz/",
+            "https://evil.example/agent?action=fund&intent=mach&chainId=4217",
+            @funding_base <> "&redirect=https://evil.example",
+            @funding_base <> "&address=evil&amount=1.00",
+            @funding_base <> "&amount=1.5",
+            @funding_base <> "&amount=1.00&address=#{@funding_payer}",
+            @funding_base <> "&amount=1.00\n"
+          ] do
+        refute MachineToken.funding_url?(url)
+      end
+    end
+  end
+
+  describe "format_amount/1" do
+    # refs/mpp-rs/src/protocol/methods/tempo/machine_token.rs:187-192.
+    test "writes at least two decimals and drops other trailing zeros" do
+      assert MachineToken.format_amount(0) == "0.00"
+      assert MachineToken.format_amount(250_000) == "0.25"
+      assert MachineToken.format_amount(1_000_000) == "1.00"
+      assert MachineToken.format_amount(1_000_001) == "1.000001"
+      assert MachineToken.format_amount(12_500_000) == "12.50"
+    end
+  end
+
+  describe "mach?/2" do
+    test "is MACH on the chains with a MACH deployment" do
+      mach = "0x20c000000000000000000000f37de3740ADec032"
+
+      assert MachineToken.mach?(4217, mach)
+      assert MachineToken.mach?(42_431, String.downcase(mach))
+      refute MachineToken.mach?(1, mach)
+      refute MachineToken.mach?(4217, @token_mainnet)
+      refute MachineToken.mach?(4217, nil)
+    end
+  end
+
+  describe "shortfall/4" do
+    @rpc_opts [rpc_url: "https://rpc.invalid", req_options: [plug: {Req.Test, __MODULE__}]]
+
+    defp stub_balance(balance) do
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        assert request["method"] == "eth_call"
+        assert [%{"to" => to, "data" => "0x70a08231" <> _owner}, _block] = request["params"]
+        assert String.downcase(to) == "0x20c000000000000000000000f37de3740adec032"
+
+        result = "0x" <> (balance |> Integer.to_string(16) |> String.pad_leading(64, "0"))
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "id" => request["id"], "result" => result})
+      end)
+    end
+
+    test "reports the missing MACH and links the onramp for it" do
+      stub_balance(250_000)
+
+      assert {:ok, shortfall} = MachineToken.shortfall(4217, @funding_payer, 1_000_000, @rpc_opts)
+      assert shortfall.reason == "requested 1.00 MACH, available 0.25 MACH"
+      assert shortfall.shortfall == 750_000
+      assert shortfall.funding_url == "#{@funding_base}&address=#{@funding_payer}&amount=0.75"
+    end
+
+    test "is :none when the balance covers the amount" do
+      stub_balance(1_000_000)
+      assert MachineToken.shortfall(4217, @funding_payer, 1_000_000, @rpc_opts) == :none
+    end
+
+    test "is :none when the balance cannot be read" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      assert MachineToken.shortfall(4217, @funding_payer, 1_000_000, @rpc_opts) == :none
+    end
+
+    test "does not read the balance off Tempo mainnet" do
+      Req.Test.stub(__MODULE__, fn _conn -> flunk("no RPC call expected") end)
+      assert MachineToken.shortfall(42_431, @funding_payer, 1_000_000, @rpc_opts) == :none
+    end
+  end
+
   defp canonical_calls(memo_hex) do
     token = decode_address(@token_moderato)
     swapper = decode_address(@swapper_moderato)
