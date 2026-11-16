@@ -643,7 +643,7 @@ unacknowledged, and a fatal second `needVoucher` while a voucher is in flight.
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.22.3"}
+    {:mpp, "~> 0.23.0"}
   ]
 end
 ```
