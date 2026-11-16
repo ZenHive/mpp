@@ -40,6 +40,8 @@ defmodule MPP.Methods.TempoIntegrationTest do
   @default_hosted_fee_payer_url "https://sponsor.moderato.tempo.xyz"
   @chain_id 42_431
   @path_usd "0x20c0000000000000000000000000000000000000"
+  # OpenUSD (OUSD), refs/mpp-rs/src/protocol/methods/tempo/mod.rs:183.
+  @open_usd "0x20c0000000000000000000006a37DA5C996874BE"
 
   # Deterministic testnet-only recipient key (no value on mainnet) — used only
   # to derive a stable recipient address. Sender and fee-payer wallets are
@@ -2119,6 +2121,10 @@ defmodule MPP.Methods.TempoIntegrationTest do
             "chain_id" => @chain_id,
             "fee_payer_url" => @default_hosted_fee_payer_url,
             "sponsor_budget_id" => "moderato-hosted-fee-payer",
+            # The hosted service picks the fee token it charges; observed on
+            # Moderato 2026-11-16 it fills OpenUSD, which the per-chain default
+            # allowlist (pathUSD) rejects, so the route names both.
+            "fee_payer_allowed_fee_tokens" => [@path_usd, @open_usd],
             "store" => ConCacheStore
           }
         )

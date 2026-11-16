@@ -49,7 +49,10 @@ defmodule MPP.Methods.Tempo do
       TIP-20 token to use for fee payment (e.g., pathUSD). Must be on the sponsor
       allowlist (`fee_payer_allowed_fee_tokens` or per-chain defaults).
     * `"fee_payer_allowed_fee_tokens"` — (optional, `fee_payer: true` only) list of
-      hex addresses overriding the default sponsor fee-token allowlist.
+      hex addresses overriding the default sponsor fee-token allowlist
+      (pathUSD plus the chain's default currency). A hosted fee payer chooses
+      the fee token it charges; name that token here when it is outside the
+      default, or the filled transaction is rejected.
     * `"fee_payer_policy"` — (optional, `fee_payer: true` only) map of sponsor
       ceilings overriding the per-chain defaults: `"max_gas"`,
       `"max_fee_per_gas"`, `"max_priority_fee_per_gas"`, `"max_total_fee"` (wei),
