@@ -4339,7 +4339,7 @@ markers = ["parallel"]
 acceptance_criteria = ["After a successful Tempo, EVM and Stripe verification the conn carries the verified payer; tests assert the value equals the on-chain sender / Stripe customer the method verified", "No payer is assigned when verification fails or the method cannot attest a payer", "Documented in MPP.Plug moduledoc"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields."
+body = "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields. 2026-11-20 sdk-delta-watch: for session credentials mppx #1300 (e2d81d0) and #1326 (b457436) accept a credential source only when it is the channel payer and the opening transaction's signature authenticates that payer (refs/mppx/src/tempo/session/server/CredentialVerification.ts assertCredentialSourceIsPayer / assertCredentialSourceCanSpend). Our session path does not read the credential source today; when this task exposes a payer for sessions, derive it from the channel payer under the same rule, never from the unverified source."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4369,7 +4369,7 @@ markers = ["parallel"]
 acceptance_criteria = ["A challenge above max_amount, above max_atomic_amount, or in a non-allowlisted currency is refused before any signature, with a specific error", "validBefore for an expires with a fractional second equals the reference SDKs' value (unit test with a reference-derived vector)", "MACH-funded charge selects the stablecoin fee token per refs; Moderato :integration test pays one MACH charge", "Existing provider tests stay green"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Client-side parity for MPP.Client.Providers.Tempo: (1) caller-configured max_amount / max_atomic_amount / currency allowlist refused before signing (mppx #1035 61b4c10, mpp-rs #629 8d27fac); (2) derive validBefore from a fractional challenge expires by rounding up to the next second, capped at the second after expiry (mppx #1042 68381a4, mpp-rs #630 eb0f55d); (3) for MACH-funded charges pay gas in a stablecoin rather than the charge currency (mpp-rs #616 09762dd). Verify constants against refs/mppx and refs/mpp-rs."
+body = "Client-side parity for MPP.Client.Providers.Tempo: (1) caller-configured max_amount / max_atomic_amount / currency allowlist refused before signing (mppx #1035 61b4c10, mpp-rs #629 8d27fac); (2) derive validBefore from a fractional challenge expires by rounding up to the next second, capped at the second after expiry (mppx #1042 68381a4, mpp-rs #630 eb0f55d); (3) for MACH-funded charges pay gas in a stablecoin rather than the charge currency (mpp-rs #616 09762dd). Verify constants against refs/mppx and refs/mpp-rs. 2026-11-20 sdk-delta-watch: (4) mppx #1293 (5e21a2e) simulates before signing and raises a typed SpendingLimitExceededError or InsufficientBalanceError when the gas estimate reverts with the access key's SpendingLimitExceeded or the token's InsufficientBalance, instead of signing a transaction that reverts on chain (refs/mppx/src/tempo/internal/simulation.ts, src/Errors.ts). Give the provider the same pre-signing check with specific errors."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4424,14 +4424,14 @@ shipped_in = "e43d1cb60c207f441fbc873133c271f699bda9e3"
 id = "163"
 phase = 1
 bundle = "mcp"
-status = "pending"
+status = "superseded"
 title = "MCP client pays the next supported challenge when the preferred one fails"
 scores = { d = 2, b = 3, u = 2 }
 markers = ["parallel"]
 acceptance_criteria = ["With two offered challenges where the provider refuses the first, the client pays the second (test)", "A provider error after a credential was sent does not trigger another payment", "Total payment attempts stay bounded as today"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "mpp-rs #602 (cedb328): when paying the preferred MCP challenge fails locally (provider refuses, unsupported currency), try the next supported challenge instead of giving up. MPP.Client.MCP stops at the first. Keep the existing at-most-two-payment-attempts bound. 2026-11-07 sdk-delta-watch: mpp-rs #686 (252f9bc) also stops MCP offer fallback once a payment outcome is unknown; the second criterion covers it, since our server broadcasts the client-signed transaction and a fallback could pay twice."
+body = "mpp-rs #602 (cedb328): when paying the preferred MCP challenge fails locally (provider refuses, unsupported currency), try the next supported challenge instead of giving up. MPP.Client.MCP stops at the first. Keep the existing at-most-two-payment-attempts bound. 2026-11-07 sdk-delta-watch: mpp-rs #686 (252f9bc) also stops MCP offer fallback once a payment outcome is unknown; the second criterion covers it, since our server broadcasts the client-signed transaction and a fallback could pay twice. 2026-11-20 sdk-delta-watch: superseded. mpp-rs #733 (823767d) removed this fallback: its MCP client now pays only the best-ranked offer and returns that offer's error, as mppx does, because a failed payment may already have moved funds. Both reference SDKs agree, and MPP.Client.MCP already stops at the first offer."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4736,6 +4736,53 @@ created_at = "2026-11-12"
 scored_at = "2026-11-12"
 done_at = "2026-11-12"
 shipped_in = "09212173c206061b6843f921071dfcf3eca6c904"
+
+[[task]]
+id = "181"
+phase = 1
+bundle = "tempo"
+status = "pending"
+title = "Accept Tempo Zone payments on the charge method"
+scores = { d = 8, b = 5, u = 3 }
+markers = ["parallel"]
+acceptance_criteria = ["A Tempo charge route configured with zones advertises them in the challenge method details and accepts a `zone` credential whose withdrawal settled the charge on Tempo, verified against the Zone portal's settlement (wire shape and checks match refs/mppx src/tempo/internal/zone.ts + src/tempo/server/Charge.ts and refs/mpp-rs src/protocol/methods/tempo/zone.rs + method/zone_credential.rs, cross-checked where they agree)", "One settlement pays once: a transfer sent by a Zone portal counts only through its `zone` credential and is refused as a `hash` credential (mppx #1309), and the dedup claim is shared between both paths (test)", "A `zone` credential for an expired challenge is refused unless the route opted into the grace option and the challenge was issued with it; the grace window and marker match the references (mppx #1313, mpp-rs #734)", "One real Zone payment and one relevant real rejection are pinned as `:integration` tests against a live Tempo network; missing credentials flunk with the exact `export` lines", "Routes without zones behave as today; existing Tempo tests and the mutation ledger stay green"]
+out_of_scope = ["Client-side Zone payments in MPP.Client.Providers.Tempo (withdrawal, fee caps, resume of a pending withdrawal: mppx #1310 / #1313)"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Both reference SDKs accept Tempo Zone payments on the charge method: mppx #1216 with the follow-up fixes #1284, #1309, #1310, #1313, and mpp-rs #734 (5c45d7b). A client pays from a Zone balance; the Zone portal withdraws to Tempo and the server verifies the new `zone` credential against that settlement. MPP.Methods.Tempo has no Zone support, so a mppx or mpp-rs client paying from a Zone cannot pay our routes. Port the server side: zones in the challenge method details, the `zone` payload type, settlement verification, single redemption across the `zone` and `hash` paths, and the opt-in expiry grace. Read both references at pickup and verify every wire-format constant against both. Premise unverified, confirm before building on it: that a Zone portal is reachable on Moderato for the live tests; if it exists only on mainnet, say so in the delivery and pin the live tests there."
+created_at = "2026-11-20"
+scored_at = "2026-11-20"
+
+[[task]]
+id = "182"
+phase = 1
+bundle = "session"
+status = "pending"
+title = "Accept TIP-1166 configurable account vouchers on Tempo sessions"
+scores = { d = 7, b = 3, u = 2 }
+markers = ["parallel"]
+acceptance_criteria = ["A Tempo session route that opts in advertises `configurableVouchers` and accepts a voucher signed under a TIP-1166 configurable account, verified against the channel's opening commitment (layout and checks match refs/mpp-rs src/protocol/methods/tempo/configurable_account.rs, precompile_voucher.rs and session_method/)", "The channel record stores the opening commitment and a voucher that does not match it is rejected with the session's existing verification error (test)", "Routes that do not opt in accept and reject exactly what they do today", "One live success and one relevant live rejection are pinned as `:integration` tests on Moderato; missing credentials flunk with the exact `export` lines"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mpp-rs #731 (8cc8280) adds TIP-1166 configurable account vouchers for TIP-1034 sessions: servers opt in (`SessionMethod::with_configurable_vouchers`, advertised as `configurableVouchers`), track each channel's `opening_commitment`, and check a configurable voucher against it; defaults are unchanged. Our Tempo session path verifies only the existing voucher forms. Port the server side behind an explicit opt-in. As of 2026-11-20 only mpp-rs implements this (no counterpart in refs/mppx/src), so there is a single reference: check mppx again at pickup and verify the signature and commitment layout against the TIP-1166 specification and a live Moderato call, not against mpp-rs alone."
+created_at = "2026-11-20"
+scored_at = "2026-11-20"
+
+[[task]]
+id = "183"
+phase = 1
+bundle = "evm"
+status = "pending"
+title = "x402 facilitator: read GET /supported and the facilitator-published payTo"
+scores = { d = 3, b = 3, u = 2 }
+markers = ["parallel"]
+acceptance_criteria = ["MPP.X402.Facilitator exposes a `supported` call (`GET /supported`) on the HTTP client and as an optional function on an in-process facilitator map; the response shape matches refs/mppx src/x402/server/Facilitator.ts and src/x402/Types.ts", "A helper returns the `payTo` a facilitator publishes there for a given scheme and network, so a route can use it as the charge recipient; an absent or ambiguous entry is an error, never a guess (test)", "Facilitator requests can carry different auth headers per endpoint (verify, settle, supported), as mppx #1323 does; a flat set for all endpoints keeps working through `:req_options`", "One real `GET /supported` success against a public x402 facilitator is pinned as an `:integration` test; the fast tests use that captured response"]
+out_of_scope = ["Sign-in-with-x (mppx #1303)", "The tempoX402 helper (mppx c5bbb31)"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mppx #1318 (c5c01a7) adds an optional `supported()` to x402 facilitator clients (`GET /supported`) and `evm.facilitatorPayTo()` to read the `payTo` a facilitator publishes there as the charge recipient; #1323 (6826a97) adds per-endpoint auth headers. MPP.X402.Facilitator has only `verify` and `settle`; static auth headers already work through `:req_options`, settle `extensions` are already kept, and `extra` is already caller-supplied in `accepts`. Add the `supported` call, the payTo helper and per-endpoint headers."
+created_at = "2026-11-20"
+scored_at = "2026-11-20"
 
 [bundles.testnet-funding]
 phase = 1
