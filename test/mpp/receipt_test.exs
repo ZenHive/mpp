@@ -204,5 +204,28 @@ defmodule MPP.ReceiptTest do
       encoded = Base.url_encode64(json, padding: false)
       assert {:error, :invalid_field_type} = Receipt.decode(encoded)
     end
+
+    # mpp-rs #703 (refs/mpp-rs/src/protocol/core/receipt.rs
+    # `test_parse_receipt_rejects_null_external_and_subscription_ids`); mppx
+    # declares all three members `z.optional(z.string())` (refs/mppx/src/Receipt.ts).
+    test "rejects an explicit null or non-string optional member" do
+      base = %{
+        "method" => "tempo",
+        "reference" => "0xabc",
+        "timestamp" => "2024-01-01T00:00:00Z",
+        "status" => "success"
+      }
+
+      for field <- ~w(externalId subscriptionId fundingCurrency), value <- [nil, 1] do
+        encoded = base |> Map.put(field, value) |> Jason.encode!() |> Base.url_encode64(padding: false)
+        assert {:error, :invalid_field_type} = Receipt.decode(encoded), "#{field}: #{inspect(value)}"
+      end
+
+      present = base |> Map.put("externalId", "id_1") |> Jason.encode!() |> Base.url_encode64(padding: false)
+      assert {:ok, %Receipt{external_id: "id_1", subscription_id: nil}} = Receipt.decode(present)
+
+      absent = base |> Jason.encode!() |> Base.url_encode64(padding: false)
+      assert {:ok, %Receipt{external_id: nil, subscription_id: nil, funding_currency: nil}} = Receipt.decode(absent)
+    end
   end
 end

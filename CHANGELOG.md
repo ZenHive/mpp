@@ -6,6 +6,12 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- `MPP.Receipt.decode/1` rejects an explicit `null` or non-string `externalId`, and an explicit `null` `subscriptionId` or `fundingCurrency`, with `{:error, :invalid_field_type}` instead of reading the member as absent (mpp-rs #703, mppx `Receipt.Schema`).
+
 ## [0.23.0] — 2026-11-16
 
 ### Changed

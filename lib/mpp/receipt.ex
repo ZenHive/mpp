@@ -124,15 +124,16 @@ defmodule MPP.Receipt do
   # Deserializes a string-keyed map into a receipt struct.
   defp from_map(%{"method" => method, "reference" => reference, "timestamp" => timestamp} = map)
        when is_binary(timestamp) do
-    with {:ok, subscription_id} <- optional_string(Map.get(map, "subscriptionId")),
-         {:ok, funding_currency} <- optional_string(Map.get(map, "fundingCurrency")) do
+    with {:ok, external_id} <- optional_string(map, "externalId"),
+         {:ok, subscription_id} <- optional_string(map, "subscriptionId"),
+         {:ok, funding_currency} <- optional_string(map, "fundingCurrency") do
       {:ok,
        %__MODULE__{
          status: Map.get(map, "status", "success"),
          method: method,
          timestamp: timestamp,
          reference: reference,
-         external_id: Map.get(map, "externalId"),
+         external_id: external_id,
          subscription_id: subscription_id,
          funding_currency: funding_currency,
          extensions: Map.drop(map, @core_wire_keys)
@@ -142,9 +143,16 @@ defmodule MPP.Receipt do
 
   defp from_map(_), do: {:error, :missing_required_fields}
 
-  defp optional_string(nil), do: {:ok, nil}
-  defp optional_string(value) when is_binary(value), do: {:ok, value}
-  defp optional_string(_value), do: {:error, :invalid_field_type}
+  # An optional member is absent or a string. An explicit `null` is rejected,
+  # as mppx's `z.optional(z.string())` (refs/mppx/src/Receipt.ts) and mpp-rs
+  # `deserialize_present_string` (refs/mpp-rs/src/protocol/core/receipt.rs) do.
+  defp optional_string(map, key) do
+    case Map.fetch(map, key) do
+      :error -> {:ok, nil}
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      {:ok, _value} -> {:error, :invalid_field_type}
+    end
+  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
