@@ -55,7 +55,7 @@
 | Task 161 `[P]` | ⬜ | 🎁 **tempo** · Accept sponsored Tempo swaps that acquire only the shortfall [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 162 | ✅ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
 | Task 163 `[P]` | ⛔ | 🎁 **mcp** · MCP client pays the next supported challenge when the preferred one fails [D:2/B:3/U:2 → Eff:1.25] 📋 |
-| Task 164 | ⬜ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:7/U:8 → Eff:1.88] 🚀 |
+| Task 164 | ✅ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:7/U:8 → Eff:1.88] 🚀 |
 | Task 165 | ⬜ | 🎁 **solana** · Implement the solana/subscription intent [D:7/B:4/U:2 → Eff:0.43] ⚠️ |
 | Task 166 | 🔶 | 🎁 **evm** · Track the EIP-3009 challenge nonce framing divergence between mppx and the EVM spec [D:2/B:3/U:2 → Eff:1.25] 📋 ⛔ waits on draft-evm-charge changing its EIP-3009 nonce derivation (tempoxyz/mpp-specs) |
 | Task 167 | ⬜ | 🎁 **session** · Session server accounting features from mppx [D:6/B:3/U:1 → Eff:0.33] ⚠️ |
