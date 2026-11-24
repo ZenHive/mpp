@@ -50,6 +50,8 @@ defmodule MPP.Client.Transport.HTTP do
   alias MPP.X402
   alias MPP.X402.Headers, as: X402Headers
 
+  @invalid_challenge_type MPP.Errors.new(:invalid_challenge, "").type
+
   api(:payment_required?, "Return true if the HTTP response is a 402 Payment Required.",
     params: [
       response: [kind: :value, description: "Req.Response struct"]
@@ -63,6 +65,76 @@ defmodule MPP.Client.Transport.HTTP do
 
   @spec payment_required?(Req.Response.t()) :: false
   def payment_required?(%Req.Response{}), do: false
+
+  api(
+    :invalid_challenge?,
+    "Return true if the response is a problem document of type `invalid-challenge`.",
+    params: [
+      response: [kind: :value, description: "Req.Response struct"]
+    ],
+    returns: %{type: :boolean, description: "true when the body is an RFC 9457 problem of type invalid-challenge"}
+  )
+
+  @doc """
+  Whether the response body is an `invalid-challenge` problem document.
+
+  A server answers a credential whose payment was already used this way, so a
+  client that sent a credential must not pay the fresh challenge beside it
+  (mppx `client/internal/Fetch.ts` `isInvalidChallengeResponse`).
+  """
+  @spec invalid_challenge?(Req.Response.t()) :: boolean()
+  def invalid_challenge?(%Req.Response{body: body} = response) do
+    problem_json?(response) and problem_type(body) == @invalid_challenge_type
+  end
+
+  defp problem_json?(response) do
+    response
+    |> Req.Response.get_header("content-type")
+    |> Enum.any?(fn value ->
+      value |> String.split(";", parts: 2) |> hd() |> String.trim() |> String.downcase() == "application/problem+json"
+    end)
+  end
+
+  # Req hands the body over decoded (string or atom keys) or raw, by its options.
+  defp problem_type(%{"type" => type}), do: type
+  defp problem_type(%{type: type}), do: type
+
+  defp problem_type(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"type" => type}} -> type
+      _other -> nil
+    end
+  end
+
+  defp problem_type(_body), do: nil
+
+  api(:credential?, "Return true if the request already carries a payment credential.",
+    params: [
+      request: [kind: :value, description: "Req.Request struct"]
+    ],
+    returns: %{
+      type: :boolean,
+      description:
+        "true when `Authorization` holds a `Payment` credential, or `Payment-Authorization` or `PAYMENT-SIGNATURE` is set"
+    }
+  )
+
+  @spec credential?(Req.Request.t()) :: boolean()
+  def credential?(%Req.Request{} = request) do
+    payment_scheme?(request) or header_set?(request, Challenge.payment_authorization_header()) or
+      header_set?(request, "payment-signature")
+  end
+
+  # `Authorization` may list several schemes; one of them is `Payment` with a token.
+  defp payment_scheme?(request) do
+    request
+    |> Req.Request.get_header("authorization")
+    |> Enum.any?(&Regex.match?(~r/(?:\A|,)[ \t]*payment[ \t]+[^ \t,]/i, &1))
+  end
+
+  defp header_set?(request, name) do
+    request |> Req.Request.get_header(String.downcase(name)) |> Enum.any?(&(String.trim(&1) != ""))
+  end
 
   api(:retry_after, "Read a Retry-After delta-seconds value from an HTTP response.",
     params: [response: [kind: :value, description: "Req.Response struct"]],

@@ -68,7 +68,7 @@ defmodule MPP.Methods.USDC.Replay do
 
     case Store.check_and_mark(store, @prefix <> key, token, challenge_expires: challenge_expires) do
       :ok -> {:ok, token}
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, detail)}
+      {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, detail)}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end

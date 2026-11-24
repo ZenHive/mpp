@@ -216,8 +216,21 @@ defmodule MPP.Methods.StripeTest do
 
       assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
       assert error.status == 402
-      assert error.type =~ "verification-failed"
       assert error.detail == "Payment has already been processed."
+      assert error.type == "https://paymentauth.org/problems/invalid-challenge"
+    end
+
+    # refs/mpp-rs/src/protocol/methods/stripe/method.rs: only a replayed response for
+    # a succeeded PaymentIntent is a payment already taken.
+    test "reads a replayed response for a PaymentIntent that needs action by its status", %{charge: charge} do
+      Req.Test.stub(Stripe, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("idempotent-replayed", "true")
+        |> Req.Test.json(%{"id" => @pi_id, "status" => "requires_action"})
+      end)
+
+      assert {:error, %Errors{} = error} = Stripe.verify(%{"spt" => @spt}, charge)
+      assert error.type =~ "payment-action-required"
     end
 
     test "returns error on Stripe API error response", %{charge: charge} do
@@ -2941,8 +2954,8 @@ defmodule MPP.Methods.StripeTest do
 
       assert conn.status == 402
       body = Jason.decode!(conn.resp_body)
-      assert body["type"] =~ "verification-failed"
       assert body["detail"] == "Payment has already been processed."
+      assert body["type"] == "https://paymentauth.org/problems/invalid-challenge"
     end
 
     test "Stripe 400 error body returns 402 through plug", %{config: config} do

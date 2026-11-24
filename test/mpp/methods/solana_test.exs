@@ -1093,6 +1093,7 @@ defmodule MPP.Methods.SolanaTest do
       assert {:ok, %Receipt{}} = Solana.verify(payload, charge)
       assert {:error, %Errors{} = error} = Solana.verify(payload, charge)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "does not mark a signature used when verification fails", %{
@@ -1150,6 +1151,7 @@ defmodule MPP.Methods.SolanaTest do
 
       assert {:error, %Errors{} = error} = Solana.verify(payload, second)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
 
       send(simulating, :go)
       assert {:ok, %Receipt{reference: ^signature}} = Task.await(task)

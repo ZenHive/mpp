@@ -304,7 +304,8 @@ defmodule MPP.X402.PlugTest do
       replayed = settle(opts, payload)
 
       assert replayed.status == 402
-      assert problem_detail(replayed) =~ "already been settled"
+      assert Jason.decode!(replayed.resp_body)["type"] == "https://paymentauth.org/problems/invalid-challenge"
+      assert problem_detail(replayed) =~ "already been presented"
       refute_received {:settle, _payload, _requirements}
     end
   end
@@ -334,7 +335,7 @@ defmodule MPP.X402.PlugTest do
       assert failed.status == 402
       assert problem_detail(failed) =~ expected
       assert Plug.Conn.get_resp_header(failed, "payment-response") == []
-      assert problem_detail(settle(opts, payload)) =~ "already been settled"
+      assert problem_detail(settle(opts, payload)) =~ "already been presented"
       refute_received {:settle, _, _}
     end
   end

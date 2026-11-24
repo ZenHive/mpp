@@ -81,6 +81,34 @@ defmodule MPP.Client.Transport.MCPTest do
     end
   end
 
+  describe "invalid_challenge?/1 and credential?/1" do
+    @invalid %{"type" => "https://paymentauth.org/problems/invalid-challenge"}
+    @failed %{"type" => "https://paymentauth.org/problems/verification-failed"}
+
+    test "reads the problem from an error, a tool result and their envelopes" do
+      error = %{"code" => -32_043, "data" => %{"problem" => @invalid}}
+      result = %{"_meta" => %{"org.paymentauth/payment-required" => %{"problem" => @invalid}}}
+
+      for response <- [error, %{"error" => error}, result, %{"result" => result}] do
+        assert MCP.invalid_challenge?(response)
+      end
+    end
+
+    test "is false for another problem type and for a response without a problem" do
+      refute MCP.invalid_challenge?(%{"error" => %{"data" => %{"problem" => @failed}}})
+      refute MCP.invalid_challenge?(%{"_meta" => %{"org.paymentauth/payment-required" => %{"problem" => @failed}}})
+      refute MCP.invalid_challenge?(%{"result" => %{"content" => []}})
+    end
+
+    test "a credential counts in an envelope or in bare params, a null placeholder does not" do
+      key = "org.paymentauth/credential"
+      assert MCP.credential?(%{"params" => %{"_meta" => %{key => %{"challenge" => %{}}}}})
+      assert MCP.credential?(%{"_meta" => %{key => %{"challenge" => %{}}}})
+      refute MCP.credential?(%{"params" => %{"_meta" => %{key => nil}}})
+      refute MCP.credential?(%{"params" => %{"name" => "tool"}})
+    end
+  end
+
   describe "get_challenges/1" do
     test "parses challenges from a bare error and a full envelope" do
       challenge = make_challenge()

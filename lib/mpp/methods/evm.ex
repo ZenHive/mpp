@@ -473,7 +473,7 @@ defmodule MPP.Methods.EVM do
   defp check_hash_unused(store, hash) do
     case Store.get(store, store_key(hash)) do
       :not_found -> :ok
-      {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:ok, _} -> {:error, Errors.new(:invalid_challenge, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
@@ -489,7 +489,7 @@ defmodule MPP.Methods.EVM do
            challenge_expires: config["challenge_expires"]
          ) do
       :ok -> :ok
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end

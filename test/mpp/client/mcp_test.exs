@@ -468,6 +468,73 @@ defmodule MPP.Client.MCPTest do
       refute_received {:approval, _}
     end
 
+    # refs/mppx/src/mcp/client/McpClient.ts: invalid-challenge answering the
+    # credential just sent can mean it was already settled, so the result is final.
+    test "pays once when a -32043 with challenges carries an invalid-challenge problem" do
+      required = Mcp.payment_required_error(make_challenge("tempo"))
+      replayed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:invalid_challenge, "used"))
+
+      send_fun = fn request ->
+        paid? = get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) != nil
+        %{"jsonrpc" => "2.0", "id" => request["id"], "error" => if(paid?, do: replayed, else: required)}
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"error" => ^replayed}} = ClientMCP.call(client, json_rpc_request(), send_fun)
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    test "does not pay when invalid-challenge answers a credential the caller attached" do
+      replayed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:invalid_challenge, "used"))
+      request = put_in(json_rpc_request(), ["params", "_meta"], %{Mcp.credential_meta_key() => %{"challenge" => %{}}})
+      send_fun = fn request -> %{"jsonrpc" => "2.0", "id" => request["id"], "error" => replayed} end
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"error" => ^replayed}} = ClientMCP.call(client, request, send_fun)
+      refute_received {:paid, _}
+    end
+
+    test "does not pay an invalid-challenge tool result answering a caller-attached credential" do
+      [challenge] = Mcp.payment_required_error(make_challenge("tempo"))["data"]["challenges"]
+
+      result = %{
+        "isError" => true,
+        "_meta" => %{
+          "org.paymentauth/payment-required" => %{
+            "challenges" => [challenge],
+            "problem" => %{"type" => "https://paymentauth.org/problems/invalid-challenge"}
+          }
+        }
+      }
+
+      request = put_in(json_rpc_request(), ["params", "_meta"], %{Mcp.credential_meta_key() => %{"challenge" => %{}}})
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      for response <- [result, %{"jsonrpc" => "2.0", "id" => 1, "result" => result}] do
+        assert {:ok, ^response} = ClientMCP.call(client, request, fn _request -> response end)
+        refute_received {:paid, _}
+      end
+    end
+
+    test "pays an invalid-challenge answer when the request holds only a null credential placeholder" do
+      replayed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:invalid_challenge, "used"))
+      request = put_in(json_rpc_request(), ["params", "_meta"], %{Mcp.credential_meta_key() => nil})
+
+      send_fun = fn request ->
+        case get_in(request, ["params", "_meta", Mcp.credential_meta_key()]) do
+          nil -> %{"jsonrpc" => "2.0", "id" => request["id"], "error" => replayed}
+          _credential -> %{"jsonrpc" => "2.0", "id" => request["id"], "result" => %{"content" => []}}
+        end
+      end
+
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %{"result" => %{"content" => []}}} = ClientMCP.call(client, request, send_fun)
+      assert_received {:paid, "tempo"}
+    end
+
     test "does not pay a third time when the server keeps returning -32043 with challenges" do
       required = Mcp.payment_required_error(make_challenge("tempo"))
       failed = Mcp.verification_failed_error(make_challenge("tempo"), MPP.Errors.new(:verification_failed, "again"))

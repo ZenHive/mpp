@@ -382,7 +382,7 @@ defmodule MPP.Methods.Tempo do
 
     with {:ok, source} <- parse_hash_credential_source(config["credential_source"], expected_chain_id),
          {:ok, hash} <- Shared.extract_hash(payload),
-         :ok <- check_hash_unused(store, hash),
+         :ok <- check_hash_unused(store, hash, config),
          :ok <- verify_hash_presenter_binding(payload, source, expected_chain_id, config),
          {:ok, rpc_url} <- Shared.require_config(config, "rpc_url", "Tempo"),
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
@@ -1102,7 +1102,7 @@ defmodule MPP.Methods.Tempo do
   defp commit_proof_used(nil, _config), do: :ok
 
   defp commit_proof_used(store, %{"challenge_id" => challenge_id} = config) when is_binary(challenge_id) do
-    commit_store_mark(store, @proof_store_key_prefix <> challenge_id, config)
+    claim_atomic(store, @proof_store_key_prefix <> challenge_id, System.system_time(:millisecond), config)
   end
 
   defp commit_proof_used(_store, _config), do: :ok
@@ -1795,14 +1795,12 @@ defmodule MPP.Methods.Tempo do
   # `releaseHashUse`).
 
   # Checks if a hash has already been used (read-only). Used by hash path before verification.
-  defp check_hash_unused(nil, _hash), do: :ok
+  defp check_hash_unused(nil, _hash, _config), do: :ok
 
-  defp check_hash_unused(store, hash) do
-    key = store_key(hash)
-
-    case store_get(store, key) do
+  defp check_hash_unused(store, hash, config) do
+    case store_get(store, store_key(hash)) do
       :not_found -> :ok
-      {:ok, _} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:ok, holder} -> {:error, hash_used_error(holder, config)}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
@@ -1811,16 +1809,38 @@ defmodule MPP.Methods.Tempo do
   # atomic check_and_mark/2. Concurrent same-hash requests collide here, so exactly
   # one wins and the loser gets "already used". Atomicity is guaranteed by
   # validate_store!/1 (a non-atomic store is rejected at init), so there is no
-  # non-atomic fallback (GHSA-w8j7-7qc3-5f24).
+  # non-atomic fallback (GHSA-w8j7-7qc3-5f24). The mark holds the id of the
+  # challenge the transfer was counted toward.
   defp commit_hash_used(nil, _hash, _config), do: :ok
 
   defp commit_hash_used(store, hash, config) do
-    commit_store_mark(store, store_key(hash), config)
+    key = store_key(hash)
+    holder = config["challenge_id"] || System.system_time(:millisecond)
+
+    case Store.check_and_mark(store, key, holder, challenge_expires: config["challenge_expires"]) do
+      :ok -> :ok
+      {:error, :already_exists} -> {:error, hash_used_error(winning_holder(store, key), config)}
+      {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+    end
   end
 
-  defp commit_store_mark(store, key, config) do
-    claim_atomic(store, key, System.system_time(:millisecond), config)
+  defp winning_holder(store, key) do
+    case store_get(store, key) do
+      {:ok, holder} -> holder
+      _other -> nil
+    end
   end
+
+  # A hash credential presented again for the challenge its transfer was counted
+  # toward is a replayed credential: `invalid-challenge`, which a client reads as
+  # final. A transfer counted toward another challenge does not pay this one:
+  # `verification-failed` (draft-tempo-charge-00, Accepted-Transfer Record).
+  defp hash_used_error(holder, %{"challenge_id" => challenge_id})
+       when is_binary(challenge_id) and holder == challenge_id do
+    Errors.new(:invalid_challenge, "Transaction hash already used")
+  end
+
+  defp hash_used_error(_holder, _config), do: Errors.new(:verification_failed, "Transaction hash already used")
 
   # Atomically reserves a hash before broadcast. Used by the transaction path to
   # prevent concurrent duplicate broadcasts of the same signed tx. The stored
@@ -1856,7 +1876,7 @@ defmodule MPP.Methods.Tempo do
   defp claim_atomic(store, key, value, config) do
     case Store.check_and_mark(store, key, value, challenge_expires: config["challenge_expires"]) do
       :ok -> :ok
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Transaction hash already used")}
       {:error, _reason} -> {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
     end
   end
@@ -1886,7 +1906,7 @@ defmodule MPP.Methods.Tempo do
     )
     |> case do
       :ok -> :ok
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction hash already used")}
+      {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Transaction hash already used")}
       {:error, reason} -> settled_claim_fault(inspect(reason))
     end
   rescue

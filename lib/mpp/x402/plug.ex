@@ -171,7 +171,7 @@ defmodule MPP.X402.Plug do
       {:ok, put_settlement(conn, settled)}
     else
       {:error, %Errors{} = error} -> {:error, error}
-      {:error, :already_used} -> {:error, Errors.new(:verification_failed, "x402 payment has already been settled")}
+      {:error, :already_used} -> {:error, Errors.new(:invalid_challenge, "x402 payment has already been presented")}
       {:error, :store_error} -> {:error, Shared.internal_payment_error()}
       {:error, reason} when is_atom(reason) -> {:error, Errors.new(:verification_failed, "x402 #{reason}")}
       {:error, reason} when is_binary(reason) -> {:error, Errors.new(:verification_failed, reason)}

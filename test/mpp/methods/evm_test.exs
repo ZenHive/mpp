@@ -957,6 +957,7 @@ defmodule MPP.Methods.EVMTest do
 
       assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "rejects the same tx hash presented for a fresh challenge (cross-challenge reuse)", %{
@@ -975,6 +976,7 @@ defmodule MPP.Methods.EVMTest do
 
       assert {:error, %Errors{} = error} = EVM.verify(payload, fresh)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "canonicalizes the hash — an uppercase-hex variant collides with the stored entry", %{
@@ -987,6 +989,7 @@ defmodule MPP.Methods.EVMTest do
       upper = "0x" <> String.upcase(String.duplicate("ab", 32))
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => upper}, charge)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "does not mark a hash used when verification fails (commit is after verify)", %{
@@ -1021,6 +1024,7 @@ defmodule MPP.Methods.EVMTest do
       assert {:ok, %Receipt{}} = EVM.verify(payload, charge)
       assert {:error, %Errors{} = error} = EVM.verify(payload, charge)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "store: false opts out — the same hash verifies again", %{charge: charge} do
@@ -1094,6 +1098,7 @@ defmodule MPP.Methods.EVMTest do
 
       assert {:error, %Errors{} = error} = EVM.verify(%{"hash" => @tx_hash}, charge)
       assert error.detail =~ "already used"
+      assert error.type =~ "invalid-challenge"
     end
 
     test "unexpected atomic commit error surfaces a generic dedup error", %{charge: charge} do

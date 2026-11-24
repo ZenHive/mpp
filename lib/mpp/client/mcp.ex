@@ -107,7 +107,9 @@ defmodule MPP.Client.MCP do
 
   @doc """
   Send `request` through `send_fun`, paying on `-32042` and at most once more
-  on a `-32043` that carries challenges.
+  on a `-32043` that carries challenges. An `invalid-challenge` answer to a
+  credential that was sent, by this client or attached to `request` by the
+  caller, is returned as final: the payment may already be settled.
 
   `send_fun` receives the JSON-RPC request map and must return a JSON-RPC
   response map. Per-call `:on_payment_required` overrides the client hook;
@@ -121,18 +123,25 @@ defmodule MPP.Client.MCP do
 
     case send_fun.(request) do
       response when is_map(response) ->
-        handle_response(client, request, response, send_fun, hook, 0)
+        handle_response(client, request, response, send_fun, hook, 0, MCPTransport.credential?(request))
 
       _other ->
         {:error, :malformed_envelope}
     end
   end
 
-  defp handle_response(client, request, response, send_fun, hook, payments_made) do
-    if payments_made < @max_payment_attempts and payable?(response, payments_made) do
-      pay_and_continue(client, request, response, send_fun, hook, payments_made)
-    else
-      {:ok, response}
+  defp handle_response(client, request, response, send_fun, hook, payments_made, credential_sent?) do
+    cond do
+      # The payment behind a sent credential may already be settled; paying the
+      # fresh challenge would pay twice (mppx mcp/client/McpClient.ts).
+      credential_sent? and MCPTransport.invalid_challenge?(response) ->
+        {:ok, response}
+
+      payments_made < @max_payment_attempts and payable?(response, payments_made) ->
+        pay_and_continue(client, request, response, send_fun, hook, payments_made)
+
+      true ->
+        {:ok, response}
     end
   end
 
@@ -149,7 +158,7 @@ defmodule MPP.Client.MCP do
          {:ok, credential} <- MultiProvider.pay(client.provider, challenge, %{request_url: nil}) do
       case request |> MCPTransport.set_credential(credential) |> send_fun.() do
         next when is_map(next) ->
-          handle_response(client, request, next, send_fun, hook, payments_made + 1)
+          handle_response(client, request, next, send_fun, hook, payments_made + 1, true)
 
         _other ->
           {:error, :malformed_envelope}

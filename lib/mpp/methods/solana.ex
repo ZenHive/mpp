@@ -1060,7 +1060,7 @@ defmodule MPP.Methods.Solana do
            challenge_expires: config["challenge_expires"]
          ) do
       :ok -> :ok
-      {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Transaction signature already used")}
+      {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Transaction signature already used")}
       {:error, _reason} -> {:error, Shared.internal_payment_error()}
     end
   end
@@ -1138,7 +1138,7 @@ defmodule MPP.Methods.Solana do
     end
   end
 
-  defp signature_used_error, do: Errors.new(:verification_failed, "Transaction signature already used")
+  defp signature_used_error, do: Errors.new(:invalid_challenge, "Transaction signature already used")
 
   defp simulate_reserved(tx, rpc_url, config, reservation) do
     release_on_error(simulate_transaction(tx, rpc_url, config), reservation)

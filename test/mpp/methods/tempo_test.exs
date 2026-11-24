@@ -1745,12 +1745,29 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
+      charge = put_in(charge.method_details["challenge_id"], "challenge-one")
+
       # First call succeeds
       assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
-      # Second call with same hash is rejected
+      # The same credential again is a replay, which a client reads as final
       assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
-      assert error.type =~ "verification-failed"
+      assert error.type == "https://paymentauth.org/problems/invalid-challenge"
+      assert error.detail =~ "already used"
+    end
+
+    # refs/mpp-specs/specs/methods/tempo/draft-tempo-charge-00.md, Accepted-Transfer
+    # Record: a transfer counted toward one challenge does not pay another.
+    test "hash path answers a transfer counted toward another challenge with verification-failed", %{charge: charge} do
+      stub_receipt(success_receipt())
+      payload = %{"type" => "hash", "hash" => @tx_hash}
+      first = put_in(charge.method_details["challenge_id"], "challenge-one")
+      second = put_in(charge.method_details["challenge_id"], "challenge-two")
+
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, first)
+
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, second)
+      assert error.type == "https://paymentauth.org/problems/verification-failed"
       assert error.detail =~ "already used"
     end
 
@@ -1768,7 +1785,7 @@ defmodule MPP.Methods.TempoTest do
 
       # Second call with same signed tx is rejected before broadcast
       assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
-      assert error.type =~ "verification-failed"
+      assert error.type =~ "invalid-challenge"
       assert error.detail =~ "already used"
     end
 

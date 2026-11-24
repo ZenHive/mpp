@@ -221,6 +221,7 @@ defmodule MPP.Transports.JsonRpcTest do
       second = JsonRpc.call(request, config, fn _ -> flunk("replay") end)
       assert second["error"]["code"] == -32_043
       assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
+      assert second["error"]["data"]["problem"]["type"] =~ "invalid-challenge"
     end
   end
 

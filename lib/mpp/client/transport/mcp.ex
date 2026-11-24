@@ -60,6 +60,17 @@ defmodule MPP.Client.Transport.MCP do
   @spec rechallenge?(term()) :: false
   def rechallenge?(_response), do: false
 
+  api(:invalid_challenge?, "Return true if the JSON-RPC message carries an `invalid-challenge` problem.",
+    params: [
+      response: [kind: :value, description: "JSON-RPC response envelope or error object"]
+    ],
+    returns: %{type: :boolean, description: "true when `error.data.problem.type` is the invalid-challenge problem type"}
+  )
+
+  @spec invalid_challenge?(term()) :: boolean()
+  def invalid_challenge?(response) when is_map(response), do: Mcp.invalid_challenge?(response)
+  def invalid_challenge?(_response), do: false
+
   api(:get_challenges, "Parse Payment challenges from a JSON-RPC payment-required message.",
     params: [
       response: [kind: :value, description: "JSON-RPC response envelope, error object, or result fragment"]
@@ -104,6 +115,25 @@ defmodule MPP.Client.Transport.MCP do
 
   # JSON-RPC envelopes carry `jsonrpc` / `params` / `method`. MCP tool-call
   # params use `name` for the tool and never look like an envelope.
+  api(:credential?, "Return true if the request already carries a credential in `_meta`.",
+    params: [
+      request: [kind: :value, description: "JSON-RPC request envelope or MCP tool-params map"]
+    ],
+    returns: %{type: :boolean, description: "true when `_meta[\"org.paymentauth/credential\"]` is set and not null"}
+  )
+
+  @spec credential?(term()) :: boolean()
+  def credential?(%{} = request) do
+    params = if json_rpc_request?(request), do: Map.get(request, "params"), else: request
+
+    case params do
+      %{"_meta" => %{} = meta} -> not is_nil(meta[Mcp.credential_meta_key()])
+      _other -> false
+    end
+  end
+
+  def credential?(_request), do: false
+
   defp json_rpc_request?(request) do
     Map.has_key?(request, "jsonrpc") or Map.has_key?(request, "params") or
       (is_binary(Map.get(request, "method")) and not Map.has_key?(request, "name"))

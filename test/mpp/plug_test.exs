@@ -955,8 +955,27 @@ defmodule MPP.PlugTest do
 
       assert second_conn.status == 402
       body = decode_json_body(second_conn)
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] == "https://paymentauth.org/problems/invalid-challenge"
       assert body["detail"] == "Payment credential already used"
+
+      # The replay answer carries a fresh challenge, as the core spec asks for an
+      # already-used credential (refs/mppx/src/Errors.ts CredentialReplayedError).
+      assert [www_authenticate] = Plug.Conn.get_resp_header(second_conn, "www-authenticate")
+      assert {:ok, [fresh]} = Headers.parse_challenges(www_authenticate)
+      assert {:ok, %Credential{challenge: used}} = Headers.parse_credential(auth_header)
+      refute fresh.id == used.id
+    end
+
+    test "a credential that fails verification is still answered with verification-failed", %{config: config} do
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config, %{"proof" => "invalid"}))
+        |> call_plug(config)
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] == "https://paymentauth.org/problems/verification-failed"
+      assert [_challenge] = Plug.Conn.get_resp_header(conn, "www-authenticate")
     end
 
     test "does not mark failed method verification as used", %{config: config} do

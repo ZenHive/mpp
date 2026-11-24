@@ -330,12 +330,8 @@ defmodule MPP.Methods.Stripe do
       )
 
     case result do
-      {:ok, %Req.Response{status: status, body: body} = response} when status in 200..299 ->
-        if idempotent_replayed?(response) do
-          {:error, Errors.new(:verification_failed, "Payment has already been processed.")}
-        else
-          {:ok, body}
-        end
+      {:ok, %Req.Response{status: status} = response} when status in 200..299 ->
+        payment_intent_or_replay(response)
 
       {:ok, %Req.Response{status: status}} when status >= 500 ->
         Logger.warning("MPP.Methods.Stripe: PaymentIntent request failed with HTTP #{status}")
@@ -426,6 +422,16 @@ defmodule MPP.Methods.Stripe do
 
   # Stripe marks replayed idempotency keys with Idempotent-Replayed: true.
   # https://docs.stripe.com/error-low-level#idempotency
+  # A replayed response for a PaymentIntent that succeeded is a payment already
+  # taken (mpp-rs stripe/method.rs). Any other replayed status is read as usual.
+  defp payment_intent_or_replay(%Req.Response{body: body} = response) do
+    if idempotent_replayed?(response) and match?(%{"status" => "succeeded"}, body) do
+      {:error, Errors.new(:invalid_challenge, "Payment has already been processed.")}
+    else
+      {:ok, body}
+    end
+  end
+
   defp idempotent_replayed?(response) do
     match?(["true" | _], Req.Response.get_header(response, "idempotent-replayed"))
   end

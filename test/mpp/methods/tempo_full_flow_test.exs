@@ -235,7 +235,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       # Second: same challenge and tx, rejected as already used
       body = submit_challenge!(config, challenge, payload)
 
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
     end
   end
@@ -330,7 +330,7 @@ defmodule MPP.Methods.TempoFullFlowTest do
       # Second: same client tx -> store catches duplicate
       body = submit_challenge!(config, challenge, payload)
 
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
     end
   end

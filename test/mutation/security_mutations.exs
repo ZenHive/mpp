@@ -72,7 +72,7 @@ defmodule MPP.Test.SecurityMutations do
         "credential-replay-precheck-bypassed",
         "replay",
         "lib/mpp/replay.ex",
-        "        {:ok, _value} -> {:error, Errors.new(:verification_failed, \"Payment credential already used\")}\n",
+        "        {:ok, _value} -> {:error, Errors.new(:invalid_challenge, \"Payment credential already used\")}\n",
         "        {:ok, _value} -> :ok\n",
         ["test/mpp/replay_test.exs"],
         false
@@ -215,7 +215,7 @@ defmodule MPP.Test.SecurityMutations do
         "tempo-proof-single-use-bypassed",
         "tempo-proof-single-use",
         "lib/mpp/methods/tempo.ex",
-        "commit_store_mark(store, @proof_store_key_prefix <> challenge_id, config)",
+        "claim_atomic(store, @proof_store_key_prefix <> challenge_id, System.system_time(:millisecond), config)",
         "_unused = {store, @proof_store_key_prefix <> challenge_id, config}\n    :ok",
         ["test/mpp/methods/tempo_test.exs"],
         true

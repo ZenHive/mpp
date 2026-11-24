@@ -1035,8 +1035,17 @@ defmodule MPP.McpTest do
           flunk("handler must not run when the credential is replayed")
         end)
 
+      # refs/mppx/src/Mcp.ts paymentVerificationFailedCode and refs/mpp-rs/src/mcp.rs
+      # PAYMENT_VERIFICATION_FAILED_CODE: a replay keeps -32043, with problem type
+      # invalid-challenge and fresh challenges.
       assert second["error"]["code"] == -32_043
+      assert second["error"]["data"]["problem"]["type"] == "https://paymentauth.org/problems/invalid-challenge"
       assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
+      assert [_ | _] = fresh = second["error"]["data"]["challenges"]
+      used = request["params"]["_meta"][Mcp.credential_meta_key()]["challenge"]["id"]
+      assert is_binary(used)
+      refute used in Enum.map(fresh, & &1["id"])
+      assert Mcp.invalid_challenge?(second)
     end
 
     test "emits verify start/fail telemetry when a replayed credential is rejected — parity with MPP.Plug" do
@@ -1067,7 +1076,7 @@ defmodule MPP.McpTest do
       assert second["error"]["data"]["problem"]["detail"] == "Payment credential already used"
 
       assert_receive {:telemetry, [:mpp, :verify, :fail], %{challenge_id: ^challenge_id} = metadata}
-      assert metadata.error_type == "https://paymentauth.org/problems/verification-failed"
+      assert metadata.error_type == "https://paymentauth.org/problems/invalid-challenge"
     end
 
     test "treats non-map JSON-RPC params as carrying no credential" do

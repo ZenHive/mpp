@@ -84,6 +84,9 @@ defmodule MPP.Client.Req do
     * `:accept_policy` — `MPP.Client.AcceptPolicy.t()` gating header injection
       (default `:always`)
     * `:max_payment_retries` — payment attempts after a 402 (default 3)
+      A 402 of problem type `invalid-challenge` that answers a request carrying
+      a credential, one this plugin sent or one the caller attached, is returned
+      as final: the payment behind the credential may already be settled
     * `:on_payment_required` — `(MPP.Challenge.t() -> boolean())` invoked after
       a challenge is selected and before `pay/2`. The hook fires on every
       payment. `nil` (default) skips approval.
@@ -186,6 +189,11 @@ defmodule MPP.Client.Req do
 
     cond do
       not HTTP.payment_required?(response) ->
+        {request, response}
+
+      # The payment behind a sent credential may already be settled; paying the
+      # fresh challenge would pay twice (mppx client/internal/Fetch.ts).
+      (retries > 0 or HTTP.credential?(request)) and HTTP.invalid_challenge?(response) ->
         {request, response}
 
       retries >= config.max_retries ->

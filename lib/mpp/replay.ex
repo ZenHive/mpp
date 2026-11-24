@@ -60,7 +60,7 @@ defmodule MPP.Replay do
     with {:ok, key} <- safe_key(credential) do
       case Store.get(store, key) do
         :not_found -> :ok
-        {:ok, _value} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+        {:ok, _value} -> {:error, Errors.new(:invalid_challenge, "Payment credential already used")}
         {:error, _reason} -> {:error, Shared.internal_payment_error()}
       end
     end
@@ -82,7 +82,7 @@ defmodule MPP.Replay do
     with {:ok, key} <- safe_key(credential) do
       case Store.check_and_mark(store, key, value, challenge_expires: credential.challenge.expires) do
         :ok -> :ok
-        {:error, :already_exists} -> {:error, Errors.new(:verification_failed, "Payment credential already used")}
+        {:error, :already_exists} -> {:error, Errors.new(:invalid_challenge, "Payment credential already used")}
         {:error, _reason} -> {:error, Shared.internal_payment_error()}
       end
     end

@@ -140,6 +140,17 @@ defmodule MPP.Client.ReqTest do
     end
   end
 
+  # What MPP.Plug answers a replayed credential with: 402, a fresh challenge and
+  # an invalid-challenge problem document.
+  defp replay_answer(conn, challenge_header) do
+    problem = MPP.Errors.new(:invalid_challenge, "Payment credential already used")
+
+    conn
+    |> Plug.Conn.put_resp_header("www-authenticate", challenge_header)
+    |> Plug.Conn.put_resp_content_type("application/problem+json")
+    |> Plug.Conn.send_resp(402, Jason.encode!(MPP.Errors.to_map(problem)))
+  end
+
   defp client(plug, opts) do
     [plug: plug]
     |> Req.new()
@@ -418,6 +429,78 @@ defmodule MPP.Client.ReqTest do
       assert {:ok, %Req.Response{status: 402, body: "still-pay"}} =
                Req.get(req, url: "http://example.com/resource")
 
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    # refs/mppx/src/client/internal/Fetch.ts: invalid-challenge answering a sent
+    # credential can mean it was already settled, so the 402 is final.
+    test "pays once when the server answers every credential with invalid-challenge" do
+      plug = fn conn ->
+        send(self(), {:request, Plug.Conn.get_req_header(conn, "authorization") != []})
+        replay_answer(conn, challenge_header("tempo"))
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 402} = response} = Req.get(req, url: "http://example.com/resource")
+      assert MPP.Client.Transport.HTTP.invalid_challenge?(response)
+
+      assert_received {:request, false}
+      assert_received {:paid, "tempo"}
+      assert_received {:request, true}
+      refute_received {:paid, _}
+      refute_received {:request, _}
+    end
+
+    test "does not pay when invalid-challenge answers a credential the caller attached" do
+      plug = fn conn -> replay_answer(conn, challenge_header("tempo")) end
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 402}} =
+               Req.get(req, url: "http://example.com/resource", headers: [{"authorization", "Payment eyJhIjoiYiJ9"}])
+
+      refute_received {:paid, _}
+    end
+
+    test "does not pay when invalid-challenge answers a caller-attached Payment-Authorization or PAYMENT-SIGNATURE" do
+      plug = fn conn -> replay_answer(conn, challenge_header("tempo")) end
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      for header <- [{"payment-authorization", "Payment eyJhIjoiYiJ9"}, {"payment-signature", "eyJhIjoiYiJ9"}] do
+        assert {:ok, %Req.Response{status: 402}} = Req.get(req, url: "http://example.com/resource", headers: [header])
+        refute_received {:paid, _}
+      end
+    end
+
+    test "pays an invalid-challenge answer to a request that carried no credential" do
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> replay_answer(conn, challenge_header("tempo"))
+          [_credential] -> Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "tempo"}
+    end
+
+    test "keeps paying a verification-failed answer until the retry budget is spent" do
+      plug = fn conn ->
+        problem = MPP.Errors.new(:verification_failed, "not yet")
+
+        conn
+        |> Plug.Conn.put_resp_header("www-authenticate", challenge_header("tempo"))
+        |> Plug.Conn.put_resp_content_type("application/problem+json")
+        |> Plug.Conn.send_resp(402, Jason.encode!(MPP.Errors.to_map(problem)))
+      end
+
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}}, max_payment_retries: 2)
+
+      assert {:ok, %Req.Response{status: 402}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "tempo"}
       assert_received {:paid, "tempo"}
       refute_received {:paid, _}
     end

@@ -81,6 +81,7 @@ defmodule MPP.Mcp do
   @payment_required_types Enum.map([:payment_required, :sponsor_capacity_exhausted], &Errors.new(&1, "").type)
   @invalid_params_types Enum.map([:malformed_credential, :invalid_payload], &Errors.new(&1, "").type)
   @internal_error_type Errors.new(:internal_payment_error, "").type
+  @invalid_challenge_type Errors.new(:invalid_challenge, "").type
 
   # Metadata key for credentials in params._meta
   @credential_meta_key "org.paymentauth/credential"
@@ -446,6 +447,41 @@ defmodule MPP.Mcp do
 
   @spec rechallenge?(map()) :: false
   def rechallenge?(%{}), do: false
+
+  api(
+    :invalid_challenge?,
+    "Check whether a JSON-RPC error carries an `invalid-challenge` problem, the answer to a replayed credential.",
+    params: [
+      error: [
+        kind: :value,
+        description: "JSON-RPC error map with `data.problem`, a tool result, or a full response envelope"
+      ]
+    ],
+    returns: %{
+      type: :boolean,
+      description:
+        "`true` if the problem in `data.problem`, or in a result's payment-required metadata, is `invalid-challenge`"
+    },
+    composes_with: [:rechallenge?, :verification_failed_error]
+  )
+
+  @doc """
+  Whether a JSON-RPC error carries an `invalid-challenge` problem.
+
+  A server answers a credential whose payment was already used this way. A
+  client that sent a credential treats the answer as final instead of paying
+  the challenges it carries (mppx `mcp/client/McpClient.ts` `isInvalidChallenge`).
+  """
+  @spec invalid_challenge?(map()) :: boolean()
+  def invalid_challenge?(%{"data" => %{"problem" => %{"type" => @invalid_challenge_type}}}), do: true
+  def invalid_challenge?(%{"error" => error}) when is_map(error), do: invalid_challenge?(error)
+  def invalid_challenge?(%{"result" => result}) when is_map(result), do: invalid_challenge?(result)
+
+  def invalid_challenge?(%{
+        "_meta" => %{@payment_required_meta_key => %{"problem" => %{"type" => @invalid_challenge_type}}}
+      }), do: true
+
+  def invalid_challenge?(%{}), do: false
 
   api(
     :extract_challenges,

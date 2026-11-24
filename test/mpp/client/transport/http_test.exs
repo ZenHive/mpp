@@ -101,6 +101,61 @@ defmodule MPP.Client.Transport.HTTPTest do
     end
   end
 
+  describe "invalid_challenge?/1" do
+    @invalid "https://paymentauth.org/problems/invalid-challenge"
+
+    defp problem_response(body, content_type) do
+      Req.Response.put_header(%Req.Response{status: 402, body: body}, "content-type", content_type)
+    end
+
+    test "reads a problem document decoded with string keys, atom keys, or left raw" do
+      for body <- [%{"type" => @invalid}, %{type: @invalid}, Jason.encode!(%{"type" => @invalid})] do
+        assert HTTP.invalid_challenge?(problem_response(body, "application/problem+json"))
+      end
+
+      assert HTTP.invalid_challenge?(problem_response(%{"type" => @invalid}, "Application/Problem+JSON; charset=utf-8"))
+    end
+
+    test "is false for another problem type, another media type and a body that is not JSON" do
+      failed = %{"type" => "https://paymentauth.org/problems/verification-failed"}
+      refute HTTP.invalid_challenge?(problem_response(failed, "application/problem+json"))
+      refute HTTP.invalid_challenge?(problem_response(%{"type" => @invalid}, "application/json"))
+      refute HTTP.invalid_challenge?(problem_response(Jason.encode!(%{"type" => @invalid}), "application/json"))
+      refute HTTP.invalid_challenge?(problem_response(%{"type" => @invalid}, "text/plain; note=application/problem+json"))
+      refute HTTP.invalid_challenge?(problem_response("payment required", "application/problem+json"))
+      refute HTTP.invalid_challenge?(%Req.Response{status: 402, body: %{"type" => @invalid}})
+    end
+  end
+
+  describe "credential?/1" do
+    defp request_with(headers), do: Req.Request.put_headers(Req.Request.new(url: "http://example.com"), headers)
+
+    test "is true for a Payment credential in any of the three headers" do
+      for headers <- [
+            [{"authorization", "Payment eyJhIjoiYiJ9"}],
+            [{"authorization", "payment\teyJhIjoiYiJ9"}],
+            [{"authorization", "Bearer abc, Payment eyJhIjoiYiJ9"}],
+            [{"payment-authorization", "Payment eyJhIjoiYiJ9"}],
+            [{"payment-signature", "eyJhIjoiYiJ9"}]
+          ] do
+        assert HTTP.credential?(request_with(headers)), inspect(headers)
+      end
+    end
+
+    test "is false without a credential token" do
+      for headers <- [
+            [],
+            [{"authorization", "Bearer abc"}],
+            [{"authorization", "Payment "}],
+            [{"authorization", "Bearer payment"}],
+            [{"payment-authorization", " "}],
+            [{"payment-signature", ""}]
+          ] do
+        refute HTTP.credential?(request_with(headers)), inspect(headers)
+      end
+    end
+  end
+
   describe "retry_after/1" do
     test "parses the emitted delta-seconds form" do
       response = Req.Response.new(status: 402, headers: %{"retry-after" => [" 17 "]})

@@ -75,7 +75,11 @@ defmodule MPP.ReplayTest do
 
       assert :ok = Replay.mark_used(store, credential)
       Process.sleep(150)
-      assert {:error, %MPP.Errors{detail: "Payment credential already used"}} = Replay.check_unused(store, credential)
+
+      assert {:error, %MPP.Errors{type: type, detail: "Payment credential already used"}} =
+               Replay.check_unused(store, credential)
+
+      assert type == "https://paymentauth.org/problems/invalid-challenge"
     end
 
     setup do
