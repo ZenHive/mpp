@@ -24,6 +24,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   @web_authn_min_authenticator_size 37
   # Tempo rejects P-256 and WebAuthn signatures with s > n/2 (tt_signature.rs P256N_HALF).
   @p256_half_order 0x7FFFFFFF800000007FFFFFFFFFFFFFFFDE737D56D38BCF4279DCE5617E3192A8
+  # Tempo rejects secp256k1 signatures with s > n/2 as well, so an authorization signed that
+  # way could never be charged (refs/mppx/src/tempo/internal/signature.ts:8).
+  @secp256k1_half_order 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
 
   @type key_type :: :secp256k1 | :p256 | :web_authn
   @type t :: %__MODULE__{
@@ -320,6 +323,9 @@ defmodule MPP.Methods.Tempo.KeyAuthorization do
   end
 
   defp verify_signature(_authorization, _signature), do: {:error, "keyAuthorization must use a primitive signature"}
+
+  defp verify_secp256k1(<<_r::binary-size(32), s::unsigned-256, _v>>, _digest) when s > @secp256k1_half_order,
+    do: {:error, "keyAuthorization signature is invalid"}
 
   defp verify_secp256k1(signature, digest) do
     with {:ok, envelope} <- SignatureEnvelope.deserialize(hex(signature)),

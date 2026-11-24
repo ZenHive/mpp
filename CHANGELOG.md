@@ -11,6 +11,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 ### Fixed
 
 - `MPP.Receipt.decode/1` rejects an explicit `null` or non-string `externalId`, and an explicit `null` `subscriptionId` or `fundingCurrency`, with `{:error, :invalid_field_type}` instead of reading the member as absent (mpp-rs #703, mppx `Receipt.Schema`).
+- Tempo subscription key authorizations signed with secp256k1 are rejected when the signature's `s` is above half the curve order, as P-256 and WebAuthn ones already were. Tempo does not accept such a signature, so the subscription could never be charged (mppx #1345).
 
 ## [0.23.0] — 2026-11-16
 

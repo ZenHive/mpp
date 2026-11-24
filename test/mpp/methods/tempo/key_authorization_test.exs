@@ -8,6 +8,7 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
   @transfer_selector "0xa9059cbb"
   @transfer_with_memo_selector "0x95777d59"
   @p256_order 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+  @secp256k1_order 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 
   test "deserializes, verifies, and reserializes a normative subscription authorization" do
     subscription = SubscriptionHelpers.subscription()
@@ -200,6 +201,23 @@ defmodule MPP.Methods.Tempo.KeyAuthorizationTest do
 
       assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.from_rpc(rpc)
     end
+  end
+
+  test "rejects a high-s secp256k1 signature as Tempo does" do
+    subscription = SubscriptionHelpers.subscription()
+    {_serialized, _authorization, rpc} = SubscriptionHelpers.signed_authorization(subscription)
+    assert {:ok, _authorization} = KeyAuthorization.from_rpc(rpc)
+
+    low_s = hex_to_integer(rpc["signature"]["s"])
+    parity = hex_to_integer(rpc["signature"]["yParity"])
+
+    # The malleated twin (n - s, flipped parity) recovers the same signer.
+    high_s_rpc =
+      rpc
+      |> put_in(["signature", "s"], fixed_hex(@secp256k1_order - low_s))
+      |> put_in(["signature", "yParity"], "0x" <> Integer.to_string(1 - parity, 16))
+
+    assert {:error, "keyAuthorization signature is invalid"} = KeyAuthorization.from_rpc(high_s_rpc)
   end
 
   test "rejects broader, incomplete, or mismatched authorization fields" do
