@@ -4318,13 +4318,13 @@ id = "156"
 phase = 1
 bundle = "core-protocol"
 status = "pending"
-title = "Answer replayed or settled credentials with 403 credential-replayed"
+title = "Answer replayed credentials with invalid-challenge and stop the client from paying again"
 scores = { d = 3, b = 6, u = 5 }
 markers = ["parallel"]
 acceptance_criteria = ["A replayed Tempo credential, a settled-hash replay and a Stripe Idempotent-Replayed response each return 403 with the credential-replayed problem type and no WWW-Authenticate header (Plug tests)", "MCP and JSON-RPC transports map the same condition to the code both reference SDKs use, cited by refs path", "Problem type URI matches refs/mppx and refs/mpp-rs", "Genuine verification failures still return 402 with a challenge (regression tests)"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "Both reference SDKs now answer a replayed or already-settled credential with a final 403 problem (`credential-replayed`) and no WWW-Authenticate challenge, so clients stop instead of paying again (mppx #1039 / 47beb31; mpp-rs #627 bd0c8a2, #646 194c9d9, #656 79a9b0d for Stripe Idempotent-Replayed). We answer 402 with a fresh challenge. Add the problem type to MPP.Errors (verify the exact URI/suffix and status against refs/mppx and refs/mpp-rs; cross-check refs/mpp-specs) and route MPP.Replay hits, Tempo settled-hash replays and Stripe Idempotent-Replayed through it in MPP.Plug, MCP and JSON-RPC transports."
+body = "Both reference SDKs now answer a replayed or already-settled credential with a final 403 problem (`credential-replayed`) and no WWW-Authenticate challenge, so clients stop instead of paying again (mppx #1039 / 47beb31; mpp-rs #627 bd0c8a2, #646 194c9d9, #656 79a9b0d for Stripe Idempotent-Replayed). We answer 402 with a fresh challenge. Add the problem type to MPP.Errors (verify the exact URI/suffix and status against refs/mppx and refs/mpp-rs; cross-check refs/mpp-specs) and route MPP.Replay hits, Tempo settled-hash replays and Stripe Idempotent-Replayed through it in MPP.Plug, MCP and JSON-RPC transports. 2026-11-25 sdk-delta-watch: SUPERSEDES the 403 shape above and in the first acceptance criterion. Both SDKs moved to the core-spec answer: a replayed credential gets 402 with a fresh challenge and problem type invalid-challenge (mppx #1273 54fc48d, refs/mppx/src/Errors.ts CredentialReplayedError extends InvalidChallengeError; mpp-rs #718 14e06a6 changelog core-spec-server). We already answer 402 with a fresh challenge but label it verification-failed (lib/mpp/replay.ex, the settled-hash and already-used paths in lib/mpp/methods/tempo.ex); relabel credential replays to invalid-challenge on HTTP, MCP and JSON-RPC. A push hash whose transfer was already counted stays verification-failed (mpp-specs #403, Accepted-Transfer Record). Client half, same change: MPP.Client.Req and MPP.Client.MCP treat an invalid-challenge answer to a credential they already sent (including one the caller attached) as final and return it instead of paying a fresh challenge (refs/mppx/src/client/internal/Fetch.ts, src/mcp/client/McpClient.ts); test/mpp/client/req_test.exs currently pins paying until the retry budget is spent. Add acceptance: replay answers carry invalid-challenge with a challenge; one Req call against a server that answers every credential with invalid-challenge pays once."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4339,7 +4339,7 @@ markers = ["parallel"]
 acceptance_criteria = ["After a successful Tempo, EVM and Stripe verification the conn carries the verified payer; tests assert the value equals the on-chain sender / Stripe customer the method verified", "No payer is assigned when verification fails or the method cannot attest a payer", "Documented in MPP.Plug moduledoc"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields. 2026-11-20 sdk-delta-watch: for session credentials mppx #1300 (e2d81d0) and #1326 (b457436) accept a credential source only when it is the channel payer and the opening transaction's signature authenticates that payer (refs/mppx/src/tempo/session/server/CredentialVerification.ts assertCredentialSourceIsPayer / assertCredentialSourceCanSpend). Our session path does not read the credential source today; when this task exposes a payer for sessions, derive it from the channel payer under the same rule, never from the unverified source."
+body = "mppx #1038 (b085cae) and mpp-rs #628 (cfa70bb) expose the verified payer (credential source / recovered sender) to the protected handler on success. MPP.Plug assigns only :mpp_receipt. Add a payer assign (and the equivalent in the MCP/JSON-RPC success context) populated only from verified data, never from unverified credential fields. 2026-11-20 sdk-delta-watch: for session credentials mppx #1300 (e2d81d0) and #1326 (b457436) accept a credential source only when it is the channel payer and the opening transaction's signature authenticates that payer (refs/mppx/src/tempo/session/server/CredentialVerification.ts assertCredentialSourceIsPayer / assertCredentialSourceCanSpend). Our session path does not read the credential source today; when this task exposes a payer for sessions, derive it from the channel payer under the same rule, never from the unverified source. 2026-11-25 sdk-delta-watch: mpp-rs #735 (3593ecc) also binds the source on legacy escrow opens and falls back to an on-chain keychain lookup when a key authorization proves nothing, treating a failed lookup as a retryable network error; #740 (4d005b2) names the funding payer from the descriptor as the credential source on the client. Same rule as noted above: derive the payer from verified chain data."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4441,11 +4441,11 @@ phase = 1
 bundle = "core-protocol"
 status = "pending"
 title = "Randomize challenge issuance and optionally bind challenges to routes"
-scores = { d = 4, b = 4, u = 3 }
+scores = { d = 4, b = 7, u = 8 }
 acceptance_criteria = ["Two challenges issued for the same route in the same microsecond have different ids (test)", "HMAC id still recomputes identically to refs/mppx for a given opaque (cross-validation vector)", "With route scope enabled, a credential is accepted only at the route that issued its challenge", "Existing opaque pinning behavior unchanged for callers that set static opaque"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "mppx #996 (bbbec69) adds an HMAC-bound random nonce to every issued challenge (src/server/internal/challengeMeta.ts withNonce, excluded from route-meta pinning) and #958 (8bfe2d1) binds challenges to the route that issued them. Adopt both wire shapes in MPP.Plug. Add a random issuance nonce inside opaque (do not add an HMAC input slot — that breaks cross-SDK id interop) and an opt-in route scope; Verifier compares route opaque excluding the nonce. mpp-rs has not adopted the nonce; follow mppx's wire shape exactly."
+body = "mppx #996 (bbbec69) adds an HMAC-bound random nonce to every issued challenge (src/server/internal/challengeMeta.ts withNonce, excluded from route-meta pinning) and #958 (8bfe2d1) binds challenges to the route that issued them. Adopt both wire shapes in MPP.Plug. Add a random issuance nonce inside opaque (do not add an HMAC input slot — that breaks cross-SDK id interop) and an opt-in route scope; Verifier compares route opaque excluding the nonce. mpp-rs has not adopted the nonce; follow mppx's wire shape exactly. 2026-11-25 sdk-delta-watch: both SDKs now issue the nonce by default and the key is `_mpp_nonce` (mppx #1273 54fc48d, refs/mppx/src/internal/challengeMeta.ts; mpp-rs #718 14e06a6, refs/mpp-rs/src/server/mpp/issue.rs). Verification ignores `_mpp_nonce` and the older `_mppx_nonce` when matching opaque (refs/mpp-rs/src/server/mpp/verify.rs); a route opaque that is not a JSON object is issued without one. Follow both SDKs for the key, the encoding and the credential-type rules that depend on the nonce (refs/mppx/src/tempo/server/Charge.ts). The sentence above that mpp-rs has not adopted the nonce is superseded. The MCP, JSON-RPC and WebSocket transports issue through the same path and get the nonce with it."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
 
@@ -4759,12 +4759,12 @@ phase = 1
 bundle = "session"
 status = "pending"
 title = "Accept TIP-1166 configurable account vouchers on Tempo sessions"
-scores = { d = 7, b = 3, u = 2 }
+scores = { d = 7, b = 4, u = 3 }
 markers = ["parallel"]
 acceptance_criteria = ["A Tempo session route that opts in advertises `configurableVouchers` and accepts a voucher signed under a TIP-1166 configurable account, verified against the channel's opening commitment (layout and checks match refs/mpp-rs src/protocol/methods/tempo/configurable_account.rs, precompile_voucher.rs and session_method/)", "The channel record stores the opening commitment and a voucher that does not match it is rejected with the session's existing verification error (test)", "Routes that do not opt in accept and reject exactly what they do today", "One live success and one relevant live rejection are pinned as `:integration` tests on Moderato; missing credentials flunk with the exact `export` lines"]
 assignee = "codex"
 model = "gpt-6-astra"
-body = "mpp-rs #731 (8cc8280) adds TIP-1166 configurable account vouchers for TIP-1034 sessions: servers opt in (`SessionMethod::with_configurable_vouchers`, advertised as `configurableVouchers`), track each channel's `opening_commitment`, and check a configurable voucher against it; defaults are unchanged. Our Tempo session path verifies only the existing voucher forms. Port the server side behind an explicit opt-in. As of 2026-11-20 only mpp-rs implements this (no counterpart in refs/mppx/src), so there is a single reference: check mppx again at pickup and verify the signature and commitment layout against the TIP-1166 specification and a live Moderato call, not against mpp-rs alone."
+body = "mpp-rs #731 (8cc8280) adds TIP-1166 configurable account vouchers for TIP-1034 sessions: servers opt in (`SessionMethod::with_configurable_vouchers`, advertised as `configurableVouchers`), track each channel's `opening_commitment`, and check a configurable voucher against it; defaults are unchanged. Our Tempo session path verifies only the existing voucher forms. Port the server side behind an explicit opt-in. As of 2026-11-20 only mpp-rs implements this (no counterpart in refs/mppx/src), so there is a single reference: check mppx again at pickup and verify the signature and commitment layout against the TIP-1166 specification and a live Moderato call, not against mpp-rs alone. 2026-11-25 sdk-delta-watch: mppx now implements this too (#1307 98d110b), so it is no longer mpp-rs only. Beyond mpp-rs, mppx authenticates an open transaction signed by a configurable account against the on-chain config commitment (refs/mppx/src/tempo/session CredentialVerification.ts verifyConfigurableTransactionPayer, SponsorshipLimit.ts), accepts the first voucher under either a zero commitment or the descriptor salt before the open lands, passes the voucher signer and opening commitment to close authorization, and enforces low-s on owner approvals (#1345 db173d9). mpp-rs also accepts P-256 and WebAuthn primitive vouchers on a zero snapshot; MPP.Session.Voucher accepts 65-byte secp256k1 only. Cover the configurable-account open payer in the acceptance tests."
 created_at = "2026-11-20"
 scored_at = "2026-11-20"
 
@@ -4783,6 +4783,111 @@ model = "gpt-6-astra"
 body = "mppx #1318 (c5c01a7) adds an optional `supported()` to x402 facilitator clients (`GET /supported`) and `evm.facilitatorPayTo()` to read the `payTo` a facilitator publishes there as the charge recipient; #1323 (6826a97) adds per-endpoint auth headers. MPP.X402.Facilitator has only `verify` and `settle`; static auth headers already work through `:req_options`, settle `extensions` are already kept, and `extra` is already caller-supplied in `accepts`. Add the `supported` call, the payTo helper and per-endpoint headers."
 created_at = "2026-11-20"
 scored_at = "2026-11-20"
+
+[[task]]
+id = "184"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Read and write Payment challenge headers by the core grammar"
+scores = { d = 5, b = 6, u = 5 }
+markers = ["parallel"]
+acceptance_criteria = ["A WWW-Authenticate Payment challenge whose auth-params are not comma-separated, or whose unquoted value is not an RFC 9110 token (including an empty one), is rejected; repeated commas (empty list elements) are accepted", "Method identifiers are lowercase a-z only in Challenge, Credential, MPP.Plug.init and receipts; a non-conformant offer in a multi-challenge header is skipped while conformant ones still parse", "The challenge formatter never writes a backslash-u escape into a bound auth-param: a realm or other bound value outside HTAB and printable ASCII is refused when the challenge is built, and MPP.Plug.init rejects such a realm at boot; description keeps its escape", "Quoted-pairs are read literally, and the client refuses to pay a challenge whose bound params carry a legacy backslash-u escape, with a specific error", "MPP.Receipt.decode rejects a non-string method or reference", "Cross-validation vectors against refs/mppx and refs/mpp-rs cover each rule; property tests for MPP.Headers stay green"]
+out_of_scope = ["Authorization credential parsing and base64url padding (already at parity, see docs/security-parity.md)", "Accept-Payment token syntax beyond what mpp-rs applies"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "Both reference SDKs now parse and emit Payment challenges by the core spec grammar. mppx #1349 (8a31e2d, refs/mppx/src/Challenge.ts) and mpp-rs #752 (fcd400b, refs/mpp-rs/src/protocol/core/headers.rs) require comma-separated auth-params and token-valued unquoted values. mppx #1341 (ad2a467) and mpp-rs #737 (db8a351, src/protocol/core/types.rs MethodName) restrict method identifiers to lowercase letters (core draft: payment-method-id = 1*LOWERALPHA). mppx #1341 and mpp-rs #755 (af73076, src/protocol/core/auth_params.rs) read quoted-pairs literally, so a backslash-u sequence is plain text, and their clients refuse to pay a challenge whose bound params carry one. Observed 2026-11-25 by running inputs through MPP.Headers: we accept auth-params without commas, non-token unquoted values, and method names such as x402 or a:b (MPP.Challenge.valid_method_name?/1 allows digits, colon, underscore, hyphen); we reject repeated commas that both SDKs accept; we decode backslash-u on parse; and the formatter escapes every non-ASCII code point as backslash-u in bound params too (lib/mpp/headers.ex escape_quoted), so a server with a non-ASCII realm emits challenges the current reference clients decline. MPP.Receipt.decode accepts a non-string method. Decisions: an empty unquoted value is rejected (mppx; mpp-rs still reads it as empty); bound params are limited to HTAB and printable ASCII (the mpp-rs rule, the intersection of both SDKs, which disagree on 0x80-0xFF); switch parsing to literal quoted-pairs only together with the client-side legacy refusal, because our current decoding is what lets us pay older servers that emitted the escape. All built-in method names are already a-z. Verify every rule against both refs before pinning it."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "185"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Core-spec request checks: one Payment credential, body digest binding, secret length at the library API"
+scores = { d = 4, b = 5, u = 4 }
+markers = ["parallel"]
+acceptance_criteria = ["A request carrying more than one Payment credential, across repeated lines, a comma-joined value or both the default and the challenge-selected field, gets 400 with no challenge; commas inside another scheme's quoted parameters are not counted", "When a challenge carries a digest, the request body's SHA-256 is compared with it and a mismatch is answered with invalid-challenge; routes without a digest are unchanged", "MPP.Verifier.verify and MPP.Challenge.create refuse a secret shorter than 32 bytes with a specific error, as MPP.Plug.init already does", "Plug tests for each case; limits on the number and size of credential fields match refs/mpp-rs select_payment_credential"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mppx #1273 (54fc48d) and mpp-rs #718 (14e06a6) align servers with the core spec. (1) More than one Payment credential is a 400 without a challenge (refs/mppx/src/server/Transport.ts countPaymentCredentials, MultipleCredentialsError; refs/mpp-rs/src/protocol/core/headers.rs select_payment_credential, which also caps the number and total size of values). MPP.Plug reads only the first Authorization line and answers a credential in both fields with a 402 and a challenge. (2) mppx now checks a challenge digest against the raw request body (refs/mppx/src/server/Mppx.ts matchesBodyDigest) and answers a mismatch with invalid-challenge. Our :digest is a static route option that MPP.Verifier only compares with the echoed value; MPP.BodyDigest is used by x402 only. Read the raw body once through a caching body reader so downstream parsers still see it. (3) mpp-rs validates the secret length on every sign and verify (refs/mpp-rs/src/protocol/core/binding.rs validate_secret_key); ours is checked in MPP.Plug.init, which covers the Plug, MCP, JSON-RPC and WebSocket transports, but not direct callers of the public MPP.Verifier and MPP.Challenge functions. The core draft in refs/mpp-specs at aeaeb83 does not yet carry the text for (1); follow the two SDKs where they agree and cite the refs lines."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "186"
+phase = 1
+bundle = "tempo"
+status = "pending"
+title = "Tempo charge memo rules from the charge draft: memo-less pull, methodDetails.memo on the client, inclusion check before broadcast"
+scores = { d = 5, b = 4, u = 3 }
+acceptance_criteria = ["A pull (type=transaction) credential with a plain transfer or a memo not in attribution format is accepted; an attribution memo for another realm or challenge is rejected; push (type=hash) still requires the challenge-bound memo", "Replay protection for a memo-less pull payment is shown by tests: the same signed transaction cannot be redeemed twice, across credentials and across a broadcast retry", "MPP.Client.Providers.Tempo sends exactly methodDetails.memo when the challenge carries one", "Before broadcasting, the server looks up the receipt and rejects an already-included transaction unless it holds its own broadcast-pending record for it", "Moderato :integration tests cover a memo-less pull payment and a methodDetails.memo payment; the memo layout still matches the spec vector"]
+out_of_scope = ["Presenter binding for hash credentials (Task 75)"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mpp-specs #403 (aeaeb83, specs/methods/tempo/draft-tempo-charge-00.md, Memo Requirements by Credential Type and Transaction Verification) defines the attribution memo, requires it for push charges, and says servers MUST accept a plain transfer or a non-attribution memo on pull while rejecting an attribution memo bound elsewhere. mppx #1273 (54fc48d) implements it (push-memo-required and charge-own-broadcast-retry changesets), including a broadcast record written before replay claims are released so a retry that overlaps an unknown broadcast outcome recovers the server's own transaction. We require the challenge-bound memo on pull as well (lib/mpp/methods/tempo.ex check_matched_memo_binding and the receipt check), so a third-party client that sends a plain transfer is refused before broadcast; our memo layout matches the spec vector byte for byte (checked 2026-11-25). Accepting memo-less pull removes the memo as the binding between payment and challenge on that path, so port the reference servers' replay and own-broadcast handling with it rather than only relaxing the check; read both before designing. The draft also says a client MUST send exactly methodDetails.memo when present; MPP.Client.Providers.Tempo ignores it. The draft's pre-broadcast inclusion lookup is not implemented: lib/mpp/methods/tempo/broadcast.ex settles an already-included resend by its receipt without a pending record."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "187"
+phase = 1
+bundle = "client-sdk"
+status = "pending"
+title = "Client payment limits and budgets on the payment transports"
+scores = { d = 5, b = 6, u = 4 }
+markers = ["parallel"]
+acceptance_criteria = ["MPP.Client.Req and MPP.Client.MCP accept a per-payment limit and refuse a selected challenge above it before any provider creates a credential, with a specific error", "A shared budget reserves before paying and commits or releases after, and concurrent calls cannot overspend it (barrier-based concurrency test)", "A money-denominated limit takes currency and decimals only from client configuration, never from the challenge; per-asset limits are in atomic units", "While a limit or budget is set, intents whose total is not known up front (session, subscription) are refused", "Docs show the limit, the budget and the existing on_payment_required hook together"]
+out_of_scope = ["Per-provider Tempo caps (Task 159)", "Funding hooks and token lists unless they fall out of the same seam"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mppx #1355 (4c32b2d) adds client-wide spending controls: maxPayment (a money limit or per-asset atomic amounts), authorize with Budget.create (reserve, then commit or release), funders and tokens (refs/mppx/src/client/Budget.ts, Spend.ts, internal/SpendGate.ts). Limits are checked after challenge selection and before a credential exists, the same gate covers MCP, and sessions and subscriptions are refused while one is set. We have the on_payment_required approval hook (lib/mpp/client/req.ex, lib/mpp/client/mcp.ex via Transport.approve) and the attempt cap; Task 159 adds caps to the Tempo provider only. A consumer can build a cap in the hook today, but a money limit computed from the challenge's own decimals is unsound, which is what the reference guards against. Add the limit and the budget next to Transport.approve so every transport and provider is covered. Check mpp-rs for an equivalent before settling option names."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "188"
+phase = 1
+bundle = "transport-ws"
+status = "pending"
+title = "Bound the wait for a receipt in the WebSocket client state machine"
+scores = { d = 3, b = 4, u = 3 }
+markers = ["parallel"]
+acceptance_criteria = ["After a credential is sent the state machine reports an armed deadline; the first data or needVoucher frame disarms it", "A receipt that does not acknowledge the pending payment (not a success for the pending challenge's method) re-arms the deadline once and never extends it", "The timeout event while the deadline is armed ends the attempt without another payment; the existing payment-amplification bound is unchanged", "Unit tests for each transition; the caller's obligation to fire the timeout is documented"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mpp-rs #756 (486b2ec, refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs) bounds how long its WebSocket client waits after sending a credential: a deadline is armed at send, disarmed by the first data or needVoucher frame, re-armed once by a receipt that does not acknowledge the payment, and also bounds blocked writes. MPP.Client.Transport.WebSocket.Retry is a pure state machine: any receipt clears the awaiting state without checking that it acknowledges the pending challenge, and there is no receipt-deadline state, so a consumer loop that never fires a timeout can be held open by a server that stays silent or sends unrelated receipts. Add the deadline state and an acknowledgement check, keeping the module socket-free."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "189"
+phase = 1
+bundle = "evm"
+status = "pending"
+title = "x402 exact on Solana, with a solana/charge offer beside it"
+scores = { d = 6, b = 3, u = 2 }
+acceptance_criteria = ["MPP.X402 parses and offers Solana exact payment requirements (CAIP-2 solana network ids) and MPP.X402.Plug settles them through the configured facilitator", "A route can offer a native solana/charge challenge beside the x402 Solana exact requirement, as refs/mppx Negotiator does", "A devnet :integration test settles one x402 Solana exact payment through a real facilitator; missing credentials flunk with setup instructions", "EVM exact behaviour unchanged"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mppx #1348 (66dc9ff, refs/mppx/src/integrations/x402/Solana.ts and Negotiator.ts) offers a native solana/charge challenge beside an x402 Solana exact requirement, settled through the x402 facilitator with the facilitator as fee payer. Our x402 support is EVM only (lib/mpp/x402.ex and lib/mpp/x402/headers.ex accept the eip155 network prefix); native solana/charge exists separately in lib/mpp/methods/solana.ex over our own RPC. Read the x402 Solana exact scheme from the provider's own specification and the mppx code, observe a real facilitator response before fixing shapes, and reuse onchain_solana for transaction handling."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "190"
+phase = 1
+bundle = "additional-methods"
+status = "pending"
+title = "Implement the nearintents/session intent"
+scores = { d = 8, b = 3, u = 2 }
+acceptance_criteria = ["open, voucher, topUp and close follow refs/mpp-specs/specs/methods/nearintents/draft-nearintents-session-00.md, including the session problem types", "Every action signature verifies per NEP-413 over the JCS message with the draft's domain string; vectors are derived from the draft or a reference implementation, not self-built", "Deposit verification and single-use hash rules are shared with the charge method; a late deposit claim after challenge expiry is handled as the draft says", "Close and idle timeout refund funded minus spent to the payer's Intents account", "A live :integration test opens, pays by voucher and closes one session against 1Click; missing credentials flunk with setup instructions"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "mpp-specs #395 (a6af5c1) adds draft-nearintents-session-00. The server issues an EXACT_OUTPUT 1Click quote into the merchant's Intents account; the client deposits and sends open with the deposit hash, an Ed25519 session key and a first cumulative voucher. Vouchers are checked locally by signature only; topUp pays a fresh funding quote into the same reference; close refunds the unspent remainder by an Intents transfer, also on idle timeout. Each action is signed over a JCS message (domain mpp-nearintents-session-v1, realm, action fields) using NEP-413. We implement nearintents charge only (lib/mpp/methods/near_intents.ex). Build on MPP.Session and the existing charge verification; fetch NEP-413 and the 1Click API docs rather than encoding the Borsh layout from memory, and check whether either reference SDK ships the intent before pinning vectors."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
 
 [bundles.testnet-funding]
 phase = 1

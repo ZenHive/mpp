@@ -47,7 +47,7 @@
 | Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
 | Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
 | Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33?] 📋 |
-| Task 156 `[P]` | ⬜ | 🎁 **core-protocol** · Answer replayed or settled credentials with 403 credential-replayed [D:3/B:6/U:5 → Eff:1.83] 🚀 |
+| Task 156 `[P]` | ⬜ | 🎁 **core-protocol** · Answer replayed credentials with invalid-challenge and stop the client from paying again [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 157 `[P]` | ⬜ | 🎁 **core-protocol** · Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯 |
 | Task 158 `[P]` | ⬜ | 🎁 **stripe** · Standardize Stripe PaymentIntent analytics metadata [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 159 `[P]` | ⬜ | 🎁 **client-sdk** · Tempo client provider: spending caps, expiry rounding and MACH gas token [D:4/B:6/U:4 → Eff:1.25] 📋 |
@@ -55,7 +55,7 @@
 | Task 161 `[P]` | ⬜ | 🎁 **tempo** · Accept sponsored Tempo swaps that acquire only the shortfall [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 162 | ✅ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
 | Task 163 `[P]` | ⛔ | 🎁 **mcp** · MCP client pays the next supported challenge when the preferred one fails [D:2/B:3/U:2 → Eff:1.25] 📋 |
-| Task 164 | ⬜ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:4/U:3 → Eff:0.88] ⚠️ |
+| Task 164 | ⬜ | 🎁 **core-protocol** · Randomize challenge issuance and optionally bind challenges to routes [D:4/B:7/U:8 → Eff:1.88] 🚀 |
 | Task 165 | ⬜ | 🎁 **solana** · Implement the solana/subscription intent [D:7/B:4/U:2 → Eff:0.43] ⚠️ |
 | Task 166 | 🔶 | 🎁 **evm** · Track the EIP-3009 challenge nonce framing divergence between mppx and the EVM spec [D:2/B:3/U:2 → Eff:1.25] 📋 ⛔ waits on draft-evm-charge changing its EIP-3009 nonce derivation (tempoxyz/mpp-specs) |
 | Task 167 | ⬜ | 🎁 **session** · Session server accounting features from mppx [D:6/B:3/U:1 → Eff:0.33] ⚠️ |
@@ -73,8 +73,15 @@
 | Task 179 | ✅ | 🎁 **tempo** · Refuse the default in-node replay store on a multi-instance runtime (mppx #1249) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
 | Task 180 | ✅ | 🎁 **client-sdk** · Carry the MACH funding link in insufficient-balance problems (mppx #1265, mpp-rs #712) [D:4/B:5/U:4 → Eff:1.12] 📋 |
 | Task 181 `[P]` | ⬜ | 🎁 **tempo** · Accept Tempo Zone payments on the charge method [D:8/B:5/U:3 → Eff:0.5] ⚠️ |
-| Task 182 `[P]` | ⬜ | 🎁 **session** · Accept TIP-1166 configurable account vouchers on Tempo sessions [D:7/B:3/U:2 → Eff:0.36] ⚠️ |
+| Task 182 `[P]` | ⬜ | 🎁 **session** · Accept TIP-1166 configurable account vouchers on Tempo sessions [D:7/B:4/U:3 → Eff:0.5] ⚠️ |
 | Task 183 `[P]` | ⬜ | 🎁 **evm** · x402 facilitator: read GET /supported and the facilitator-published payTo [D:3/B:3/U:2 → Eff:0.83] ⚠️ |
+| Task 184 `[P]` | ⬜ | 🎁 **core-protocol** · Read and write Payment challenge headers by the core grammar [D:5/B:6/U:5 → Eff:1.1] 📋 |
+| Task 185 `[P]` | ⬜ | 🎁 **core-protocol** · Core-spec request checks: one Payment credential, body digest binding, secret length at the library API [D:4/B:5/U:4 → Eff:1.12] 📋 |
+| Task 186 | ⬜ | 🎁 **tempo** · Tempo charge memo rules from the charge draft: memo-less pull, methodDetails.memo on the client, inclusion check before broadcast [D:5/B:4/U:3 → Eff:0.7] ⚠️ |
+| Task 187 `[P]` | ⬜ | 🎁 **client-sdk** · Client payment limits and budgets on the payment transports [D:5/B:6/U:4 → Eff:1.0] 📋 |
+| Task 188 `[P]` | ⬜ | 🎁 **transport-ws** · Bound the wait for a receipt in the WebSocket client state machine [D:3/B:4/U:3 → Eff:1.17] 📋 |
+| Task 189 | ⬜ | 🎁 **evm** · x402 exact on Solana, with a solana/charge offer beside it [D:6/B:3/U:2 → Eff:0.42] ⚠️ |
+| Task 190 | ⬜ | 🎁 **additional-methods** · Implement the nearintents/session intent [D:8/B:3/U:2 → Eff:0.31] ⚠️ |
 <!-- TASKS:END -->
 
 ---

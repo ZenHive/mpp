@@ -201,6 +201,14 @@ open-items note below).
 | mpp-rs #733 (commit 823767d) MCP client pays only the best-ranked offer | Paying a second offer after a failure that may already have moved funds | `MPP.Client.MCP` pays the one selected challenge and returns its error; the fallback planned in Task 163 is superseded — `client/mcp.ex` |
 | mpp-rs #703 (commit 5772b05) receipt rejects `null` `externalId` / `subscriptionId` | Parser disagreement on explicit `null` optional receipt members | `MPP.Receipt.decode/1` rejects an explicit `null` or non-string optional member — `receipt.ex` (`optional_string/2`) |
 | mpp-rs #728 (commit e8fd836) / #726 (commit 8bda5cd) client session recovery and key-authorization gas | Client-side session restoration bounds and declared gas | Not applicable: no session client provider here; the sponsor gas ceiling is unchanged in both references (2,000,000 default) and matches `FeePayerPolicy` |
+| mppx #1345 (commit db173d9) / mpp-rs #749 (commit fd4b12b) high-s signatures in vouchers and key authorizations | A signature with `s` above half the curve order verifies off chain but can never settle on Tempo | Session vouchers and close authorizations accept only the canonical low-s form; subscription key authorizations reject a high-s P-256, WebAuthn or secp256k1 signature — `session/voucher.ex` (`decode_signature/1`), `methods/tempo/key_authorization.ex` (`verify_secp256k1/2`, `verify_p256_signature/6`). Proof credentials never settle on chain and are deduplicated by challenge id, as in mppx |
+| mppx #1350 (commit 7c2c519) credential payload and source types | A credential whose `payload` is not an object or whose `source` is not a string | `MPP.Credential.decode/1` rejects both — `credential.ex` |
+| mpp-rs #752 (commit fcd400b) `Authorization` read as one `Payment <token>` | A multi-scheme or malformed `Authorization` value read as a Payment credential | The whole field value is one credential; a second scheme, a missing separator or trailing data is rejected — `headers.ex` (`parse_authorization/1`), `plug.ex`. The challenge auth-param grammar from the same change is Task 184 |
+| mpp-rs #751 (commit 5aea1fa) base64url padding only at the end | `=` before the end of a base64url value | Rejected for credentials, receipts and the challenge `request` — `codec.ex` (`decode_base64_json/1`) |
+| mppx #1333 (commit 34e6d4c) client sends the credential in the header its challenge selects | A credential placed in a header its own challenge did not select | The client derives the field from the credential's challenge and clears a stale Payment value in the other field — `client/transport/http.ex` |
+| mppx #1328 (commit 0f6955d) / mpp-rs #748 (commit dc4813a) owner-aware replay stores, fail closed without a shared store | A custom store that cannot release its own claim; an in-node default store on a multi-instance runtime | A release compares against the claiming attempt's token and a store without an atomic release keeps the slot until its TTL; the default store raises on a multi-instance runtime (Task 179) — `tempo/store.ex`, `instance_local.ex` |
+| mppx #1347 (commit bd9dac5) / #1340 (commit 6056a5b) / mpp-rs #745 (commit 05f2877) validation tool, entrypoints, Zone client | CLI validation output, package entrypoints, client-side Zone payment | Not applicable: no validation CLI, no JS packaging, no Zone client (server-side Zone is Task 181) |
+| mppx #1332 (commit 813085d) / #1353 (commit 8b6b501) / #1344 (commit c1d91f6) / mpp-rs #753 (commit 26c15a6) / #747 (commit 05a9668) identity extension | Origin and host binding of identity proofs (attestations, ERC-8004, signed requests) | Not applicable: no identity extension here; payment verification does not depend on it |
 
 ## 📋 Tracked as roadmap work (parity pending)
 
@@ -215,7 +223,7 @@ open-items note below).
 
 ## Open hardening items
 
-**0 open items** as of 2026-11-07.
+**1 open item** as of 2026-11-25, tracked in a private draft advisory from the 2026-11-25 upstream sweep.
 
 Previously resolved items: the three low draft advisories from the 2026-11-04 upstream sweep shipped in 0.22.1 and were published after the Hex release (`GHSA-r5w8-h5v2-3g34`, `GHSA-388w-957g-grcq`, `GHSA-4j54-j2qx-w4c9`).
 
