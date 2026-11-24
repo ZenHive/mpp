@@ -223,9 +223,11 @@ open-items note below).
 
 ## Open hardening items
 
-**1 open item** as of 2026-11-25, tracked in a private draft advisory from the 2026-11-25 upstream sweep.
+**0 open items** as of 2026-11-25.
 
-Previously resolved items: the three low draft advisories from the 2026-11-04 upstream sweep shipped in 0.22.1 and were published after the Hex release (`GHSA-r5w8-h5v2-3g34`, `GHSA-388w-957g-grcq`, `GHSA-4j54-j2qx-w4c9`).
+Previously resolved items: the low draft advisory from the 2026-11-25 upstream sweep shipped in 0.24.0 and was published the same day (`GHSA-4gjv-hw6c-9pxh`: per-issuance challenge nonce, mppx #1273 / mpp-rs #718 — `MPP.Challenge.Meta`, `require_challenge_nonce/2` in `tempo.ex`).
+
+Earlier: the three low draft advisories from the 2026-11-04 upstream sweep shipped in 0.22.1 and were published after the Hex release (`GHSA-r5w8-h5v2-3g34`, `GHSA-388w-957g-grcq`, `GHSA-4j54-j2qx-w4c9`).
 
 Earlier: the five low draft advisories from the 2026-10-31 review shipped in 0.22.0 and were published after the Hex release (`GHSA-pggm-gm7c-2f4j`, `GHSA-76qc-4p5p-v35x`, `GHSA-8pv3-83vq-77rr`, `GHSA-wwp2-w5hw-hw3r`, `GHSA-89vp-6m4q-7hhp`).
 
