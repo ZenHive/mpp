@@ -291,7 +291,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       assert conn2.status == 402
       body = Jason.decode!(conn2.resp_body)
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
 
       # Moderato resolves the receipt for an unprefixed / uppercase hash too, so
@@ -842,7 +842,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert %Receipt{} = conn.assigns[:mpp_receipt]
 
       body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
     end
 
@@ -913,7 +913,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
         assert %Receipt{reference: ^tx_hash} = conn.assigns[:mpp_receipt]
 
         body = submit_credential!(config, challenge, payload)
-        assert body["type"] =~ "verification-failed"
+        assert body["type"] =~ "invalid-challenge"
         assert body["detail"] =~ "already used"
       end
     end
@@ -943,7 +943,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       assert String.downcase(reference) == canonical_hash
 
       body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => canonical_tx})
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
 
       alternate_tx = TempoTestHelpers.with_alternate_signature_encoding(canonical_tx)
@@ -953,7 +953,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       alternate_body =
         submit_credential!(config, challenge, %{"type" => "transaction", "signature" => alternate_tx})
 
-      assert alternate_body["type"] =~ "verification-failed"
+      assert alternate_body["type"] =~ "invalid-challenge"
       assert alternate_body["detail"] =~ "already used"
     end
 
@@ -1340,7 +1340,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       # Second: same client tx -> store catches duplicate
       body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
     end
   end
@@ -1656,7 +1656,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       # Second submission: store catches duplicate before broadcast
       body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
-      assert body["type"] =~ "verification-failed"
+      assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "already used"
     end
   end

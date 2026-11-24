@@ -10,7 +10,7 @@ defmodule MPP.X402.CrossValidationTest do
 
   @moduletag :cross_validation
 
-  @types "refs/mppx/src/x402/Types.ts"
+  @types "refs/mppx/src/internal/x402/Types.ts"
   @exact "refs/mppx/src/x402/client/Exact.ts"
   @transport "refs/mppx/src/client/Transport.ts"
   @x402_protocol "refs/mppx/src/client/internal/protocols/X402.ts"
@@ -20,8 +20,8 @@ defmodule MPP.X402.CrossValidationTest do
     exact = read!(@exact)
 
     assert types =~ "export const schemes = ['exact'] as const"
-    assert types =~ "export const paymentMethod = 'evm'"
-    assert types =~ "export const exactIntent = 'charge'"
+    assert types =~ "export const paymentMethod = 'evm' as const"
+    assert types =~ "export const exactIntent = 'charge' as const"
     assert types =~ "syntheticChallengeIdPrefix = 'x402:'"
     assert exact =~ "randomAuthorizationNonce()"
     assert exact =~ "RouteBinding.nonce("
