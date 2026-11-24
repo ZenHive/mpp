@@ -80,6 +80,76 @@ defmodule MPP.ChallengeHeaderCrossValidationTest do
     end
   end
 
+  describe "issuance nonce vs mppx and mpp-rs" do
+    setup do
+      if !Code.ensure_loaded?(QuickBEAM) do
+        flunk("QuickBEAM not available. This test requires the dev/test dependency stack.")
+      end
+
+      rt = start_supervised!({QuickBEAM, apis: :browser})
+      MppxChallengeBundle.load!(rt)
+      %{rt: rt}
+    end
+
+    # mppx serializes `meta` into `opaque` (refs/mppx/src/Challenge.ts:198); the nonce is
+    # one of its members (refs/mppx/src/internal/challengeMeta.ts `withNonce`).
+    @meta %{"order" => "one", "_mpp_nonce" => "q83vEjRWeJCrze8SNFZ4kA", "_mppx_scope" => "GET /premium"}
+
+    test "an opaque built from the same members has the same bytes and the same id", %{rt: rt} do
+      {:ok, mppx} =
+        QuickBEAM.call(rt, "mppxFrom", [
+          %{
+            "secretKey" => @secret,
+            "realm" => @realm,
+            "method" => @method,
+            "intent" => @intent,
+            "request" => %{"amount" => "1000000"},
+            "meta" => @meta
+          }
+        ])
+
+      opaque = @meta |> MPP.JCS.canonicalize() |> Base.url_encode64(padding: false)
+
+      elixir =
+        Challenge.create(
+          [realm: @realm, method: @method, intent: @intent, request: request_b64(), opaque: opaque],
+          @secret
+        )
+
+      assert mppx["opaque"] == opaque
+      assert mppx["id"] == elixir.id
+
+      assert MppRsHmacOracle.compute_id!(
+               secret: @secret,
+               realm: @realm,
+               method: @method,
+               intent: @intent,
+               request: request_b64(),
+               opaque: opaque
+             ) == elixir.id
+    end
+
+    test "mppx reads a challenge issued here with the same id and opaque", %{rt: rt} do
+      scoped = MPP.Challenge.Meta.with_scope!(nil, "GET /premium")
+
+      elixir =
+        Challenge.create(
+          [realm: @realm, method: @method, intent: @intent, request: request_b64(), opaque: scoped, nonce: true],
+          @secret
+        )
+
+      {:ok, parsed} = QuickBEAM.call(rt, "mppxDeserialize", [Headers.format_challenge(elixir)])
+
+      assert parsed["id"] == elixir.id
+      assert parsed["opaque"] == elixir.opaque
+
+      assert %{"_mppx_scope" => "GET /premium", "_mpp_nonce" => nonce} =
+               parsed["opaque"] |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      assert nonce =~ ~r/\A[A-Za-z0-9_-]{22}\z/
+    end
+  end
+
   defp mppx_id(rt, header) do
     params = %{
       "secretKey" => @secret,

@@ -34,7 +34,10 @@ defmodule MPP.Verifier do
       for this endpoint. `:intent` is accepted as an alias.
     * `:method_config` — (optional) server-only config map, default `%{}`
     * `:digest` — (optional) expected endpoint digest value
-    * `:opaque` — (optional) expected endpoint opaque value
+    * `:opaque` — (optional) expected endpoint opaque value. It is matched as JSON
+      without the members reserved for issued challenges (`_mpp_nonce`,
+      `_mppx_nonce`, `_mppx_identity`, `_mppx_expiry_grace`); setting one of them
+      here raises `ArgumentError`
 
   ## Verification tiers
 
@@ -49,6 +52,7 @@ defmodule MPP.Verifier do
   use Descripex, namespace: "/protocol"
 
   alias MPP.Challenge
+  alias MPP.Challenge.Meta, as: ChallengeMeta
   alias MPP.Credential
   alias MPP.Errors
   alias MPP.Intents.Charge
@@ -95,11 +99,13 @@ defmodule MPP.Verifier do
     method_config = Keyword.get(opts, :method_config, %{})
     digest = Keyword.get(opts, :digest)
     opaque = Keyword.get(opts, :opaque)
+    ChallengeMeta.validate_configured!(opaque)
 
     runtime_config =
       method_config
       |> Map.put("challenge_id", credential.challenge.id)
       |> Map.put("challenge_expires", credential.challenge.expires)
+      |> Map.put("challenge_nonce", ChallengeMeta.nonce?(credential.challenge.opaque))
       |> Map.put("realm", realm)
       |> Map.put("credential_source", credential.source)
 
@@ -335,8 +341,11 @@ defmodule MPP.Verifier do
   defp check_digest_match(%Challenge{digest: digest}, digest), do: :ok
   defp check_digest_match(_challenge, _expected), do: {:error, :digest_mismatch}
 
-  defp check_opaque_match(%Challenge{opaque: opaque}, opaque), do: :ok
-  defp check_opaque_match(_challenge, _expected), do: {:error, :opaque_mismatch}
+  # The issuance nonce differs per challenge, so the route is matched on the rest of
+  # the opaque (refs/mpp-rs/src/server/mpp/verify.rs `matched_opaque`).
+  defp check_opaque_match(%Challenge{opaque: opaque}, expected) do
+    if ChallengeMeta.same_route?(opaque, expected), do: :ok, else: {:error, :opaque_mismatch}
+  end
 
   defp decode_credential_request(%Challenge{request: request}) do
     with {:ok, json} <- Base.url_decode64(request, padding: false),

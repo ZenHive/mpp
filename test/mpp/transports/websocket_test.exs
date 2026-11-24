@@ -162,6 +162,7 @@ defmodule MPP.Transports.WebSocketTest do
       assert challenge["intent"] == "charge"
       assert is_binary(challenge["request"])
       assert {:ok, _} = Base.url_decode64(challenge["request"], padding: false)
+      assert MPP.Challenge.Meta.nonce?(challenge["opaque"])
       assert ClientTransport.payment_required?(frame)
     end
 

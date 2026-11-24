@@ -19,6 +19,15 @@ defmodule MPP.Test.TempoTestHelpers do
     "0x" <> Base.encode16(addr, case: :lower)
   end
 
+  @doc """
+  `MPP.Methods.Tempo.verify/2` as `MPP.Verifier` calls it for a challenge that
+  carries an issuance nonce: sets `"challenge_nonce" => true` unless the test
+  set the key itself.
+  """
+  def verify_nonced(payload, %{method_details: details} = request) do
+    MPP.Methods.Tempo.verify(payload, %{request | method_details: Map.put_new(details || %{}, "challenge_nonce", true)})
+  end
+
   @doc "The raw 32-byte private key of the fixed test sender (for signing presenter proofs in tests)."
   def test_sender_key, do: @test_sender_key
 

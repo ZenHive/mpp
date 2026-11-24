@@ -21,7 +21,8 @@ defmodule MPP.X402.Plug do
   request method, `info.digest` the route digest and `info.opaque` the route
   opaque value. The digest and opaque come from the `MPP.Plug` route
   (`:digest` / `:opaque`) or from the nested `:x402` options; a value set in
-  both places must agree. Caller-supplied `:extensions` are advertised
+  both places must agree. The route's `:scope` is advertised as
+  `info._mppx_scope` and is part of its `info.opaque`. Caller-supplied `:extensions` are advertised
   alongside, and their other `mppx.info` keys are kept; the route-derived keys
   take precedence. A route-bound credential must echo this binding before its
   nonce is recomputed over it (`EvmCharge.ts:173-218`), so a credential signed
@@ -91,7 +92,8 @@ defmodule MPP.X402.Plug do
           extensions: map() | nil,
           route_binding: :resource | :required,
           digest: String.t() | nil,
-          opaque: String.t() | nil
+          opaque: String.t() | nil,
+          scope: String.t() | nil
         }
 
   @enforce_keys [:facilitator, :accepts]
@@ -102,14 +104,15 @@ defmodule MPP.X402.Plug do
     extensions: nil,
     route_binding: :required,
     digest: nil,
-    opaque: nil
+    opaque: nil,
+    scope: nil
   ]
 
   @doc """
   Build x402 plug options from `MPP.Plug` `:x402` config.
 
-  `route` carries the enclosing route's `:digest` and `:opaque`; they scope the
-  x402 binding together with any nested `:digest` / `:opaque`.
+  `route` carries the enclosing route's `:digest`, `:opaque` and `:scope`; they
+  scope the x402 binding together with any nested `:digest` / `:opaque`.
   """
   @spec configure(nil | false | keyword() | map(), keyword()) :: t() | nil
   def configure(opts, route \\ [])
@@ -126,7 +129,8 @@ defmodule MPP.X402.Plug do
       extensions: Map.get(opts, :extensions),
       route_binding: configure_binding(opts),
       digest: route_scope!(:digest, Map.get(opts, :digest), Keyword.get(route, :digest)),
-      opaque: route_scope!(:opaque, Map.get(opts, :opaque), Keyword.get(route, :opaque))
+      opaque: route_scope!(:opaque, Map.get(opts, :opaque), Keyword.get(route, :opaque)),
+      scope: Keyword.get(route, :scope)
     }
   end
 
@@ -249,6 +253,7 @@ defmodule MPP.X402.Plug do
       |> Map.put("method", method)
       |> put_present("digest", x402.digest)
       |> put_present("opaque", x402.opaque)
+      |> put_present("_mppx_scope", x402.scope)
 
     Map.put(caller, "mppx", %{"info" => info, "schema" => Map.get(mppx, "schema", @mppx_binding_schema)})
   end

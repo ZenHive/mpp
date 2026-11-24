@@ -139,6 +139,13 @@ defmodule MPP.Methods.Tempo do
 
   Both may additionally carry `"presenterSignature" => "0x..."` (see below).
 
+  `type="hash"` and `type="proof"` credentials are accepted only for a challenge
+  that carries an issuance nonce (`_mpp_nonce` in `opaque`, which `MPP.Plug` adds
+  to every challenge it issues). `MPP.Verifier` passes that fact as
+  `"challenge_nonce" => true`; a caller of `verify/2` that issues its own
+  challenges creates them with `MPP.Challenge.create/2` and `nonce: true` and
+  passes the same key.
+
   ## Recurring subscriptions
 
   Routes configured with `intent: "subscription"` use the shared
@@ -320,7 +327,8 @@ defmodule MPP.Methods.Tempo do
   def verify(%{"type" => "hash"} = payload, %Charge{} = charge) do
     config = charge.method_details || %{}
 
-    with :ok <- reject_non_proof_for_zero_amount(charge, "hash"),
+    with :ok <- require_challenge_nonce(config, "hash"),
+         :ok <- reject_non_proof_for_zero_amount(charge, "hash"),
          :ok <- ensure_submission_mode_allowed(config, "hash"),
          :ok <- reject_hash_when_fee_payer(config) do
       verify_hash_credential(payload, charge, config)
@@ -345,7 +353,8 @@ defmodule MPP.Methods.Tempo do
     store = Store.for_method(config["store"], "tempo")
     expected_chain_id = config["chain_id"] || @moderato_chain_id
 
-    with :ok <- require_zero_amount(charge),
+    with :ok <- require_challenge_nonce(config, "proof"),
+         :ok <- require_zero_amount(charge),
          {:ok, signature} <- extract_proof_signature(payload),
          {:ok, source} <- require_proof_source(config["credential_source"]),
          {:ok, parsed} <- parse_proof_source(source, expected_chain_id),
@@ -750,6 +759,15 @@ defmodule MPP.Methods.Tempo do
           {:error, Errors.new(:verification_failed, "#{kind} credentials are not supported for this challenge.")}
         end
     end
+  end
+
+  # Hash and proof credentials are accepted only for a challenge that carries an
+  # issuance nonce (refs/mppx/src/tempo/server/Charge.ts:577). `MPP.Verifier` reports
+  # whether the verified challenge has one; anything but `true` is refused.
+  defp require_challenge_nonce(%{"challenge_nonce" => true}, _type), do: :ok
+
+  defp require_challenge_nonce(_config, type) do
+    {:error, Errors.new(:invalid_challenge, "#{type} credentials need a challenge with a nonce")}
   end
 
   defp submission_mode("hash"), do: {"push", "Hash"}

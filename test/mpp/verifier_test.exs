@@ -70,6 +70,19 @@ defmodule MPP.VerifierTest do
     end
   end
 
+  defmodule MockNonceMethod do
+    @moduledoc false
+    use MPP.Method
+
+    @impl MPP.Method
+    def method_name, do: "mocknonce"
+
+    @impl MPP.Method
+    def verify(_payload, charge) do
+      {:ok, Receipt.new(method: method_name(), reference: inspect(charge.method_details["challenge_nonce"]))}
+    end
+  end
+
   defmodule MockTransactionMethod do
     @moduledoc false
     use MPP.Method
@@ -610,6 +623,67 @@ defmodule MPP.VerifierTest do
       assert_raise ArgumentError, ~r/charge/, fn ->
         Verifier.verify(credential, opts)
       end
+    end
+  end
+
+  describe "verify/2 issuance nonce" do
+    defp opaque(json), do: Base.url_encode64(json, padding: false)
+
+    test "matches the route opaque without the nonce, in either member order" do
+      echoed = opaque(~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA","route":"a","order":"one"}))
+      credential = build_credential(opaque: echoed)
+
+      assert {:ok, %Receipt{}} =
+               Verifier.verify(credential, verify_opts(opaque: opaque(~S({"order":"one","route":"a"}))))
+    end
+
+    test "ignores the nonce key of earlier mppx releases" do
+      credential = build_credential(opaque: opaque(~S({"_mppx_nonce":"legacy","route":"a"})))
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, verify_opts(opaque: opaque(~S({"route":"a"}))))
+    end
+
+    test "a challenge holding only a nonce matches a route without opaque" do
+      credential = build_credential(opaque: opaque(~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA"})))
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, verify_opts())
+    end
+
+    test "rejects another member, a missing member and a nonce-only challenge on a route with opaque" do
+      route = verify_opts(opaque: opaque(~S({"route":"a"})))
+
+      for echoed <- [
+            ~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA","route":"b"}),
+            ~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA","route":"a","extra":"1"}),
+            ~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA"})
+          ] do
+        assert {:error, %Errors{type: type, detail: detail}} =
+                 Verifier.verify(build_credential(opaque: opaque(echoed)), route)
+
+        assert type =~ "invalid-challenge"
+        assert detail =~ "opaque"
+      end
+    end
+
+    test "rejects a challenge with members on a route without opaque" do
+      credential = build_credential(opaque: opaque(~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA","route":"a"})))
+      assert {:error, %Errors{detail: detail}} = Verifier.verify(credential, verify_opts())
+      assert detail =~ "opaque"
+    end
+
+    test "tells the method whether the verified challenge carries a nonce" do
+      opts = verify_opts(method: MockNonceMethod)
+
+      with_nonce = build_credential(method_name: "mocknonce", opaque: opaque(~S({"_mpp_nonce":"q83vEjRWeJCrze8SNFZ4kA"})))
+      assert {:ok, %Receipt{reference: "true"}} = Verifier.verify(with_nonce, opts)
+
+      without = build_credential(method_name: "mocknonce")
+      assert {:ok, %Receipt{reference: "false"}} = Verifier.verify(without, opts)
+    end
+
+    test "a method_config value cannot stand in for the challenge's nonce" do
+      opts = verify_opts(method: MockNonceMethod, method_config: %{"challenge_nonce" => true})
+      credential = build_credential(method_name: "mocknonce")
+
+      assert {:ok, %Receipt{reference: "false"}} = Verifier.verify(credential, opts)
     end
   end
 

@@ -23,6 +23,21 @@ defmodule MPP.JCSTest do
       assert JCS.canonicalize("line\nbreak") == ~S("line\nbreak")
     end
 
+    # RFC 8785 §3.2.2.2, and what ECMAScript JSON.stringify (mppx) writes:
+    # node -e 'console.log(JSON.stringify("\u001f\u0000\b\f\r\t\u007f/"))'
+    test "control characters without a short escape use lowercase hex" do
+      assert JCS.canonicalize(<<0x1F, 0x00, 0x08, 0x0C, 0x0D, 0x09, 0x7F, ?/>>) ==
+               ~S("\u001f\u0000\b\f\r\t) <> <<0x7F>> <> ~S(/")
+    end
+
+    test "a literal backslash-u sequence stays a literal" do
+      assert JCS.canonicalize(~S(\u001F)) == ~S("\\u001F")
+    end
+
+    test "non-ASCII text and member names are written as is" do
+      assert JCS.canonicalize(%{"ключ" => "é\u2028"}) == ~s({"ключ":"é\u2028"})
+    end
+
     test "integer" do
       assert JCS.canonicalize(42) == "42"
     end

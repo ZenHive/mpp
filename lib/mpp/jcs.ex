@@ -53,7 +53,7 @@ defmodule MPP.JCS do
       term
       |> Map.to_list()
       |> Enum.sort_by(fn {k, _v} -> string_key!(k) end)
-      |> Enum.map_intersperse(",", fn {k, v} -> [Jason.encode!(k), ":", canonicalize(v)] end)
+      |> Enum.map_intersperse(",", fn {k, v} -> [encode_string(k), ":", canonicalize(v)] end)
 
     IO.iodata_to_binary(["{", pairs, "}"])
   end
@@ -63,7 +63,7 @@ defmodule MPP.JCS do
     "[" <> elements <> "]"
   end
 
-  def canonicalize(term) when is_binary(term), do: Jason.encode!(term)
+  def canonicalize(term) when is_binary(term), do: encode_string(term)
   def canonicalize(term) when is_integer(term), do: Integer.to_string(term)
   def canonicalize(true), do: "true"
   def canonicalize(false), do: "false"
@@ -78,4 +78,29 @@ defmodule MPP.JCS do
   defp string_key!(key) do
     raise ArgumentError, "MPP.JCS.canonicalize/1 requires string map keys (RFC 8785); got: #{inspect(key)}"
   end
+
+  # RFC 8785 §3.2.2.2: the two-character escapes for `"`, `\`, backspace, form feed,
+  # line feed, carriage return and tab, `\u00xx` in lowercase hex for the other
+  # control characters, and every other character as is. Jason writes the hex digits
+  # in uppercase, which ECMAScript `JSON.stringify` (mppx) and mpp-rs do not.
+  defp encode_string(string) do
+    if String.valid?(string) do
+      IO.iodata_to_binary([?", for(<<byte <- string>>, do: escape(byte)), ?"])
+    else
+      Jason.encode!(string)
+    end
+  end
+
+  defp escape(?"), do: ~S(\")
+  defp escape(?\\), do: ~S(\\)
+  defp escape(?\b), do: ~S(\b)
+  defp escape(?\f), do: ~S(\f)
+  defp escape(?\n), do: ~S(\n)
+  defp escape(?\r), do: ~S(\r)
+  defp escape(?\t), do: ~S(\t)
+
+  defp escape(byte) when byte < 0x20,
+    do: ["\\u00", byte |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(2, "0")]
+
+  defp escape(byte), do: byte
 end

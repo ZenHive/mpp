@@ -14,6 +14,7 @@ defmodule MPP.Methods.TempoMachIntegrationTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
   alias MPP.Receipt
+  alias MPP.Test.TempoTestHelpers
 
   @moduletag :integration
 
@@ -61,7 +62,7 @@ defmodule MPP.Methods.TempoMachIntegrationTest do
     charge = machine_token_charge(rpc_url)
 
     assert {:ok, %Receipt{} = receipt} =
-             Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+             TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
 
     assert receipt.method == "tempo"
     assert receipt.status == "success"
@@ -79,7 +80,7 @@ defmodule MPP.Methods.TempoMachIntegrationTest do
           Map.put(charge.method_details, "credential_source", "did:pkh:eip155:#{@chain_id}:#{@wrong_source}")
     }
 
-    assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     assert error.type =~ "verification-failed"
     assert error.detail =~ "No matching Transfer"
   end
@@ -92,7 +93,7 @@ defmodule MPP.Methods.TempoMachIntegrationTest do
       | method_details: Map.put(charge.method_details, "credential_source", "did:pkh:eip155:#{@chain_id}:#{@payer}")
     }
 
-    assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
   end
 
   defp machine_token_charge(rpc_url) do

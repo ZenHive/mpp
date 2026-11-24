@@ -214,6 +214,25 @@ defmodule MPP.X402.PlugTest do
       end
     end
 
+    test "the route's :scope is part of the binding" do
+      premium = plug_opts(self(), route_scope: "GET /premium")
+      reports = plug_opts(self(), route_scope: "GET /reports")
+      payload = signed_payload(premium)
+
+      assert get_in(payload, ["extensions", "mppx", "info", "_mppx_scope"]) == "GET /premium"
+      assert settle(premium, payload).status == 200
+      assert_received {:verify, _payload, _requirements}
+
+      conn = settle(reports, payload)
+      assert conn.status == 402
+      assert problem_detail(conn) =~ "extension_mismatch"
+      refute_received {:verify, _payload, _requirements}
+
+      unbound = Map.delete(payload, "extensions")
+      assert problem_detail(settle(premium, unbound)) =~ "route_binding_required"
+      refute_received {:verify, _payload, _requirements}
+    end
+
     test "nested x402 options keep the route scope" do
       digest = MPP.BodyDigest.compute("")
       opts = plug_opts(self(), route_digest: digest, digest: digest, extensions: @extensions)
@@ -556,6 +575,7 @@ defmodule MPP.X402.PlugTest do
       currency: "usd",
       digest: Keyword.get(overrides, :route_digest),
       opaque: Keyword.get(overrides, :route_opaque),
+      scope: Keyword.get(overrides, :route_scope),
       store: Keyword.get(overrides, :store, false),
       x402: x402
     )

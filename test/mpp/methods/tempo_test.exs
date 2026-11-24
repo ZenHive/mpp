@@ -19,6 +19,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Test.HostedRecordFaultStore
   alias MPP.Test.SubscriptionHelpers
   alias MPP.Test.TempoMemoryStore
+  alias MPP.Test.TempoTestHelpers
   alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder, as: TempoTxBuilder
@@ -428,11 +429,40 @@ defmodule MPP.Methods.TempoTest do
   end
 
   describe "verify/2 — hash credential" do
+    test "is refused for a challenge without an issuance nonce", %{charge: charge} do
+      stub_receipt(success_receipt())
+      charge = put_in(charge.method_details["challenge_nonce"], false)
+
+      assert {:error, %Errors{type: type, detail: "hash credentials need a challenge with a nonce"}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
+
+      assert type =~ "invalid-challenge"
+    end
+
+    test "is refused when nothing reports a nonce for the challenge", %{charge: charge} do
+      stub_receipt(success_receipt())
+
+      for details <- [charge.method_details, Map.put(charge.method_details, "challenge_nonce", "true")] do
+        assert {:error, %Errors{type: type, detail: "hash credentials need a challenge with a nonce"}} =
+                 Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, %{charge | method_details: details})
+
+        assert type =~ "invalid-challenge"
+      end
+    end
+
+    test "is verified for a challenge with an issuance nonce", %{charge: charge} do
+      stub_receipt(success_receipt())
+      charge = put_in(charge.method_details["challenge_nonce"], true)
+
+      assert {:ok, %Receipt{reference: @tx_hash}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
+    end
+
     test "returns receipt on successful Transfer match", %{charge: charge} do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.reference == @tx_hash
       assert receipt.status == "success"
@@ -448,7 +478,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_log(from: @payer)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "accepts auto-attribution memo bound to the challenge", %{charge: charge} do
@@ -461,7 +491,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects plain transfer when challenge binding context requires attribution memo", %{charge: charge} do
@@ -473,7 +503,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -488,7 +518,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -504,7 +534,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: untagged_memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -520,7 +550,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: short_memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -532,7 +562,7 @@ defmodule MPP.Methods.TempoTest do
       }
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "source"
     end
@@ -547,38 +577,38 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_log(from: wrong_payer)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
 
     test "returns error on missing hash field", %{charge: charge} do
       payload = %{"type" => "hash"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
     end
 
     test "returns error on empty hash", %{charge: charge} do
       payload = %{"type" => "hash", "hash" => ""}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
     end
 
     test "returns error on invalid hash format", %{charge: charge} do
       payload = %{"type" => "hash", "hash" => "0xnothex"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
     end
 
     test "returns error on missing type field", %{charge: charge} do
       payload = %{"hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
     end
 
     test "returns error for unsupported type", %{charge: charge} do
       payload = %{"type" => "unknown"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
     end
 
@@ -586,7 +616,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt_response(%{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
@@ -595,7 +625,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(reverted_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "reverted"
     end
@@ -606,7 +636,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(receipt)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -616,7 +646,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(receipt)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
     end
 
@@ -635,7 +665,9 @@ defmodule MPP.Methods.TempoTest do
 
         stub_receipt(receipt)
 
-        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+        assert {:error, %Errors{} = error} =
+                 TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
+
         assert error.detail =~ "No matching Transfer"
       end
     end
@@ -648,7 +680,7 @@ defmodule MPP.Methods.TempoTest do
                 |> StreamData.filter(&(&1 not in Tempo.credential_types())),
               max_runs: @property_runs
             ) do
-        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => type}, charge)
+        assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => type}, charge)
         assert error.type =~ "invalid-payload"
       end
     end
@@ -658,7 +690,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(receipt)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
     end
 
@@ -667,7 +699,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(receipt)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
     end
 
@@ -679,7 +711,7 @@ defmodule MPP.Methods.TempoTest do
       })
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
@@ -690,7 +722,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
@@ -703,14 +735,14 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
 
     test "rejects transaction with invalid hex in signature field", %{charge: charge} do
       payload = %{"type" => "transaction", "signature" => "0xdeadbeef"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Not a Tempo transaction"
     end
@@ -720,7 +752,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.external_id == "order-42"
     end
 
@@ -729,7 +761,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "not a valid integer"
     end
@@ -744,7 +776,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       assert_received {:rpc_request, request}
       assert request["method"] == "eth_getTransactionReceipt"
@@ -770,7 +802,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects a receipt whose memo is only the configured static value", %{charge: charge} do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: @test_memo)]))
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -779,13 +811,13 @@ defmodule MPP.Methods.TempoTest do
       memo = attribution_memo(@realm, @challenge_id)
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "rejects a plain transfer even when a static memo is configured", %{charge: charge} do
       stub_receipt(success_receipt())
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail =~ "No matching Transfer"
     end
 
@@ -802,7 +834,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
       assert error.detail =~ "not bound to this challenge"
       refute_received {:rpc, _}
@@ -813,7 +845,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, @test_memo), chain_id: 42_431)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
       assert error.detail =~ "not bound to this challenge"
     end
@@ -846,7 +878,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
       assert error.detail =~ "not bound to this challenge"
       refute_received {:rpc, "eth_sendRawTransactionSync"}
@@ -857,14 +889,14 @@ defmodule MPP.Methods.TempoTest do
   describe "verify/2 — hash credential with machine tokens" do
     test "derives direct funding from the on-chain route", %{charge: charge} do
       stub_receipt_and_transaction_from(success_receipt(), @payer)
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert receipt.funding_currency == charge.currency
     end
 
     test "derives legacy funding from transaction.to when calls are absent", %{charge: charge} do
       stub_hash_transaction(success_receipt(), %{"from" => @payer, "to" => charge.currency})
 
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert receipt.funding_currency == charge.currency
     end
 
@@ -879,7 +911,8 @@ defmodule MPP.Methods.TempoTest do
         "calls" => [%{"to" => charge.currency}]
       })
 
-      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{funding_currency: nil}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "omits funding metadata when the route has extra calls", %{charge: charge} do
@@ -889,7 +922,8 @@ defmodule MPP.Methods.TempoTest do
         "calls" => [%{"to" => charge.currency}, %{"to" => "0x20c0000000000000000000000000000000000001"}]
       })
 
-      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{funding_currency: nil}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "omits funding metadata when the transaction route is unavailable", %{charge: charge} do
@@ -899,7 +933,8 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => 1})
       end)
 
-      assert {:ok, %Receipt{funding_currency: nil}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{funding_currency: nil}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "accepts TransferWithMemo from the canonical swapper when the tx sender is the payer", %{charge: charge} do
@@ -912,7 +947,7 @@ defmodule MPP.Methods.TempoTest do
         @payer
       )
 
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert receipt.funding_currency == MachineToken.token(42_431)
     end
 
@@ -937,11 +972,11 @@ defmodule MPP.Methods.TempoTest do
         success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: memo)])
 
       stub_receipt_and_transaction_from(receipt, @payer)
-      assert {:ok, %Receipt{funding_currency: funding}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{funding_currency: funding}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert funding == mach.token
 
       stub_receipt_and_transaction_from(receipt, "0x2222222222222222222222222222222222222222")
-      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: detail}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert detail =~ "No matching Transfer"
 
       stub_receipt_and_transaction_from(
@@ -949,12 +984,12 @@ defmodule MPP.Methods.TempoTest do
         @payer
       )
 
-      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: detail}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert detail =~ "No matching Transfer"
 
       stub_receipt_and_transaction_from(receipt, @payer)
       disabled = %{charge | method_details: Map.put(charge.method_details, "machine_token_enabled", false)}
-      assert {:error, %Errors{detail: detail}} = Tempo.verify(payload, disabled)
+      assert {:error, %Errors{detail: detail}} = TempoTestHelpers.verify_nonced(payload, disabled)
       assert detail =~ "No matching Transfer"
     end
 
@@ -968,7 +1003,7 @@ defmodule MPP.Methods.TempoTest do
 
       stub_receipt_and_transaction_from(success_receipt(logs: [transfer_log(from: @payer)]), @payer)
 
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert receipt.funding_currency == charge.currency
     end
 
@@ -987,7 +1022,7 @@ defmodule MPP.Methods.TempoTest do
         "0x2222222222222222222222222222222222222222"
       )
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -1000,7 +1035,7 @@ defmodule MPP.Methods.TempoTest do
 
       stub_receipt(success_receipt())
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail =~ "Machine tokens are not supported on chain ID 1"
     end
 
@@ -1021,7 +1056,7 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail =~ "Transaction not found on-chain"
     end
 
@@ -1042,7 +1077,7 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => request["id"]})
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail == "An internal payment error occurred."
     end
   end
@@ -1061,7 +1096,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
     end
@@ -1070,7 +1105,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
     end
 
     test "preserves external_id in transaction receipt", %{charge: charge, tx_hex: tx_hex} do
@@ -1078,20 +1113,20 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.external_id == "tx-order-99"
     end
 
     test "returns error on missing signature field", %{charge: charge} do
       payload = %{"type" => "transaction"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "signature"
     end
 
     test "returns error on empty signature field", %{charge: charge} do
       payload = %{"type" => "transaction", "signature" => ""}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "signature"
     end
@@ -1105,7 +1140,7 @@ defmodule MPP.Methods.TempoTest do
       wrong_chain_tx = build_tempo_tx(calls: [call], chain_id: 9999)
 
       payload = %{"type" => "transaction", "signature" => wrong_chain_tx}
-      result = Tempo.verify(payload, charge)
+      result = TempoTestHelpers.verify_nonced(payload, charge)
 
       refute_received {:rpc_call, _method}, "Chain ID mismatch: must reject before simulation or any RPC call"
 
@@ -1124,7 +1159,7 @@ defmodule MPP.Methods.TempoTest do
         calldata = transfer_calldata(@recipient, 1_000_000)
         tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: chain_id)
 
-        result = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+        result = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
         refute_received {:rpc_call, _method}, "Chain ID mismatch: must reject before simulation or any RPC call"
 
@@ -1142,7 +1177,7 @@ defmodule MPP.Methods.TempoTest do
       bad_tx = build_tempo_tx(calls: [call], chain_id: 42_431)
 
       payload = %{"type" => "transaction", "signature" => bad_tx}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching transfer call"
     end
@@ -1169,7 +1204,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
@@ -1178,7 +1213,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(reverted_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "reverted"
     end
@@ -1189,7 +1224,7 @@ defmodule MPP.Methods.TempoTest do
       bad_hex = "0x02" <> Base.encode16(body, case: :lower)
 
       payload = %{"type" => "transaction", "signature" => bad_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Not a Tempo transaction"
     end
@@ -1213,7 +1248,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.reference == @tx_hash
 
       # Verify the sync RPC method was called with raw tx hex
@@ -1233,7 +1268,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(receipt)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.reference == @tx_hash
     end
 
@@ -1255,7 +1290,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
       assert Errors.client_detail(error) == "An internal payment error occurred."
@@ -1281,7 +1316,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
       assert Errors.client_detail(error) == "An internal payment error occurred."
@@ -1321,7 +1356,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Pre-broadcast simulation rejected"
 
@@ -1339,7 +1374,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "result" => "0x", "id" => 1})
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert_received {:rpc_call, "eth_simulateV1", _}
       assert_received {:rpc_call, "eth_call", [call, "latest"]}
       assert Onchain.Address.equal?(call["from"], sender)
@@ -1355,19 +1390,19 @@ defmodule MPP.Methods.TempoTest do
 
       reverted = %{"code" => 3, "message" => "execution reverted: InsufficientBalance"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => reverted, "id" => 1})
-      assert {:error, %Errors{} = rejected} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = rejected} = TempoTestHelpers.verify_nonced(payload, charge)
       assert rejected.detail =~ "Pre-broadcast simulation rejected"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       out_of_gas = %{"code" => -32_003, "message" => "out of gas: gas exhausted during precompiled contract execution"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => out_of_gas, "id" => 1})
-      assert {:error, %Errors{} = underfunded} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = underfunded} = TempoTestHelpers.verify_nonced(payload, charge)
       assert underfunded.detail =~ "An internal payment error occurred."
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
 
       unavailable = %{"code" => -32_000, "message" => "header not found"}
       stub_unsupported_simulate(self(), %{"jsonrpc" => "2.0", "error" => unavailable, "id" => 1})
-      assert {:error, %Errors{} = failed} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = failed} = TempoTestHelpers.verify_nonced(payload, charge)
       assert failed.detail =~ "An internal payment error occurred."
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
@@ -1416,7 +1451,7 @@ defmodule MPP.Methods.TempoTest do
       stub_optimistic_flow(@tx_hash)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
       assert receipt.reference == @tx_hash
@@ -1427,7 +1462,7 @@ defmodule MPP.Methods.TempoTest do
       stub_optimistic_flow(@tx_hash)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.external_id == "optimistic-order-1"
     end
 
@@ -1454,7 +1489,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Pre-broadcast simulation rejected"
 
@@ -1485,7 +1520,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail == "An internal payment error occurred."
     end
@@ -1508,7 +1543,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Verify the correct RPC methods were called with the raw tx
       assert_received {:rpc_call, "eth_simulateV1", _}
@@ -1525,7 +1560,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "An internal payment error occurred."
     end
@@ -1550,7 +1585,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
       assert Errors.client_detail(error) == "An internal payment error occurred."
@@ -1577,7 +1612,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "Broadcast outcome is unknown for transaction 0x"
       assert Errors.client_detail(error) == "An internal payment error occurred."
@@ -1611,7 +1646,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # The full tx is simulated once, then broadcast.
       assert_received {:rpc_call, "eth_simulateV1"}
@@ -1629,7 +1664,9 @@ defmodule MPP.Methods.TempoTest do
         success_receipt(logs: [transfer_with_memo_log(from: machine_token_swapper(), memo: memo)])
       )
 
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{} = receipt} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert receipt.funding_currency == MachineToken.token(42_431)
     end
 
@@ -1653,7 +1690,7 @@ defmodule MPP.Methods.TempoTest do
 
         tx_hex = build_tempo_tx(calls: calls, chain_id: 42_431)
         stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: mach.swapper, memo: memo)]))
-        result = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+        result = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
         case expected do
           :ok ->
@@ -1672,7 +1709,9 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
       stub_broadcast_and_receipt(success_receipt(logs: [transfer_log(from: test_sender_address())]))
 
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{} = receipt} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert receipt.funding_currency == charge.currency
     end
 
@@ -1682,7 +1721,9 @@ defmodule MPP.Methods.TempoTest do
       [_approve, swap] = machine_token_calls(1_000_000, memo)
       tx_hex = build_tempo_tx(calls: [swap], chain_id: 42_431)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert error.detail =~ "No matching transfer"
     end
   end
@@ -1705,10 +1746,10 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
       # First call succeeds
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Second call with same hash is rejected
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "already used"
     end
@@ -1723,10 +1764,10 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
       # First call succeeds
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Second call with same signed tx is rejected before broadcast
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "already used"
     end
@@ -1759,14 +1800,14 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => raw_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => raw_hex}, charge)
 
       assert_received {:rpc_call, "eth_simulateV1", _}
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
       assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert error.detail =~ "already used"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
@@ -1804,14 +1845,14 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => alternate_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => alternate_hex}, charge)
 
       assert_received {:rpc_call, "eth_simulateV1", _}
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [broadcast_hex]}
       assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert error.detail =~ "already used"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
@@ -1833,14 +1874,14 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => padded_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => padded_hex}, charge)
 
       assert error.detail =~ "leading zero"
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
       assert :not_found = TempoMemoryStore.get("mpp:charge:" <> keccak256_hex(padded_hex))
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert {:ok, _} = TempoMemoryStore.get("mpp:charge:" <> canonical_hash)
     end
@@ -1850,9 +1891,9 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "already used"
     end
@@ -1863,12 +1904,13 @@ defmodule MPP.Methods.TempoTest do
       "0x" <> hex = @tx_hash
 
       assert {:ok, %Receipt{reference: reference}} =
-               Tempo.verify(%{"type" => "hash", "hash" => "0x" <> String.upcase(hex)}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => "0x" <> String.upcase(hex)}, charge)
 
       assert reference == "0x" <> String.downcase(hex)
 
       for spelling <- [hex, String.upcase(hex), @tx_hash] do
-        assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => spelling}, charge),
+        assert {:error, %Errors{} = error} =
+                 TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => spelling}, charge),
                "spelling #{inspect(spelling)} was not deduplicated"
 
         assert error.detail =~ "already used"
@@ -1880,7 +1922,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt_response(%{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "timeout"}, "id" => 1})
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Hash should NOT be burned — store should have no entry
       expected_key = "mpp:charge:" <> String.downcase(@tx_hash)
@@ -1888,7 +1930,7 @@ defmodule MPP.Methods.TempoTest do
 
       # Second attempt: RPC succeeds — retry should work
       stub_receipt(success_receipt())
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Now the hash IS marked
       assert {:ok, _timestamp} = TempoMemoryStore.get(expected_key)
@@ -1898,7 +1940,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       expected_key = "mpp:charge:" <> String.downcase(@tx_hash)
       assert {:ok, _timestamp} = TempoMemoryStore.get(expected_key)
@@ -1927,7 +1969,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Reserve is keyed on keccak256(canonical bytes); the distinct on-chain hash is recorded too
       canonical_key = "mpp:charge:" <> keccak256_hex(tx_hex)
@@ -1969,7 +2011,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       canonical_key = "mpp:charge:" <> keccak256_hex(tx_hex)
       onchain_key = "mpp:charge:" <> String.downcase(different_on_chain_hash)
@@ -1998,7 +2040,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "An internal payment error occurred."
     end
@@ -2015,7 +2057,7 @@ defmodule MPP.Methods.TempoTest do
       # Fire two concurrent verify calls with identical signed tx
       tasks =
         for _ <- 1..2 do
-          Task.async(fn -> Tempo.verify(payload, charge) end)
+          Task.async(fn -> TempoTestHelpers.verify_nonced(payload, charge) end)
         end
 
       results = Task.await_many(tasks)
@@ -2057,12 +2099,12 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Pre-broadcast simulation rejected"
       assert :not_found = TempoMemoryStore.get(expected_key)
 
       stub_broadcast_and_receipt(success_receipt())
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
     end
 
@@ -2093,7 +2135,7 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Pre-broadcast simulation rejected"
       assert {:ok, ^later_token} = TempoMemoryStore.get(expected_key)
     end
@@ -2111,7 +2153,7 @@ defmodule MPP.Methods.TempoTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
           assert error.detail =~ "Pre-broadcast simulation rejected"
         end)
 
@@ -2119,7 +2161,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, _} = FaultyDeleteStore.get(expected_key)
 
       stub_broadcast_and_receipt(success_receipt())
-      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = retry_error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert retry_error.detail =~ "already used"
     end
 
@@ -2136,7 +2178,7 @@ defmodule MPP.Methods.TempoTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
           assert error.detail =~ "Pre-broadcast simulation rejected"
         end)
 
@@ -2144,7 +2186,7 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, _} = FaultyDeleteStore.get(expected_key)
 
       stub_broadcast_and_receipt(success_receipt())
-      assert {:error, %Errors{} = retry_error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = retry_error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert retry_error.detail =~ "already used"
     end
 
@@ -2161,7 +2203,7 @@ defmodule MPP.Methods.TempoTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+          assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
           assert error.detail =~ "Pre-broadcast simulation rejected"
         end)
 
@@ -2186,7 +2228,7 @@ defmodule MPP.Methods.TempoTest do
         end
       )
 
-      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: reference}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert reference == keccak256_hex(payload["signature"])
       assert_received :broadcast_issued
       assert Agent.get(lookups, & &1) == 3
@@ -2216,7 +2258,7 @@ defmodule MPP.Methods.TempoTest do
       for {outcome, nonce} <- Enum.with_index(outcomes) do
         {payload, _key} = plain_transaction_payload(gas_limit: 21_000 + nonce)
         stub_send_outcome(fn conn, _method -> outcome.(conn) end, fn -> success_receipt() end)
-        assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+        assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       end
     end
 
@@ -2238,7 +2280,9 @@ defmodule MPP.Methods.TempoTest do
         end
       )
 
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       refute_received :receipt_lookup
       assert :not_found = TempoMemoryStore.get(expected_key)
     end
@@ -2248,7 +2292,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, _key} = plain_transaction_payload(valid_before: valid_before, nonce_key: expiring_nonce_key())
       stub_send_outcome(fn conn, _method -> Req.Test.transport_error(conn, :timeout) end, fn -> nil end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       hash = keccak256_hex(payload["signature"])
       assert error.detail == unresolved_detail(hash, valid_before)
       assert Errors.client_detail(error) == "An internal payment error occurred."
@@ -2260,7 +2304,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, _key} = plain_transaction_payload(valid_before: valid_before, nonce_key: expiring_nonce_key())
       stub_send_outcome(fn conn, "eth_sendRawTransaction" -> Req.Test.transport_error(conn, :timeout) end, fn -> nil end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail == unresolved_detail(keccak256_hex(payload["signature"]), valid_before)
     end
 
@@ -2275,7 +2319,9 @@ defmodule MPP.Methods.TempoTest do
         nil
       end)
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert Agent.get(lookups, & &1) == 2
     end
 
@@ -2301,19 +2347,24 @@ defmodule MPP.Methods.TempoTest do
         fn -> if Agent.get(mined?, & &1), do: success_receipt() end
       )
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       # Only a settled payment consumes the credential.
       assert :not_found = TempoMemoryStore.get(expected_key)
 
       Agent.update(mined?, fn _ -> true end)
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
 
       # A settled transaction is never accepted again, whether resent or presented by hash.
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       hash_payload = %{"type" => "hash", "hash" => keccak256_hex(payload["signature"])}
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(hash_payload, charge)
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               TempoTestHelpers.verify_nonced(hash_payload, charge)
+
       assert_received :broadcast_issued
       assert_received :broadcast_issued
       refute_received :broadcast_issued
@@ -2336,9 +2387,9 @@ defmodule MPP.Methods.TempoTest do
         fn -> success_receipt() end
       )
 
-      first = Task.async(fn -> Tempo.verify(payload, charge) end)
+      first = Task.async(fn -> TempoTestHelpers.verify_nonced(payload, charge) end)
       assert_receive {:send_entered, send_pid}, to_timeout(second: 5)
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
       send(send_pid, :release_send)
       assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
     end
@@ -2362,14 +2413,14 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "a recovered receipt that reverted is not accepted", %{charge: charge} do
       {payload, expected_key} = plain_transaction_payload()
       stub_send_outcome(fn conn, _method -> Req.Test.transport_error(conn, :timeout) end, fn -> reverted_receipt() end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "reverted"
       assert :not_found = TempoMemoryStore.get(expected_key)
     end
@@ -2383,12 +2434,12 @@ defmodule MPP.Methods.TempoTest do
 
       charge_without_rpc = %{charge | method_details: Map.delete(charge.method_details, "rpc_url")}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge_without_rpc)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge_without_rpc)
       assert error.detail =~ "rpc_url"
       assert :not_found = TempoMemoryStore.get(expected_key)
 
       stub_broadcast_and_receipt(success_receipt())
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "concurrent duplicate during the reserved window is rejected exactly once against ConCacheStore",
@@ -2423,11 +2474,11 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      first = Task.async(fn -> Tempo.verify(payload, charge) end)
+      first = Task.async(fn -> TempoTestHelpers.verify_nonced(payload, charge) end)
       assert_receive {:simulate_entered, sim_pid}, to_timeout(second: 5)
       assert {:ok, _} = ConCacheStore.get(expected_key, store_opts)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "already used"
 
       send(sim_pid, :release_simulate)
@@ -2517,7 +2568,10 @@ defmodule MPP.Methods.TempoTest do
       # whether the store raises, answers an error, or exits.
       for fault <- [:raise, :error, :exit] do
         Agent.update(CrashingPutStore, &Map.put(&1, :fault, fault))
-        assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+
+        assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+                 TempoTestHelpers.verify_nonced(payload, charge)
+
         assert_received :post_broadcast_mark
       end
     end
@@ -2587,7 +2641,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
       # Should succeed despite post-broadcast store process being dead (catch :exit)
-      assert {:ok, %Receipt{reference: ^different_hash}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: ^different_hash}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "validate_config! rejects invalid store module" do
@@ -2627,10 +2681,10 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Replay rejected
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "already used"
     end
 
@@ -2646,7 +2700,7 @@ defmodule MPP.Methods.TempoTest do
       # (check_and_mark) — exactly one wins, the other is rejected as already-used.
       tasks =
         for _ <- 1..2 do
-          Task.async(fn -> Tempo.verify(payload, charge) end)
+          Task.async(fn -> TempoTestHelpers.verify_nonced(payload, charge) end)
         end
 
       results = Task.await_many(tasks)
@@ -2670,10 +2724,10 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # Replay rejected
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "already used"
     end
 
@@ -2718,8 +2772,8 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, named_charge)
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, named_charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, named_charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, named_charge)
       assert error.detail =~ "already used"
     end
 
@@ -2741,10 +2795,10 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
       # First call succeeds via atomic check_and_mark on named store
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, named_charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, named_charge)
 
       # Replay rejected
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, named_charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, named_charge)
       assert error.detail =~ "already used"
     end
 
@@ -2760,7 +2814,7 @@ defmodule MPP.Methods.TempoTest do
       # Run 5 concurrent verifications — exactly 1 should succeed via atomic reserve
       tasks =
         for _ <- 1..5 do
-          Task.async(fn -> Tempo.verify(payload, charge) end)
+          Task.async(fn -> TempoTestHelpers.verify_nonced(payload, charge) end)
         end
 
       results = Task.await_many(tasks)
@@ -2783,7 +2837,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "An internal payment error occurred."
     end
@@ -2804,7 +2858,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "An internal payment error occurred."
     end
@@ -2863,7 +2917,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "internal-payment-error"
       assert error.detail =~ "An internal payment error occurred."
     end
@@ -2890,7 +2944,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "rpc_url"
     end
@@ -3236,7 +3290,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects a hash credential when supported_modes is pull-only before RPC", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.type =~ "verification-failed"
       assert error.detail == @hash_unsupported
     end
@@ -3244,7 +3298,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects a hash credential when advertised supportedModes omits push", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", ["pull"])}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail == @hash_unsupported
     end
 
@@ -3252,7 +3306,7 @@ defmodule MPP.Methods.TempoTest do
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["push"])}
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => "0x76"}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => "0x76"}, charge)
 
       assert error.type =~ "verification-failed"
       assert error.detail == @tx_unsupported
@@ -3261,17 +3315,19 @@ defmodule MPP.Methods.TempoTest do
     test "rejects hash and transaction credentials when supportedModes is empty", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", [])}
 
-      assert {:error, %Errors{} = hash} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = hash} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert hash.detail == @hash_unsupported
 
-      assert {:error, %Errors{} = tx} = Tempo.verify(%{"type" => "transaction", "signature" => "0x76"}, charge)
+      assert {:error, %Errors{} = tx} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => "0x76"}, charge)
+
       assert tx.detail == @tx_unsupported
     end
 
     test "rejects a hash credential when supportedModes is not a list", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supportedModes", "push")}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
       assert error.detail == @hash_unsupported
     end
 
@@ -3279,14 +3335,14 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt())
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["push"])}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
 
     test "accepts a hash credential when supported_modes lists both modes", %{charge: charge} do
       stub_receipt(success_receipt())
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull", "push"])}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "hash", "hash" => @tx_hash}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
     end
   end
 
@@ -3295,7 +3351,7 @@ defmodule MPP.Methods.TempoTest do
       charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", true)}
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "hash"
       assert error.detail =~ "feePayer"
@@ -3306,7 +3362,7 @@ defmodule MPP.Methods.TempoTest do
       charge = %{charge | method_details: Map.put(charge.method_details, "fee_payer", false)}
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
   end
 
@@ -3367,7 +3423,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
 
@@ -3413,7 +3469,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => raw_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => raw_hex}, charge)
 
       # Sender simulation before co-sign: no fee token, zero fees, no sponsor signature.
       assert_received {:rpc_call, "eth_call", [sender_call, "latest"]}
@@ -3431,7 +3487,7 @@ defmodule MPP.Methods.TempoTest do
       assert String.starts_with?(broadcast_hex, "0x76")
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert error.detail =~ "already used"
       refute_received {:rpc_call, "eth_call", _}
@@ -3478,7 +3534,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Pre-broadcast simulation rejected"
 
@@ -3515,7 +3571,9 @@ defmodule MPP.Methods.TempoTest do
       out_of_gas = rpc_error(-32_003, "out of gas: gas exhausted during precompiled contract execution: 45000")
       stub_sponsored_simulations(self(), out_of_gas, eth_call_ok())
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Pre-broadcast simulation rejected"
 
@@ -3531,7 +3589,9 @@ defmodule MPP.Methods.TempoTest do
       shortfall = rpc_error(-32_003, "insufficient fee token balance: required 8929, but only have 0")
       stub_sponsored_simulations(self(), eth_call_ok(), shortfall)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert error.type =~ "verification-failed"
       assert error.detail =~ "Pre-broadcast simulation rejected"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
@@ -3545,7 +3605,7 @@ defmodule MPP.Methods.TempoTest do
       out_of_gas = rpc_error(-32_003, "out of gas: gas exhausted during precompiled contract execution: 1000000")
       stub_sponsored_simulations(self(), eth_call_ok(), out_of_gas)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
       assert_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
 
@@ -3553,7 +3613,9 @@ defmodule MPP.Methods.TempoTest do
       {:ok, tx_hex} = build_sponsored_client_tx(nonce: 0)
       stub_sponsored_simulations(self(), eth_call_ok(), rpc_error(3, "out of gas"))
 
-      assert {:error, %Errors{} = error} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
       assert error.type =~ "verification-failed"
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
     end
@@ -3563,7 +3625,7 @@ defmodule MPP.Methods.TempoTest do
       stub_sponsored_simulations(self(), eth_call_ok(), &Req.Test.transport_error(&1, :econnrefused))
 
       assert {:error, %Errors{detail: "An internal payment error occurred."}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
 
       refute_received {:rpc_call, "eth_sendRawTransactionSync", _}
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
@@ -3588,7 +3650,7 @@ defmodule MPP.Methods.TempoTest do
         )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "placeholder"
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
@@ -3613,7 +3675,7 @@ defmodule MPP.Methods.TempoTest do
         )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "fee_token"
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
@@ -3635,7 +3697,10 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
       assert [%{phase: :pending, tx_hash: "0x" <> _sent_hash}] = Map.values(state.reservations)
     end
@@ -3645,7 +3710,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(reverted_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "reverted"
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
     end
@@ -3661,7 +3726,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "needs at least 15s of remaining validity"
       assert :not_found = sponsor_budget_state(charge, @fee_payer_private_key)
@@ -3695,7 +3760,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "needs at least 15s of remaining validity"
 
@@ -3730,7 +3795,7 @@ defmodule MPP.Methods.TempoTest do
         stub_recording_simulation(test_pid)
 
         payload = %{"type" => "transaction", "signature" => tx_hex}
-        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
         assert error.type =~ "verification-failed"
         assert error.detail =~ "needs at least 15s of remaining validity"
 
@@ -3762,7 +3827,7 @@ defmodule MPP.Methods.TempoTest do
       stub_recording_simulation(test_pid)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "needs at least 15s of remaining validity"
 
@@ -3800,7 +3865,7 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
       assert sponsor_budget_state(charge, @fee_payer_private_key) in [:not_found, {:ok, %{reservations: %{}}}]
     end
 
@@ -3823,7 +3888,9 @@ defmodule MPP.Methods.TempoTest do
       {:ok, first_tx} = build_sponsored_client_tx(nonce: 9)
       stub_optimistic_flow(@tx_hash)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => first_tx}, charge)
+      assert {:ok, %Receipt{}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => first_tx}, charge)
+
       assert {:ok, state} = sponsor_budget_state(charge, @fee_payer_private_key)
       assert [%{phase: :pending, tx_hash: @tx_hash}] = Map.values(state.reservations)
 
@@ -3847,7 +3914,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => second_tx}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => second_tx}, charge)
 
       assert error.type == "https://zenhive.github.io/mpp/problems/sponsor-capacity-exhausted"
       assert error.retry_after > 0
@@ -3860,7 +3927,10 @@ defmodule MPP.Methods.TempoTest do
       reserve_failure_charge = put_in(charge.method_details["store"], SponsorLifecycleStore)
 
       assert {:error, %Errors{} = reserve_error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => reserve_failure_tx}, reserve_failure_charge)
+               TempoTestHelpers.verify_nonced(
+                 %{"type" => "transaction", "signature" => reserve_failure_tx},
+                 reserve_failure_charge
+               )
 
       assert reserve_error.detail == "An internal payment error occurred."
 
@@ -3868,7 +3938,10 @@ defmodule MPP.Methods.TempoTest do
       missing_store_charge = put_in(charge.method_details["store"], false)
 
       assert {:error, %Errors{} = store_error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => store_failure_tx}, missing_store_charge)
+               TempoTestHelpers.verify_nonced(
+                 %{"type" => "transaction", "signature" => store_failure_tx},
+                 missing_store_charge
+               )
 
       assert store_error.detail == "An internal payment error occurred."
 
@@ -3878,7 +3951,10 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       assert {:error, %Errors{} = transition_error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => transition_failure_tx}, transition_failure_charge)
+               TempoTestHelpers.verify_nonced(
+                 %{"type" => "transaction", "signature" => transition_failure_tx},
+                 transition_failure_charge
+               )
 
       assert transition_error.detail == "An internal payment error occurred."
 
@@ -3888,7 +3964,10 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => release_failure_tx}, release_failure_charge)
+               TempoTestHelpers.verify_nonced(
+                 %{"type" => "transaction", "signature" => release_failure_tx},
+                 release_failure_charge
+               )
 
       {:ok, pending_failure_tx} = build_sponsored_client_tx(nonce: 15)
       :ok = SponsorLifecycleStore.configure(3)
@@ -3901,7 +3980,10 @@ defmodule MPP.Methods.TempoTest do
       stub_optimistic_flow(@tx_hash)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => pending_failure_tx}, pending_failure_charge)
+               TempoTestHelpers.verify_nonced(
+                 %{"type" => "transaction", "signature" => pending_failure_tx},
+                 pending_failure_charge
+               )
     end
 
     test "passes through when fee_payer is false (no co-signing)", %{charge: charge} do
@@ -3915,7 +3997,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
   end
 
@@ -3951,7 +4033,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(max_fee_per_gas: 1_000_000_000_000_000_000, gas_limit: 21_000)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "max_fee_per_gas"
     end
@@ -3966,7 +4048,7 @@ defmodule MPP.Methods.TempoTest do
         )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "total fee budget"
     end
 
@@ -3975,7 +4057,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(access_list: access_list)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "access list"
     end
 
@@ -4007,7 +4089,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(authorization_list: authorization_list_field(7))
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "authorization list"
       refute_received {:rpc_call, _method}
@@ -4018,7 +4100,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(authorization_list: authorization_list_field(1))
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "authorization list (1 entries)"
       refute_received {:rpc_call, _method}
     end
@@ -4028,7 +4110,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(key_authorization: verified_key_authorization())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "must not carry a key authorization"
       refute_received {:rpc_call, _method}
@@ -4052,7 +4134,7 @@ defmodule MPP.Methods.TempoTest do
             {[key_authorization: verified_key_authorization()], "must not carry a key authorization"}
           ] do
         payload = %{"type" => "transaction", "signature" => econ_tx(opts)}
-        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
         assert error.type =~ "verification-failed"
         assert error.detail =~ expected_detail
       end
@@ -4071,7 +4153,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = econ_tx(max_fee_per_gas: 2_000_000_000, max_priority_fee_per_gas: 1, gas_limit: 21_000)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "max_fee_per_gas"
     end
   end
@@ -4105,7 +4187,7 @@ defmodule MPP.Methods.TempoTest do
 
       # No RPC stubs needed — validation fires before broadcast
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "disallowed call pattern"
     end
 
@@ -4117,7 +4199,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [valid_call, rogue_call], chain_id: 42_431, fee_payer: true)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "disallowed call pattern"
     end
 
@@ -4134,7 +4216,7 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt())
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "binds the approve/swap prefix to the payment", %{charge: charge} do
@@ -4163,7 +4245,7 @@ defmodule MPP.Methods.TempoTest do
           "signature" => build_tempo_tx(calls: calls, chain_id: 42_431, fee_payer: true)
         }
 
-        assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+        assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
         assert error.detail =~ detail
       end
 
@@ -4178,7 +4260,7 @@ defmodule MPP.Methods.TempoTest do
         "signature" => build_tempo_tx(calls: malformed, chain_id: 42_431, fee_payer: true)
       }
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "approve target"
 
       bound = [
@@ -4189,7 +4271,7 @@ defmodule MPP.Methods.TempoTest do
 
       stub_broadcast_and_receipt(success_receipt())
       payload = %{"type" => "transaction", "signature" => build_tempo_tx(calls: bound, chain_id: 42_431, fee_payer: true)}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "skips DEX call-scope when the canonical machine-token route matches", %{charge: charge} do
@@ -4203,7 +4285,7 @@ defmodule MPP.Methods.TempoTest do
       )
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
   end
 
@@ -4253,7 +4335,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, payer} = mach_payment(4217)
       stub_rejected_simulation(250_000)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       url = "#{@funding_base}&address=#{payer}&amount=0.75"
 
       assert error.type =~ "verification-failed"
@@ -4275,7 +4357,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, _payer} = mach_payment(4217)
       stub_rejected_simulation(1_000_000)
 
-      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{funding_url: nil} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail == "Pre-broadcast simulation rejected the transaction"
       refute Map.has_key?(Errors.to_map(error), "fundingUrl")
     end
@@ -4284,7 +4366,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, _payer} = mach_payment(4217, :machine_usd)
       Req.Test.stub(Tempo, fn conn -> reject_simulation_only(conn) end)
 
-      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{funding_url: nil} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail == "Pre-broadcast simulation rejected the transaction"
     end
 
@@ -4293,7 +4375,7 @@ defmodule MPP.Methods.TempoTest do
       {payload, _payer} = mach_payment(42_431)
       Req.Test.stub(Tempo, fn conn -> reject_simulation_only(conn) end)
 
-      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{funding_url: nil} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail == "Pre-broadcast simulation rejected the transaction"
     end
 
@@ -4307,7 +4389,7 @@ defmodule MPP.Methods.TempoTest do
       :ok = MPP.Tempo.Store.put(store, "mpp:charge:" <> keccak256_hex(payload["signature"]), true)
       Req.Test.stub(Tempo, fn _conn -> flunk("a used transaction must not reach the RPC") end)
 
-      assert {:error, %Errors{funding_url: nil} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{funding_url: nil} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       refute error.detail =~ "MACH"
       refute error.detail =~ "Add funds"
     end
@@ -4467,10 +4549,26 @@ defmodule MPP.Methods.TempoTest do
       {:ok, charge: zero_charge}
     end
 
+    test "refuses a proof for a challenge without an issuance nonce", %{charge: charge} do
+      charge = put_in(charge.method_details["challenge_nonce"], false)
+
+      assert {:error, %Errors{type: type, detail: "proof credentials need a challenge with a nonce"}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => @proof_signature}, charge)
+
+      assert type =~ "invalid-challenge"
+    end
+
+    test "accepts a proof for a challenge with an issuance nonce", %{charge: charge} do
+      charge = put_in(charge.method_details["challenge_nonce"], true)
+
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => @proof_signature}, charge)
+    end
+
     test "accepts a valid proof credential for zero-amount charge", %{charge: charge} do
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects a reused proof credential", %{charge: charge} do
@@ -4479,8 +4577,8 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["store"], {ConCacheStore, name: cache_name})
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "keeps a proof single-use until its challenge expires, past the store TTL", %{charge: charge} do
@@ -4494,9 +4592,9 @@ defmodule MPP.Methods.TempoTest do
       charge = %{charge | method_details: details}
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       Process.sleep(150)
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "accepts a valid proof for a zero amount with leading zeros", %{charge: charge} do
@@ -4507,21 +4605,21 @@ defmodule MPP.Methods.TempoTest do
       }
 
       payload = %{"type" => "proof", "signature" => @proof_signature}
-      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "proof credentials ignore supportedModes", %{charge: charge} do
       charge = %{charge | method_details: Map.put(charge.method_details, "supported_modes", ["pull"])}
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects proof for non-zero amount", %{charge: charge} do
       charge = %{charge | amount: "1000"}
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "zero-amount"
     end
 
@@ -4529,7 +4627,7 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "hash", "hash" => @tx_hash}
 
       for amount <- ["0", "000"] do
-        assert {:error, %Errors{} = error} = Tempo.verify(payload, %{charge | amount: amount})
+        assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, %{charge | amount: amount})
         assert error.detail =~ "proof credential"
       end
     end
@@ -4538,7 +4636,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["credential_source"], nil)
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "source"
     end
 
@@ -4546,7 +4644,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["credential_source"], 12_345)
       payload = %{"type" => "proof", "signature" => @proof_signature}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "source"
     end
@@ -4554,7 +4652,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects proof credential missing the signature field", %{charge: charge} do
       payload = %{"type" => "proof"}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "signature"
     end
@@ -4562,7 +4660,7 @@ defmodule MPP.Methods.TempoTest do
     test "rejects proof credential with a non-binary signature", %{charge: charge} do
       payload = %{"type" => "proof", "signature" => 42}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "signature"
     end
@@ -4588,7 +4686,7 @@ defmodule MPP.Methods.TempoTest do
       stub_active_access_key_metadata!()
 
       payload = %{"type" => "proof", "signature" => signature}
-      assert {:ok, %Receipt{reference: @proof_challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: @proof_challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects proof signed by a revoked access key for the root source", %{charge: charge} do
@@ -4613,7 +4711,7 @@ defmodule MPP.Methods.TempoTest do
 
       payload = %{"type" => "proof", "signature" => signature}
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Proof signature does not match source"
     end
   end
@@ -4648,7 +4746,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "regression (GHSA-34g7-vx6g-82mq residual): a third party cannot claim an observed transfer against their own challenge",
@@ -4662,7 +4760,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "No matching Transfer"
     end
@@ -4675,7 +4773,7 @@ defmodule MPP.Methods.TempoTest do
       stub_active_access_key_metadata!(revoked: true)
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
 
@@ -4687,7 +4785,7 @@ defmodule MPP.Methods.TempoTest do
       stub_active_access_key_metadata!(revoked: true)
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
 
@@ -4696,7 +4794,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
 
       payload = %{"type" => "hash", "hash" => @tx_hash}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "Presenter binding is required"
     end
@@ -4705,7 +4803,7 @@ defmodule MPP.Methods.TempoTest do
       signature = sign_access_key_proof!(presenter_params(wallet.hex), wallet.key, wallet.address)
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "requires a credential source"
     end
@@ -4714,7 +4812,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => 42}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "presenterSignature"
     end
@@ -4729,7 +4827,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt_and_access_key!(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "accepts a valid presenter signature when binding is not required", %{charge: charge, wallet: wallet} do
@@ -4740,7 +4838,7 @@ defmodule MPP.Methods.TempoTest do
       stub_receipt(success_receipt(logs: [transfer_with_memo_log(from: wallet.hex, memo: memo)]))
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => signature}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects an invalid provided presenter signature even when binding is not required",
@@ -4749,7 +4847,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{wallet.hex}")
 
       payload = %{"type" => "hash", "hash" => @tx_hash, "presenterSignature" => "0xdeadbeef"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
   end
@@ -4782,13 +4880,13 @@ defmodule MPP.Methods.TempoTest do
       stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: sender_hex, memo: memo)]))
 
       payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "rejects a transaction credential without presenterSignature when binding is required",
          %{charge: charge, tx_hex: tx_hex} do
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "invalid-payload"
       assert error.detail =~ "Presenter binding is required"
     end
@@ -4800,7 +4898,7 @@ defmodule MPP.Methods.TempoTest do
       signature = sign_presenter_by_test_sender!(presenter_params(test_sender_address()))
 
       payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Credential source does not match the transaction sender"
     end
 
@@ -4812,7 +4910,7 @@ defmodule MPP.Methods.TempoTest do
       stub_active_access_key_metadata!(revoked: true)
 
       payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => signature}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
 
@@ -4823,16 +4921,16 @@ defmodule MPP.Methods.TempoTest do
       sender_hex = test_sender_address()
 
       other = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:0x#{String.duplicate("22", 20)}")
-      assert {:error, %Errors{} = mismatch} = Tempo.verify(payload, other)
+      assert {:error, %Errors{} = mismatch} = TempoTestHelpers.verify_nonced(payload, other)
       assert mismatch.detail =~ "Credential source does not match the transaction sender"
 
       wrong_chain = put_in(charge.method_details["credential_source"], "did:pkh:eip155:4217:#{sender_hex}")
-      assert {:error, %Errors{} = invalid} = Tempo.verify(payload, wrong_chain)
+      assert {:error, %Errors{} = invalid} = TempoTestHelpers.verify_nonced(payload, wrong_chain)
       assert invalid.detail =~ "source is invalid"
 
       stub_broadcast_and_receipt(success_receipt(logs: [transfer_with_memo_log(from: sender_hex, memo: memo)]))
       sender = put_in(charge.method_details["credential_source"], "did:pkh:eip155:42431:#{sender_hex}")
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, sender)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, sender)
     end
 
     test "rejects an invalid provided presenter signature even when binding is not required",
@@ -4840,7 +4938,7 @@ defmodule MPP.Methods.TempoTest do
       charge = put_in(charge.method_details["require_presenter_binding"], false)
 
       payload = %{"type" => "transaction", "signature" => tx_hex, "presenterSignature" => "0xdeadbeef"}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Presenter signature does not match the transfer sender"
     end
   end
@@ -4948,7 +5046,7 @@ defmodule MPP.Methods.TempoTest do
       tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431, fee_payer: true)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "not allowed"
     end
 
@@ -4961,7 +5059,7 @@ defmodule MPP.Methods.TempoTest do
 
       stub_broadcast_and_receipt(success_receipt())
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, _} = Tempo.verify(payload, charge)
+      assert {:ok, _} = TempoTestHelpers.verify_nonced(payload, charge)
     end
   end
 
@@ -5046,7 +5144,7 @@ defmodule MPP.Methods.TempoTest do
       stub_recording_simulation(test_pid)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.type =~ "verification-failed"
       assert error.detail =~ "needs at least 15s of remaining validity"
 
@@ -5083,7 +5181,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{} = receipt} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
       assert receipt.method == "tempo"
       assert receipt.status == "success"
 
@@ -5135,7 +5233,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       assert {:ok, %Receipt{}} =
-               Tempo.verify(%{"type" => "transaction", "signature" => alternate_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => alternate_hex}, charge)
 
       assert_received {:rpc_call, "eth_fillTransaction"}
       assert_received {:rpc_call, "eth_call"}
@@ -5143,7 +5241,7 @@ defmodule MPP.Methods.TempoTest do
       assert_received {:rpc_call, "eth_sendRawTransactionSync"}
 
       assert {:error, %Errors{} = error} =
-               Tempo.verify(%{"type" => "transaction", "signature" => canonical_hex}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => canonical_hex}, charge)
 
       assert error.detail =~ "already used"
       refute_received {:rpc_call, "eth_fillTransaction"}
@@ -5191,13 +5289,15 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert_received {:rpc_call, "eth_fillTransaction", _}
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [filled_hex]}
       assert {:ok, ^filled_hex} = ConCacheStore.get(record_key, store_opts)
 
       Agent.update(mined?, fn _ -> true end)
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
 
       # The retry neither asks for a new fill nor sends again: the recorded fill's receipt settles it.
       refute_received {:rpc_call, "eth_fillTransaction", _}
@@ -5206,7 +5306,7 @@ defmodule MPP.Methods.TempoTest do
       assert filled_hash == keccak256_hex(filled_hex)
       assert :not_found = ConCacheStore.get(record_key, store_opts)
       assert {:ok, _} = ConCacheStore.get("mpp:charge:" <> filled_hash, store_opts)
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "an unreadable recorded fill fails closed and leaves the record for an operator", %{charge: charge} do
@@ -5223,7 +5323,10 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       refute_received {:rpc_call, "eth_fillTransaction"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       assert {:ok, "0xnot-a-transaction"} = ConCacheStore.get(record_key, store_opts)
@@ -5239,11 +5342,14 @@ defmodule MPP.Methods.TempoTest do
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
       Process.put(:hosted_record_fault, :put)
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert Agent.get(chain, & &1.sent_hash) == nil
 
       Process.delete(:hosted_record_fault)
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     test "a settled hosted fill whose record cannot be removed still settles", %{charge: charge} do
@@ -5254,7 +5360,7 @@ defmodule MPP.Methods.TempoTest do
       stub_hosted_chain(hosted_fill_tx_map(tx), mined: true)
 
       Process.put(:hosted_record_fault, :delete)
-      assert {:ok, %Receipt{}} = Tempo.verify(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
       assert {:ok, "0x" <> _raw} = HostedRecordFaultStore.get("mpp:charge:hosted:" <> keccak256_hex(tx_hex))
     end
 
@@ -5279,7 +5385,10 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "An internal payment error occurred."}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert_received {:rpc_call, "eth_fillTransaction"}
       refute_received {:rpc_call, "eth_sendRawTransactionSync"}
       assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
@@ -5292,7 +5401,7 @@ defmodule MPP.Methods.TempoTest do
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: true)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: reference}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert reference == Agent.get(chain, & &1.sent_hash)
       refute reference == keccak256_hex(tx_hex)
       assert {:ok, _} = ConCacheStore.get("mpp:charge:" <> reference, store_opts)
@@ -5301,7 +5410,7 @@ defmodule MPP.Methods.TempoTest do
       unsponsored = %{charge | method_details: Map.drop(charge.method_details, ["fee_payer_url", "sponsor_budget_id"])}
 
       assert {:error, %Errors{detail: "Transaction hash already used"}} =
-               Tempo.verify(%{"type" => "hash", "hash" => reference}, unsponsored)
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => reference}, unsponsored)
     end
 
     test "a recovered sponsored transaction whose on-chain hash was claimed first is rejected", %{charge: charge} do
@@ -5311,14 +5420,16 @@ defmodule MPP.Methods.TempoTest do
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       sent_hash = Agent.get(chain, & &1.sent_hash)
 
       # Another request settled the same on-chain transaction under its own hash.
       :ok = ConCacheStore.check_and_mark("mpp:charge:" <> sent_hash, 1, store_opts)
       Agent.update(chain, &%{&1 | mined?: true})
 
-      assert {:error, %Errors{detail: "Transaction hash already used"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
     end
 
@@ -5334,14 +5445,16 @@ defmodule MPP.Methods.TempoTest do
 
       # With room for one reservation, every resend still fits: it reuses the first one.
       for _attempt <- 1..3 do
-        assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+        assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+                 TempoTestHelpers.verify_nonced(payload, charge)
+
         sent_hash = Agent.get(chain, & &1.sent_hash)
         assert {:ok, state} = ConCacheStore.get(@hosted_budget_key, store_opts)
         assert [%{phase: :pending, tx_hash: ^sent_hash}] = Map.values(state.reservations)
       end
 
       Agent.update(chain, &%{&1 | mined?: true})
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert :not_found = ConCacheStore.get(@hosted_budget_key, store_opts)
     end
 
@@ -5352,14 +5465,18 @@ defmodule MPP.Methods.TempoTest do
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       sent_hash = Agent.get(chain, & &1.sent_hash)
 
       # A retry under another challenge adopts the reservation, then fails the memo binding.
       rebound =
         update_in(charge.method_details, &Map.merge(&1, %{"challenge_id" => "another-challenge", "realm" => "api.test"}))
 
-      assert {:error, %Errors{detail: "Payment memo is not bound to this challenge"}} = Tempo.verify(payload, rebound)
+      assert {:error, %Errors{detail: "Payment memo is not bound to this challenge"}} =
+               TempoTestHelpers.verify_nonced(payload, rebound)
+
       assert {:ok, state} = ConCacheStore.get(@hosted_budget_key, store_opts)
       assert [%{phase: :pending, tx_hash: ^sent_hash}] = Map.values(state.reservations)
     end
@@ -5371,7 +5488,9 @@ defmodule MPP.Methods.TempoTest do
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       sent_hash = Agent.get(chain, & &1.sent_hash)
 
       Req.Test.stub(Tempo, fn conn ->
@@ -5381,7 +5500,9 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt, "id" => 1})
       end)
 
-      assert {:error, %Errors{detail: "Transaction failed on-chain (reverted)"}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Transaction failed on-chain (reverted)"}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert :not_found = ConCacheStore.get(@hosted_budget_key, store_opts)
     end
 
@@ -5390,7 +5511,9 @@ defmodule MPP.Methods.TempoTest do
       {:ok, tx} = Transaction.deserialize(tx_hex)
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
 
       sent_hash = Agent.get(chain, & &1.sent_hash)
 
@@ -5409,7 +5532,10 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       started = System.monotonic_time(:millisecond)
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
       assert System.monotonic_time(:millisecond) - started < 600
     end
 
@@ -5424,12 +5550,13 @@ defmodule MPP.Methods.TempoTest do
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
       payload = %{"type" => "transaction", "signature" => tx_hex}
 
-      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
 
       # Five seconds of validity left: too little to sponsor, enough to settle what was sent.
       set_clock.((valid_before - 5) * 1_000)
       Agent.update(chain, &%{&1 | mined?: true})
-      assert {:ok, %Receipt{reference: reference}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: reference}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert reference == Agent.get(chain, & &1.sent_hash)
     end
 
@@ -5461,7 +5588,7 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, response)
       end)
 
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail == "An internal payment error occurred."
       assert :not_found = ConCacheStore.get(expected_key, store_opts)
 
@@ -5484,7 +5611,7 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, response)
       end)
 
-      assert {:ok, %Receipt{}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert {:ok, _} = ConCacheStore.get(expected_key, store_opts)
     end
 
@@ -5509,7 +5636,7 @@ defmodule MPP.Methods.TempoTest do
       end)
 
       payload = %{"type" => "transaction", "signature" => tx_hex}
-      assert {:error, %Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "not allowed"
     end
 

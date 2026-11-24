@@ -83,7 +83,20 @@ defmodule MPP.Transports.JsonRpcTest do
       assert challenge["intent"] == "charge"
       assert challenge["request"]["amount"] == "1000"
       assert challenge["request"]["currency"] == "usd"
+      assert MPP.Challenge.Meta.nonce?(challenge["opaque"])
       refute Map.has_key?(response, "_meta")
+    end
+
+    test "two unpaid calls get challenges with different ids" do
+      ids =
+        for _ <- 1..2 do
+          unpaid = JsonRpc.call(rpc_request(), server_config(), fn _ -> flunk("handler must not run") end)
+          {:ok, [challenge]} = JsonRpc.extract_challenges(unpaid)
+          challenge.id
+        end
+
+      assert [first, second] = ids
+      refute first == second
     end
 
     test "a typed internal error renders the fixed detail and logs the original" do

@@ -8,6 +8,21 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Added
+
+- **Issuance nonce.** Challenges issued by `MPP.Plug` and the MCP, JSON-RPC and WebSocket transports carry a fresh `_mpp_nonce` (16 random bytes, base64url) inside their `opaque` JSON object, so two challenges for the same route never share an id. This is the wire shape of mppx (#1273) and mpp-rs (#718); the HMAC input layout is unchanged. A route whose `:opaque` is not a JSON object is issued as configured, without a nonce. `MPP.Challenge.create/2` takes `nonce: true` for callers that issue challenges themselves.
+- `MPP.Plug` option `:scope` binds a route's challenges to a name such as `"GET /premium"`, carried as `_mppx_scope` in `opaque` (mppx `scope`). A credential is accepted only where a challenge with the same scope is issued. With `:x402` the scope is part of the x402 route binding as well.
+- `MPP.Plug` option `:challenge_nonce` (default `true`).
+
+### Changed
+
+- **Tempo `type="hash"` and `type="proof"` credentials need a challenge with an issuance nonce** and are otherwise answered with `invalid-challenge` (mppx `tempo/server/Charge.ts`). Affected are routes that set `challenge_nonce: false`, routes whose `:opaque` is not a JSON object, callers of `MPP.Verifier.verify/2` that build challenges with `MPP.Challenge.create/2` without `nonce: true`, and challenges issued by an earlier release that are redeemed after the upgrade.
+- **`MPP.Methods.Tempo.verify/2` called directly** accepts those two credential types only with `"challenge_nonce" => true` in `method_details`. `MPP.Verifier` sets the key from the verified challenge; a direct caller sets it for challenges it issued with a nonce.
+- A challenge's `opaque` is compared to the route's as JSON instead of byte for byte, ignoring the members reserved for issued challenges (`_mpp_nonce`, `_mppx_nonce`, `_mppx_identity`, `_mppx_expiry_grace`). Numbers are compared strictly (`1` is not `1.0`). An `opaque` that is not base64url JSON, or that repeats a member name, is compared as text.
+- **Rolling upgrades:** an instance on an earlier release rejects a credential whose challenge carries `_mpp_nonce`, because it compares `opaque` byte for byte. Routes that take neither Tempo `hash` nor `proof` credentials can deploy this release with `challenge_nonce: false` while such instances still verify credentials, then remove the option. Routes that take those credential types have no mixed-version setting: switch all instances serving them together.
+- `MPP.Plug.init/1` and `MPP.Verifier.verify/2` raise when the route's `:opaque` sets one of the reserved members.
+- `MPP.JCS.canonicalize/1` writes control characters without a short escape as lowercase `\u00xx` (RFC 8785, ECMAScript `JSON.stringify`); it wrote the hex digits in uppercase.
+
 ### Fixed
 
 - `MPP.Receipt.decode/1` rejects an explicit `null` or non-string `externalId`, and an explicit `null` `subscriptionId` or `fundingCurrency`, with `{:error, :invalid_field_type}` instead of reading the member as absent (mpp-rs #703, mppx `Receipt.Schema`).

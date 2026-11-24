@@ -46,7 +46,24 @@ defmodule MPP.Plug do
     * `:realm` — (required) server protection space
     * `:expires_in` — (optional) challenge TTL in seconds (integer, defaults to 300)
     * `:digest` — (optional) expected content digest for body-bound challenges
-    * `:opaque` — (optional) base64url-encoded server correlation data
+    * `:opaque` — (optional) base64url-encoded server correlation data. A JSON
+      object (or no `:opaque`) gets a `_mpp_nonce` member per issued challenge;
+      the members reserved for issued challenges (`_mpp_nonce`, `_mppx_nonce`,
+      `_mppx_identity`, `_mppx_expiry_grace`) are rejected here
+    * `:challenge_nonce` — (optional, default `true`) add a fresh random
+      `_mpp_nonce` to the `opaque` of every issued challenge, so no two
+      challenges share an id (mppx `challengeNonce`, mpp-rs `with_nonce`).
+      Verification ignores the nonce when it matches a credential to this route.
+      An `:opaque` that is not a JSON object is issued as configured, without a
+      nonce. Methods may refuse credential types for a challenge without one:
+      Tempo refuses `type="hash"` and `type="proof"`. `false` is for a rollout
+      in which instances on a release without nonce support still verify this
+      route's credentials
+    * `:scope` — (optional) a string naming this route, for example
+      `"GET /premium"`. It is carried in `opaque` as `_mppx_scope` (mppx
+      `scope`), so a credential is accepted only where a challenge with the
+      same scope is issued. With `:x402` it also scopes the x402 route binding
+      (`MPP.X402.Plug`)
     * `:store` — (optional) shared `MPP.Tempo.Store` replay-protection store.
       Unset, non-Tempo methods and x402 use the application-started
       `MPP.Tempo.ConCacheStore`; on a runtime that looks multi-instance (see
@@ -68,7 +85,7 @@ defmodule MPP.Plug do
       x402 request passes through with `:x402_settlement` assigned (the
       facilitator's settlement response) instead of `:mpp_receipt`, and the
       `PAYMENT-RESPONSE` header is attached on a successful response.
-      The route's `:digest` and `:opaque` also scope the x402 route binding;
+      The route's `:digest`, `:opaque` and `:scope` also scope the x402 route binding;
       binding options (`:resource`, `:extensions`, `:digest`, `:opaque`,
       `:route_binding`) are described in `MPP.X402.Plug`.
 
@@ -105,6 +122,7 @@ defmodule MPP.Plug do
 
   alias MPP.AcceptPayment
   alias MPP.Challenge
+  alias MPP.Challenge.Meta, as: ChallengeMeta
   alias MPP.Errors
   alias MPP.Headers
   alias MPP.Intents.Charge
@@ -158,6 +176,7 @@ defmodule MPP.Plug do
             expires_in: pos_integer(),
             digest: String.t() | nil,
             opaque: String.t() | nil,
+            challenge_nonce: boolean(),
             store: module() | {module(), keyword()} | nil,
             implicit_store: boolean(),
             intent: String.t(),
@@ -176,6 +195,7 @@ defmodule MPP.Plug do
       :opaque,
       :store,
       implicit_store: false,
+      challenge_nonce: true,
       intent: "charge",
       session_store: nil,
       requires_auth: false,
@@ -206,6 +226,7 @@ defmodule MPP.Plug do
     validate_unique_requests!(entries, intent)
 
     configured_store = opts |> Keyword.get(:store) |> validate_store!()
+    route_opaque = route_opaque!(opts)
 
     %Config{
       secret_key: opts |> require_opt!(:secret_key) |> validate_secret_key!(),
@@ -213,13 +234,19 @@ defmodule MPP.Plug do
       method_entries: entries,
       expires_in: expires_in,
       digest: Keyword.get(opts, :digest),
-      opaque: Keyword.get(opts, :opaque),
+      opaque: route_opaque,
+      challenge_nonce: validate_challenge_nonce!(Keyword.get(opts, :challenge_nonce, true)),
       store: Store.resolve(configured_store),
       implicit_store: is_nil(configured_store),
       intent: intent,
       session_store: session_store,
       requires_auth: validate_requires_auth!(Keyword.get(opts, :requires_auth, false)),
-      x402: X402Plug.configure(Keyword.get(opts, :x402), Keyword.take(opts, [:digest, :opaque]))
+      x402:
+        X402Plug.configure(Keyword.get(opts, :x402),
+          digest: Keyword.get(opts, :digest),
+          opaque: route_opaque,
+          scope: Keyword.get(opts, :scope)
+        )
     }
   end
 
@@ -247,6 +274,20 @@ defmodule MPP.Plug do
 
   defp validate_expires_in!(_seconds) do
     raise ArgumentError, "MPP.Plug: :expires_in must be a positive integer"
+  end
+
+  # The opaque every challenge of this route carries: the configured one, bound to
+  # the route's `:scope` when set.
+  defp route_opaque!(opts) do
+    opaque = Keyword.get(opts, :opaque)
+    ChallengeMeta.validate_configured!(opaque)
+    ChallengeMeta.with_scope!(opaque, Keyword.get(opts, :scope))
+  end
+
+  defp validate_challenge_nonce!(value) when is_boolean(value), do: value
+
+  defp validate_challenge_nonce!(_value) do
+    raise ArgumentError, "MPP.Plug: :challenge_nonce must be true or false"
   end
 
   defp validate_requires_auth!(value) when is_boolean(value), do: value
@@ -765,7 +806,8 @@ defmodule MPP.Plug do
         realm: config.realm,
         method: entry.method.method_name(),
         intent: config.intent,
-        request: entry.request
+        request: entry.request,
+        nonce: config.challenge_nonce
       ]
       |> maybe_add(:expires, compute_expires(config.expires_in))
       |> maybe_add(:digest, config.digest)

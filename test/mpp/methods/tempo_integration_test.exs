@@ -2014,7 +2014,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       payload = %{"type" => "proof", "signature" => signature}
 
-      assert {:ok, %Receipt{reference: ^challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: ^challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     @tag :integration
@@ -2053,7 +2053,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
       }
 
       payload = %{"type" => "proof", "signature" => signature}
-      assert {:ok, %Receipt{reference: ^challenge_id}} = Tempo.verify(payload, charge)
+      assert {:ok, %Receipt{reference: ^challenge_id}} = TempoTestHelpers.verify_nonced(payload, charge)
     end
 
     @tag :integration
@@ -2093,7 +2093,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       payload = %{"type" => "proof", "signature" => signature}
 
-      assert {:error, %MPP.Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %MPP.Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "Proof signature does not match source"
     end
   end
@@ -2238,7 +2238,7 @@ defmodule MPP.Methods.TempoIntegrationTest do
 
       payload = %{"type" => "transaction", "signature" => signed_tx}
 
-      assert {:error, %MPP.Errors{} = error} = Tempo.verify(payload, charge)
+      assert {:error, %MPP.Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
       assert error.detail =~ "not allowed"
     end
   end

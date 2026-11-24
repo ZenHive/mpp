@@ -5,6 +5,7 @@ defmodule MPP.Methods.Tempo.P256ProofIntegrationTest do
   alias MPP.Methods.Tempo
   alias MPP.Methods.Tempo.Proof
   alias MPP.Receipt
+  alias MPP.Test.TempoTestHelpers
   alias Onchain.Address
   alias Onchain.Contract
 
@@ -76,7 +77,7 @@ defmodule MPP.Methods.Tempo.P256ProofIntegrationTest do
       IO.puts("Moderato P-256 key #{fixture["accessKeyAddress"]}; authorization #{fixture["authorizationHash"]}")
 
       assert {:error, wrong_key_error} =
-               Tempo.verify(%{"type" => "proof", "signature" => fixture["wrongSignature"]}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => fixture["wrongSignature"]}, charge)
 
       assert wrong_key_error.detail == "Proof signature does not match source"
 
@@ -107,12 +108,12 @@ defmodule MPP.Methods.Tempo.P256ProofIntegrationTest do
                )
 
       assert {:error, tampered_error} =
-               Tempo.verify(%{"type" => "proof", "signature" => hex(prefix <> tampered)}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => hex(prefix <> tampered)}, charge)
 
       assert tampered_error.detail == "Proof signature does not match source"
 
       assert {:ok, %Receipt{reference: ^challenge_id}} =
-               Tempo.verify(%{"type" => "proof", "signature" => hex(prefix <> bytes)}, charge)
+               TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => hex(prefix <> bytes)}, charge)
     end
   end
 

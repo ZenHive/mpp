@@ -9,6 +9,7 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
   alias MPP.Methods.Tempo
   alias MPP.Receipt
   alias MPP.Test.FaucetWallet
+  alias MPP.Test.TempoTestHelpers
   alias Onchain.Address
   alias Onchain.Tempo.RPC
   alias Onchain.Tempo.Transaction.Builder
@@ -54,12 +55,12 @@ defmodule MPP.Methods.TempoCurrenciesIntegrationTest do
     [ousd, path_usd] = config.method_entries
     payload = %{"type" => "hash", "hash" => hash}
     charge = %{ousd.charge | method_details: ousd.method_config}
-    assert {:ok, %Receipt{funding_currency: @ousd} = receipt} = Tempo.verify(payload, charge)
+    assert {:ok, %Receipt{funding_currency: @ousd} = receipt} = TempoTestHelpers.verify_nonced(payload, charge)
     assert {:ok, ^receipt} = receipt |> Receipt.encode() |> Receipt.decode()
 
     wrong_charge = %{path_usd.charge | method_details: path_usd.method_config}
 
     assert {:error, %Errors{detail: "No matching Transfer event found in transaction"}} =
-             Tempo.verify(payload, wrong_charge)
+             TempoTestHelpers.verify_nonced(payload, wrong_charge)
   end
 end

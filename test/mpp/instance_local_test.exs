@@ -21,6 +21,7 @@ defmodule MPP.InstanceLocalTest do
   alias MPP.Subscription.Store, as: SubscriptionStore
   alias MPP.Tempo.ConCacheStore
   alias MPP.Tempo.Store
+  alias MPP.Test.TempoTestHelpers
 
   defmodule SessionMethod do
     @moduledoc false
@@ -127,7 +128,7 @@ defmodule MPP.InstanceLocalTest do
       System.put_env("K_SERVICE", "shop")
 
       assert_raise ArgumentError, ~r/the tempo route has no method_config "store" configured and K_SERVICE is set/, fn ->
-        Tempo.verify(@payload, %{@charge | method_details: %{}})
+        TempoTestHelpers.verify_nonced(@payload, %{@charge | method_details: %{}})
       end
     end
 
@@ -137,7 +138,7 @@ defmodule MPP.InstanceLocalTest do
       # No credential source is configured, so verification rejects the
       # credential; the point is that it gets that far instead of raising.
       assert {:error, %MPP.Errors{}} =
-               Tempo.verify(@payload, %{@charge | method_details: %{"store" => ConCacheStore}})
+               TempoTestHelpers.verify_nonced(@payload, %{@charge | method_details: %{"store" => ConCacheStore}})
     end
   end
 

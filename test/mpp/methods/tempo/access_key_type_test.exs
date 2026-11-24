@@ -5,6 +5,7 @@ defmodule MPP.Methods.Tempo.AccessKeyTypeTest do
   alias MPP.Methods.Tempo.AccessKey
   alias MPP.Methods.Tempo.KeyAuthorization
   alias MPP.Methods.Tempo.Proof
+  alias MPP.Test.TempoTestHelpers
 
   @account "0x" <> String.duplicate("12", 20)
   @key "0x" <> String.duplicate("34", 20)
@@ -30,13 +31,16 @@ defmodule MPP.Methods.Tempo.AccessKeyTypeTest do
     params = %{account: @account, chain_id: 42_431, challenge_id: "typed-key", realm: "example.test"}
     signature = MPP.Test.TempoAccessKey.sign_proof!(Proof.hash(params), private, address)
     stub_key(1)
-    assert {:error, error} = Tempo.verify(%{"type" => "proof", "signature" => signature}, charge(params))
+
+    assert {:error, error} =
+             TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => signature}, charge(params))
+
     assert error.detail == "Proof signature does not match source"
   end
 
   test "the charge API preserves the explicit unsupported WebAuthn error" do
     params = %{account: @account, chain_id: 42_431, challenge_id: "web-authn", realm: "example.test"}
-    assert {:error, error} = Tempo.verify(%{"type" => "proof", "signature" => "0x02"}, charge(params))
+    assert {:error, error} = TempoTestHelpers.verify_nonced(%{"type" => "proof", "signature" => "0x02"}, charge(params))
     assert error.detail == "unsupported proof signature type: WebAuthn"
   end
 

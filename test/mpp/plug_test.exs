@@ -2,6 +2,7 @@ defmodule MPP.PlugTest do
   use ExUnit.Case, async: true
 
   alias MPP.Challenge
+  alias MPP.Challenge.Meta, as: ChallengeMeta
   alias MPP.Client.Transport.HTTP
   alias MPP.Credential
   # --- Mock Methods ---
@@ -1305,6 +1306,135 @@ defmodule MPP.PlugTest do
       body = decode_json_body(conn)
       assert body["type"] =~ "invalid-challenge"
       assert body["detail"] =~ "opaque"
+    end
+  end
+
+  describe "issuance nonce" do
+    defp issued_challenge(config) do
+      conn = :get |> Plug.Test.conn("/premium") |> call_plug(config)
+      assert conn.status == 402
+      {:ok, [challenge]} = conn |> get_resp_header("www-authenticate") |> Headers.parse_challenges()
+      challenge
+    end
+
+    defp pay(config, challenge, path \\ "/premium") do
+      credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}
+
+      :get
+      |> Plug.Test.conn(path)
+      |> Plug.Conn.put_req_header("authorization", Headers.format_credential(credential))
+      |> call_plug(config)
+    end
+
+    test "challenges issued at the same instant for one route have different ids" do
+      config = init_config()
+
+      challenges =
+        1..500
+        |> Task.async_stream(fn _ -> issued_challenge(config) end, max_concurrency: 50)
+        |> Enum.map(fn {:ok, challenge} -> challenge end)
+
+      nonces =
+        MapSet.new(challenges, fn challenge ->
+          challenge.opaque |> Base.url_decode64!(padding: false) |> Jason.decode!() |> Map.fetch!("_mpp_nonce")
+        end)
+
+      assert MapSet.size(nonces) == 500
+      assert MapSet.size(MapSet.new(challenges, & &1.id)) == 500
+    end
+
+    test "an issued challenge carries the nonce and is accepted at its route" do
+      config = init_config()
+      challenge = issued_challenge(config)
+
+      assert ChallengeMeta.nonce?(challenge.opaque)
+      refute pay(config, challenge).halted
+    end
+
+    test "a route with a static opaque keeps its members and accepts its own challenge" do
+      config = init_config(opaque: "eyJyb3V0ZSI6ImEifQ")
+      challenge = issued_challenge(config)
+
+      assert %{"route" => "a", "_mpp_nonce" => _nonce} =
+               challenge.opaque |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      refute pay(config, challenge).halted
+    end
+
+    test "a challenge of a route with another opaque is rejected" do
+      challenge = issued_challenge(init_config(opaque: "eyJyb3V0ZSI6ImIifQ"))
+      conn = pay(init_config(opaque: "eyJyb3V0ZSI6ImEifQ"), challenge)
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] =~ "invalid-challenge"
+    end
+
+    test "a tampered nonce breaks the challenge id" do
+      config = init_config()
+      challenge = issued_challenge(config)
+      conn = pay(config, %{challenge | opaque: ChallengeMeta.with_nonce(nil)})
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] =~ "invalid-challenge"
+    end
+
+    test "challenge_nonce: false issues the configured opaque unchanged" do
+      assert issued_challenge(init_config(challenge_nonce: false)).opaque == nil
+
+      config = init_config(challenge_nonce: false, opaque: "eyJyb3V0ZSI6ImEifQ")
+      assert issued_challenge(config).opaque == "eyJyb3V0ZSI6ImEifQ"
+    end
+
+    test "an opaque that is not a JSON object is issued and matched as configured" do
+      opaque = Base.url_encode64(~S(["a"]), padding: false)
+      config = init_config(opaque: opaque)
+      challenge = issued_challenge(config)
+
+      assert challenge.opaque == opaque
+      refute pay(config, challenge).halted
+    end
+
+    test "init rejects a reserved nonce key in :opaque and a non-boolean :challenge_nonce" do
+      reserved = Base.url_encode64(~S({"_mpp_nonce":"fixed"}), padding: false)
+      assert_raise ArgumentError, ~r/must not set _mpp_nonce/, fn -> init_config(opaque: reserved) end
+      assert_raise ArgumentError, ~r/:challenge_nonce must be true or false/, fn -> init_config(challenge_nonce: "no") end
+    end
+  end
+
+  describe "route scope" do
+    test "a credential is accepted only where a challenge with its scope is issued" do
+      premium = init_config(scope: "GET /premium")
+      reports = init_config(scope: "GET /reports")
+      unscoped = init_config()
+      challenge = issued_challenge(premium)
+
+      assert %{"_mppx_scope" => "GET /premium"} =
+               challenge.opaque |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      refute pay(premium, challenge).halted
+
+      for other <- [reports, unscoped] do
+        conn = pay(other, challenge)
+        assert conn.status == 402
+        assert decode_json_body(conn)["type"] =~ "invalid-challenge"
+        assert decode_json_body(conn)["detail"] =~ "opaque"
+      end
+
+      assert pay(premium, issued_challenge(unscoped)).status == 402
+    end
+
+    test "the scope sits beside the route's own opaque members" do
+      config = init_config(scope: "GET /premium", opaque: "eyJyb3V0ZSI6ImEifQ")
+
+      assert %{"route" => "a", "_mppx_scope" => "GET /premium", "_mpp_nonce" => _nonce} =
+               issued_challenge(config).opaque |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+      refute pay(config, issued_challenge(config)).halted
+    end
+
+    test "init rejects a scope that conflicts with the opaque" do
+      opaque = Base.url_encode64(~S({"_mppx_scope":"GET /other"}), padding: false)
+      assert_raise ArgumentError, ~r/conflicts/, fn -> init_config(scope: "GET /premium", opaque: opaque) end
     end
   end
 

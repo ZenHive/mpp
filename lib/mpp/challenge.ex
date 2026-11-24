@@ -41,6 +41,8 @@ defmodule MPP.Challenge do
 
   use Descripex, namespace: "/protocol"
 
+  alias MPP.Challenge.Meta
+
   @type t :: %__MODULE__{
           id: String.t() | nil,
           realm: String.t(),
@@ -66,7 +68,7 @@ defmodule MPP.Challenge do
       params: [
         kind: :value,
         description:
-          "Keyword list with `:realm`, `:method`, `:intent`, `:request` (required) and `:description`, `:digest`, `:expires`, `:header`, `:opaque` (optional)"
+          "Keyword list with `:realm`, `:method`, `:intent`, `:request` (required) and `:description`, `:digest`, `:expires`, `:header`, `:opaque` (optional). `nonce: true` adds a fresh `_mpp_nonce` (16 random bytes, base64url) to an `:opaque` JSON object, so no two issued challenges share an id"
       ],
       secret_key: [kind: :value, description: "HMAC-SHA256 secret key for challenge binding"]
     ],
@@ -76,14 +78,20 @@ defmodule MPP.Challenge do
 
   @spec create(keyword(), String.t()) :: t()
   def create(params, secret_key) when is_list(params) and is_binary(secret_key) do
+    {nonce?, params} = Keyword.pop(params, :nonce, false)
+
     challenge =
       params
       |> Keyword.delete(:id)
       |> Keyword.update(:header, nil, &bound_header/1)
+      |> put_nonce(nonce?)
       |> then(&struct!(__MODULE__, &1))
 
     %{challenge | id: compute_id(challenge, secret_key)}
   end
+
+  defp put_nonce(params, true), do: Keyword.put(params, :opaque, Meta.with_nonce(params[:opaque]))
+  defp put_nonce(params, _nonce?), do: params
 
   api(:verify, "Verify a challenge's HMAC-bound ID against a secret key using constant-time comparison.",
     params: [
