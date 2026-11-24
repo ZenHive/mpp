@@ -4317,7 +4317,7 @@ shipped_in = "c691e09e54399da363a461f2df60080fa0f97f26"
 id = "156"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "done"
 title = "Answer replayed credentials with invalid-challenge and stop the client from paying again"
 scores = { d = 3, b = 6, u = 5 }
 markers = ["parallel"]
@@ -4325,8 +4325,11 @@ acceptance_criteria = ["A replayed Tempo credential, a settled-hash replay and a
 assignee = "codex"
 model = "gpt-6-astra"
 body = "Both reference SDKs now answer a replayed or already-settled credential with a final 403 problem (`credential-replayed`) and no WWW-Authenticate challenge, so clients stop instead of paying again (mppx #1039 / 47beb31; mpp-rs #627 bd0c8a2, #646 194c9d9, #656 79a9b0d for Stripe Idempotent-Replayed). We answer 402 with a fresh challenge. Add the problem type to MPP.Errors (verify the exact URI/suffix and status against refs/mppx and refs/mpp-rs; cross-check refs/mpp-specs) and route MPP.Replay hits, Tempo settled-hash replays and Stripe Idempotent-Replayed through it in MPP.Plug, MCP and JSON-RPC transports. 2026-11-25 sdk-delta-watch: SUPERSEDES the 403 shape above and in the first acceptance criterion. Both SDKs moved to the core-spec answer: a replayed credential gets 402 with a fresh challenge and problem type invalid-challenge (mppx #1273 54fc48d, refs/mppx/src/Errors.ts CredentialReplayedError extends InvalidChallengeError; mpp-rs #718 14e06a6 changelog core-spec-server). We already answer 402 with a fresh challenge but label it verification-failed (lib/mpp/replay.ex, the settled-hash and already-used paths in lib/mpp/methods/tempo.ex); relabel credential replays to invalid-challenge on HTTP, MCP and JSON-RPC. A push hash whose transfer was already counted stays verification-failed (mpp-specs #403, Accepted-Transfer Record). Client half, same change: MPP.Client.Req and MPP.Client.MCP treat an invalid-challenge answer to a credential they already sent (including one the caller attached) as final and return it instead of paying a fresh challenge (refs/mppx/src/client/internal/Fetch.ts, src/mcp/client/McpClient.ts); test/mpp/client/req_test.exs currently pins paying until the retry budget is spent. Add acceptance: replay answers carry invalid-challenge with a challenge; one Req call against a server that answers every credential with invalid-challenge pays once."
+implemented = "Replayed credentials answer 402 + fresh challenge with problem type invalid-challenge (replay store, Tempo, EVM hash, Solana signature, x402 nonce, USDC claims, Stripe replay of a succeeded intent); a Tempo hash transfer counted toward another challenge stays verification-failed. MPP.Client.Req and MPP.Client.MCP return invalid-challenge answering a sent credential as final."
 created_at = "2026-10-31"
 scored_at = "2026-10-31"
+done_at = "2026-11-24"
+shipped_in = "3ffed99d69237d1c25434863872f1320e939ea20"
 
 [[task]]
 id = "157"
@@ -4890,6 +4893,22 @@ acceptance_criteria = ["open, voucher, topUp and close follow refs/mpp-specs/spe
 assignee = "codex"
 model = "gpt-6-astra"
 body = "mpp-specs #395 (a6af5c1) adds draft-nearintents-session-00. The server issues an EXACT_OUTPUT 1Click quote into the merchant's Intents account; the client deposits and sends open with the deposit hash, an Ed25519 session key and a first cumulative voucher. Vouchers are checked locally by signature only; topUp pays a fresh funding quote into the same reference; close refunds the unspent remainder by an Intents transfer, also on idle timeout. Each action is signed over a JCS message (domain mpp-nearintents-session-v1, realm, action fields) using NEP-413. We implement nearintents charge only (lib/mpp/methods/near_intents.ex). Build on MPP.Session and the existing charge verification; fetch NEP-413 and the 1Click API docs rather than encoding the Borsh layout from memory, and check whether either reference SDK ships the intent before pinning vectors."
+created_at = "2026-11-24"
+scored_at = "2026-11-24"
+
+[[task]]
+id = "191"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Check the on-chain receipt before reporting a failed Tempo simulation as retryable"
+scores = { d = 4, b = 5, u = 4 }
+acceptance_criteria = ["A transaction credential whose transaction is already included on-chain, presented with no dedup mark, is answered with problem type invalid-challenge and not with a funding link (unit test with stubbed RPC, plus an :integration test on Moderato)", "A simulation rejection for a transaction that has no receipt keeps its current answer", "The refs/mppx and refs/mpp-rs evidence is cited by path:line in the delivery"]
+out_of_scope = ["Sponsored transactions unless both reference SDKs cover them in the same branch"]
+touches = ["lib/mpp/methods/tempo.ex", "test/mpp/methods/tempo_test.exs"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = "When simulation rejects an unsponsored Tempo transaction credential and the dedup store holds no mark for its hash (store disabled, expired or lost), MPP.Methods.Tempo reports verification-failed or a balance shortfall. mppx looks up the canonical transaction's receipt in that case and answers a replay when the transaction is already included (refs/mppx/src/tempo/server/Charge.ts, the simulation-failure branch that emits CredentialReplayedError). Port that check: on a definitive simulation rejection, fetch the receipt for the canonical hash; when it exists, answer invalid-challenge (the replay answer shipped with Task 156) and record the hash. Verify the exact branch and conditions against refs/mppx and refs/mpp-rs before building. Found in the Task 156 review (2026-11-25); premise unverified beyond the reviewer's read of tempo.ex — confirm with a test first."
 created_at = "2026-11-24"
 scored_at = "2026-11-24"
 

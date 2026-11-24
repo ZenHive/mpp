@@ -47,7 +47,7 @@
 | Task 152 `[P]` | ✅ | 🎁 **core-protocol** · Map the remaining store and redeem failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
 | Task 154 `[P]` | ✅ | 🎁 **core-protocol** · Map Tempo subscription infrastructure failures to internal-payment-error [D:3/B:6/U:5 → Eff:1.83?] 🚀 |
 | Task 155 `[P]` | ✅ | 🎁 **core-protocol** · Make the opt-in and Tempo chain mutants fail on their security assertions [D:3/B:5/U:3 → Eff:1.33?] 📋 |
-| Task 156 `[P]` | ⬜ | 🎁 **core-protocol** · Answer replayed credentials with invalid-challenge and stop the client from paying again [D:3/B:6/U:5 → Eff:1.83] 🚀 |
+| Task 156 `[P]` | ✅ | 🎁 **core-protocol** · Answer replayed credentials with invalid-challenge and stop the client from paying again [D:3/B:6/U:5 → Eff:1.83] 🚀 |
 | Task 157 `[P]` | ⬜ | 🎁 **core-protocol** · Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯 |
 | Task 158 `[P]` | ⬜ | 🎁 **stripe** · Standardize Stripe PaymentIntent analytics metadata [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 159 `[P]` | ⬜ | 🎁 **client-sdk** · Tempo client provider: spending caps, expiry rounding and MACH gas token [D:4/B:6/U:4 → Eff:1.25] 📋 |
@@ -82,6 +82,7 @@
 | Task 188 `[P]` | ⬜ | 🎁 **transport-ws** · Bound the wait for a receipt in the WebSocket client state machine [D:3/B:4/U:3 → Eff:1.17] 📋 |
 | Task 189 | ⬜ | 🎁 **evm** · x402 exact on Solana, with a solana/charge offer beside it [D:6/B:3/U:2 → Eff:0.42] ⚠️ |
 | Task 190 | ⬜ | 🎁 **additional-methods** · Implement the nearintents/session intent [D:8/B:3/U:2 → Eff:0.31] ⚠️ |
+| Task 191 | ⬜ | 🎁 **core-protocol** · Check the on-chain receipt before reporting a failed Tempo simulation as retryable [D:4/B:5/U:4 → Eff:1.12] 📋 |
 <!-- TASKS:END -->
 
 ---
