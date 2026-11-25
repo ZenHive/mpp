@@ -376,14 +376,13 @@ defmodule MPP.Headers do
 
   defp skip_param_value(<<"\"", rest::binary>>), do: skip_quoted(rest)
 
-  defp skip_param_value(value) do
-    {_text, rest} = split_word(value, <<>>)
-    # An `=` ends a word but belongs to an unquoted value such as a token68.
-    rest |> skip_equals() |> skip_element()
-  end
+  # An unquoted value runs to whitespace or a comma, `=` included
+  # (refs/mpp-rs/src/protocol/core/auth_params.rs:138).
+  defp skip_param_value(value), do: skip_unquoted(value)
 
-  defp skip_equals(<<"=", rest::binary>>), do: skip_equals(rest)
-  defp skip_equals(rest), do: rest
+  defp skip_unquoted(<<c, _rest::binary>> = rest) when c in [?\s, ?\t, ?,], do: skip_element(rest)
+  defp skip_unquoted(<<_c, rest::binary>>), do: skip_unquoted(rest)
+  defp skip_unquoted(<<>>), do: {:ok, <<>>}
 
   defp skip_quoted(<<>>), do: :error
   defp skip_quoted(<<"\\", _c, rest::binary>>), do: skip_quoted(rest)

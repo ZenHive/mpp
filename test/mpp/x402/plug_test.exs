@@ -435,6 +435,20 @@ defmodule MPP.X402.PlugTest do
       assert {:ok, "", _conn} = Plug.Conn.read_body(conn)
     end
 
+    test "a kept body that is not the complete request is not compared", %{opts: opts, header: header} do
+      conn =
+        :get
+        |> Plug.Test.conn(@url)
+        |> Plug.Conn.put_req_header("content-length", "9")
+        |> Plug.Conn.put_req_header("payment-signature", header)
+        |> Plug.Conn.put_private(:raw_body, "expected")
+        |> PaymentPlug.call(opts)
+
+      assert conn.status == 402
+      assert problem_detail(conn) =~ "body_digest_unavailable"
+      refute_received {:verify, _payload, _requirements}
+    end
+
     # mppx settles the credential count before either protocol
     # (refs/mppx/src/server/Mppx.ts).
     test "two Payment credentials are refused before the facilitator is called", %{opts: opts} do

@@ -387,6 +387,9 @@ defmodule MPP.X402.Plug do
     get_in(payload, ["payload", "authorization", "nonce"]) || ""
   end
 
+  # Set by `MPP.Plug` when `MPP.BodyReader.fetch/1` could not get the body complete.
+  defp request_body(%Conn{private: %{mpp_raw_body_unavailable: true}}), do: :unavailable
+
   defp request_body(%Conn{private: %{raw_body: body}} = conn) when is_binary(body) do
     if body == "" and bodyless?(conn), do: :none, else: {:ok, body}
   end

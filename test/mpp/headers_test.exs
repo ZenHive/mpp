@@ -993,7 +993,13 @@ defmodule MPP.HeadersTest do
     # Only a parameter value that starts with a quote is a quoted string
     # (refs/mpp-rs/src/protocol/core/auth_params.rs:131-135).
     test "a stray quote in another scheme does not hide a later credential" do
-      for value <- [~s(Digest a=b"c, Payment abc), ~s(Digest tok"en, Payment abc), ~s(Basic dXNlcg==, Payment abc)] do
+      for value <- [
+            ~s(Digest a=b"c, Payment abc),
+            ~s(Digest tok"en, Payment abc),
+            ~s(Basic dXNlcg==, Payment abc),
+            ~s(Digest a=b=c=d, Payment abc),
+            ~s(Digest a=b="c, Payment abc)
+          ] do
         assert {:ok, "Payment abc"} = Headers.select_payment_credential([value], [], "Authorization")
       end
 

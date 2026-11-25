@@ -108,7 +108,7 @@ defmodule MPP.BodyReaderTest do
     test "accepts the Content-Length spellings an adapter accepts" do
       size = byte_size(@body)
 
-      for value <- ["0#{size}", "#{size}, #{size}", " #{size}"] do
+      for value <- ["0#{size}", "#{String.duplicate("0", 30)}#{size}", "#{size}, #{size}", " #{size}"] do
         assert {:ok, @body, _conn} = conn() |> Plug.Conn.put_req_header("content-length", value) |> BodyReader.fetch()
       end
 

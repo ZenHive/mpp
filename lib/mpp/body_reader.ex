@@ -29,8 +29,10 @@ defmodule MPP.BodyReader do
       A request without `Content-Length` (chunked, HTTP/2) gives no such sign:
       what `fetch/1` returns is what was left to read, so nothing before the
       payment plug may read such a body except through `read_body/2`.
-    * `fetch/1` returns at most 8 MB, also for a kept body, and gives up when
-      a read returns no bytes or the body takes longer than 15 seconds.
+    * `fetch/1` returns at most 8 MB, also for a kept body. It gives up when
+      a read returns no bytes, and when 15 seconds have passed once a read
+      returns; each read gets the time left as its `:read_timeout`, which an
+      adapter applies per socket read.
   """
 
   use Descripex, namespace: "/protocol"
@@ -129,21 +131,23 @@ defmodule MPP.BodyReader do
   defp read_rest(conn, _read, size, _deadline) when size > @default_length, do: {:error, conn}
 
   defp read_rest(conn, read, size, deadline) do
-    case Conn.read_body(conn, length: @default_length - size + 1) do
-      {:ok, chunk, conn} when size + byte_size(chunk) <= @default_length ->
-        {:ok, IO.iodata_to_binary([read, chunk]), conn}
+    left = deadline - System.monotonic_time(:millisecond)
 
-      {:ok, _chunk, conn} ->
+    case left > 0 and Conn.read_body(conn, length: @default_length - size + 1, read_timeout: left) do
+      false ->
         {:error, conn}
+
+      {:ok, chunk, conn} ->
+        if size + byte_size(chunk) <= @default_length and System.monotonic_time(:millisecond) < deadline,
+          do: {:ok, IO.iodata_to_binary([read, chunk]), conn},
+          else: {:error, conn}
 
       # An adapter answers a timed-out read with an empty part.
       {:more, <<>>, conn} ->
         {:error, conn}
 
       {:more, chunk, conn} ->
-        if System.monotonic_time(:millisecond) < deadline,
-          do: read_rest(conn, [read, chunk], size + byte_size(chunk), deadline),
-          else: {:error, conn}
+        read_rest(conn, [read, chunk], size + byte_size(chunk), deadline)
 
       {:error, _reason} ->
         {:error, conn}
@@ -174,7 +178,7 @@ defmodule MPP.BodyReader do
   end
 
   defp decimal(text) do
-    if text != "" and text =~ ~r/\A[0-9]{1,19}\z/, do: String.to_integer(text), else: :error
+    if text != "" and text =~ ~r/\A[0-9]+\z/, do: String.to_integer(text), else: :error
   end
 
   # `Plug.Parsers` sets an empty map without reading a body it does not parse.

@@ -627,7 +627,8 @@ defmodule MPP.Plug do
   defp keep_x402_body(conn, _config), do: conn
 
   defp fetched_conn({:ok, _body, conn}), do: conn
-  defp fetched_conn({:error, conn}), do: conn
+  # A body that cannot be had complete must not be compared, kept or not.
+  defp fetched_conn({:error, conn}), do: Plug.Conn.put_private(conn, :mpp_raw_body_unavailable, true)
 
   defp native_handshake(conn, config, credential) do
     case credential do
