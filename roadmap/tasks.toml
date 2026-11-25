@@ -4814,7 +4814,7 @@ shipped_in = "00ea4753344376225fd6e14563c5459d810a4b54"
 id = "185"
 phase = 1
 bundle = "core-protocol"
-status = "pending"
+status = "done"
 title = "Core-spec request checks: one Payment credential, body digest binding, secret length at the library API"
 scores = { d = 4, b = 5, u = 4 }
 markers = ["parallel"]
@@ -4822,8 +4822,11 @@ acceptance_criteria = ["A request carrying more than one Payment credential, acr
 assignee = "codex"
 model = "gpt-6-astra"
 body = "mppx #1273 (54fc48d) and mpp-rs #718 (14e06a6) align servers with the core spec. (1) More than one Payment credential is a 400 without a challenge (refs/mppx/src/server/Transport.ts countPaymentCredentials, MultipleCredentialsError; refs/mpp-rs/src/protocol/core/headers.rs select_payment_credential, which also caps the number and total size of values). MPP.Plug reads only the first Authorization line and answers a credential in both fields with a 402 and a challenge. (2) mppx now checks a challenge digest against the raw request body (refs/mppx/src/server/Mppx.ts matchesBodyDigest) and answers a mismatch with invalid-challenge. Our :digest is a static route option that MPP.Verifier only compares with the echoed value; MPP.BodyDigest is used by x402 only. Read the raw body once through a caching body reader so downstream parsers still see it. (3) mpp-rs validates the secret length on every sign and verify (refs/mpp-rs/src/protocol/core/binding.rs validate_secret_key); ours is checked in MPP.Plug.init, which covers the Plug, MCP, JSON-RPC and WebSocket transports, but not direct callers of the public MPP.Verifier and MPP.Challenge functions. The core draft in refs/mpp-specs at aeaeb83 does not yet carry the text for (1); follow the two SDKs where they agree and cite the refs lines."
+implemented = "MPP.Plug takes one Payment credential across Authorization and Payment-Authorization (400 bad-request otherwise, before native and x402), a route :digest is compared with the raw request body (MPP.BodyReader), Verifier.verify/2 needs :request_body for a digest challenge, BodyDigest writes padded Base64 and accepts both SDK encodings, credentials are bounded at 64 KiB, Challenge.create/2 and Verifier.verify/2 refuse a secret under 32 bytes. Reviewed in two Codex rounds."
 created_at = "2026-11-24"
 scored_at = "2026-11-24"
+done_at = "2026-11-25"
+shipped_in = "2a7363aeaed4d6067c59d9b1c57bddf97eed68fe"
 
 [[task]]
 id = "186"
