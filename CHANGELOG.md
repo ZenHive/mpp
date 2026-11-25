@@ -28,6 +28,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ### Added
 
+- **Receipt deadline in `MPP.Client.Transport.WebSocket.Retry`** (mpp-rs #756). Sending a payment credential now returns `{:arm_receipt_deadline, ms}` in place of `:continue`; `:data` or `:need_voucher` disarms the deadline, a receipt that does not acknowledge the pending payment (`{:receipt, receipt, challenge}` or `:unacknowledged_receipt`) keeps the payment pending and arms the deadline once more, and `:receipt_timeout` while it is armed latches `:receipt_timeout`. A receipt no longer clears the in-flight flag of provider work that is still running, a receipt body that is not an object latches `:malformed_frame`, and `:server_error` clears the pending credential. `receipt_deadline_armed?/1` and `acknowledges_payment?/2` are new. The timer is the caller's.
 - `MPP.BodyReader`: `read_body/2` for `Plug.Parsers` `:body_reader`, and `fetch/1`.
 - `MPP.Headers.select_payment_credential/3`, `MPP.Challenge.validate_secret_key!/1`, `MPP.Challenge.compute_id/2` (the id algorithm without the key-length check, for published test vectors), and the `:request_body` option of `MPP.Verifier.verify/2`.
 - A bare scheme followed by a comma (`Basic, Digest ...`) and a scheme name with other token characters now end the Payment offer in a multi-scheme header.

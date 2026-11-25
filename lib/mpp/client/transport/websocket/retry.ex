@@ -27,6 +27,40 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
     * At most `:max_payments` challenges (default 3, mpp-rs
       `DEFAULT_MAX_PAYMENT_RETRIES`) are paid per connection; the next
       `:pay_started` latches `:payment_limit`.
+    * The wait for a receipt is bounded (mpp-rs #756, `ReceiptDeadline` in
+      `refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs`). Sending a payment
+      credential returns `{:arm_receipt_deadline, ms}`; the first `:data` or
+      `:need_voucher` disarms the deadline, because a server may stream data
+      and send the receipt at the end. A receipt that does not acknowledge
+      the pending payment keeps the payment pending and arms the deadline
+      for good: once more from now when it was disarmed, never extending
+      one that is running. `:receipt_timeout` while the deadline is armed
+      latches `:receipt_timeout`.
+
+  ## Timers are the caller's
+
+  This module holds no timer. On `{:arm_receipt_deadline, ms}` the caller
+  starts a timer of `ms` and feeds `:receipt_timeout` when it fires. A caller
+  that never does can be held open by a server that stays silent or sends
+  receipts for something else.
+
+  The deadline can be armed a second time, so the caller keeps the reference
+  of the timer it started last, cancels the earlier one, and feeds
+  `:receipt_timeout` only for a message carrying that reference
+  (`Process.send_after(self(), {:receipt_timeout, ref}, ms)` with a fresh
+  `ref`). A timeout from an earlier timer that is already in the mailbox
+  would otherwise end the attempt early. A timeout while no deadline is armed
+  is ignored.
+
+  Writes that block while `receipt_deadline_armed?/1` is true are the
+  caller's to bound by the same timer.
+
+  ## Receipts
+
+  Feed a receipt frame as `{:receipt, body, challenge}` with the frame's
+  decoded `receipt` member and the challenge the pending payment answers.
+  A bare `:receipt` settles the credential without a check and is for a
+  caller that ran `acknowledges_payment?/2` itself.
   """
 
   use Descripex, namespace: "/client"
@@ -50,6 +84,10 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
           :pay_started
           | :credential_sent
           | :receipt
+          | {:receipt, MPP.Receipt.t() | map(), MPP.Challenge.t()}
+          | :unacknowledged_receipt
+          | :data
+          | :receipt_timeout
           | :challenge
           | :need_voucher
           | :handshake_timeout
@@ -62,7 +100,15 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
           | {:socket_error, term()}
           | {:close, non_neg_integer() | nil}
 
-  @type disposition :: :continue | {:retry, non_neg_integer()} | {:fatal, atom()}
+  @type disposition ::
+          :continue | {:arm_receipt_deadline, pos_integer()} | {:retry, non_neg_integer()} | {:fatal, atom()}
+
+  @typedoc """
+  Where the receipt deadline stands: `:off` (no payment pending),
+  `:awaiting_progress` (armed at send), `:progressing` (disarmed by data or
+  a voucher request), `:final` (armed by a receipt that acknowledged nothing).
+  """
+  @type receipt_deadline :: :off | :awaiting_progress | :progressing | :final
 
   @type t :: %__MODULE__{
           max_retries: pos_integer(),
@@ -76,7 +122,8 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
           fatal_reason: atom() | nil,
           payment_in_flight?: boolean(),
           voucher_in_flight?: boolean(),
-          awaiting_receipt?: boolean()
+          awaiting_receipt?: boolean(),
+          receipt_deadline: receipt_deadline()
         }
 
   defstruct max_retries: @default_max_retries,
@@ -90,7 +137,8 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
             fatal_reason: nil,
             payment_in_flight?: false,
             voucher_in_flight?: false,
-            awaiting_receipt?: false
+            awaiting_receipt?: false,
+            receipt_deadline: :off
 
   api(:new, "Build a retry state with mpp-rs / alloy-transport-mpp defaults.",
     params: [
@@ -137,20 +185,72 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
     end
   end
 
+  # A payment credential arms the deadline; a voucher leaves it as it stands
+  # (mpp-rs resets it only where the payment becomes pending).
+  def transition(%__MODULE__{payment_in_flight?: true} = state, :credential_sent) do
+    {{:arm_receipt_deadline, state.handshake_timeout_ms},
+     %{
+       state
+       | payment_in_flight?: false,
+         voucher_in_flight?: false,
+         awaiting_receipt?: true,
+         receipt_deadline: :awaiting_progress
+     }}
+  end
+
   def transition(%__MODULE__{} = state, :credential_sent) do
     {:continue, %{state | payment_in_flight?: false, voucher_in_flight?: false, awaiting_receipt?: true}}
   end
 
-  def transition(%__MODULE__{} = state, :receipt) do
-    {:continue, %{state | awaiting_receipt?: false, payment_in_flight?: false, voucher_in_flight?: false}}
+  # A receipt frame whose body is not an object is a protocol error
+  # (refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs handle_text Receipt).
+  def transition(%__MODULE__{} = state, {:receipt, receipt, _challenge}) when not is_map(receipt) do
+    latch(state, :malformed_frame)
   end
+
+  # Only a pending payment needs an acknowledgement; the deadline is off
+  # exactly when none is pending, and then any receipt settles the credential.
+  def transition(%__MODULE__{receipt_deadline: :off} = state, {:receipt, _receipt, _challenge}) do
+    transition(state, :receipt)
+  end
+
+  def transition(%__MODULE__{} = state, {:receipt, receipt, challenge}) do
+    if acknowledges_payment?(receipt, challenge),
+      do: transition(state, :receipt),
+      else: transition(state, :unacknowledged_receipt)
+  end
+
+  # A receipt settles the sent credential. Provider work still running keeps
+  # its in-flight flag, so it cannot be started a second time.
+  def transition(%__MODULE__{} = state, :receipt) do
+    {:continue, %{state | awaiting_receipt?: false, receipt_deadline: :off}}
+  end
+
+  def transition(%__MODULE__{receipt_deadline: :progressing} = state, :unacknowledged_receipt) do
+    {{:arm_receipt_deadline, state.handshake_timeout_ms}, %{state | receipt_deadline: :final}}
+  end
+
+  def transition(%__MODULE__{receipt_deadline: :awaiting_progress} = state, :unacknowledged_receipt) do
+    {:continue, %{state | receipt_deadline: :final}}
+  end
+
+  def transition(%__MODULE__{} = state, :unacknowledged_receipt), do: {:continue, state}
+
+  def transition(%__MODULE__{} = state, :data), do: {:continue, progress(state)}
+
+  def transition(%__MODULE__{receipt_deadline: deadline} = state, :receipt_timeout)
+      when deadline in [:awaiting_progress, :final] do
+    latch(state, :receipt_timeout)
+  end
+
+  def transition(%__MODULE__{} = state, :receipt_timeout), do: {:continue, state}
 
   def transition(%__MODULE__{voucher_in_flight?: true} = state, :need_voucher) do
     latch(state, :second_voucher_in_flight)
   end
 
   def transition(%__MODULE__{} = state, :need_voucher) do
-    {:continue, %{state | voucher_in_flight?: true, vouchers_started?: true}}
+    {:continue, progress(%{state | voucher_in_flight?: true, vouchers_started?: true})}
   end
 
   def transition(%__MODULE__{payment_in_flight?: true} = state, :challenge) do
@@ -158,14 +258,18 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
   end
 
   def transition(%__MODULE__{awaiting_receipt?: true} = state, :challenge) do
-    {:continue, %{state | awaiting_receipt?: false}}
+    {:continue, %{state | awaiting_receipt?: false, receipt_deadline: :off}}
   end
 
   def transition(%__MODULE__{} = state, :challenge), do: {:continue, state}
 
   def transition(%__MODULE__{} = state, :handshake_timeout), do: latch(state, :handshake_timeout)
   def transition(%__MODULE__{} = state, :provider_error), do: latch(state, :provider_error)
-  def transition(%__MODULE__{} = state, :server_error), do: latch(state, :server_error)
+  # The server rejected whatever was pending.
+  def transition(%__MODULE__{} = state, :server_error) do
+    latch(%{state | awaiting_receipt?: false, receipt_deadline: :off}, :server_error)
+  end
+
   def transition(%__MODULE__{} = state, :malformed_frame), do: latch(state, :malformed_frame)
   def transition(%__MODULE__{} = state, :binary_frame), do: latch(state, :binary_frame)
 
@@ -214,6 +318,55 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
       not state.awaiting_receipt? and state.pay_count < state.max_payments
   end
 
+  api(:receipt_deadline_armed?, "Return true while the receipt deadline can fire.",
+    params: [
+      state: [kind: :value, description: "Retry state"]
+    ],
+    returns: %{
+      type: :boolean,
+      description:
+        "true from a sent payment credential until data or a voucher request, and after a receipt that acknowledged nothing"
+    }
+  )
+
+  @spec receipt_deadline_armed?(t()) :: boolean()
+  def receipt_deadline_armed?(%__MODULE__{fatal?: false, receipt_deadline: deadline}),
+    do: deadline in [:awaiting_progress, :final]
+
+  def receipt_deadline_armed?(%__MODULE__{}), do: false
+
+  api(
+    :acknowledges_payment?,
+    "Return true if a receipt is the server's acceptance of the payment made for a challenge: status `success`, a `reference`, and the challenge's method.",
+    params: [
+      receipt: [kind: :value, description: "`MPP.Receipt` or the receipt frame's decoded JSON object"],
+      challenge: [kind: :value, description: "The challenge the pending payment answers"]
+    ],
+    returns: %{
+      type: :boolean,
+      description: "false for a failed status, another method, or anything that is not a receipt"
+    }
+  )
+
+  # refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs acknowledges_payment
+  @spec acknowledges_payment?(term(), MPP.Challenge.t()) :: boolean()
+  def acknowledges_payment?(%MPP.Receipt{} = receipt, challenge) do
+    acknowledges_payment?(
+      %{"status" => receipt.status, "reference" => receipt.reference, "method" => receipt.method},
+      challenge
+    )
+  end
+
+  def acknowledges_payment?(
+        %{"status" => "success", "reference" => reference, "method" => method},
+        %MPP.Challenge{} = challenge
+      )
+      when is_binary(reference) and is_binary(method) and is_binary(challenge.method) do
+    String.downcase(method, :ascii) == String.downcase(challenge.method, :ascii)
+  end
+
+  def acknowledges_payment?(_receipt, _challenge), do: false
+
   api(:reconnect?, "Return true if a socket-level reconnect is still allowed.",
     params: [
       state: [kind: :value, description: "Retry state"]
@@ -256,6 +409,9 @@ defmodule MPP.Client.Transport.WebSocket.Retry do
   @spec transient_close?(non_neg_integer() | nil) :: boolean()
   def transient_close?(code) when code in @transient_close_codes, do: true
   def transient_close?(_code), do: false
+
+  defp progress(%__MODULE__{receipt_deadline: :awaiting_progress} = state), do: %{state | receipt_deadline: :progressing}
+  defp progress(state), do: state
 
   defp latch(state, reason) do
     {{:fatal, reason},

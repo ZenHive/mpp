@@ -189,7 +189,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
       state = Retry.new()
       {:continue, state} = Retry.transition(state, :pay_started)
       assert state.pay_count == 1
-      {:continue, state} = Retry.transition(state, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
       refute Retry.should_pay?(state)
 
       {{:fatal, :dropped_awaiting_receipt}, state} = Retry.transition(state, :connection_dropped)
@@ -235,7 +235,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
 
     test "a replacement challenge after an unacked credential rolls back and allows re-pay" do
       {:continue, state} = Retry.transition(Retry.new(), :pay_started)
-      {:continue, state} = Retry.transition(state, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
       {:continue, state} = Retry.transition(state, :challenge)
       assert Retry.should_pay?(state)
       refute state.fatal?
@@ -250,7 +250,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
 
     test "receipt clears awaiting and allows later session vouchers" do
       {:continue, state} = Retry.transition(Retry.new(), :pay_started)
-      {:continue, state} = Retry.transition(state, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
       {:continue, state} = Retry.transition(state, :receipt)
       assert Retry.should_pay?(state)
       refute state.awaiting_receipt?
@@ -262,7 +262,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
 
     test "pay_started while awaiting a receipt is refused" do
       {:continue, state} = Retry.transition(Retry.new(), :pay_started)
-      {:continue, state} = Retry.transition(state, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
       {{:fatal, :payment_retry_refused}, state} = Retry.transition(state, :pay_started)
       assert state.pay_count == 1
     end
@@ -270,7 +270,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
     test "drop variants while awaiting receipt are all fatal" do
       awaiting = fn ->
         {:continue, state} = Retry.transition(Retry.new(), :pay_started)
-        {:continue, state} = Retry.transition(state, :credential_sent)
+        {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
         state
       end
 
@@ -291,7 +291,7 @@ defmodule MPP.Client.Transport.WebSocketTest do
 
     test "drop after a receipt is fatal and refuses another payment" do
       {:continue, state} = Retry.transition(Retry.new(), :pay_started)
-      {:continue, state} = Retry.transition(state, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
       {:continue, state} = Retry.transition(state, :receipt)
       refute Retry.reconnect?(state)
 
@@ -313,10 +313,157 @@ defmodule MPP.Client.Transport.WebSocketTest do
       {{:fatal, :dropped_after_payment}, _} = Retry.transition(state, :connection_dropped)
     end
 
+    # mpp-rs `receipt_deadline_is_disarmed_by_progress_and_never_extended`
+    # (refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs).
+    test "a sent payment credential arms the receipt deadline; data or a voucher request disarms it" do
+      refute Retry.receipt_deadline_armed?(Retry.new())
+      {:continue, state} = Retry.transition(Retry.new(handshake_timeout_ms: 5_000), :pay_started)
+      refute Retry.receipt_deadline_armed?(state)
+
+      {{:arm_receipt_deadline, 5_000}, sent} = Retry.transition(state, :credential_sent)
+      assert Retry.receipt_deadline_armed?(sent)
+
+      for event <- [:data, :need_voucher] do
+        {:continue, progressing} = Retry.transition(sent, event)
+        refute Retry.receipt_deadline_armed?(progressing)
+        assert progressing.awaiting_receipt?
+        assert {:continue, ^progressing} = Retry.transition(progressing, :receipt_timeout)
+      end
+
+      {:continue, settled} = Retry.transition(sent, :receipt)
+      refute Retry.receipt_deadline_armed?(settled)
+      assert {:continue, ^settled} = Retry.transition(settled, :data)
+    end
+
+    test "a receipt that acknowledges nothing re-arms the deadline once and never extends it" do
+      {:continue, state} = Retry.transition(Retry.new(handshake_timeout_ms: 5_000), :pay_started)
+      {{:arm_receipt_deadline, 5_000}, sent} = Retry.transition(state, :credential_sent)
+
+      # After progress: armed again from now, once.
+      {:continue, progressing} = Retry.transition(sent, :data)
+      {{:arm_receipt_deadline, 5_000}, final} = Retry.transition(progressing, :unacknowledged_receipt)
+      assert Retry.receipt_deadline_armed?(final)
+      assert final.awaiting_receipt?
+      assert {:continue, ^final} = Retry.transition(final, :unacknowledged_receipt)
+      assert {:continue, ^final} = Retry.transition(final, :data)
+
+      # Before any progress: the running deadline stays, and later data no longer disarms it.
+      {:continue, final} = Retry.transition(sent, :unacknowledged_receipt)
+      assert {:continue, ^final} = Retry.transition(final, :data)
+      assert Retry.receipt_deadline_armed?(final)
+
+      assert {:continue, state} = Retry.transition(Retry.new(), :unacknowledged_receipt)
+      refute Retry.receipt_deadline_armed?(state)
+    end
+
+    test "the timeout while the deadline is armed ends the attempt without another payment" do
+      {:continue, state} = Retry.transition(Retry.new(), :pay_started)
+      {{:arm_receipt_deadline, _ms}, sent} = Retry.transition(state, :credential_sent)
+      {:continue, final} = Retry.transition(sent, :unacknowledged_receipt)
+
+      for armed <- [sent, final] do
+        {{:fatal, :receipt_timeout}, latched} = Retry.transition(armed, :receipt_timeout)
+        refute Retry.should_pay?(latched)
+        refute Retry.reconnect?(latched)
+        refute Retry.receipt_deadline_armed?(latched)
+        {{:fatal, :receipt_timeout}, latched} = Retry.transition(latched, :pay_started)
+        assert latched.pay_count == 1
+      end
+
+      assert {:continue, _state} = Retry.transition(Retry.new(), :receipt_timeout)
+    end
+
+    test "a replacement challenge clears the deadline and a voucher send does not arm it" do
+      {:continue, state} = Retry.transition(Retry.new(), :pay_started)
+      {{:arm_receipt_deadline, _ms}, sent} = Retry.transition(state, :credential_sent)
+
+      {:continue, replaced} = Retry.transition(sent, :challenge)
+      refute Retry.receipt_deadline_armed?(replaced)
+
+      {:continue, voucher} = Retry.transition(sent, :need_voucher)
+      {:continue, voucher} = Retry.transition(voucher, :credential_sent)
+      refute Retry.receipt_deadline_armed?(voucher)
+      {{:arm_receipt_deadline, _ms}, voucher} = Retry.transition(voucher, :unacknowledged_receipt)
+      {{:fatal, :receipt_timeout}, _latched} = Retry.transition(voucher, :receipt_timeout)
+    end
+
+    test "a receipt event is checked against the pending challenge" do
+      challenge = %Challenge{id: "c", realm: "r", method: "tempo", intent: "charge", request: "e30"}
+      {:continue, state} = Retry.transition(Retry.new(), :pay_started)
+      {{:arm_receipt_deadline, _ms}, sent} = Retry.transition(state, :credential_sent)
+
+      good = %{"status" => "success", "reference" => "0xabc", "method" => "Tempo"}
+      assert Retry.acknowledges_payment?(good, challenge)
+      assert Retry.acknowledges_payment?(MPP.Receipt.new(method: "tempo", reference: "0xabc"), challenge)
+
+      {:continue, settled} = Retry.transition(sent, {:receipt, good, challenge})
+      refute settled.awaiting_receipt?
+
+      for receipt <- [
+            %{},
+            Map.put(good, "status", "failed"),
+            Map.put(good, "method", "stripe"),
+            Map.delete(good, "reference"),
+            Map.put(good, "reference", 1)
+          ] do
+        refute Retry.acknowledges_payment?(receipt, challenge)
+        {:continue, pending} = Retry.transition(sent, {:receipt, receipt, challenge})
+        assert pending.awaiting_receipt?
+        assert pending.receipt_deadline == :final
+        refute Retry.should_pay?(pending)
+      end
+
+      refute Retry.acknowledges_payment?("receipt", challenge)
+      {{:fatal, :malformed_frame}, _latched} = Retry.transition(sent, {:receipt, "receipt", challenge})
+      {{:fatal, :malformed_frame}, _latched} = Retry.transition(Retry.new(), {:receipt, nil, challenge})
+    end
+
+    # mpp-rs checks the method only while a payment is pending
+    # (refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs handle_text Receipt).
+    test "a receipt for a voucher sent after a settled payment needs no acknowledgement" do
+      challenge = %Challenge{id: "c", realm: "r", method: "tempo", intent: "session", request: "e30"}
+      fresh = Retry.new()
+      assert {:continue, ^fresh} = Retry.transition(fresh, {:receipt, %{}, challenge})
+
+      {:continue, state} = Retry.transition(fresh, :pay_started)
+      {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
+      {:continue, state} = Retry.transition(state, :receipt)
+      {:continue, state} = Retry.transition(state, :need_voucher)
+      {:continue, state} = Retry.transition(state, :credential_sent)
+      assert state.awaiting_receipt?
+      refute Retry.receipt_deadline_armed?(state)
+
+      {:continue, settled} = Retry.transition(state, {:receipt, %{"action" => "voucher"}, challenge})
+      refute settled.awaiting_receipt?
+      assert Retry.should_pay?(settled)
+    end
+
+    test "a receipt does not clear provider work that is still running" do
+      {:continue, paying} = Retry.transition(Retry.new(), :pay_started)
+      {:continue, paying} = Retry.transition(paying, :receipt)
+      assert paying.payment_in_flight?
+      {{:fatal, :payment_retry_refused}, _latched} = Retry.transition(paying, :pay_started)
+
+      {:continue, vouching} = Retry.transition(Retry.new(), :need_voucher)
+      {:continue, vouching} = Retry.transition(vouching, :receipt)
+      assert vouching.voucher_in_flight?
+      {{:fatal, :second_voucher_in_flight}, _latched} = Retry.transition(vouching, :need_voucher)
+    end
+
+    test "a server error clears what was pending" do
+      {:continue, state} = Retry.transition(Retry.new(), :pay_started)
+      {{:arm_receipt_deadline, _ms}, sent} = Retry.transition(state, :credential_sent)
+      {{:fatal, :server_error}, latched} = Retry.transition(sent, :server_error)
+
+      refute latched.awaiting_receipt?
+      assert latched.receipt_deadline == :off
+      refute Retry.should_pay?(latched)
+    end
+
     test "payments per connection are capped at max_payments (default 3)" do
       pay = fn state ->
         {:continue, state} = Retry.transition(state, :pay_started)
-        {:continue, state} = Retry.transition(state, :credential_sent)
+        {{:arm_receipt_deadline, _ms}, state} = Retry.transition(state, :credential_sent)
         {:continue, state} = Retry.transition(state, :receipt)
         state
       end

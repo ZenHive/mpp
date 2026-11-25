@@ -637,7 +637,9 @@ WebSocket server's own maximum frame size so oversized frames are not buffered.
 `Payment <base64url>` credential frames. `MPP.Client.Transport.WebSocket.Retry`
 matches upstream reconnect posture: capped exponential backoff, fatal latch on
 protocol errors, no second payment after a drop that left a credential
-unacknowledged, and a fatal second `needVoucher` while a voucher is in flight.
+unacknowledged, a fatal second `needVoucher` while a voucher is in flight, and a
+deadline on the wait for a receipt that acknowledges the payment. `Retry` holds
+no timer: start one on `{:arm_receipt_deadline, ms}` and feed `:receipt_timeout`.
 
 ## Installation
 

@@ -77,13 +77,14 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       credential = %Credential{challenge: challenge, payload: %{"token" => "demo-token"}}
       cred_frame = ClientTransport.set_credential(%{}, credential)
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(cred_frame))
-      {:continue, retry} = Retry.transition(retry, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, retry} = Retry.transition(retry, :credential_sent)
 
       {receipt_frame, client} = recv_frame!(client)
       assert receipt_frame["type"] == "receipt"
       assert receipt_frame["receipt"]["status"] == "success"
       assert receipt_frame["receipt"]["challengeId"] == challenge.id
-      {:continue, retry} = Retry.transition(retry, :receipt)
+      {:continue, retry} = Retry.transition(retry, {:receipt, receipt_frame["receipt"], challenge})
+      refute retry.awaiting_receipt?
       assert Retry.should_pay?(retry)
 
       rpc = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_chainId", "params" => []}
@@ -133,7 +134,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
         })
 
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(cred_frame))
-      {:continue, retry} = Retry.transition(retry, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, retry} = Retry.transition(retry, :credential_sent)
       assert_receive {:ws_script_recv, _text}, 1_000
 
       assert {:error, :closed} = WebSocketLoopback.recv_text(client)
@@ -199,11 +200,12 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
         })
 
       assert :ok = WebSocketLoopback.send_text(client, WebSocket.encode_frame(open_frame))
-      {:continue, retry} = Retry.transition(retry, :credential_sent)
+      {{:arm_receipt_deadline, _ms}, retry} = Retry.transition(retry, :credential_sent)
 
       {open_receipt, client} = recv_frame!(client)
       assert open_receipt["type"] == "receipt"
-      {:continue, retry} = Retry.transition(retry, :receipt)
+      {:continue, retry} = Retry.transition(retry, {:receipt, open_receipt["receipt"], challenge})
+      refute retry.awaiting_receipt?
 
       {data, client} = recv_frame!(client)
       assert data["type"] == "message"
@@ -233,7 +235,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       assert voucher_receipt["receipt"]["action"] == "voucher"
       assert voucher_receipt["receipt"]["acceptedCumulative"] == "100"
       assert voucher_receipt["receipt"]["spent"] == "50"
-      {:continue, retry} = Retry.transition(retry, :receipt)
+      {:continue, retry} = Retry.transition(retry, {:receipt, voucher_receipt["receipt"], challenge})
       refute retry.voucher_in_flight?
       refute retry.awaiting_receipt?
 
@@ -249,7 +251,7 @@ defmodule MPP.Transports.WebSocket.IntegrationTest do
       assert session_receipt["receipt"]["acceptedCumulative"] == "100"
       assert session_receipt["receipt"]["spent"] == "100"
       assert session_receipt["receipt"]["units"] == 2
-      {:continue, retry} = Retry.transition(retry, :receipt)
+      {:continue, retry} = Retry.transition(retry, {:receipt, session_receipt["receipt"], challenge})
       assert Retry.should_pay?(retry)
 
       assert {:ok, channel} = MPP.Session.Store.get(store, @channel_id)
