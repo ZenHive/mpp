@@ -180,6 +180,9 @@ defmodule MPP.Credential do
       }
 
       with :ok <- validate_optional_challenge_fields(map),
+           # An echoed `header` is `Payment-Authorization` or absent (mppx
+           # `Challenge.Schema`, mpp-rs credential parsing).
+           :ok <- validate_echoed_header(map["header"]),
            challenge = %{challenge | header: Challenge.advertised_header(challenge.header)},
            :ok <- Challenge.validate_fields(challenge) do
         {:ok, challenge}
@@ -188,6 +191,12 @@ defmodule MPP.Credential do
       {:error, :missing_required_fields}
     end
   end
+
+  defp validate_echoed_header(header) when is_binary(header) do
+    if String.downcase(header) in ["", "authorization"], do: {:error, :invalid_header}, else: :ok
+  end
+
+  defp validate_echoed_header(_header), do: :ok
 
   # Older mppx clients echo `opaque` as a flat string→string object rather than
   # base64url(JCS). Re-encode that shape before the string check so it verifies
@@ -259,7 +268,8 @@ defmodule MPP.Credential do
     |> maybe_put("digest", challenge.digest)
     |> maybe_put("expires", challenge.expires)
     |> maybe_put("opaque", challenge.opaque)
-    |> maybe_put("header", challenge.header)
+    # The default is echoed by leaving `header` out, never by writing it.
+    |> maybe_put("header", Challenge.advertised_header(challenge.header))
   end
 
   # Adds a key-value pair to the map only if the value is non-nil.

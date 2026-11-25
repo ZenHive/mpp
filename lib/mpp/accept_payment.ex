@@ -40,6 +40,7 @@ defmodule MPP.AcceptPayment do
   # `parse_q_value` and mppx `parseHeaderQ` (`src/internal/AcceptPayment.ts`).
   @qvalue ~r/\A(0(\.[0-9]{0,3})?|1(\.0{0,3})?)\z/
   @intent_token ~r/\A[a-z0-9-]+\z/
+  @method_token ~r/\A[a-z0-9:_-]+\z/
   @param_name ~r/\A[A-Za-z0-9_-]+\z/
 
   api(
@@ -58,8 +59,9 @@ defmodule MPP.AcceptPayment do
   @doc """
   Parse an `Accept-Payment` header value into preference entries.
 
-  Each entry is `{method, intent, q}` where `method` is `*` or a challenge
-  method name (`[a-z][a-z0-9:_-]*`), `intent` is `*` or `[a-z0-9-]+`, and `q`
+  Each entry is `{method, intent, q}` where `method` is `*` or `[a-z0-9:_-]+`
+  (wider than the challenge method grammar, so an entry may name a method no
+  challenge can carry), `intent` is `*` or `[a-z0-9-]+`, and `q`
   is an RFC 9110 qvalue (default `1.0`).
 
   Returns `[]` for empty, whitespace-only, or malformed input (spec MAY-ignore).
@@ -273,10 +275,12 @@ defmodule MPP.AcceptPayment do
 
   defp validate_accept_payment_token("*", _kind), do: :ok
 
-  # Method tokens follow the challenge method grammar (`:`, `_` included);
-  # intent tokens stay `[a-z0-9-]+` (mpp-rs #488 `validate_token`).
+  # Method tokens keep the wider `[a-z0-9:_-]+` grammar; intent tokens stay
+  # `[a-z0-9-]+` (mpp-rs `validate_token`,
+  # refs/mpp-rs/src/protocol/core/accept_payment.rs). An entry naming a method
+  # outside the challenge grammar (`1*LOWERALPHA`) matches no challenge.
   defp validate_accept_payment_token(token, :method) do
-    if Challenge.valid_method_name?(token), do: :ok, else: {:error, :malformed}
+    if token =~ @method_token, do: :ok, else: {:error, :malformed}
   end
 
   defp validate_accept_payment_token(token, :intent) do

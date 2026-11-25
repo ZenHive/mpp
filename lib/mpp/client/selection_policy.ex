@@ -41,9 +41,9 @@ defmodule MPP.Client.SelectionPolicy do
     ],
     returns: %{
       type: :tagged_tuple,
-      description: "`{:ok, challenge}` or `{:error, :no_supported_challenge}`"
+      description: "`{:ok, challenge}`, `{:error, :no_supported_challenge}` or `{:error, :legacy_unicode_escape}`"
     },
-    errors: [:no_supported_challenge]
+    errors: [:no_supported_challenge, :legacy_unicode_escape]
   )
 
   @doc """
@@ -52,21 +52,31 @@ defmodule MPP.Client.SelectionPolicy do
   Unsupported challenges are dropped first. The policy then orders what remains
   and the first entry is selected. Returns `{:error, :no_supported_challenge}`
   when nothing is left, including the empty-list case.
+
+  A challenge whose header carried a legacy backslash-u escape in a bound
+  parameter is never selected: a quoted-pair reads that escape as other text
+  than the server bound into the challenge id, so paying it would fail
+  verification after funds may have moved. When every challenge the policy
+  leaves is of that kind the result is `{:error, :legacy_unicode_escape}`.
   """
   @spec select([Challenge.t()], MultiProvider.t(), t()) ::
-          {:ok, Challenge.t()} | {:error, :no_supported_challenge}
+          {:ok, Challenge.t()} | {:error, :no_supported_challenge | :legacy_unicode_escape}
   def select(challenges, %MultiProvider{} = multi, policy \\ default()) when is_list(challenges) do
-    challenges
-    |> Enum.filter(&supported?(&1, multi))
-    |> order(policy)
-    |> case do
+    # The policy runs first, so the legacy verdict is about the offers the
+    # caller would otherwise have paid (mppx `selectChallenge`,
+    # refs/mppx/src/internal/AcceptPayment.ts).
+    eligible = challenges |> Enum.filter(&supported?(&1, multi)) |> order(policy)
+
+    case Enum.reject(eligible, & &1.legacy_unicode_escape) do
       [%Challenge{} = challenge | _rest] -> {:ok, challenge}
+      [] when eligible != [] -> {:error, :legacy_unicode_escape}
       _empty -> {:error, :no_supported_challenge}
     end
   end
 
   defp supported?(%Challenge{} = challenge, multi) do
-    Challenge.payable?(challenge) and MultiProvider.supports_challenge?(multi, challenge)
+    Challenge.payable?(%{challenge | legacy_unicode_escape: false}) and
+      MultiProvider.supports_challenge?(multi, challenge)
   end
 
   defp order(challenges, :server_order), do: challenges

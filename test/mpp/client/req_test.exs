@@ -387,6 +387,24 @@ defmodule MPP.Client.ReqTest do
                Req.get(req, url: "http://example.com/resource")
     end
 
+    test "refuses to pay a challenge whose realm carries a legacy unicode escape" do
+      header = String.replace(challenge_header("tempo"), ~r/realm="[^"]*"/, ~S(realm="caf\u00e9.example.com"))
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("www-authenticate", header)
+        |> Plug.Conn.send_resp(402, "pay")
+      end
+
+      req = client(plug, provider: MultiProvider.new([{TempoProvider, %{test_pid: self()}}]))
+
+      assert {:error, %ClientReq.Error{reason: :legacy_unicode_escape, message: message}} =
+               Req.get(req, url: "http://example.com/resource")
+
+      assert message =~ "upgrade the server"
+      refute_received {:paid, _}
+    end
+
     test "returns an error when payment execution fails" do
       plug = fn conn ->
         conn

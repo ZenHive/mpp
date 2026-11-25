@@ -213,6 +213,17 @@ defmodule MPP.Plug do
   @impl Plug
   @spec init(keyword()) :: Config.t()
   def init(opts) when is_list(opts) do
+    opts |> init_config() |> validate_header_realm!()
+  end
+
+  @doc false
+  # The transport-neutral part of `init/1`. The MCP, JSON-RPC and WebSocket
+  # transports carry a challenge as JSON, so the header-only value checks do not
+  # apply to them (mppx `Mppx.create`, refs/mppx/src/server/Mppx.ts).
+  @spec init_config(keyword()) :: Config.t()
+  def init_config(opts) when is_list(opts), do: opts |> build_config() |> validate_bound_values!()
+
+  defp build_config(opts) do
     intent = validate_intent!(Keyword.get(opts, :intent, "charge"))
     configured_session_store = Keyword.get(opts, :session_store)
     session_store = resolve_session_store(intent, configured_session_store)
@@ -454,8 +465,47 @@ defmodule MPP.Plug do
     )
   end
 
-  # Validates that every method name matches the reference-SDK method-identifier
-  # grammar `[a-z][a-z0-9:_-]*` (see `MPP.Challenge.valid_method_name?/1`).
+  # The realm is bound into the challenge id and written into the header as a
+  # quoted-string, which carries only HTAB and printable ASCII. Any other realm
+  # would fail every 402, so it fails here (mpp-rs `validate_realm`,
+  # refs/mpp-rs/src/protocol/core/auth_params.rs).
+  defp validate_header_realm!(%Config{realm: realm} = config) do
+    if !Challenge.header_text?(realm) do
+      raise ArgumentError,
+            "MPP.Plug :realm must be printable ASCII, since a challenge header " <>
+              "cannot carry other characters: #{inspect(realm)}"
+    end
+
+    config
+  end
+
+  # Types of the values every challenge binds, on every transport. `digest` and
+  # a string `opaque` have ASCII encodings of their own (a digest field value,
+  # base64url JSON), so a value outside printable ASCII is one no receiver
+  # accepts, in a header or in JSON.
+  defp validate_bound_values!(%Config{} = config) do
+    if !is_binary(config.realm) do
+      raise ArgumentError, "MPP.Plug :realm must be a string, got: #{inspect(config.realm)}"
+    end
+
+    if !(is_nil(config.digest) or is_binary(config.digest)) do
+      raise ArgumentError, "MPP.Plug :digest must be a string, got: #{inspect(config.digest)}"
+    end
+
+    if !(is_nil(config.opaque) or is_binary(config.opaque) or is_map(config.opaque)) do
+      raise ArgumentError, "MPP.Plug :opaque must be a string or a map, got: #{inspect(config.opaque)}"
+    end
+
+    for {name, value} <- [digest: config.digest, opaque: config.opaque],
+        is_binary(value) and not Challenge.header_text?(value) do
+      raise ArgumentError, "MPP.Plug :#{name} must be printable ASCII: #{inspect(value)}"
+    end
+
+    config
+  end
+
+  # Validates that every method name is `1*LOWERALPHA`, the core draft's
+  # method-identifier grammar (see `MPP.Challenge.valid_method_name?/1`).
   # Challenge parsing (this library's own client paths included) rejects any
   # other shape as `:invalid_method`, so a non-conformant name must fail at boot
   # rather than emit unparseable challenges.
@@ -467,8 +517,8 @@ defmodule MPP.Plug do
 
     if bad != [] do
       raise ArgumentError,
-            "MPP.Plug: method names must start with a lowercase ASCII letter and contain only " <>
-              "lowercase letters, digits, `:`, `_` or `-` (grammar `[a-z][a-z0-9:_-]*`): #{inspect(Enum.uniq(bad))}"
+            "MPP.Plug: method names must contain only lowercase ASCII letters " <>
+              "(grammar `1*LOWERALPHA`): #{inspect(Enum.uniq(bad))}"
     end
   end
 

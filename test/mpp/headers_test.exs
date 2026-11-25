@@ -7,6 +7,7 @@ defmodule MPP.HeadersTest do
   alias MPP.Headers
   alias MPP.Methods.Tempo.SessionReceipt
   alias MPP.Receipt
+  alias MPP.Test.MppxChallengeBundle
 
   @secret "test-secret-key"
 
@@ -103,20 +104,32 @@ defmodule MPP.HeadersTest do
       assert ascii_header?(header)
     end
 
-    test "escapes Latin-1, a C0 control, and DEL, and parse(format(x)) == x" do
-      text = "caf\u00E9\u0007\u007F"
-      description = text <> "\t"
-      challenge = make_challenge(realm: text, description: description)
-      header = Headers.format_challenge(challenge)
+    test "escapes Latin-1, a C0 control, and DEL in the description only" do
+      description = "caf\u00E9\u0007\u007F\t"
+      header = Headers.format_challenge(make_challenge(description: description))
 
       assert ascii_header?(header)
-      assert header =~ ~s(realm="caf\\u00e9\\u0007\\u007f")
       assert header =~ ~s(description="caf\\u00e9\\u0007\\u007f\t")
+    end
 
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.realm == text
-      assert parsed.description == description
-      assert parsed.id == challenge.id
+    # mpp-rs `escape_quoted_value` (refs/mpp-rs/src/protocol/core/auth_params.rs);
+    # mppx `authParam` refuses above U+00FF (refs/mppx/src/Challenge.ts).
+    test "refuses a bound value outside HTAB and printable ASCII" do
+      for {field, value} <- [realm: "caf\u00E9", realm: "a\u2014b", realm: "bell\a", realm: "del\u007F", id: "id\u00E9"] do
+        challenge = Map.put(make_challenge(), field, value)
+
+        assert_raise ArgumentError, ~r/#{field} must be printable ASCII/, fn ->
+          Headers.format_challenge(challenge)
+        end
+      end
+
+      assert Headers.format_challenge(make_challenge(realm: "My \"API\"\t\\v2")) =~ ~s(realm="My \\"API\\"\t\\\\v2")
+    end
+
+    test "refuses to format a challenge parsed with a legacy escape in a bound param" do
+      assert {:ok, legacy} = Headers.parse_challenge(raw_header(realm: "caf\\u00e9"))
+
+      assert_raise ArgumentError, ~r/legacy unicode escape/, fn -> Headers.format_challenge(legacy) end
     end
 
     test "escapes code points outside the BMP as a UTF-16 surrogate pair, matching mppx (#813)" do
@@ -215,13 +228,13 @@ defmodule MPP.HeadersTest do
       assert parsed.header == "Payment-Authorization"
     end
 
-    test "treats header=Authorization as absent" do
-      original = make_challenge()
-      header = Headers.format_challenge(original) <> ~s(, header="Authorization")
-
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.header == nil
-      assert parsed.id == original.id
+    # mppx `deserialize` and mpp-rs reject a written default: only an absent
+    # `header` selects `Authorization`.
+    test "rejects an explicit header=Authorization or an empty header" do
+      for value <- ["Authorization", "authorization", ""] do
+        header = Headers.format_challenge(make_challenge()) <> ~s(, header="#{value}")
+        assert {:error, :invalid_header} = Headers.parse_challenge(header), value
+      end
     end
 
     test "roundtrip preserves escaped quotes in description" do
@@ -273,9 +286,15 @@ defmodule MPP.HeadersTest do
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", id="f"))
     end
 
-    test "rejects unknown params" do
-      assert {:error, :invalid_auth_params} =
-               Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", unknown="x"))
+    # Core draft: "implementations MUST ignore unknown parameters".
+    test "ignores unknown params and still rejects a repeated one" do
+      assert {:ok, %Challenge{id: "abc", realm: "api.example.com"}} =
+               Headers.parse_challenge(raw_header([]) <> ~s(, x-note=v, unknown="x"))
+
+      assert {:error, :duplicate_param} = Headers.parse_challenge(raw_header([]) <> ~s(, x-note=v, x-note=w))
+
+      assert {:ok, %Challenge{legacy_unicode_escape: false}} =
+               Headers.parse_challenge(raw_header([]) <> ~S(, x-note="caf\u00e9"))
     end
 
     test "accepts header as a known optional param (Task 83 whitelist is not loosened)" do
@@ -325,30 +344,20 @@ defmodule MPP.HeadersTest do
                Headers.parse_challenge(~s(Payment id="a", realm="b", method="c", intent="d", request="e", opaque))
     end
 
-    test "accepts an empty unquoted description at the end or before a comma (mpp-rs #505)" do
+    # mppx `readAuthParamValue` requires 1*tchar (refs/mppx/src/Challenge.ts);
+    # mpp-rs still reads an empty unquoted value as "".
+    test "rejects an empty unquoted value" do
       base = ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", description=)
 
-      assert {:ok, trailing} = Headers.parse_challenge(base)
-      assert trailing.description == ""
+      for header <- [
+            base,
+            base <> ~s(, digest="sha-256=abc"),
+            ~s(Payment id=, realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+          ] do
+        assert {:error, :invalid_auth_params} = Headers.parse_challenge(header), header
+      end
 
-      assert {:ok, before_comma} =
-               Headers.parse_challenge(base <> ~s(, digest="sha-256=abc"))
-
-      assert before_comma.description == ""
-      assert before_comma.digest == "sha-256=abc"
-
-      assert {:ok, before_tab} =
-               Headers.parse_challenge(
-                 ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", description=,\tdigest="sha-256=abc")
-               )
-
-      assert before_tab.description == ""
-      assert before_tab.digest == "sha-256=abc"
-    end
-
-    test "still rejects an empty id token" do
-      assert {:error, :empty_id} =
-               Headers.parse_challenge(~s(Payment id=, realm="b", method="c", intent="d", request="eyJhIjoxfQ"))
+      assert {:ok, %Challenge{description: ""}} = Headers.parse_challenge(base <> ~s(""))
     end
 
     test "rejects unterminated quoted string" do
@@ -363,50 +372,50 @@ defmodule MPP.HeadersTest do
       assert parsed.id == "ax"
     end
 
-    test "decodes \\uXXXX non-Latin-1 escapes, matching mppx (#813)" do
+    # RFC 9110 §5.6.4; mppx `readQuotedAuthParamValue` (refs/mppx/src/Challenge.ts),
+    # mpp-rs `Tokenizer::value` (refs/mpp-rs/src/protocol/core/auth_params.rs).
+    test "reads a backslash-u sequence as a quoted-pair, not an escape" do
       header =
         ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", ) <>
-          ~s(description="1 × Classmatic \\u2014 General Admission")
+          ~s(description="1 \\u00d7 Classmatic \\u2014 \\"GA\\" \\ud83c\\udf9f")
 
       assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.description == "1 × Classmatic — General Admission"
+      assert parsed.description == ~s(1 u00d7 Classmatic u2014 "GA" ud83cudf9f)
+      refute parsed.legacy_unicode_escape
     end
 
-    test "decodes a UTF-16 surrogate pair \\uXXXX escape into the original code point" do
-      header =
-        ~s(Payment id="a", realm="b", method="c", intent="d", request="eyJhIjoxfQ", ) <>
-          ~s(description="Tickets \\ud83c\\udf9f\\ufe0f \\"VIP\\"")
+    test "flags a backslash-u escape in every param but the description" do
+      for {field, value} <- [
+            id: "\\u00e9abc",
+            realm: "caf\\u00e9",
+            intent: "ch\\u0061rge"
+          ] do
+        header = raw_header([{field, value}])
+        assert {:ok, %Challenge{legacy_unicode_escape: true}} = Headers.parse_challenge(header), header
+      end
+
+      assert {:ok, %Challenge{legacy_unicode_escape: false, description: "cafu00e9"}} =
+               Headers.parse_challenge(raw_header(description: "caf\\u00e9"))
+
+      assert {:ok, %Challenge{realm: "cafu00e9"}} = Headers.parse_challenge(raw_header(realm: "caf\\u00e9"))
+
+      for value <- ["caf\\u00e", "caf\\U00e9", "caf\\\\u00e9", "cafu00e9"] do
+        assert {:ok, %Challenge{legacy_unicode_escape: false}} = Headers.parse_challenge(raw_header(realm: value)),
+               value
+      end
+    end
+
+    test "does not round-trip a non-ASCII description: the receiver shows the escape text" do
+      header = Headers.format_challenge(make_challenge(description: "北京 — café"))
 
       assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.description == ~s(Tickets 🎟️ "VIP")
+      assert parsed.description == "u5317u4eac u2014 cafu00e9"
+      refute parsed.legacy_unicode_escape
     end
 
-    test "round-trips a description with an em dash and a CJK string through format then parse" do
-      challenge = make_challenge(description: "北京 — 東京 café")
-      header = Headers.format_challenge(challenge)
-
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.description == "北京 — 東京 café"
-    end
-
-    test "rejects \\u not followed by 4 hex digits (never silently dropped)" do
-      header = ~s(Payment id="a\\u12", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
-      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
-    end
-
-    test "rejects \\u followed by fewer than 4 characters at end of string" do
-      header = ~s(Payment id="a\\u1)
-      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
-    end
-
-    test "rejects an unpaired high surrogate escape" do
-      header = ~s(Payment id="a\\ud83c b", realm="c", method="d", intent="e", request="eyJhIjoxfQ")
-      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
-    end
-
-    test "rejects a lone low surrogate escape with no preceding high surrogate" do
-      header = ~s(Payment id="a\\udc00", realm="b", method="c", intent="d", request="eyJhIjoxfQ")
-      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    test "rejects a quoted string that ends in a backslash" do
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(~s(Payment id="a\\u1))
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(~s(Payment id="a\\))
     end
 
     test "rejects bare newline in quoted string" do
@@ -428,24 +437,56 @@ defmodule MPP.HeadersTest do
       assert parsed.realm == "test.com"
     end
 
-    test "parses unquoted tokens separated by spaces" do
-      header = ~s(Payment id=abc realm=test.com method=stripe intent=charge request=eyJ0ZXN0Ijp0cnVlfQ)
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.id == "abc"
-      assert parsed.realm == "test.com"
-      assert parsed.method == "stripe"
+    # auth-params = auth-param *( OWS "," OWS auth-param ): mppx `parseAuthParams`,
+    # mpp-rs `read_challenge_flagged` ("Expected ',' between auth-params").
+    test "rejects auth-params that are not separated by a comma" do
+      for separator <- [" ", "\t", ""] do
+        header =
+          Enum.join(
+            [
+              ~s(Payment id="abc"),
+              ~s(realm="test.com"),
+              ~s(method="stripe"),
+              ~s(intent="charge"),
+              ~s(request="eyJ0ZXN0Ijp0cnVlfQ")
+            ],
+            separator
+          )
+
+        assert {:error, :invalid_auth_params} = Headers.parse_challenge(header), inspect(separator)
+      end
+
+      assert {:error, :invalid_auth_params} =
+               Headers.parse_challenge(
+                 "Payment id=abc realm=test.com, method=stripe, intent=charge, request=eyJ0ZXN0Ijp0cnVlfQ"
+               )
     end
 
-    test "parses unquoted tokens separated by tabs" do
-      header = "Payment id=abc\trealm=test.com\tmethod=stripe\tintent=charge\trequest=eyJ0ZXN0Ijp0cnVlfQ"
-      assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.id == "abc"
-      assert parsed.realm == "test.com"
-      assert parsed.method == "stripe"
-    end
-  end
+    test "accepts repeated commas and whitespace around the comma and the equals sign" do
+      header =
+        ~s(Payment ,, id = "abc" ,,\t realm= test.com,method ="stripe" , , intent=charge,request=eyJ0ZXN0Ijp0cnVlfQ,,)
 
-  describe "format_credential/1" do
+      assert {:ok, parsed} = Headers.parse_challenge(header)
+      assert {parsed.id, parsed.realm, parsed.method, parsed.intent} == {"abc", "test.com", "stripe", "charge"}
+    end
+
+    test "rejects an unquoted value that is not a token" do
+      for value <- ["a/b", "a:b", "a=b", "a(b", "a\"b", "caf\u00E9", "a;b", "a@b"] do
+        header = ~s(Payment id=#{value}, realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+        assert {:error, :invalid_auth_params} = Headers.parse_challenge(header), value
+      end
+
+      assert {:ok, %Challenge{id: "!#$%&'*+-.^_`|~aZ9"}} =
+               Headers.parse_challenge(
+                 ~s(Payment id=!#$%&'*+-.^_`|~aZ9, realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+               )
+    end
+
+    test "rejects text after a value that is not a comma" do
+      header = ~s(Payment id="abc"x, realm="b", method="c", intent="d", request="eyJhIjoxfQ")
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
     test "produces Payment scheme prefix" do
       credential = make_credential()
       header = Headers.format_credential(credential)
@@ -555,6 +596,33 @@ defmodule MPP.HeadersTest do
       assert p1.realm == "api.one.com"
       assert p2.realm == "api.two.com"
       assert p2.method == "tempo"
+    end
+
+    test "skips an offer whose method is not lowercase letters and keeps the rest" do
+      header =
+        Enum.join(
+          [raw_header(method: "x402"), raw_header(realm: "ok.example.com"), raw_header(method: "tempo-v2")],
+          ", "
+        )
+
+      assert {:ok, [%Challenge{method: "tempo", realm: "ok.example.com"}]} = Headers.parse_challenges(header)
+      assert {:error, :invalid_method} = Headers.parse_challenges(raw_header(method: "x402"))
+    end
+
+    test "skips an offer with a grammar error and keeps a legacy-escaped one flagged" do
+      header =
+        ~s(Payment id="abc" realm="x", method="tempo", intent="charge", request="eyJhIjoxfQ", ) <>
+          raw_header(realm: "caf\\u00e9")
+
+      assert {:ok, [%Challenge{realm: "cafu00e9", legacy_unicode_escape: true}]} = Headers.parse_challenges(header)
+    end
+
+    # Whitespace before the equals sign is BWS, not a scheme boundary.
+    test "keeps an offer whole when a param has whitespace before its equals sign" do
+      header = ~s(Payment id=ch, realm = shop, method=tempo, intent=charge, request=e30, description = "d")
+
+      assert {:ok, [%Challenge{realm: "shop", description: "d"}]} = Headers.parse_challenges(header)
+      assert {:ok, [%Challenge{method: "tempo"}]} = Headers.parse_challenges(header <> ~s(, Bearer realm = "x"))
     end
 
     test "parses three challenges" do
@@ -764,6 +832,17 @@ defmodule MPP.HeadersTest do
       Headers.format_challenge(make_challenge(overrides))
     end
 
+    # Writes the values between the quotes as given, without escaping.
+    defp raw_header(overrides) do
+      params =
+        Keyword.merge(
+          [id: "abc", realm: "api.example.com", method: "tempo", intent: "charge", request: "eyJhIjoxfQ"],
+          overrides
+        )
+
+      "Payment " <> Enum.map_join(params, ", ", fn {key, value} -> ~s(#{key}="#{value}") end)
+    end
+
     test "rejects an empty id" do
       # Challenge.create computes the id, so craft the header directly to force id="".
       header =
@@ -772,19 +851,24 @@ defmodule MPP.HeadersTest do
       assert {:error, :empty_id} = Headers.parse_challenge(header)
     end
 
-    test "rejects an uppercase method (grammar [a-z][a-z0-9:_-]*)" do
-      assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: "Stripe"))
+    test "rejects an uppercase method" do
+      assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: "Stripe"))
     end
 
-    test "accepts canonical method names (mppx Challenge.ts:380 / mpp-rs #428)" do
-      for method <- ["x402", "tempo-v2", "a:b", "a_b", "a1:b_2-c"] do
+    test "accepts methods of lowercase letters only (1*LOWERALPHA)" do
+      for method <- ["tempo", "a", "nearintents"] do
         assert {:ok, %Challenge{method: ^method}} = Headers.parse_challenge(challenge_header(method: method))
+      end
+
+      for method <- ["x402", "tempo-v2", "a:b", "a_b"] do
+        assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: method)), method
+        assert_raise ArgumentError, ~r/lowercase letters/, fn -> challenge_header(method: method) end
       end
     end
 
     test "rejects a method that does not start with a lowercase letter" do
       for method <- ["-tempo", ":tempo", "_tempo", "123", "tempo!"] do
-        assert {:error, :invalid_method} = Headers.parse_challenge(challenge_header(method: method)), method
+        assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: method)), method
       end
     end
 
@@ -838,8 +922,7 @@ defmodule MPP.HeadersTest do
             ) do
         # Guaranteed non-conformant: at least one byte outside the grammar is present.
         method = lower <> <<bad_char>> <> suffix
-        header = Headers.format_challenge(make_challenge(method: method))
-        assert {:error, :invalid_method} = Headers.parse_challenge(header)
+        assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: method))
       end
     end
 
@@ -848,24 +931,22 @@ defmodule MPP.HeadersTest do
               first <- StreamData.member_of([?0, ?9, ?:, ?_, ?-, ?A]),
               rest <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 0, max_length: 8)
             ) do
-        header = Headers.format_challenge(make_challenge(method: <<first>> <> rest))
-        assert {:error, :invalid_method} = Headers.parse_challenge(header)
+        assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: <<first>> <> rest))
       end
     end
 
-    property "any method matching [a-z][a-z0-9:_-]* round-trips through parse_challenge/1" do
-      check all(
-              first <- StreamData.integer(?a..?z),
-              rest <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 0, max_length: 8)
-            ) do
-        method = <<first>> <> rest
-        header = Headers.format_challenge(make_challenge(method: method))
-        assert {:ok, %Challenge{method: ^method}} = Headers.parse_challenge(header)
+    property "a method round-trips exactly when it is one or more lowercase letters" do
+      check all(method <- StreamData.string([?a..?z, ?0..?9, ?:, ?_, ?-], min_length: 1, max_length: 8)) do
+        if method =~ ~r/\A[a-z]+\z/ do
+          header = Headers.format_challenge(make_challenge(method: method))
+          assert {:ok, %Challenge{method: ^method}} = Headers.parse_challenge(header)
+        else
+          assert {:error, :invalid_method} = Headers.parse_challenge(raw_header(method: method))
+          assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(method: method)) end
+        end
       end
     end
   end
-
-  # --- Property tests for Task 63 ---
 
   defp safe_str do
     :printable
@@ -876,7 +957,7 @@ defmodule MPP.HeadersTest do
   describe "property: round-trip identity (format then parse)" do
     property "format_challenge/1 + parse_challenge/1 is identity" do
       check all(
-              realm <- safe_str(),
+              realm <- StreamData.string([?\t, 0x20..0x7E], min_length: 1, max_length: 40),
               method <-
                 StreamData.one_of([
                   StreamData.constant("stripe"),
@@ -892,6 +973,20 @@ defmodule MPP.HeadersTest do
         ch = make_challenge(realm: realm, method: method, request: request)
         h = Headers.format_challenge(ch)
         assert {:ok, ^ch} = Headers.parse_challenge(h)
+      end
+    end
+
+    property "a realm holding anything but HTAB and printable ASCII is refused" do
+      check all(realm <- safe_str(), not Challenge.header_text?(realm)) do
+        assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(realm: realm)) end
+      end
+    end
+
+    property "any description formats to an ASCII header that parses without a legacy flag" do
+      check all(description <- safe_str()) do
+        header = Headers.format_challenge(make_challenge(description: description))
+        assert ascii_header?(header)
+        assert {:ok, %Challenge{legacy_unicode_escape: false}} = Headers.parse_challenge(header)
       end
     end
 
@@ -951,7 +1046,7 @@ defmodule MPP.HeadersTest do
   # Deterministic but requires a JS toolchain (QuickBEAM + node + npx/esbuild +
   # the `zod`/`ox` npm packages mppx's Challenge.ts imports). Excluded from the
   # default gate; run explicitly with `mix test.json --include cross_validation`.
-  describe "cross-validation: \\uXXXX escape vs mppx Challenge (mppx #813)" do
+  describe "cross-validation: description escape vs mppx Challenge" do
     @describetag :cross_validation
 
     setup do
@@ -962,11 +1057,11 @@ defmodule MPP.HeadersTest do
       end
 
       rt = start_supervised!({QuickBEAM, apis: :browser})
-      MPP.Test.MppxChallengeBundle.load!(rt)
+      MppxChallengeBundle.load!(rt)
       %{rt: rt}
     end
 
-    test "mppx serializes a non-Latin-1 description and we parse it identically", %{rt: rt} do
+    test "mppx serializes a non-Latin-1 description and we read the same text mppx does", %{rt: rt} do
       description = "1 × Classmatic — General Admission 🎟️"
 
       {:ok, header} =
@@ -984,18 +1079,27 @@ defmodule MPP.HeadersTest do
           )
         ])
 
+      # mppx escapes only above U+00FF, and both sides read the escape as text.
+      assert {:ok, %{"ok" => true, "challenge" => mppx_parsed}} = QuickBEAM.call(rt, "mppxRead", [header])
       assert {:ok, parsed} = Headers.parse_challenge(header)
-      assert parsed.description == description
+      assert parsed.description == "1 × Classmatic u2014 General Admission ud83cudf9fufe0f"
+      assert parsed.description == mppx_parsed["description"]
+      refute parsed.legacy_unicode_escape
     end
 
-    test "we serialize a non-Latin-1 description and mppx parses it identically", %{rt: rt} do
-      description = "1 × Classmatic — General Admission 🎟️"
-      challenge = make_challenge(method: "tempo", description: description)
+    # mppx reads a quoted-pair literally (refs/mppx/src/Challenge.ts
+    # `readQuotedAuthParamValue`), so the description arrives as escape text.
+    test "we serialize a non-Latin-1 description and mppx reads the same escape text we do", %{rt: rt} do
+      challenge = make_challenge(method: "tempo", description: "1 × Classmatic — General Admission 🎟️")
       header = Headers.format_challenge(challenge)
 
-      {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
+      assert {:ok, %{"ok" => true, "legacy" => false, "challenge" => mppx_parsed}} =
+               QuickBEAM.call(rt, "mppxRead", [header])
 
-      assert mppx_parsed["description"] == description
+      assert {:ok, ours} = Headers.parse_challenge(header)
+
+      assert ours.description == "1 u00d7 Classmatic u2014 General Admission ud83cudf9fufe0f"
+      assert mppx_parsed["description"] == ours.description
     end
 
     test "mppx serializes header=Payment-Authorization and we parse it", %{rt: rt} do
@@ -1024,16 +1128,210 @@ defmodule MPP.HeadersTest do
       assert mppx_parsed["header"] == "Payment-Authorization"
     end
 
-    test "we escape Latin-1, a C0 control, and DEL to ASCII and mppx parses them back", %{rt: rt} do
-      description = "caf\u00E9\u0007\u007F"
-      challenge = make_challenge(method: "tempo", description: description)
-      header = Headers.format_challenge(challenge)
+    test "we escape Latin-1, a C0 control, and DEL to ASCII and mppx reads the escape text", %{rt: rt} do
+      header = Headers.format_challenge(make_challenge(method: "tempo", description: "caf\u00E9\u0007\u007F"))
 
       assert ascii_header?(header)
 
-      {:ok, mppx_parsed} = QuickBEAM.call(rt, "mppxDeserialize", [header])
+      assert {:ok, %{"ok" => true, "legacy" => false, "challenge" => mppx_parsed}} =
+               QuickBEAM.call(rt, "mppxRead", [header])
 
-      assert mppx_parsed["description"] == description
+      assert mppx_parsed["description"] == "cafu00e9u0007u007f"
+    end
+  end
+
+  # Each grammar rule against mppx at runtime (refs/mppx/src/Challenge.ts, mppx
+  # #1341 / #1349). The mpp-rs verdicts are the ones its own tests pin in
+  # refs/mpp-rs/src/protocol/core/headers.rs and auth_params.rs; they are named
+  # per vector where mpp-rs differs.
+  describe "cross-validation: core header grammar vs mppx Challenge" do
+    @describetag :cross_validation
+
+    setup do
+      if !Code.ensure_loaded?(QuickBEAM) do
+        flunk("""
+        QuickBEAM not available. This test requires the dev/test dependency stack.
+        """)
+      end
+
+      rt = start_supervised!({QuickBEAM, apis: :browser})
+      MppxChallengeBundle.load!(rt)
+      %{rt: rt}
+    end
+
+    @quoted ~s(realm="api.example.com", method="tempo", intent="charge", request="eyJhIjoxfQ")
+
+    test "both accept or both reject each header", %{rt: rt} do
+      vectors = [
+        # comma-separated auth-params; empty list elements
+        {~s(Payment id="abc", #{@quoted}), true},
+        {~s(Payment id="abc" #{@quoted}), false},
+        {~s(Payment id="abc"\t#{@quoted}), false},
+        {~s(Payment id="abc"x, #{@quoted}), false},
+        {~s(Payment ,, id="abc" ,, #{@quoted},,), true},
+        {~s(Payment id = "abc" , #{@quoted}), true},
+        # unquoted values are tokens
+        {~s(Payment id=abc, #{@quoted}), true},
+        {~s(Payment id=!#$%&'*+-.^_`|~aZ9, #{@quoted}), true},
+        {~s(Payment id=a/b, #{@quoted}), false},
+        {~s(Payment id=a:b, #{@quoted}), false},
+        {~s(Payment id=a@b, #{@quoted}), false},
+        # mpp-rs reads the empty unquoted value as "" and then rejects the empty id
+        {~s(Payment id=, #{@quoted}), false},
+        # method identifiers
+        {raw_header(method: "x402"), false},
+        {raw_header(method: "tempo-v2"), false},
+        {raw_header(method: "a:b"), false},
+        {raw_header(method: "a_b"), false},
+        {raw_header(method: "Tempo"), false},
+        {raw_header(method: ""), false},
+        # quoted strings
+        {raw_header(realm: "caf\\u00e9"), true},
+        {raw_header(realm: "a\\\"b\\\\c\\x"), true},
+        {~s(Payment id="abc), false},
+        {~s(Payment id="abc\\), false}
+      ]
+
+      for {header, accepted?} <- vectors do
+        assert {:ok, %{"ok" => mppx_ok}} = QuickBEAM.call(rt, "mppxRead", [header])
+        ours_ok = match?({:ok, _}, Headers.parse_challenge(header))
+
+        assert mppx_ok == accepted?, "mppx on #{inspect(header)}"
+        assert ours_ok == accepted?, "ours on #{inspect(header)}"
+      end
+    end
+
+    # mpp-rs reads this one as description "" (refs/mpp-rs/src/protocol/core/headers.rs
+    # `read_challenge_flagged`: "An empty unquoted value is still read as \"\""); we follow mppx.
+    test "an empty unquoted description is rejected, as mppx rejects it", %{rt: rt} do
+      header = ~s(Payment id="abc", #{@quoted}, description=)
+
+      assert {:ok, %{"ok" => false}} = QuickBEAM.call(rt, "mppxRead", [header])
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
+    test "quoted-pairs read to the same text and the same legacy verdict", %{rt: rt} do
+      # {param, wire value, legacy?} — refs/mpp-rs/src/protocol/core/headers.rs
+      # `test_parse_payable_challenges_refuses_legacy_unicode_escapes` pins the first four.
+      vectors = [
+        {"realm", "caf\\u00e9.example.com", true},
+        {"realm", "merchant\\u2014api.example.com", true},
+        {"realm", "lower hex \\u00E9 and \\uabcd", true},
+        {"realm", "caf\\u00e", false},
+        {"realm", "caf\\U00e9", false},
+        {"realm", "caf\\\\u00e9", false},
+        {"realm", "a\\\"b\\x", false},
+        {"description", "caf\\u00e9", false}
+      ]
+
+      for {param, value, legacy?} <- vectors do
+        header = raw_header([{String.to_atom(param), value}])
+
+        assert {:ok, %{"ok" => true, "legacy" => mppx_legacy, "challenge" => mppx_parsed}} =
+                 QuickBEAM.call(rt, "mppxRead", [header])
+
+        assert {:ok, ours} = Headers.parse_challenge(header)
+        assert Map.fetch!(ours, String.to_atom(param)) == mppx_parsed[param], value
+        assert mppx_legacy == legacy?, "mppx on #{value}"
+        assert ours.legacy_unicode_escape == legacy?, "ours on #{value}"
+      end
+    end
+
+    # mppx flags the params it binds into the id and leaves `id` itself out
+    # (`boundParams`); mpp-rs flags `id` too (`read_challenge_flagged`,
+    # `("id", r"ch\u00e9")`). We follow mpp-rs: the credential echoes the id.
+    test "a legacy escape in the id is flagged, as mpp-rs flags it", %{rt: rt} do
+      header = raw_header(id: "ch\\u00e9")
+
+      assert {:ok, %{"ok" => true, "legacy" => false}} = QuickBEAM.call(rt, "mppxRead", [header])
+      assert {:ok, %Challenge{id: "chu00e9", legacy_unicode_escape: true}} = Headers.parse_challenge(header)
+    end
+
+    test "mppx refuses a realm above U+00FF and a non-letter method when writing; so do we", %{rt: rt} do
+      base = %{
+        "id" => "abc",
+        "realm" => "api.example.com",
+        "method" => "tempo",
+        "intent" => "charge",
+        "request" => %{"a" => "1"}
+      }
+
+      for {field, value} <- [{"realm", "merchant—api"}, {"method", "x402"}, {"method", "tempo-v2"}] do
+        assert {:ok, %{"ok" => false}} = QuickBEAM.call(rt, "mppxWrite", [Map.put(base, field, value)])
+      end
+
+      assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(realm: "merchant—api")) end
+      assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(method: "x402")) end
+      assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(method: "tempo-v2")) end
+    end
+
+    test "a multi-challenge header keeps the conformant offer on both sides", %{rt: rt} do
+      header = raw_header(method: "tempo-v2") <> ", " <> raw_header(id: "good")
+
+      assert {:ok, ["good"]} = QuickBEAM.call(rt, "mppxReadList", [header])
+      assert {:ok, [%Challenge{id: "good"}]} = Headers.parse_challenges(header)
+    end
+
+    # Another scheme's params never join the Payment offer, and a bare scheme ends it.
+    test "other schemes in the same header leave the Payment offer as mppx reads it", %{rt: rt} do
+      for suffix <- [", New_Scheme realm=other, description=secondary", ", Basic, Digest realm=other", ", Bearer"] do
+        header = raw_header(id: "good") <> suffix
+
+        assert {:ok, ["good"]} = QuickBEAM.call(rt, "mppxReadList", [header]), suffix
+        assert {:ok, [%Challenge{id: "good", description: nil}]} = Headers.parse_challenges(header), suffix
+      end
+    end
+
+    test "a parameter name that is not a token is rejected, as mppx rejects it", %{rt: rt} do
+      header = raw_header([]) <> ", /note=v"
+
+      assert {:ok, %{"ok" => false}} = QuickBEAM.call(rt, "mppxRead", [header])
+      assert {:error, :invalid_auth_params} = Headers.parse_challenge(header)
+    end
+
+    test "a receipt with a non-string method or reference is rejected, as mppx rejects it", %{rt: rt} do
+      base = %{"method" => "tempo", "reference" => "0xabc", "timestamp" => "2024-01-01T00:00:00Z", "status" => "success"}
+
+      for {key, value, accepted?} <- [
+            {"method", "tempo", true},
+            {"method", 42, false},
+            {"reference", nil, false},
+            {"reference", %{}, false}
+          ] do
+        encoded = base |> Map.put(key, value) |> Jason.encode!() |> Base.url_encode64(padding: false)
+
+        assert {:ok, %{"ok" => ^accepted?}} = QuickBEAM.call(rt, "mppxReceiptRead", [encoded])
+        assert match?({:ok, _}, Receipt.decode(encoded)) == accepted?, "#{key}=#{inspect(value)}"
+      end
+    end
+
+    test "unknown params, an explicit default header and BWS read as mppx reads them", %{rt: rt} do
+      for {header, accepted?} <- [
+            {raw_header([]) <> ", x-note=v", true},
+            {raw_header([]) <> ~s(, header="Authorization"), false},
+            {raw_header([]) <> ~s(, header=""), false},
+            {raw_header([]) <> ~s(, header="payment-authorization"), true},
+            {~s(Payment id=ch, realm = shop, method=tempo, intent=charge, request=e30), true}
+          ] do
+        assert {:ok, %{"ok" => mppx_ok}} = QuickBEAM.call(rt, "mppxRead", [header])
+        assert mppx_ok == accepted?, "mppx on #{inspect(header)}"
+        assert match?({:ok, [_]}, Headers.parse_challenges(header)) == accepted?, "ours on #{inspect(header)}"
+      end
+    end
+
+    # mppx still writes U+0080-U+00FF raw (`authParam`); mpp-rs refuses everything
+    # outside HTAB and printable ASCII (`escape_quoted_value`). We apply the mpp-rs
+    # rule, which every header mppx accepts from us also satisfies.
+    test "our bound values stay within what mppx reads back unchanged", %{rt: rt} do
+      challenge = make_challenge(method: "tempo", realm: "My \"API\"\t\\v2 ~!")
+      # --- Property tests for Task 63 ---
+      header = Headers.format_challenge(challenge)
+
+      assert {:ok, %{"ok" => true, "legacy" => false, "challenge" => mppx_parsed}} =
+               QuickBEAM.call(rt, "mppxRead", [header])
+
+      assert mppx_parsed["realm"] == challenge.realm
+      assert_raise ArgumentError, fn -> Headers.format_challenge(make_challenge(realm: "caf\u00E9")) end
     end
   end
 

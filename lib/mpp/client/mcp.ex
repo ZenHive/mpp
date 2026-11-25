@@ -102,7 +102,14 @@ defmodule MPP.Client.MCP do
       type: :tagged_tuple,
       description: "`{:ok, response}` or `{:error, reason}`"
     },
-    errors: [:payment_declined, :no_supported_challenge, :malformed_envelope, :no_challenges, :invalid_challenge]
+    errors: [
+      :payment_declined,
+      :no_supported_challenge,
+      :legacy_unicode_escape,
+      :malformed_envelope,
+      :no_challenges,
+      :invalid_challenge
+    ]
   )
 
   @doc """

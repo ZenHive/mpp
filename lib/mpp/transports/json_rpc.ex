@@ -50,7 +50,7 @@ defmodule MPP.Transports.JsonRpc do
   )
 
   @spec init(keyword()) :: Config.t()
-  def init(opts) when is_list(opts), do: MPP.Plug.init(opts)
+  def init(opts) when is_list(opts), do: MPP.Plug.init_config(opts)
 
   api(
     :call,

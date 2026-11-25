@@ -10,6 +10,7 @@ defmodule MPP.Client.Providers.Shared do
   @spec parse_charge(Challenge.t(), String.t()) :: {:ok, Charge.t()} | {:error, term()}
   def parse_charge(%Challenge{} = challenge, method) when is_binary(method) do
     with :ok <- validate_kind(challenge, method, "charge"),
+         :ok <- refuse_legacy(challenge),
          :ok <- Challenge.validate_fields(challenge),
          :ok <- validate_expiration(challenge.expires),
          {:ok, request} <- Codec.decode_base64_json(challenge.request),
@@ -25,6 +26,7 @@ defmodule MPP.Client.Providers.Shared do
   @spec parse_subscription(Challenge.t(), String.t()) :: {:ok, Subscription.t()} | {:error, term()}
   def parse_subscription(%Challenge{} = challenge, method) when is_binary(method) do
     with :ok <- validate_kind(challenge, method, "subscription"),
+         :ok <- refuse_legacy(challenge),
          :ok <- Challenge.validate_fields(challenge),
          :ok <- validate_expiration(challenge.expires),
          {:ok, request} <- Codec.decode_base64_json(challenge.request),
@@ -35,6 +37,11 @@ defmodule MPP.Client.Providers.Shared do
       {:error, _reason} = error -> error
     end
   end
+
+  # Checked where a credential is created, so a provider called directly refuses
+  # too (mppx `Method.ts` `assertNotLegacyUnicodeEscaped`, mpp-rs `ensure_payable`).
+  defp refuse_legacy(%Challenge{legacy_unicode_escape: true}), do: {:error, :legacy_unicode_escape}
+  defp refuse_legacy(%Challenge{}), do: :ok
 
   @doc false
   @spec expiration_unix(Challenge.t(), non_neg_integer()) :: {:ok, non_neg_integer()} | {:error, term()}

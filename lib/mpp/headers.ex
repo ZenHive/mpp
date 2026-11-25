@@ -49,6 +49,12 @@ defmodule MPP.Headers do
   @optional_params ~w(expires digest description header opaque)
   @all_params @required_params ++ @optional_params
 
+  # Auth-params the challenge id binds or the credential echoes: everything
+  # except the display-only `description` (mpp-rs `read_challenge_flagged`,
+  # refs/mpp-rs/src/protocol/core/headers.rs; mppx `boundParams`,
+  # refs/mppx/src/Challenge.ts, which leaves `id` out).
+  @bound_params @all_params -- ["description"]
+
   # 16 KiB cap on client-supplied header tokens, enforced BEFORE any base64url
   # decode to prevent a memory-exhaustion DoS (an oversized token would force
   # unbounded allocation in Base.url_decode64 + Jason.decode). Ported from the
@@ -71,8 +77,25 @@ defmodule MPP.Headers do
     composes_with: [:parse_challenge]
   )
 
+  @doc """
+  Format a challenge as a `WWW-Authenticate: Payment` header value.
+
+  Raises `ArgumentError` when the method is not lowercase letters a-z, when a
+  value holds CR or LF, when a value other than
+  `description` holds a character outside HTAB and printable ASCII, or when the
+  challenge was parsed from a header that carried a legacy backslash-u escape
+  in such a value. `description` is display-only, so other characters are
+  written there as backslash-u escapes; a receiver shows the escape text.
+  """
   @spec format_challenge(Challenge.t()) :: String.t()
   def format_challenge(%Challenge{} = challenge) do
+    Challenge.refuse_legacy!(challenge)
+
+    if !Challenge.valid_method_name?(challenge.method) do
+      raise ArgumentError,
+            "MPP challenge method must be lowercase letters a-z: #{inspect(challenge.method)}"
+    end
+
     params =
       Enum.reject(
         [
@@ -91,7 +114,7 @@ defmodule MPP.Headers do
       )
 
     formatted =
-      Enum.map_join(params, ", ", fn {key, value} -> ~s(#{key}="#{escape_quoted(value)}") end)
+      Enum.map_join(params, ", ", fn {key, value} -> ~s(#{key}="#{quote_param(key, value)}") end)
 
     "#{@payment_scheme} #{formatted}"
   end
@@ -122,10 +145,14 @@ defmodule MPP.Headers do
   @spec parse_challenge(String.t()) :: {:ok, Challenge.t()} | {:error, atom()}
   def parse_challenge(header) when is_binary(header) do
     with {:ok, rest} <- strip_scheme(header),
-         {:ok, params} <- parse_auth_params(rest),
+         {:ok, all_params, legacy?} <- parse_auth_params(rest),
+         # Unknown auth-params are ignored (core draft: "implementations MUST
+         # ignore unknown parameters"; both SDKs keep the known fields).
+         params = Map.take(all_params, @all_params),
          :ok <- check_request_size(params),
          :ok <- validate_required_params(params),
-         challenge = params_to_challenge(params),
+         :ok <- validate_explicit_header(params),
+         challenge = %{params_to_challenge(params) | legacy_unicode_escape: legacy?},
          :ok <- Challenge.validate_fields(challenge) do
       {:ok, challenge}
     end
@@ -302,42 +329,42 @@ defmodule MPP.Headers do
 
   # --- Private: Auth-param formatting ---
 
-  # Escapes a value for use inside a quoted-string (RFC 9110 Section 5.6.4).
-  # Rejects CR/LF which would produce invalid header text or break HMAC binding.
-  #
-  # Every code point outside HTAB and printable ASCII (0x20-0x7E) is escaped
-  # as `\uXXXX`, matching mpp-rs #450. RFC 9110 §5.5 permits opaque obs-text
-  # bytes, but a client decoding UTF-8 bytes as Latin-1 (mpp-rs #489) would
-  # read them as mojibake. ASCII escaping also avoids raw C0 controls.
-  # mppx #813 escapes only U+0100 and above; we still decode that form.
-  defp escape_quoted(value) do
+  # Writes a value into a quoted-string (RFC 9110 §5.6.4). A quoted-pair escapes
+  # one character, so only HTAB and printable ASCII round-trip; a receiver reads
+  # `—` as the text `u2014`. A bound value holding anything else is refused
+  # (mpp-rs `escape_quoted_value`, refs/mpp-rs/src/protocol/core/auth_params.rs;
+  # mppx `authParam` refuses above U+00FF, refs/mppx/src/Challenge.ts — the
+  # ASCII rule is what both accept). CR/LF are refused everywhere.
+  defp quote_param(key, value) do
     if String.contains?(value, ["\r", "\n"]) do
       raise ArgumentError,
             "MPP challenge field contains CR/LF which is invalid in HTTP headers: #{inspect(value)}"
     end
 
-    value
-    |> String.replace("\\", "\\\\")
-    |> String.replace("\"", "\\\"")
-    |> escape_non_ascii()
+    cond do
+      key == "description" ->
+        value |> String.to_charlist() |> Enum.map(&escape_codepoint/1) |> IO.iodata_to_binary()
+
+      Challenge.header_text?(value) ->
+        value |> :binary.bin_to_list() |> Enum.map(&escape_byte/1) |> IO.iodata_to_binary()
+
+      true ->
+        raise ArgumentError,
+              "MPP challenge #{key} must be printable ASCII, since a challenge header " <>
+                "cannot carry other characters: #{inspect(value)}"
+    end
   end
 
-  # Escapes every code point outside HTAB and 0x20-0x7E as `\uXXXX`
-  # (lowercase hex, zero-padded to 4 digits — mpp-rs #450;
-  # mppx's `charCodeAt(0).toString(16).padStart(4, '0')` for the code points
-  # it escapes, refs/mppx/src/Challenge.ts).
-  #
-  # mppx's regex operates per UTF-16 code unit, so a code point outside the
-  # Basic Multilingual Plane (e.g. an emoji) is escaped as two separate
-  # `\uXXXX` sequences — the UTF-16 surrogate pair. We split the same way so
-  # the wire bytes match exactly.
-  defp escape_non_ascii(value) do
-    value
-    |> String.to_charlist()
-    |> Enum.map(&escape_codepoint/1)
-    |> IO.iodata_to_binary()
-  end
+  defp escape_byte(?\\), do: "\\\\"
+  defp escape_byte(?"), do: "\\\""
+  defp escape_byte(byte), do: <<byte>>
 
+  # `description` only: every code point outside HTAB and 0x20-0x7E is written
+  # as `\uXXXX` per UTF-16 code unit (lowercase hex, 4 digits), so a code point
+  # outside the Basic Multilingual Plane becomes a surrogate pair (mppx
+  # `authParam` with `escapeUnicode`; mpp-rs `escape_quoted_description`).
+  defp escape_codepoint(?\\), do: "\\\\"
+  defp escape_codepoint(?"), do: "\\\""
   defp escape_codepoint(0x09), do: "\t"
   defp escape_codepoint(codepoint) when codepoint in 0x20..0x7E, do: <<codepoint>>
 
@@ -354,73 +381,69 @@ defmodule MPP.Headers do
 
   # --- Private: Auth-param parsing ---
 
-  # Parses comma-separated auth-params into a map.
-  # Handles both quoted ("value") and unquoted (token) values.
-  defp parse_auth_params(input) do
-    input
-    |> String.trim()
-    |> do_parse_params(%{})
-  end
+  defguardp whitespace?(c) when c in [?\s, ?\t, ?\r, ?\n, ?\f, ?\v]
+  defguardp hex_digit?(c) when c in ?0..?9 or c in ?a..?f or c in ?A..?F
 
-  # Base case: empty input, parsing complete.
-  defp do_parse_params("", acc), do: {:ok, acc}
+  # RFC 9110 §5.6.2 tchar.
+  defguardp tchar?(c)
+            when c in ?0..?9 or c in ?a..?z or c in ?A..?Z or
+                   c in [?!, ?#, ?$, ?%, ?&, ?', ?*, ?+, ?-, ?., ?^, ?_, ?`, ?|, ?~]
 
-  # Recursive parser: extract key=value pairs.
-  defp do_parse_params(input, acc) do
-    input = skip_separators(input)
+  # auth-params = auth-param *( OWS "," OWS auth-param ), with empty list
+  # elements allowed (RFC 9110 §5.6.1). Returns the params and whether a quoted
+  # value of a bound param held a legacy `\uXXXX` escape.
+  #
+  # Both reference parsers require the comma and a token or quoted-string value
+  # (mppx `parseAuthParams`, refs/mppx/src/Challenge.ts; mpp-rs
+  # `read_challenge_flagged`, refs/mpp-rs/src/protocol/core/headers.rs).
+  defp parse_auth_params(input), do: do_parse_params(input, %{}, false)
 
-    if input == "" do
-      {:ok, acc}
-    else
-      with {:ok, key, rest} <- parse_key(input),
-           :ok <- validate_param_name(key),
-           :ok <- check_duplicate(acc, key),
-           {:ok, value, rest} <- parse_value(rest) do
-        do_parse_params(rest, Map.put(acc, key, value))
-      end
+  defp do_parse_params(input, acc, legacy?) do
+    {input, comma?} = skip_separators(input, false)
+
+    cond do
+      input == "" ->
+        {:ok, acc, legacy?}
+
+      map_size(acc) > 0 and not comma? ->
+        {:error, :invalid_auth_params}
+
+      true ->
+        with {:ok, key, rest} <- parse_key(input),
+             :ok <- check_duplicate(acc, key),
+             {:ok, value, rest, escaped?} <- parse_value(rest) do
+          do_parse_params(rest, Map.put(acc, key, value), legacy? or (escaped? and key in @bound_params))
+        end
     end
   end
 
-  # Skips commas and optional whitespace between params.
-  defp skip_separators(input) do
-    input
-    |> String.trim_leading()
-    |> String.trim_leading(",")
-    |> String.trim_leading()
-  end
+  # Skips whitespace and commas, reporting whether a comma was among them.
+  defp skip_separators(<<c, rest::binary>>, comma?) when whitespace?(c), do: skip_separators(rest, comma?)
+  defp skip_separators("," <> rest, _comma?), do: skip_separators(rest, true)
+  defp skip_separators(input, comma?), do: {input, comma?}
+
+  defp skip_whitespace(<<c, rest::binary>>) when whitespace?(c), do: skip_whitespace(rest)
+  defp skip_whitespace(input), do: input
 
   # Extracts the parameter key up to the "=" sign. Names are lowercased so
-  # `ID=` / `Id=` map to `"id"` and `id=` + `ID=` collide as `:duplicate_param`.
-  #
-  # Authority: RFC 9110 §11.2 ("the name token is matched case-insensitively").
-  # mppx lowercases at parse (`refs/mppx/src/Challenge.ts:388`); mpp-rs keeps the
-  # raw token (`refs/mpp-rs/src/protocol/core/headers.rs:150`) — the RFC breaks
-  # that disagreement toward case-insensitivity (mppx #788).
+  # `ID=` / `Id=` map to `"id"` and `id=` + `ID=` collide as `:duplicate_param`
+  # (RFC 9110 §11.2: the name is matched case-insensitively).
   defp parse_key(input) do
     case String.split(input, "=", parts: 2) do
       [key, rest] ->
         key = key |> String.trim() |> String.downcase(:ascii)
 
-        if key == "" do
-          {:error, :invalid_auth_params}
-        else
-          {:ok, key, rest}
-        end
+        # A parameter name is a token, known or not (mppx `parseAuthParams`,
+        # mpp-rs `read_challenge_flagged`).
+        if token?(key), do: {:ok, key, rest}, else: {:error, :invalid_auth_params}
 
       _ ->
         {:error, :invalid_auth_params}
     end
   end
 
-  # Rejects unknown auth-params for security. If the spec adds new optional
-  # params, add them to @all_params. Prefer strict rejection over silent ignore.
-  defp validate_param_name(key) do
-    if key in @all_params do
-      :ok
-    else
-      {:error, :invalid_auth_params}
-    end
-  end
+  defp token?(<<c, rest::binary>>) when tchar?(c), do: rest == "" or token?(rest)
+  defp token?(_other), do: false
 
   # Checks for duplicate parameters.
   defp check_duplicate(acc, key) do
@@ -431,97 +454,45 @@ defmodule MPP.Headers do
     end
   end
 
-  # Parses a value — either a quoted string or an unquoted token.
-  # An empty unquoted token (`description=` at the end of the header, or
-  # `description=,`) is a valid empty value (mpp-rs #505). mppx's
-  # `readAuthParamValue` returns that trimmed slice, which may be empty.
-  defp parse_value("\"" <> rest), do: parse_quoted_string(rest, [])
-
+  # auth-param = token BWS "=" BWS ( token / quoted-string ). An unquoted value
+  # is 1*tchar; an empty one is rejected, as mppx does (mpp-rs still reads it
+  # as the empty string).
   defp parse_value(input) do
-    {token, rest} = take_token(input)
-    {:ok, token, rest}
-  end
-
-  defguardp hex_digit?(c) when c in ?0..?9 or c in ?a..?f or c in ?A..?F
-
-  # State machine for parsing a quoted string with escape handling.
-  # Rejects CRLF to prevent header injection.
-  defp parse_quoted_string("", _acc), do: {:error, :invalid_auth_params}
-
-  defp parse_quoted_string("\"" <> rest, acc) do
-    value = acc |> Enum.reverse() |> IO.iodata_to_binary()
-    {:ok, value, rest}
-  end
-
-  defp parse_quoted_string("\\\\" <> rest, acc), do: parse_quoted_string(rest, ["\\" | acc])
-  defp parse_quoted_string("\\\"" <> rest, acc), do: parse_quoted_string(rest, ["\"" | acc])
-
-  # `\uXXXX` (lowercase `u`, exactly 4 hex digits) decodes mppx's non-Latin-1
-  # escape (refs/mppx/src/Challenge.ts:333-343, mppx #813). Only a lowercase
-  # `\u` triggers this — an uppercase `\U` or any other letter falls through
-  # to the generic single-char escape below, same as mppx's degrade path.
-  defp parse_quoted_string("\\u" <> <<a, b, c, d, rest::binary>>, acc)
-       when hex_digit?(a) and hex_digit?(b) and hex_digit?(c) and hex_digit?(d) do
-    code_unit = String.to_integer(<<a, b, c, d>>, 16)
-    decode_unicode_escape(code_unit, rest, acc)
-  end
-
-  # Malformed `\u` escape (not followed by exactly 4 hex digits) — rejected
-  # outright rather than silently degrading to a literal "u" followed by
-  # whatever partial hex text came after it.
-  defp parse_quoted_string("\\u" <> _rest, _acc), do: {:error, :invalid_auth_params}
-
-  defp parse_quoted_string("\\" <> <<char, rest::binary>>, acc), do: parse_quoted_string(rest, [<<char>> | acc])
-  defp parse_quoted_string("\r" <> _rest, _acc), do: {:error, :invalid_auth_params}
-  defp parse_quoted_string("\n" <> _rest, _acc), do: {:error, :invalid_auth_params}
-
-  defp parse_quoted_string(<<char, rest::binary>>, acc) do
-    parse_quoted_string(rest, [<<char>> | acc])
-  end
-
-  # A code unit in the high-surrogate range must be immediately followed by
-  # another `\uXXXX` escape decoding to a low surrogate — together they
-  # represent one code point outside the Basic Multilingual Plane, encoded
-  # the same way mppx's UTF-16-based escape splits it (mppx #813). An
-  # unpaired surrogate cannot be represented as valid UTF-8, so it is
-  # rejected rather than silently corrupted or dropped.
-  defp decode_unicode_escape(code_unit, rest, acc) when code_unit in 0xD800..0xDBFF do
-    case rest do
-      <<"\\u", a, b, c, d, rest2::binary>>
-      when hex_digit?(a) and hex_digit?(b) and hex_digit?(c) and hex_digit?(d) ->
-        low = String.to_integer(<<a, b, c, d>>, 16)
-
-        if low in 0xDC00..0xDFFF do
-          codepoint = 0x10000 + (code_unit - 0xD800) * 0x400 + (low - 0xDC00)
-          parse_quoted_string(rest2, [<<codepoint::utf8>> | acc])
-        else
-          {:error, :invalid_auth_params}
-        end
-
-      _ ->
-        {:error, :invalid_auth_params}
+    case skip_whitespace(input) do
+      "\"" <> rest -> parse_quoted_string(rest, [], false)
+      rest -> parse_token(rest, [])
     end
   end
 
-  # A lone low surrogate with no preceding high surrogate is invalid.
-  defp decode_unicode_escape(code_unit, _rest, _acc) when code_unit in 0xDC00..0xDFFF do
-    {:error, :invalid_auth_params}
+  defp parse_token(<<c, rest::binary>>, acc) when tchar?(c), do: parse_token(rest, [c | acc])
+  defp parse_token(_rest, []), do: {:error, :invalid_auth_params}
+  defp parse_token(rest, acc), do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), rest, false}
+
+  # Reads a quoted-string. A quoted-pair stands for the character after the
+  # backslash, so `—` is the text `u2014` (RFC 9110 §5.6.4; mppx
+  # `readQuotedAuthParamValue`, mpp-rs `Tokenizer::value`). The third element
+  # of the result reports a `\u` followed by four hex digits: the escape older
+  # servers wrote for characters outside ASCII. CR and LF are rejected.
+  defp parse_quoted_string("\"" <> rest, acc, escaped?) do
+    {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), rest, escaped?}
   end
 
-  defp decode_unicode_escape(code_unit, rest, acc) do
-    parse_quoted_string(rest, [<<code_unit::utf8>> | acc])
+  defp parse_quoted_string(<<"\\u", a, b, c, d, _::binary>> = input, acc, _escaped?)
+       when hex_digit?(a) and hex_digit?(b) and hex_digit?(c) and hex_digit?(d) do
+    "\\" <> rest = input
+    parse_quoted_string(rest, acc, true)
   end
 
-  # Takes characters until a comma, whitespace, or end of input (unquoted token).
-  defp take_token(input), do: take_token(input, [])
-  defp take_token("", acc), do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), ""}
-  defp take_token("," <> _ = rest, acc), do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
-  defp take_token(" " <> _ = rest, acc), do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
-  defp take_token("\t" <> _ = rest, acc), do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
-
-  defp take_token(<<char, rest::binary>>, acc) do
-    take_token(rest, [<<char>> | acc])
+  defp parse_quoted_string(<<"\\", char, rest::binary>>, acc, escaped?) when char not in [?\r, ?\n] do
+    parse_quoted_string(rest, [char | acc], escaped?)
   end
+
+  defp parse_quoted_string(<<char, rest::binary>>, acc, escaped?) when char not in [?\\, ?\r, ?\n] do
+    parse_quoted_string(rest, [char | acc], escaped?)
+  end
+
+  # Unterminated, a trailing backslash, or a line break.
+  defp parse_quoted_string(_input, _acc, _escaped?), do: {:error, :invalid_auth_params}
 
   # Validates that all required auth-params are present.
   defp validate_required_params(params) do
@@ -534,10 +505,18 @@ defmodule MPP.Headers do
     end
   end
 
+  # A received challenge selects the default by leaving `header` out; a written
+  # `header` may only be `Payment-Authorization` (mppx `deserialize`, mpp-rs
+  # `test_parse_www_authenticate_rejects_unsupported_credential_header`). The
+  # other values reach `Challenge.validate_fields/1`; these two would otherwise
+  # be folded into the default.
+  defp validate_explicit_header(%{"header" => header}) do
+    if String.downcase(header) in ["", "authorization"], do: {:error, :invalid_header}, else: :ok
+  end
+
+  defp validate_explicit_header(_params), do: :ok
+
   # Builds a Challenge struct from parsed auth-params.
-  # `header="Authorization"` (the implicit default) is stored as nil so it is
-  # never advertised. Any other value is kept for `Challenge.validate_fields/1`,
-  # which accepts only `Payment-Authorization` and rejects the rest.
   defp params_to_challenge(params) do
     %Challenge{
       id: params["id"],

@@ -267,17 +267,17 @@ defmodule MPP.ChallengeTest do
       assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: "Stripe"})
     end
 
-    # mppx `Challenge.ts:380` and mpp-rs #428 (`is_valid_method_name`) agree on
-    # `[a-z][a-z0-9:_-]*`: digits, hyphens, underscores and colons are valid after
-    # the leading lowercase letter.
-    test "accepts canonical method names with digits, dashes, underscores and colons" do
-      for method <- ["tempo", "x402", "tempo-v2", "mock_b", "a:b", "a1:b_2-c"] do
+    # Core draft `payment-method-id = 1*LOWERALPHA`; mppx `methodPattern = /^[a-z]+$/`
+    # (refs/mppx/src/Challenge.ts), mpp-rs `is_valid_method_id`
+    # (refs/mpp-rs/src/protocol/core/types.rs).
+    test "accepts method names of lowercase letters" do
+      for method <- ["tempo", "a", "nearintents"] do
         assert :ok = Challenge.validate_fields(%{valid_challenge() | method: method}), method
       end
     end
 
-    test "rejects method names that do not start with a lowercase letter" do
-      for method <- ["123", "-tempo", ":tempo", "_tempo", "*", "tempo!", "Tempo"] do
+    test "rejects method names holding anything but lowercase letters" do
+      for method <- ["", "123", "-tempo", ":tempo", "_tempo", "*", "tempo!", "Tempo", "x402", "tempo-v2", "mock_b", "a:b"] do
         assert {:error, :invalid_method} = Challenge.validate_fields(%{valid_challenge() | method: method}), method
       end
     end

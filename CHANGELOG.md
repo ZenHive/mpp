@@ -6,6 +6,26 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Challenge headers follow the core grammar** (mppx #1341 / #1349, mpp-rs #737 / #752 / #755). `MPP.Headers.parse_challenge/1` requires a comma between auth-params and a token or quoted-string value; an unquoted value that is empty or holds a character outside the RFC 9110 token set is `:invalid_auth_params`. Repeated commas and whitespace around `=` are accepted.
+- **Method identifiers are lowercase letters a-z only** (core draft `1*LOWERALPHA`). `MPP.Challenge.valid_method_name?/1`, challenge and credential parsing and `MPP.Plug.init/1` reject names with digits, `:`, `_` or `-`. All built-in methods already conform; a custom `MPP.Method` with such a name must be renamed.
+- **Quoted-pairs are read literally.** A backslash-u sequence in a challenge header is the text after the backslash, as both reference SDKs read it. `format_challenge/1` no longer writes that escape into a parameter the challenge id binds: a realm or other bound value outside HTAB and printable ASCII raises, and `MPP.Plug.init/1` rejects such a realm at boot. `description` keeps the escape; receivers show the escape text.
+- **The client does not pay a legacy-escaped challenge.** A parsed challenge whose bound parameters carried a backslash-u escape is flagged (`legacy_unicode_escape`). `MPP.Client.SelectionPolicy` never selects it and `MPP.Client.MultiProvider.pay/3` refuses it, both with `:legacy_unicode_escape` (the selection error applies when the offers the preferences leave are all of that kind); `MPP.Client.Req` reports it as an error telling the operator to upgrade the server.
+- `format_challenge/1` raises for a method that is not lowercase letters a-z. `MPP.Plug.init/1` also rejects a `:digest` or string `:opaque` outside HTAB and printable ASCII. `MPP.Mcp.init/1` and the JSON-RPC and WebSocket transports carry challenges as JSON and accept any realm.
+- A challenge flagged this way is not payable (`MPP.Challenge.payable?/1`), is refused by the built-in Stripe and Tempo providers when called directly, and is not passed on by `MPP.Mcp.payment_required_error/1` or the WebSocket challenge frame.
+- **Unknown auth-params are ignored**, as the core draft requires; a repeated parameter is still `:duplicate_param`.
+- An explicit `header="Authorization"` or `header=""` on a received challenge, or echoed in a credential, is `:invalid_header`; only an absent `header` selects the default. A parameter name that is not a token is `:invalid_auth_params`.
+- `MPP.Plug.init/1` and the transport `init/1` functions raise when `:realm` or `:digest` is not a string or `:opaque` is neither a string nor a map. `MPP.Client.PaymentProvider.pay/3` and the x402 exact provider refuse a legacy-escaped challenge.
+- A bare scheme followed by a comma (`Basic, Digest ...`) and a scheme name with other token characters now end the Payment offer in a multi-scheme header.
+- A challenge parameter written with whitespace before its `=` no longer splits the offer in a multi-challenge header.
+- `Accept-Payment` method tokens may start with a digit, `:`, `_` or `-`, so one such entry no longer discards the whole header.
+- `MPP.Receipt.decode/1` rejects a non-string `method` or `reference` with `:invalid_field_type`.
+
+---
+
 ## [0.24.0] — 2026-11-25
 
 ### Added

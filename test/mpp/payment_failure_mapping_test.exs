@@ -98,7 +98,14 @@ defmodule MPP.PaymentFailureMappingTest do
 
     for {field, value, reason} <- fields do
       challenge = Map.put(base, field, value)
-      params = base |> Map.from_struct() |> Map.put(field, value) |> Enum.reject(fn {_key, v} -> is_nil(v) end)
+
+      params =
+        base
+        |> Map.from_struct()
+        |> Map.delete(:legacy_unicode_escape)
+        |> Map.put(field, value)
+        |> Enum.reject(fn {_key, v} -> is_nil(v) end)
+
       header = "Payment " <> Enum.map_join(params, ", ", fn {key, v} -> ~s(#{key}="#{v}") end)
       assert {:error, ^reason} = Headers.parse_challenge(header)
 
@@ -122,7 +129,8 @@ defmodule MPP.PaymentFailureMappingTest do
         "secret"
       )
 
-    header = Headers.format_challenge(challenge) <> ~s(, header="Authorization")
+    header = Headers.format_challenge(challenge)
+    assert {:error, :invalid_header} = Headers.parse_challenge(header <> ~s(, header="Authorization"))
     assert {:ok, parsed} = Headers.parse_challenge(header)
     assert parsed.intent == "charge_now"
     assert parsed.opaque == standard_opaque

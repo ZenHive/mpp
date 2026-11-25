@@ -126,10 +126,14 @@ defmodule MPP.Client.PaymentProvider do
   @doc """
   Execute payment using a provider module for the given challenge.
 
-  Convenience function that delegates to `module.pay/2`.
+  Delegates to `module.pay/2`. A challenge parsed with a legacy backslash-u
+  escape in a bound parameter is refused with `{:error, :legacy_unicode_escape}`
+  before the provider runs.
   """
   @spec pay(module(), Challenge.t(), map()) ::
           {:ok, MPP.Credential.t()} | {:error, term()}
+  def pay(_module, %Challenge{legacy_unicode_escape: true}, _config), do: {:error, :legacy_unicode_escape}
+
   def pay(module, challenge, config) do
     module.pay(challenge, config)
   end

@@ -439,6 +439,28 @@ defmodule MPP.McpTest do
     end
   end
 
+  # A JSON transport carries any string (mppx `Mppx.create` exempts MCP from the
+  # header realm check); a challenge parsed with a legacy escape is not passed on.
+  describe "values a header cannot carry" do
+    test "init accepts a realm outside printable ASCII and offers it unchanged" do
+      config = server_config(realm: "café")
+      assert config.realm == "café"
+    end
+
+    test "payment_required_error/1 refuses a legacy-escaped challenge" do
+      legacy = %{
+        Challenge.create([realm: @realm, method: "mock", intent: "charge", request: "e30"], @secret_key)
+        | legacy_unicode_escape: true
+      }
+
+      assert_raise ArgumentError, ~r/legacy unicode escape/, fn -> Mcp.payment_required_error(legacy) end
+
+      assert_raise ArgumentError, ~r/legacy unicode escape/, fn ->
+        MPP.Transports.WebSocket.Frame.challenge_to_wire(legacy)
+      end
+    end
+  end
+
   describe "payment_required_error/1" do
     test "builds error from single challenge" do
       challenge = sample_challenge()

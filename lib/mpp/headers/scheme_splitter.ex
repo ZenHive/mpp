@@ -79,24 +79,28 @@ defmodule MPP.Headers.SchemeSplitter do
   defp find_boundaries(<<_, rest::binary>>, pos, false, _after_sep, acc),
     do: find_boundaries(rest, pos + 1, false, false, acc)
 
-  # Extracts a scheme token (RFC 9110: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ))
-  # followed by at least one whitespace character, or by the end of the header
-  # (a bare `auth-scheme` with no params is a valid challenge, so a trailing
-  # `, Basic` ends the previous segment instead of corrupting its auth-params;
-  # mppx's auth-param parser stops at the same token). Returns
-  # {:ok, token, total_len} where total_len includes the token + the first
-  # whitespace char when one follows.
+  # Extracts a scheme token (RFC 9110 `auth-scheme = token`) that is followed by
+  # whitespace, by a comma, or by the end of the header. A bare `auth-scheme`
+  # with no params is a valid challenge, so `, Basic` and `, Basic, Digest ...`
+  # end the previous segment instead of corrupting its auth-params; mppx's
+  # auth-param parser stops at the same token. Returns {:ok, token, total_len}
+  # where total_len includes the token + the first whitespace char when one follows.
   defp extract_scheme_token(bin), do: extract_scheme_token(bin, 0)
 
   defp extract_scheme_token(bin, len) when len < byte_size(bin) do
     c = :binary.at(bin, len)
 
     cond do
-      c in ?A..?Z or c in ?a..?z or c in ?0..?9 or c in [?+, ?-, ?.] ->
+      tchar?(c) ->
         extract_scheme_token(bin, len + 1)
 
+      # `realm = "x"` is an auth-param with whitespace before the equals sign
+      # (BWS), not a scheme (mppx `parseAuthParams`, mpp-rs `Tokenizer::next`).
       len > 0 and c in [?\s, ?\t] ->
-        {:ok, binary_part(bin, 0, len), len + 1}
+        if equals_follows?(bin, len), do: :not_scheme, else: {:ok, binary_part(bin, 0, len), len + 1}
+
+      len > 0 and c == ?, ->
+        {:ok, binary_part(bin, 0, len), len}
 
       true ->
         :not_scheme
@@ -105,6 +109,17 @@ defmodule MPP.Headers.SchemeSplitter do
 
   defp extract_scheme_token(bin, len) when len > 0 and len == byte_size(bin), do: {:ok, bin, len}
   defp extract_scheme_token(_bin, _len), do: :not_scheme
+
+  defp tchar?(c), do: c in ?A..?Z or c in ?a..?z or c in ?0..?9 or c in ~c"!#$%&'*+-.^_`|~"
+
+  defp equals_follows?(bin, pos) when pos < byte_size(bin) do
+    case :binary.at(bin, pos) do
+      c when c in [?\s, ?\t] -> equals_follows?(bin, pos + 1)
+      c -> c == ?=
+    end
+  end
+
+  defp equals_follows?(_bin, _pos), do: false
 
   # Checks if the scheme token at `pos` is exactly "Payment" (case-insensitive).
   # Requires that the character after "Payment" is whitespace, preventing prefix

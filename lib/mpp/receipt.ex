@@ -123,7 +123,7 @@ defmodule MPP.Receipt do
 
   # Deserializes a string-keyed map into a receipt struct.
   defp from_map(%{"method" => method, "reference" => reference, "timestamp" => timestamp} = map)
-       when is_binary(timestamp) do
+       when is_binary(timestamp) and is_binary(method) and is_binary(reference) do
     with {:ok, external_id} <- optional_string(map, "externalId"),
          {:ok, subscription_id} <- optional_string(map, "subscriptionId"),
          {:ok, funding_currency} <- optional_string(map, "fundingCurrency") do
@@ -140,6 +140,11 @@ defmodule MPP.Receipt do
        }}
     end
   end
+
+  # `method` and `reference` are strings (mppx `z.string()`,
+  # refs/mppx/src/Receipt.ts; mpp-rs `Receipt`, refs/mpp-rs/src/protocol/core/receipt.rs).
+  defp from_map(%{"method" => _, "reference" => _, "timestamp" => timestamp}) when is_binary(timestamp),
+    do: {:error, :invalid_field_type}
 
   defp from_map(_), do: {:error, :missing_required_fields}
 

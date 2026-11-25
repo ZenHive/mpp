@@ -82,7 +82,7 @@ defmodule MPP.Client.Transport do
       type: :tagged_tuple,
       description: "`{:ok, challenge}` on success, `{:error, :no_supported_challenge}` if none matches"
     },
-    errors: [:no_supported_challenge]
+    errors: [:no_supported_challenge, :legacy_unicode_escape]
   )
 
   api(:approve, "Invoke an optional on_payment_required hook after challenge selection.",
@@ -109,7 +109,7 @@ defmodule MPP.Client.Transport do
   provider, including the empty-list case.
   """
   @spec select_challenge([Challenge.t()], MultiProvider.t(), keyword()) ::
-          {:ok, Challenge.t()} | {:error, :no_supported_challenge}
+          {:ok, Challenge.t()} | {:error, :no_supported_challenge | :legacy_unicode_escape}
   def select_challenge(challenges, %MultiProvider{} = multi, opts \\ []) when is_list(challenges) do
     SelectionPolicy.select(challenges, multi, policy_from_opts(opts))
   end

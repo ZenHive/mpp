@@ -316,6 +316,9 @@ defmodule MPP.Client.Req do
 
   defp error_message(:no_supported_challenge), do: "no configured provider supports the offered payment challenges"
 
+  defp error_message(:legacy_unicode_escape),
+    do: "refusing to pay: the server escaped a bound challenge parameter as \\uXXXX; upgrade the server"
+
   defp error_message(:cross_origin_redirect), do: "refusing to send payment credential across a cross-origin redirect"
 
   defp error_message(:redirected_request),

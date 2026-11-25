@@ -83,6 +83,8 @@ defmodule MPP.Transports.WebSocket.Frame do
   @doc "Serialize a challenge with `request` left as its raw base64url string."
   @spec challenge_to_wire(Challenge.t()) :: map()
   def challenge_to_wire(%Challenge{} = challenge) do
+    Challenge.refuse_legacy!(challenge)
+
     %{
       "id" => challenge.id,
       "realm" => challenge.realm,

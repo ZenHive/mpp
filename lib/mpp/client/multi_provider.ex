@@ -120,7 +120,7 @@ defmodule MPP.Client.MultiProvider do
       ]
     ],
     returns: %{type: :tuple, description: "{:ok, Credential.t()} or {:error, term()}"},
-    errors: [:unsupported_payment_method]
+    errors: [:unsupported_payment_method, :legacy_unicode_escape]
   )
 
   @doc """
@@ -133,10 +133,20 @@ defmodule MPP.Client.MultiProvider do
   `MPP.Client.Providers.Tempo`). Context keys override config keys of the
   same name.
 
-  Returns `{:error, :unsupported_payment_method}` if no provider matches.
+  Returns `{:error, :unsupported_payment_method}` if no provider matches, and
+  `{:error, :legacy_unicode_escape}` for a challenge whose header carried a
+  legacy backslash-u escape in a bound parameter.
   """
   @spec pay(t(), MPP.Challenge.t(), map()) :: {:ok, MPP.Credential.t()} | {:error, term()}
-  def pay(%__MODULE__{providers: providers}, challenge, context \\ %{}) when is_map(context) do
+  def pay(multi, challenge, context \\ %{})
+
+  # The values read from the header are not the ones the server bound into the
+  # challenge id (mppx `assertNotLegacyUnicodeEscaped`, mpp-rs `ensure_payable`).
+  def pay(%__MODULE__{}, %{legacy_unicode_escape: true}, context) when is_map(context) do
+    {:error, :legacy_unicode_escape}
+  end
+
+  def pay(%__MODULE__{providers: providers}, challenge, context) when is_map(context) do
     providers
     |> Enum.find(fn {mod, cfg} -> provider_supports_challenge?(mod, cfg, challenge) end)
     |> case do

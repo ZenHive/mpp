@@ -136,8 +136,8 @@ defmodule MPP.PlugTest do
     @moduledoc false
     use MPP.Method
 
-    # Deliberately outside the method-identifier grammar `[a-z][a-z0-9:_-]*`
-    # (uppercase first letter) to exercise init-time rejection.
+    # Deliberately outside the method-identifier grammar `1*LOWERALPHA` to
+    # exercise init-time rejection.
     @impl MPP.Method
     def method_name, do: "Mock_bad"
 
@@ -675,10 +675,55 @@ defmodule MPP.PlugTest do
       end
     end
 
+    test "raises on a digest or opaque a challenge header cannot carry" do
+      for {key, value} <- [digest: "sha-256=café", opaque: "café"] do
+        assert_raise ArgumentError, ~r/:#{key} must be printable ASCII/, fn ->
+          PaymentPlug.init(
+            [secret_key: @secret_key, realm: "api", method: MockMethod, amount: "1000", currency: "usd"] ++ [{key, value}]
+          )
+        end
+
+        # `digest` and a string `opaque` have ASCII encodings on every transport.
+        assert_raise ArgumentError, ~r/:#{key} must be printable ASCII/, fn ->
+          MPP.Mcp.init(
+            [secret_key: @secret_key, realm: "api", method: MockMethod, amount: "1000", currency: "usd"] ++ [{key, value}]
+          )
+        end
+      end
+
+      for {key, message} <- [realm: "a string", digest: "a string", opaque: "a string or a map"] do
+        opts =
+          Keyword.put(
+            [secret_key: @secret_key, realm: "api", method: MockMethod, amount: "1000", currency: "usd"],
+            key,
+            42
+          )
+
+        assert_raise ArgumentError, ~r/:#{key} must be #{message}/, fn -> PaymentPlug.init(opts) end
+      end
+    end
+
+    test "raises on a realm a challenge header cannot carry" do
+      for realm <- ["café.example", "api\u2014test", "bell\a"] do
+        assert_raise ArgumentError, ~r/:realm must be printable ASCII/, fn ->
+          PaymentPlug.init(secret_key: @secret_key, realm: realm, method: MockMethod, amount: "1000", currency: "usd")
+        end
+      end
+
+      assert %{realm: "My API\t(v2)"} =
+               PaymentPlug.init(
+                 secret_key: @secret_key,
+                 realm: "My API\t(v2)",
+                 method: MockMethod,
+                 amount: "1000",
+                 currency: "usd"
+               )
+    end
+
     test "raises on a method name outside the method-identifier grammar" do
       # Challenge parsing rejects such names as :invalid_method, so the
       # misconfiguration must surface at boot, not as client parse failures.
-      assert_raise ArgumentError, ~r/\[a-z\]\[a-z0-9:_-\]\*.*Mock_bad/s, fn ->
+      assert_raise ArgumentError, ~r/1\*LOWERALPHA.*Mock_bad/s, fn ->
         PaymentPlug.init(
           secret_key: @secret_key,
           realm: "api.test.com",

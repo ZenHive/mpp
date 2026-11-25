@@ -191,6 +191,17 @@ defmodule MPP.ReceiptTest do
       assert {:error, :missing_required_fields} = Receipt.decode(encoded)
     end
 
+    # mppx `z.string()` (refs/mppx/src/Receipt.ts); mpp-rs `Receipt` deserializes
+    # both as strings (refs/mpp-rs/src/protocol/core/receipt.rs).
+    test "returns error for a non-string method or reference" do
+      base = %{"method" => "tempo", "reference" => "0xabc", "timestamp" => "2024-01-01T00:00:00Z", "status" => "success"}
+
+      for {key, value} <- [{"method", 1}, {"method", nil}, {"method", ["tempo"]}, {"reference", 7}, {"reference", %{}}] do
+        encoded = base |> Map.put(key, value) |> Jason.encode!() |> Base.url_encode64(padding: false)
+        assert {:error, :invalid_field_type} = Receipt.decode(encoded), "#{key}=#{inspect(value)}"
+      end
+    end
+
     test "returns error for a non-string subscriptionId" do
       json =
         Jason.encode!(%{

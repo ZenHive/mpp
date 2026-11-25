@@ -32,6 +32,8 @@ defmodule MPP.Client.Providers.X402Exact do
   @doc "Sign an x402 exact PAYMENT-SIGNATURE payload."
   @impl PaymentProvider
   @spec pay(Challenge.t(), map()) :: {:ok, Credential.t()} | {:error, term()}
+  def pay(%Challenge{legacy_unicode_escape: true}, _config), do: {:error, :legacy_unicode_escape}
+
   def pay(%Challenge{} = challenge, config) when is_map(config) do
     with {:ok, payload} <- Exact.sign(challenge, config) do
       {:ok, %Credential{challenge: challenge, payload: payload, source: nil}}

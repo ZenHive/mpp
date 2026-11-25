@@ -20,6 +20,16 @@ defmodule MPP.Client.Providers.StripeTest do
   end
 
   describe "pay/2" do
+    test "refuses a legacy-escaped challenge before any request" do
+      Req.Test.stub(__MODULE__, fn _conn -> flunk("no request expected") end)
+      legacy = %{challenge() | legacy_unicode_escape: true}
+
+      refute Challenge.payable?(legacy)
+      assert {:error, :legacy_unicode_escape} = Stripe.pay(legacy, provider_config())
+      assert {:error, :legacy_unicode_escape} = MPP.Client.PaymentProvider.pay(Stripe, legacy, provider_config())
+      assert {:error, :legacy_unicode_escape} = MPP.Client.Providers.X402Exact.pay(legacy, %{})
+    end
+
     test "creates a test-mode SPT and echoes the challenge external ID" do
       Req.Test.stub(__MODULE__, fn conn ->
         assert conn.request_path == "/v1/test_helpers/shared_payment/granted_tokens"

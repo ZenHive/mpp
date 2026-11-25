@@ -115,6 +115,14 @@ defmodule MPP.Client.MultiProviderTest do
       assert credential.payload == %{"provider" => "first"}
     end
 
+    test "refuses a legacy-escaped challenge before any provider runs" do
+      multi = MultiProvider.new([{AlwaysProvider, %{provider_id: "first"}}])
+      legacy = %{challenge() | legacy_unicode_escape: true}
+
+      assert {:error, :legacy_unicode_escape} = MultiProvider.pay(multi, legacy)
+      assert {:error, :legacy_unicode_escape} = MultiProvider.pay(multi, legacy, %{request_url: nil})
+    end
+
     test "returns unsupported_payment_method when no provider matches" do
       multi =
         MultiProvider.new([

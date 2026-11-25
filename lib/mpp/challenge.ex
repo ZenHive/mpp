@@ -53,11 +53,26 @@ defmodule MPP.Challenge do
           digest: String.t() | nil,
           expires: String.t() | nil,
           header: String.t() | nil,
-          opaque: String.t() | nil
+          opaque: String.t() | nil,
+          legacy_unicode_escape: boolean()
         }
 
   @enforce_keys [:realm, :method, :intent, :request]
-  defstruct [:id, :realm, :method, :intent, :request, :description, :digest, :expires, :header, :opaque]
+  defstruct [
+    :id,
+    :realm,
+    :method,
+    :intent,
+    :request,
+    :description,
+    :digest,
+    :expires,
+    :header,
+    :opaque,
+    # Set by `MPP.Headers.parse_challenge/1` when a quoted value the challenge
+    # binds or echoes held a legacy backslash-u escape. Never serialized.
+    legacy_unicode_escape: false
+  ]
 
   @hmac_separator "|"
   @authorization_header "Authorization"
@@ -147,7 +162,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z][a-z0-9:_-]*`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent, empty, Authorization or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z]+`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent, empty, Authorization or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -195,27 +210,23 @@ defmodule MPP.Challenge do
   defp validate_id(id) when is_binary(id) and id != "", do: :ok
   defp validate_id(_id), do: {:error, :empty_id}
 
-  # method MUST match the canonical method-identifier grammar shared by both
-  # reference SDKs: `[a-z][a-z0-9:_-]*` (mppx `Challenge.deserialize`,
-  # refs/mppx/src/Challenge.ts:380; mpp-rs `is_valid_method_name`,
-  # refs/mpp-rs/src/protocol/core/headers.rs, aligned in mpp-rs #428). The
-  # spec ABNF (`payment-method-id = 1*LOWERALPHA`,
-  # refs/mpp-specs/specs/core/draft-httpauth-payment-00.md:657) is stricter, but
-  # two independent SDKs agree on the looser grammar and interop with their
-  # challenges is the point — follow the SDKs (same call as the HMAC header slot).
+  # method MUST match the core draft's `payment-method-id = 1*LOWERALPHA`
+  # (refs/mpp-specs/specs/core/draft-httpauth-payment-00.md). Both reference
+  # SDKs apply it: mppx `methodPattern = /^[a-z]+$/` (refs/mppx/src/Challenge.ts),
+  # mpp-rs `is_valid_method_id` (refs/mpp-rs/src/protocol/core/types.rs).
   defp validate_method(method) when is_binary(method) do
     if valid_method_name?(method), do: :ok, else: {:error, :invalid_method}
   end
 
   defp validate_method(_method), do: {:error, :invalid_method}
 
-  # Lowercase ASCII letter first, then lowercase letters, digits, `:`, `_`, `-`.
+  # Lowercase ASCII letters only.
   # Shared with `MPP.Plug.init/1` so a non-conformant server config fails at boot
   # instead of emitting challenges no reference client (including this library's
   # own parse paths) can parse.
   api(
     :valid_method_name?,
-    "Check whether a string is a valid MPP payment-method name per the reference-SDK grammar `[a-z][a-z0-9:_-]*` (lowercase ASCII letter first; then lowercase letters, digits, colon, underscore, hyphen).",
+    "Check whether a string is a valid MPP payment-method name: one or more lowercase ASCII letters (core draft `payment-method-id = 1*LOWERALPHA`).",
     params: [
       method: [kind: :value, description: "Candidate payment-method name"]
     ],
@@ -223,13 +234,31 @@ defmodule MPP.Challenge do
   )
 
   @spec valid_method_name?(String.t()) :: boolean()
-  def valid_method_name?(<<first, rest::binary>>) when first in ?a..?z do
-    rest |> :binary.bin_to_list() |> Enum.all?(&method_name_char?/1)
+  def valid_method_name?(method) when is_binary(method) and method != "" do
+    method |> :binary.bin_to_list() |> Enum.all?(&(&1 in ?a..?z))
   end
 
   def valid_method_name?(method) when is_binary(method), do: false
 
-  defp method_name_char?(char), do: char in ?a..?z or char in ?0..?9 or char in [?:, ?_, ?-]
+  api(
+    :header_text?,
+    "Return whether a value can be written into a challenge header unchanged: only HTAB and printable ASCII (0x20-0x7E).",
+    params: [value: [kind: :value, description: "Candidate auth-param value"]],
+    returns: %{type: :boolean, description: "true when every byte is HTAB or printable ASCII"}
+  )
+
+  @doc """
+  Return whether a value can be written into a challenge header unchanged.
+
+  A quoted-pair escapes a single character, so only HTAB and printable ASCII
+  survive a round trip through a quoted-string (mpp-rs `escape_quoted_value`,
+  refs/mpp-rs/src/protocol/core/auth_params.rs). Every auth-param the challenge
+  id binds or the credential echoes must satisfy this; `description` is exempt.
+  """
+  @spec header_text?(String.t()) :: boolean()
+  def header_text?(value) when is_binary(value) do
+    value |> :binary.bin_to_list() |> Enum.all?(&(&1 == ?\t or &1 in 0x20..0x7E))
+  end
 
   # request MUST base64url-decode to a valid JSON object (mpp-rs validates JSON via
   # `serde_json::from_slice`; mppx via `PaymentRequest.deserialize` + `z.record`,
@@ -360,7 +389,8 @@ defmodule MPP.Challenge do
     ],
     returns: %{
       type: :boolean,
-      description: "false when `header` is present and is not `Payment-Authorization`, compared case-insensitively"
+      description:
+        "false when `header` is present and is not `Payment-Authorization` (compared case-insensitively), or when the challenge was parsed with a legacy backslash-u escape in a bound parameter"
     }
   )
 
@@ -370,14 +400,45 @@ defmodule MPP.Challenge do
   The draft allows only `Payment-Authorization` as a non-default `header` value,
   compared case-insensitively. Any other advertised value is an unrecognized
   challenge (draft-01 § Credentials) and must not be paid.
+
+  A challenge parsed from a header that carried a legacy backslash-u escape in a
+  bound parameter is not payable either: its values are not the ones the server
+  bound into the id.
   """
   @spec payable?(t()) :: boolean()
+  def payable?(%__MODULE__{legacy_unicode_escape: true}), do: false
+
   def payable?(%__MODULE__{header: header}) do
     case advertised_header(header) do
       nil -> true
       name -> payment_authorization_header?(name)
     end
   end
+
+  api(
+    :refuse_legacy!,
+    "Return the challenge unchanged, or raise when it was parsed with a legacy backslash-u escape in a bound parameter. Called wherever a challenge is written back out.",
+    params: [challenge: [kind: :value, description: "Challenge struct"]],
+    returns: %{type: :struct, description: "The same `MPP.Challenge`"},
+    errors: [:argument_error]
+  )
+
+  @doc """
+  Return the challenge unchanged, or raise `ArgumentError` when it was parsed
+  with a legacy backslash-u escape in a bound parameter.
+
+  Sending such a challenge on would hand its receiver values the issuer never
+  bound, without the marker that says so (mpp-rs `format_www_authenticate`
+  refuses it, refs/mpp-rs/src/protocol/core/headers.rs).
+  """
+  @spec refuse_legacy!(t()) :: t()
+  def refuse_legacy!(%__MODULE__{legacy_unicode_escape: true}) do
+    raise ArgumentError,
+          "MPP challenge was parsed from a header with a legacy unicode escape in a bound parameter; " <>
+            "its values are not the ones its issuer bound"
+  end
+
+  def refuse_legacy!(%__MODULE__{} = challenge), do: challenge
 
   api(
     :bound_header,

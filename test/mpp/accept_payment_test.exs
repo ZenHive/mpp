@@ -18,6 +18,12 @@ defmodule MPP.AcceptPaymentTest do
                AcceptPayment.parse("tempo/charge, stripe/charge;q=0.5")
     end
 
+    # mppx `assertToken` and mpp-rs `validate_token` take a leading digit here.
+    test "keeps an entry whose method no challenge can carry" do
+      assert [{"2nd", "charge", 1.0}, {"tempo", "charge", 1.0}] = AcceptPayment.parse("2nd/charge, tempo/charge")
+      assert [{"_x:y-1", "charge", 1.0}] = AcceptPayment.parse("_x:y-1/charge")
+    end
+
     test "parses wildcards and q=0" do
       assert AcceptPayment.parse("tempo/*, */session;q=0") == [
                {"tempo", "*", 1.0},
@@ -77,11 +83,13 @@ defmodule MPP.AcceptPaymentTest do
       assert [{"tempo", "charge", 0.5}] = AcceptPayment.parse("tempo/charge;foo=bar;q=0.5")
     end
 
-    test "accepts method tokens that follow the challenge method grammar" do
+    # refs/mpp-rs/src/protocol/core/accept_payment.rs `validate_token`: the entry
+    # parses, and matches no challenge because the challenge grammar is a-z only.
+    test "accepts method tokens wider than the challenge method grammar" do
       assert [{"eip155:8453_usdc", "charge", 0.5}] =
                AcceptPayment.parse("eip155:8453_usdc/charge;q=0.5")
 
-      assert Challenge.valid_method_name?("eip155:8453_usdc")
+      refute Challenge.valid_method_name?("eip155:8453_usdc")
       assert AcceptPayment.parse("tempo/char:ge") == []
       assert AcceptPayment.parse("tempo/char_ge") == []
     end

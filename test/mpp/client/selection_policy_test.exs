@@ -56,6 +56,38 @@ defmodule MPP.Client.SelectionPolicyTest do
       assert challenge.method == "tempo"
     end
 
+    # mppx `AcceptPayment.selectChallenge` (refs/mppx/src/internal/AcceptPayment.ts);
+    # mpp-rs `ensure_payable` (refs/mpp-rs/src/protocol/core/challenge.rs).
+    test "never selects a legacy-escaped challenge and names it when nothing else is payable" do
+      legacy = %{make_challenge("tempo") | legacy_unicode_escape: true}
+      multi = MultiProvider.new([{TempoProvider, %{}}, {StripeProvider, %{}}])
+
+      assert {:ok, %Challenge{method: "stripe"}} = SelectionPolicy.select([legacy, make_challenge("stripe")], multi)
+      assert {:error, :legacy_unicode_escape} = SelectionPolicy.select([legacy], multi)
+      assert {:error, :legacy_unicode_escape} = Transport.select_challenge([legacy], multi)
+
+      # A custom policy cannot bring it back, and an unsupported legacy offer is not the reason.
+      assert {:error, :legacy_unicode_escape} = SelectionPolicy.select([legacy], multi, fn _ -> [legacy] end)
+
+      assert {:error, :no_supported_challenge} =
+               SelectionPolicy.select([legacy], MultiProvider.new([{StripeProvider, %{}}]))
+    end
+
+    test "the legacy verdict is about the offers the preferences leave" do
+      legacy = %{make_challenge("tempo") | legacy_unicode_escape: true}
+      multi = MultiProvider.new([{TempoProvider, %{}}, {StripeProvider, %{}}])
+
+      assert {:error, :legacy_unicode_escape} =
+               SelectionPolicy.select(
+                 [legacy, make_challenge("stripe")],
+                 multi,
+                 {:accept_payment, [{"tempo", "charge", 1.0}]}
+               )
+
+      assert {:error, :no_supported_challenge} =
+               SelectionPolicy.select([legacy], multi, {:accept_payment, [{"tempo", "charge", 0.0}]})
+    end
+
     test "skips unsupported offers and keeps server order" do
       challenges = [make_challenge("tempo"), make_challenge("stripe")]
       multi = MultiProvider.new([{StripeProvider, %{}}])

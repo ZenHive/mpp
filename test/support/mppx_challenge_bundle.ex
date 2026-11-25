@@ -34,7 +34,8 @@ defmodule MPP.Test.MppxChallengeBundle do
   @doc """
   Loads the mppx Challenge bundle into a QuickBEAM runtime.
 
-  After this call, `mppxSerialize(challenge)` and `mppxDeserialize(header)`
+  After this call, `mppxSerialize(challenge)`, `mppxDeserialize(header)` and the
+  non-throwing `mppxRead(header)` / `mppxWrite(challenge)`
   are available as flat globals in the runtime (`QuickBEAM.call/3` resolves a
   bare global name only, not a dotted `MppxChallenge.serialize` path).
 
@@ -53,7 +54,15 @@ defmodule MPP.Test.MppxChallengeBundle do
         "globalThis.mppxSerialize = (c) => MppxChallenge.serialize(c); " <>
           "globalThis.mppxDeserialize = (h) => MppxChallenge.deserialize(h); " <>
           "globalThis.mppxFrom = (p) => MppxChallenge.from(p); " <>
-          "globalThis.mppxCredentialHeader = (c) => MppxChallenge.credentialHeader(c); 1"
+          "globalThis.mppxCredentialHeader = (c) => MppxChallenge.credentialHeader(c); " <>
+          "globalThis.mppxRead = (h) => { try { const c = MppxChallenge.deserialize(h); " <>
+          "return { ok: true, challenge: c, legacy: MppxChallenge.isLegacyUnicodeEscaped(c) } } " <>
+          "catch (e) { return { ok: false, error: String(e.message) } } }; " <>
+          "globalThis.mppxWrite = (c) => { try { return { ok: true, header: MppxChallenge.serialize(c) } } " <>
+          "catch (e) { return { ok: false, error: String(e.message) } } }; " <>
+          "globalThis.mppxReadList = (h) => MppxChallenge.deserializeList(h).map((c) => c.id); " <>
+          "globalThis.mppxReceiptRead = (r) => { try { MppxChallenge.receiptDeserialize(r); return { ok: true } } " <>
+          "catch (e) { return { ok: false } } }; 1"
       )
 
     :ok
@@ -63,6 +72,7 @@ defmodule MPP.Test.MppxChallengeBundle do
     not File.exists?(@cache_path) or
       mtime(@entry_point) > mtime(@cache_path) or
       mtime(@mppx_source) > mtime(@cache_path) or
+      mtime("refs/mppx/src/Receipt.ts") > mtime(@cache_path) or
       mtime("node_modules/zod/package.json") > mtime(@cache_path)
   end
 

@@ -237,7 +237,7 @@ defmodule MPP.Mcp do
   )
 
   @spec init(keyword()) :: Config.t()
-  def init(opts) when is_list(opts), do: MPP.Plug.init(opts)
+  def init(opts) when is_list(opts), do: MPP.Plug.init_config(opts)
 
   api(
     :call,
@@ -551,6 +551,8 @@ defmodule MPP.Mcp do
   # Decodes `request` from base64url to a native JSON object per the MCP transport spec:
   # "Servers MUST NOT base64url-encode the request when using JSON-RPC transport."
   defp challenge_to_map(%Challenge{} = challenge) do
+    Challenge.refuse_legacy!(challenge)
+
     %{
       "id" => challenge.id,
       "realm" => challenge.realm,
