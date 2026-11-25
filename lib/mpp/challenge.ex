@@ -93,6 +93,7 @@ defmodule MPP.Challenge do
 
   @spec create(keyword(), String.t()) :: t()
   def create(params, secret_key) when is_list(params) and is_binary(secret_key) do
+    validate_secret_key!(secret_key)
     {nonce?, params} = Keyword.pop(params, :nonce, false)
 
     challenge =
@@ -490,6 +491,50 @@ defmodule MPP.Challenge do
     String.downcase(header, :ascii) == String.downcase(@authorization_header, :ascii)
   end
 
+  @min_secret_key_bytes 32
+
+  api(
+    :validate_secret_key!,
+    "Return the secret key unchanged, or raise when it is not a binary of at least 32 bytes. Called before a challenge is created or a credential verified.",
+    params: [secret_key: [kind: :value, description: "Server secret key for HMAC-SHA256"]],
+    returns: %{type: :string, description: "The same secret key"},
+    errors: [:argument_error]
+  )
+
+  @doc """
+  Return the secret key unchanged, or raise `ArgumentError` when it is not a
+  binary of at least 32 bytes.
+
+  Whoever can guess the key can mint challenges for any amount (mppx
+  `SecretKey.assert`; mpp-rs `validate_secret_key`,
+  refs/mpp-rs/src/protocol/core/binding.rs).
+  """
+  @spec validate_secret_key!(term()) :: String.t()
+  def validate_secret_key!(key) when is_binary(key) and byte_size(key) >= @min_secret_key_bytes, do: key
+
+  def validate_secret_key!(_key) do
+    raise ArgumentError,
+          "MPP secret key must be a binary of at least #{@min_secret_key_bytes} bytes " <>
+            "(generate one with `openssl rand -base64 32`)"
+  end
+
+  api(
+    :compute_id,
+    "Compute the HMAC-SHA256 id of a challenge's bound fields. Applies no key-length check; `create/2` is the way to issue a challenge.",
+    params: [
+      challenge: [kind: :value, description: "Challenge struct; its `id` is ignored"],
+      secret_key: [kind: :value, description: "HMAC key"]
+    ],
+    returns: %{type: :string, description: "Base64url id without padding"}
+  )
+
+  @doc """
+  Compute the HMAC-SHA256 id of a challenge's bound fields.
+
+  The id algorithm on its own, for published test vectors and interop tooling
+  (mpp-rs `compute_challenge_id`). It applies no key-length check; issue
+  challenges with `create/2`.
+  """
   # Computes the HMAC-SHA256 challenge ID.
   #
   # Legacy seven-slot input (header-less, 0.16.0 byte-for-byte):
@@ -502,7 +547,8 @@ defmodule MPP.Challenge do
   # draft-httpauth-payment-01 §HMAC-SHA256 Challenge Binding defines the same two
   # layouts (mpp-specs #362 aligned the spec to the SDKs, closing mpp-specs#357),
   # with three test vectors pinned in test/mpp/challenge_conformance_test.exs.
-  defp compute_id(%__MODULE__{} = challenge, secret_key) do
+  @spec compute_id(t(), String.t()) :: String.t()
+  def compute_id(%__MODULE__{} = challenge, secret_key) when is_binary(secret_key) do
     slots = [
       challenge.realm,
       challenge.method,

@@ -223,6 +223,20 @@ defmodule MPP.Transports.JsonRpc.PlugTest do
     end
   end
 
+  test "init/1 refuses a body digest" do
+    assert_raise ArgumentError, ~r/does not take :digest/, fn ->
+      RpcPlug.init(
+        handler: & &1,
+        secret_key: @secret_key,
+        realm: @realm,
+        method: DemoMethod,
+        amount: "1",
+        currency: "usd",
+        digest: MPP.BodyDigest.compute("")
+      )
+    end
+  end
+
   test "init/1 requires a handler function" do
     assert_raise ArgumentError, ~r/:handler/, fn ->
       RpcPlug.init(secret_key: @secret_key, realm: @realm, method: DemoMethod, amount: "1", currency: "usd")

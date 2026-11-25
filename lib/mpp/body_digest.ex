@@ -2,8 +2,10 @@ defmodule MPP.BodyDigest do
   @moduledoc """
   SHA-256 body digest computation and verification.
 
-  Produces digest strings in the format `"sha-256=<base64>"` for binding request
-  bodies to challenges. Maps are JSON-encoded before hashing. Verification uses
+  Produces digest strings in the format `"sha-256=<base64>"` (padded Base64, as
+  mppx and mpp-rs write it) for binding request bodies to challenges.
+  `verify/2` also accepts the RFC 9530 form `"sha-256=:<base64>:"` and either
+  form without padding. Maps are JSON-encoded before hashing. Verification uses
   constant-time comparison to prevent timing attacks.
 
   **Note:** When passing a map, the digest is computed over `Jason.encode!/1` output.
@@ -36,7 +38,7 @@ defmodule MPP.BodyDigest do
     returns: %{
       type: :string,
       description: ~s(Digest string in format "sha-256=<base64>"),
-      example: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
+      example: "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE="
     },
     composes_with: [:verify]
   )
@@ -44,7 +46,7 @@ defmodule MPP.BodyDigest do
   @spec compute(String.t() | map()) :: String.t()
   def compute(body) when is_binary(body) do
     hash = :crypto.hash(:sha256, body)
-    @digest_prefix <> Base.encode64(hash, padding: false)
+    @digest_prefix <> Base.encode64(hash)
   end
 
   @spec compute(map()) :: String.t()
@@ -67,7 +69,33 @@ defmodule MPP.BodyDigest do
   )
 
   @spec verify(String.t(), String.t() | map()) :: boolean()
-  def verify(digest, body) when is_binary(digest) do
-    Plug.Crypto.secure_compare(compute(body), digest)
+  def verify(@digest_prefix <> encoded, body) when is_binary(body) do
+    case digest_hash(encoded) do
+      {:ok, hash} -> Plug.Crypto.secure_compare(Base.encode64(:crypto.hash(:sha256, body), padding: false), hash)
+      :error -> false
+    end
+  end
+
+  def verify(digest, body) when is_binary(digest) and is_map(body), do: verify(digest, Jason.encode!(body))
+  def verify(digest, _body) when is_binary(digest), do: false
+
+  # The Base64 hash without padding, from `<base64>` or the RFC 9530 byte
+  # sequence `:<base64>:`, either of which may omit its padding
+  # (mpp-rs `verify`, refs/mpp-rs/src/body_digest.rs; mppx `normalize`,
+  # refs/mppx/src/BodyDigest.ts).
+  defp digest_hash(encoded) do
+    hash =
+      case encoded do
+        <<":", rest::binary>> when byte_size(rest) > 0 ->
+          if String.ends_with?(rest, ":"),
+            do: rest |> binary_part(0, byte_size(rest) - 1) |> String.trim_trailing("="),
+            else: :error
+
+        # A SHA-256 hash has one padding character; the bare form is otherwise literal.
+        bare ->
+          String.replace_suffix(bare, "=", "")
+      end
+
+    if is_binary(hash) and hash != "" and not String.contains?(hash, ":"), do: {:ok, hash}, else: :error
   end
 end

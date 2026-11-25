@@ -402,6 +402,59 @@ defmodule MPP.X402.PlugTest do
       if raw_body, do: Plug.Conn.put_private(conn, :raw_body, raw_body), else: conn
     end
 
+    test "the payment plug reads an unread body for the digest", %{opts: opts, header: header} do
+      for {body, status} <- [{"expected", 200}, {"changed!", 402}] do
+        conn =
+          :get
+          |> Plug.Test.conn(@url, body)
+          |> Plug.Conn.put_req_header("content-length", "8")
+          |> Plug.Conn.put_req_header("payment-signature", header)
+          |> PaymentPlug.call(opts)
+
+        conn = if conn.halted, do: conn, else: Plug.Conn.send_resp(conn, 200, "ok")
+        assert conn.status == status
+        assert conn.private.raw_body == body
+      end
+
+      assert_received {:settle, _payload, _requirements}
+      refute_received {:settle, _payload, _requirements}
+    end
+
+    test "a body that cannot be read complete is refused without a facilitator call", %{opts: opts, header: header} do
+      conn =
+        :get
+        |> Plug.Test.conn(@url, "expected")
+        |> Plug.Conn.put_req_header("content-length", "9")
+        |> Plug.Conn.put_req_header("payment-signature", header)
+        |> PaymentPlug.call(opts)
+
+      assert conn.status == 402
+      assert problem_detail(conn) =~ "body_digest_unavailable"
+      refute_received {:verify, _payload, _requirements}
+      # The plug goes on with the connection the read left.
+      assert {:ok, "", _conn} = Plug.Conn.read_body(conn)
+    end
+
+    # mppx settles the credential count before either protocol
+    # (refs/mppx/src/server/Mppx.ts).
+    test "two Payment credentials are refused before the facilitator is called", %{opts: opts} do
+      {:ok, header} = opts |> signed_payload() |> Headers.encode_payment_signature()
+
+      conn =
+        :get
+        |> Plug.Test.conn(@url)
+        |> Plug.Conn.put_req_header("payment-signature", header)
+        |> Plug.Conn.put_req_header("authorization", "Payment a, Payment b")
+        |> PaymentPlug.call(opts)
+
+      assert conn.status == 400
+      assert Plug.Conn.get_resp_header(conn, "www-authenticate") == []
+      assert Plug.Conn.get_resp_header(conn, "payment-required") == []
+      assert Jason.decode!(conn.resp_body)["type"] =~ "bad-request"
+      refute_received {:verify, _payload, _requirements}
+      refute_received {:settle, _payload, _requirements}
+    end
+
     test "accepts the cached body the digest pins", %{opts: opts, header: header} do
       conn = digest_conn(header, :get, [{"content-length", "8"}], "expected")
       assert {:ok, _} = X402.Plug.maybe_settle(conn, opts.x402, nil)

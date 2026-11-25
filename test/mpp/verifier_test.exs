@@ -505,7 +505,7 @@ defmodule MPP.VerifierTest do
     test "matching digest passes" do
       digest = "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
       credential = build_credential(digest: digest)
-      opts = verify_opts(digest: digest)
+      opts = verify_opts(digest: digest, request_body: :none)
 
       assert {:ok, %Receipt{}} = Verifier.verify(credential, opts)
     end
@@ -588,7 +588,75 @@ defmodule MPP.VerifierTest do
     end
   end
 
+  describe "verify/2 request body digest" do
+    setup do
+      body = ~s({"amount":"1000"})
+      digest = MPP.BodyDigest.compute(body)
+      %{body: body, credential: build_credential(digest: digest), opts: verify_opts(digest: digest)}
+    end
+
+    test "a matching body passes", %{body: body, credential: credential, opts: opts} do
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, opts ++ [request_body: {:ok, body}])
+    end
+
+    test "a different body is invalid-challenge", %{credential: credential, opts: opts} do
+      for body <- ["", ~s({"amount":"9999"})] do
+        assert {:error, %Errors{type: type, detail: "Request body does not match the challenge digest"}} =
+                 Verifier.verify(credential, opts ++ [request_body: {:ok, body}])
+
+        assert type =~ "invalid-challenge"
+      end
+    end
+
+    test "an unavailable body is invalid-challenge", %{credential: credential, opts: opts} do
+      assert {:error, %Errors{type: type, detail: detail}} =
+               Verifier.verify(credential, opts ++ [request_body: :unavailable])
+
+      assert type =~ "invalid-challenge"
+      assert detail =~ "not available"
+    end
+
+    test "a transport without a request body says so", %{credential: credential, opts: opts} do
+      assert {:ok, %Receipt{}} = Verifier.verify(credential, opts ++ [request_body: :none])
+    end
+
+    # mpp-rs refuses a digest-bound credential verified without a body
+    # (refs/mpp-rs/src/server/mpp/verify.rs).
+    test "leaving the body out is invalid-challenge", %{credential: credential, opts: opts} do
+      assert {:error, %Errors{type: type, detail: detail}} = Verifier.verify(credential, opts)
+      assert type =~ "invalid-challenge"
+      assert detail =~ "not available"
+    end
+
+    test "the reference SDKs' digest encodings match", %{body: body} do
+      "sha-256=" <> hash = MPP.BodyDigest.compute(body)
+
+      for digest <- ["sha-256=:#{hash}:", "sha-256=" <> String.trim_trailing(hash, "=")] do
+        credential = build_credential(digest: digest)
+        opts = verify_opts(digest: digest)
+
+        assert {:ok, %Receipt{}} = Verifier.verify(credential, opts ++ [request_body: {:ok, body}])
+        assert {:error, %Errors{}} = Verifier.verify(credential, opts ++ [request_body: {:ok, body <> " "}])
+      end
+    end
+
+    test "a body is ignored when the challenge has no digest", %{body: body} do
+      assert {:ok, %Receipt{}} = Verifier.verify(build_credential(), verify_opts(request_body: {:ok, body}))
+    end
+  end
+
   describe "verify/2 required opts validation" do
+    # mpp-rs `validate_secret_key` (refs/mpp-rs/src/protocol/core/binding.rs).
+    test "a secret key shorter than 32 bytes raises" do
+      credential = build_credential()
+
+      for key <- ["", String.duplicate("k", 31), :not_a_binary] do
+        assert_raise ArgumentError, ~r/secret key must be a binary of at least 32 bytes/, fn ->
+          Verifier.verify(credential, verify_opts(secret_key: key))
+        end
+      end
+    end
+
     test "missing secret_key raises" do
       credential = build_credential()
       opts = Keyword.delete(verify_opts(), :secret_key)

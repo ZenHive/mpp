@@ -31,8 +31,8 @@ defmodule MPP.ChallengeTest do
     end
 
     test "different secret keys produce different IDs" do
-      challenge1 = Challenge.create(@base_params, "key-one")
-      challenge2 = Challenge.create(@base_params, "key-two")
+      challenge1 = Challenge.create(@base_params, "key-one-padded-to-32-bytes-xxxxxxxxxxxxxxxx")
+      challenge2 = Challenge.create(@base_params, "key-two-padded-to-32-bytes-xxxxxxxxxxxxxxxx")
 
       refute challenge1.id == challenge2.id
     end
@@ -129,6 +129,29 @@ defmodule MPP.ChallengeTest do
 
     test "raises on missing required fields" do
       assert_raise ArgumentError, fn -> Challenge.create([realm: "r"], @secret_key) end
+    end
+  end
+
+  describe "validate_secret_key!/1" do
+    test "create/2 refuses a secret key shorter than 32 bytes" do
+      for key <- ["", "short", String.duplicate("k", 31)] do
+        assert_raise ArgumentError, ~r/secret key must be a binary of at least 32 bytes/, fn ->
+          Challenge.create(@base_params, key)
+        end
+      end
+
+      assert %Challenge{} = Challenge.create(@base_params, String.duplicate("k", 32))
+    end
+
+    test "returns a long enough key and raises for anything else" do
+      key = String.duplicate("k", 32)
+      assert Challenge.validate_secret_key!(key) == key
+      assert_raise ArgumentError, fn -> Challenge.validate_secret_key!(nil) end
+    end
+
+    test "compute_id/2 is the id create/2 assigns" do
+      challenge = Challenge.create(@base_params, @secret_key)
+      assert Challenge.compute_id(%{challenge | id: nil}, @secret_key) == challenge.id
     end
   end
 

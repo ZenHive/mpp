@@ -174,19 +174,21 @@ defmodule MPP.Challenge.MetaTest do
     @params [realm: "api.example.com", method: "tempo", intent: "charge", request: "eyJhbW91bnQiOiIxIn0"]
 
     test "issues a different id for identical parameters and binds the nonce into the id" do
-      first = Challenge.create([nonce: true] ++ @params, "secret")
-      second = Challenge.create([nonce: true] ++ @params, "secret")
+      first = Challenge.create([nonce: true] ++ @params, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx")
+      second = Challenge.create([nonce: true] ++ @params, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx")
 
       assert Meta.nonce?(first.opaque)
       refute first.id == second.id
-      assert Challenge.verify(first, "secret") == :ok
-      assert Challenge.verify(%{first | opaque: second.opaque}, "secret") == {:error, :invalid_challenge}
+      assert Challenge.verify(first, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx") == :ok
+
+      assert Challenge.verify(%{first | opaque: second.opaque}, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx") ==
+               {:error, :invalid_challenge}
     end
 
     test "leaves the challenge as before without the option" do
-      challenge = Challenge.create(@params, "secret")
+      challenge = Challenge.create(@params, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx")
       assert challenge.opaque == nil
-      assert challenge.id == Challenge.create(@params, "secret").id
+      assert challenge.id == Challenge.create(@params, "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx").id
     end
   end
 end

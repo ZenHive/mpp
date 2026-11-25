@@ -88,7 +88,9 @@ defmodule MPP.Transports.JsonRpc.Adapter do
       charge: entry.charge,
       method_config: entry.method_config,
       digest: config.digest,
-      opaque: config.opaque
+      opaque: config.opaque,
+      # The request is a decoded protocol message, with no HTTP body to bind.
+      request_body: :none
     ]
 
     case Replay.check_unused(store, credential) do

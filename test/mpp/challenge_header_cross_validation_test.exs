@@ -21,7 +21,10 @@ defmodule MPP.ChallengeHeaderCrossValidationTest do
 
   @moduletag :cross_validation
 
-  @secret "test-vector-secret"
+  @secret "test-vector-secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
+  # Key of the published id vectors: 18 bytes, below the minimum `create/2`
+  # accepts, so those ids go through `Challenge.compute_id/2`.
+  @vector_secret "test-vector-secret"
   @realm "api.example.com"
   @method "tempo"
   @intent "charge"
@@ -33,13 +36,13 @@ defmodule MPP.ChallengeHeaderCrossValidationTest do
 
   defp elixir_challenge(header) do
     params = [realm: @realm, method: @method, intent: @intent, request: request_b64()]
-    params = if header, do: Keyword.put(params, :header, header), else: params
-    Challenge.create(params, @secret)
+    challenge = struct!(Challenge, Keyword.put(params, :header, Challenge.advertised_header(header)))
+    %{challenge | id: Challenge.compute_id(challenge, @vector_secret)}
   end
 
   defp rust_id(header) do
     MppRsHmacOracle.compute_id!(
-      secret: @secret,
+      secret: @vector_secret,
       realm: @realm,
       method: @method,
       intent: @intent,
@@ -152,7 +155,7 @@ defmodule MPP.ChallengeHeaderCrossValidationTest do
 
   defp mppx_id(rt, header) do
     params = %{
-      "secretKey" => @secret,
+      "secretKey" => @vector_secret,
       "realm" => @realm,
       "method" => @method,
       "intent" => @intent,

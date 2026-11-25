@@ -27,12 +27,39 @@ defmodule MPP.BodyDigestTest do
       assert map_digest == string_digest
     end
 
-    test "uses standard base64 without padding" do
-      "sha-256=" <> hash = BodyDigest.compute("test")
-      # base64 alphabet: A-Z, a-z, 0-9, +, / (no - or _ which would be base64url)
-      refute String.ends_with?(hash, "=")
-      # SHA-256 = 32 bytes → 43 base64 chars without padding
-      assert byte_size(hash) == 43
+    # mppx `compute` (refs/mppx/src/BodyDigest.ts) and mpp-rs `compute`
+    # (refs/mpp-rs/src/body_digest.rs) write padded standard Base64.
+    test "uses padded standard base64" do
+      assert BodyDigest.compute("hello") == "sha-256=LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+    end
+
+    # Vectors of refs/mpp-rs/src/server/mpp/tests/body_digest.rs.
+    test "verify/2 accepts the bare and the RFC 9530 form, padded or not" do
+      hash = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ"
+
+      for digest <- ["sha-256=#{hash}=", "sha-256=#{hash}", "sha-256=:#{hash}=:", "sha-256=:#{hash}:"] do
+        assert BodyDigest.verify(digest, "hello")
+        refute BodyDigest.verify(digest, "hello!")
+      end
+    end
+
+    test "verify/2 refuses a digest that is not a sha-256 hash" do
+      hash = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+
+      for digest <- [
+            "",
+            "sha-256=",
+            "sha-256=::",
+            "sha-256=:",
+            "sha-256=:#{hash}",
+            "sha-256=#{hash}:",
+            "sha-256=#{hash}=",
+            "sha-256==",
+            "sha-512=#{hash}",
+            hash
+          ] do
+        refute BodyDigest.verify(digest, "hello")
+      end
     end
 
     test "matches known SHA-256 vector" do

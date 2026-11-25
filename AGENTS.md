@@ -524,6 +524,7 @@ MPP.Session.Method         — use-wrapper that dispatches Method.verify/2 throu
 MPP.Session.Store          — Behaviour for pluggable session-channel persistence
 MPP.Session.ETSStore       — ETS-backed default session store (app-started)
 MPP.BodyDigest             — SHA-256 body digest compute/verify for request body binding
+MPP.BodyReader             — Plug body reader that keeps the raw body in conn.private.raw_body (read_body/2 for Plug.Parsers, fetch/1)
 MPP.Amount                 — Amount/decimals helpers: parse_units, with_base_units, parse_dollar_amount
 MPP.JCS                    — RFC 8785 JSON Canonicalization Scheme (MPP subset: ASCII keys, no floats) for cross-SDK HMAC interop
 MPP.Verifier               — Transport-neutral verification pipeline (HMAC, realm, expiry, request match, method.verify)

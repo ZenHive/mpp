@@ -94,7 +94,11 @@ defmodule MPP.PaymentFailureMappingTest do
       {:header, "X-Payment-Authorization", :invalid_header}
     ]
 
-    base = Challenge.create([realm: "api.example.com", method: "tempo", intent: "charge", request: "e30"], "secret")
+    base =
+      Challenge.create(
+        [realm: "api.example.com", method: "tempo", intent: "charge", request: "e30"],
+        "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
+      )
 
     for {field, value, reason} <- fields do
       challenge = Map.put(base, field, value)
@@ -126,7 +130,7 @@ defmodule MPP.PaymentFailureMappingTest do
           request: "e30",
           opaque: standard_opaque
         ],
-        "secret"
+        "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
       )
 
     header = Headers.format_challenge(challenge)
@@ -157,7 +161,7 @@ defmodule MPP.PaymentFailureMappingTest do
             digest: digest,
             header: "payment-authorization"
           ],
-          "secret"
+          "secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
         )
 
       assert {:ok, ^challenge} = challenge |> Headers.format_challenge() |> Headers.parse_challenge()

@@ -53,7 +53,7 @@ defmodule MPP.X402.ExactTest do
     native =
       Challenge.create(
         [realm: "api.example.com", method: "evm", intent: "charge", request: "eyJhbW91bnQiOiIxIn0"],
-        "test-secret-key"
+        "test-secret-key-of-at-least-32-bytes"
       )
 
     refute Exact.can_handle?(native, @config)
@@ -65,7 +65,7 @@ defmodule MPP.X402.ExactTest do
     native =
       Challenge.create(
         [realm: "api.example.com", method: "evm", intent: "charge", request: "eyJhbW91bnQiOiIxIn0"],
-        "test-secret-key"
+        "test-secret-key-of-at-least-32-bytes"
       )
 
     multi = MultiProvider.new([{X402Exact, @config}])

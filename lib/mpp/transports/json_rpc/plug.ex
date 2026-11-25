@@ -41,7 +41,14 @@ defmodule MPP.Transports.JsonRpc.Plug do
       raise ArgumentError, "MPP.Transports.JsonRpc.Plug requires :handler (arity-1 function)"
     end
 
-    %{config: JsonRpc.init(plug_opts), handler: handler}
+    config = JsonRpc.init(plug_opts)
+
+    # The posted envelope carries the credential, so no body digest can cover it.
+    if config.digest do
+      raise ArgumentError, "MPP.Transports.JsonRpc.Plug does not take :digest: a JSON-RPC request has no body to bind"
+    end
+
+    %{config: config, handler: handler}
   end
 
   @impl Plug

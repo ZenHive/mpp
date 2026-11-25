@@ -34,6 +34,7 @@ defmodule MPP.DescripexTest do
     XRPL,
     NearIntents,
     MPP.BodyDigest,
+    MPP.BodyReader,
     MPP.Amount,
     MPP.Expires,
     MPP.DID,

@@ -21,7 +21,7 @@ defmodule MPP.VerifierPinnedPropertyTest do
     def verify(_payload, _charge), do: {:ok, Receipt.new(method: method_name(), reference: "ref_ok")}
   end
 
-  @secret "property-test-secret"
+  @secret "property-test-secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
   @realm "api.property.test"
 
   defp build_charge(amount, currency) do
@@ -164,7 +164,7 @@ defmodule MPP.VerifierPinnedPropertyTest do
   describe "property: HMAC corruption yields invalid_challenge" do
     property "wrong secret returns invalid_challenge" do
       check all(
-              wrong <- StreamData.string(:alphanumeric, min_length: 8, max_length: 32),
+              wrong <- StreamData.string(:alphanumeric, min_length: 32, max_length: 48),
               wrong != @secret
             ) do
         charge = build_charge("1000", "usd")

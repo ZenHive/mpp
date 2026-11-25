@@ -45,7 +45,11 @@ defmodule MPP.Plug do
     * `:secret_key` — (required) HMAC-SHA256 key for challenge binding
     * `:realm` — (required) server protection space
     * `:expires_in` — (optional) challenge TTL in seconds (integer, defaults to 300)
-    * `:digest` — (optional) expected content digest for body-bound challenges
+    * `:digest` — (optional) content digest (`MPP.BodyDigest.compute/1`) bound into
+      the route's challenges. A credential is accepted only with a request body
+      whose SHA-256 matches it; a mismatch is answered with `invalid-challenge`.
+      The body is read once and kept in `conn.private.raw_body`; mount
+      `MPP.BodyReader` as the `Plug.Parsers` `:body_reader` so parsers see it
     * `:opaque` — (optional) base64url-encoded server correlation data. A JSON
       object (or no `:opaque`) gets a `_mpp_nonce` member per issued challenge;
       the members reserved for issued challenges (`_mpp_nonce`, `_mppx_nonce`,
@@ -140,7 +144,6 @@ defmodule MPP.Plug do
   alias MPP.X402.Plug, as: X402Plug
 
   @default_expires_in_seconds 300
-  @min_secret_key_bytes 32
 
   defmodule MethodEntry do
     @moduledoc """
@@ -240,7 +243,7 @@ defmodule MPP.Plug do
     route_opaque = route_opaque!(opts)
 
     %Config{
-      secret_key: opts |> require_opt!(:secret_key) |> validate_secret_key!(),
+      secret_key: opts |> require_opt!(:secret_key) |> Challenge.validate_secret_key!(),
       realm: require_opt!(opts, :realm),
       method_entries: entries,
       expires_in: expires_in,
@@ -259,16 +262,6 @@ defmodule MPP.Plug do
           scope: Keyword.get(opts, :scope)
         )
     }
-  end
-
-  # A guessable key lets anyone mint challenge ids, so keys shorter than 32
-  # bytes are rejected (mppx and mpp-rs #491 use the same minimum).
-  defp validate_secret_key!(key) when is_binary(key) and byte_size(key) >= @min_secret_key_bytes, do: key
-
-  defp validate_secret_key!(_key) do
-    raise ArgumentError,
-          "MPP.Plug: :secret_key must be a binary of at least #{@min_secret_key_bytes} bytes " <>
-            "(generate one with `openssl rand -base64 32`)"
   end
 
   defp validate_intent!(intent) when intent in ["charge", "session", "subscription"], do: intent
@@ -605,40 +598,44 @@ defmodule MPP.Plug do
   @impl Plug
   @spec call(Plug.Conn.t(), Config.t()) :: Plug.Conn.t()
   def call(conn, %Config{} = config) do
-    case X402Plug.maybe_settle(conn, config.x402, x402_store(conn, config)) do
-      :continue -> native_handshake(conn, config)
-      {:ok, conn} -> conn
-      {:error, %Errors{} = error} -> respond_error(conn, config, error)
+    # The credential count is settled before either payment path runs (mppx
+    # extracts the credential first, refs/mppx/src/server/Mppx.ts).
+    case extract_credential(conn, config) do
+      {:error, reason} when reason in [:multiple_credentials, :too_many_credential_values] ->
+        respond_error(conn, config, credential_error(reason))
+
+      credential ->
+        conn = keep_x402_body(conn, config)
+
+        case X402Plug.maybe_settle(conn, config.x402, x402_store(conn, config)) do
+          :continue -> native_handshake(conn, config, credential)
+          {:ok, conn} -> conn
+          {:error, %Errors{} = error} -> respond_error(conn, config, error)
+        end
     end
   end
 
-  defp native_handshake(conn, config) do
-    case extract_credential(conn, config) do
+  # An x402 payment on a route with a digest is bound to the request body too;
+  # read it so `MPP.X402.Plug` finds it in `conn.private.raw_body`.
+  defp keep_x402_body(conn, %Config{x402: %X402Plug{digest: digest}}) when is_binary(digest) do
+    case {Plug.Conn.get_req_header(conn, "payment-signature"), conn} do
+      {[], conn} -> conn
+      {_signature, conn} -> conn |> MPP.BodyReader.fetch() |> fetched_conn()
+    end
+  end
+
+  defp keep_x402_body(conn, _config), do: conn
+
+  defp fetched_conn({:ok, _body, conn}), do: conn
+  defp fetched_conn({:error, conn}), do: conn
+
+  defp native_handshake(conn, config, credential) do
+    case credential do
       nil ->
         respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
 
-      {:error, :invalid_scheme} ->
-        respond_error(conn, config, Errors.new(:payment_required, "No payment credential provided"))
-
-      {:error, :wrong_credential_header} ->
-        respond_error(
-          conn,
-          config,
-          Errors.new(:payment_required, "Payment credential must be sent in Payment-Authorization")
-        )
-
-      {:error, :duplicate_credential} ->
-        respond_error(
-          conn,
-          config,
-          Errors.new(
-            :malformed_credential,
-            "Payment credential presented in both Authorization and Payment-Authorization"
-          )
-        )
-
       {:error, reason} ->
-        respond_error(conn, config, Errors.new(:malformed_credential, "#{reason}"))
+        respond_error(conn, config, credential_error(reason))
 
       {:ok, credential} ->
         case find_method_entry(config, credential.challenge) do
@@ -655,49 +652,64 @@ defmodule MPP.Plug do
     end
   end
 
-  # Extracts and parses the Payment credential from the field selected by this
-  # endpoint. Unconfigured plugs read `Authorization` only. `:requires_auth`
-  # reads `Payment-Authorization` only, rejects a Payment credential in
-  # `Authorization`, and rejects Payment credentials presented in both fields.
-  defp extract_credential(conn, %Config{requires_auth: true}) do
+  # Finds the request's one Payment credential and parses it when it is in the
+  # field this endpoint selects: `Authorization`, or `Payment-Authorization`
+  # under `:requires_auth`. A credential in the other field counts as absent.
+  defp extract_credential(conn, %Config{requires_auth: requires_auth}) do
     authorization = Plug.Conn.get_req_header(conn, "authorization")
     payment_authorization = Plug.Conn.get_req_header(conn, "payment-authorization")
-    auth_payment? = presented_payment_credential?(authorization)
-    alt_payment? = presented_payment_credential?(payment_authorization)
+    selected = if requires_auth, do: "Payment-Authorization", else: "Authorization"
 
-    cond do
-      auth_payment? and alt_payment? ->
-        {:error, :duplicate_credential}
-
-      auth_payment? ->
-        {:error, :wrong_credential_header}
-
-      alt_payment? ->
-        parse_first_credential(payment_authorization)
-
-      true ->
-        nil
+    case Headers.select_payment_credential(authorization, payment_authorization, selected) do
+      {:ok, nil} -> absent_credential(authorization, requires_auth)
+      {:ok, credential} -> Headers.parse_credential(credential)
+      {:error, _reason} = error -> error
     end
   end
 
-  defp extract_credential(conn, %Config{}) do
-    case Plug.Conn.get_req_header(conn, "authorization") do
-      [] -> nil
-      [header | _] -> Headers.parse_credential(header)
+  defp credential_error(:invalid_scheme), do: Errors.new(:payment_required, "No payment credential provided")
+
+  defp credential_error(:wrong_credential_header),
+    do: Errors.new(:payment_required, "Payment credential must be sent in Payment-Authorization")
+
+  # 400 without a challenge (mppx `MultipleCredentialsError`, mpp-rs
+  # `select_payment_credential`).
+  defp credential_error(:multiple_credentials),
+    do: Errors.new(:bad_request, "Request carries more than one Payment credential")
+
+  defp credential_error(:too_many_credential_values),
+    do: Errors.new(:bad_request, "Too many Authorization or Payment-Authorization field values")
+
+  defp credential_error(reason), do: Errors.new(:malformed_credential, "#{reason}")
+
+  defp absent_credential(authorization, true) do
+    case Headers.select_payment_credential(authorization, [], "Authorization") do
+      {:ok, credential} when is_binary(credential) -> {:error, :wrong_credential_header}
+      _none -> nil
     end
   end
 
-  defp parse_first_credential([header | _]), do: Headers.parse_credential(header)
+  defp absent_credential(_authorization, _requires_auth), do: nil
 
-  defp presented_payment_credential?(headers) when is_list(headers) do
-    Enum.any?(headers, fn value ->
-      case Headers.parse_credential(value) do
-        {:error, :invalid_scheme} -> false
-        {:ok, _} -> true
-        {:error, _} -> true
-      end
-    end)
+  # The raw request body, for a credential whose challenge binds the route's
+  # digest. Read once and kept in `conn.private.raw_body`, where
+  # `MPP.BodyReader` hands it to a downstream `Plug.Parsers`. A body a parser
+  # already consumed without caching cannot be compared. The body is read only
+  # for a challenge this server issued (mppx verifies the challenge before it
+  # reads the body, refs/mppx/src/server/Mppx.ts); any other credential fails
+  # in `MPP.Verifier` before the body is looked at.
+  defp request_body(conn, %Config{digest: digest} = config, %Challenge{digest: digest} = challenge)
+       when is_binary(digest) do
+    with :ok <- Challenge.verify_server_binding(challenge, config.secret_key, config.realm),
+         {:ok, body, conn} <- MPP.BodyReader.fetch(conn) do
+      {conn, {:ok, body}}
+    else
+      {:error, %Plug.Conn{} = conn} -> {conn, :unavailable}
+      {:error, :invalid_challenge} -> {conn, :unavailable}
+    end
   end
+
+  defp request_body(conn, _config, _challenge), do: {conn, :unavailable}
 
   @doc false
   @spec find_method_entry(Config.t(), Challenge.t()) :: {:ok, MethodEntry.t()} | {:error, Errors.t()}
@@ -741,7 +753,10 @@ defmodule MPP.Plug do
         respond_error(conn, config, error)
 
       :ok ->
-        with {:ok, receipt} <- Verifier.verify(credential, opts),
+        # Read the body only for an unused credential of this server.
+        {conn, request_body} = request_body(conn, config, credential.challenge)
+
+        with {:ok, receipt} <- Verifier.verify(credential, [request_body: request_body] ++ opts),
              :ok <- Replay.mark_used(store, credential) do
           conn
           |> Plug.Conn.assign(:mpp_receipt, receipt)

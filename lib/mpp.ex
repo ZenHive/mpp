@@ -55,6 +55,7 @@ defmodule MPP do
     * `MPP.Subscription.Store` — Pluggable recurring-subscription persistence
     * `MPP.Subscription.ETSStore` — Application-started single-node subscription store
     * `MPP.BodyDigest` — SHA-256 body digest computation and verification
+    * `MPP.BodyReader` — Request body reader that keeps the raw body for digest checks
     * `MPP.Amount` — Amount/decimals helpers (parse_units, dollar parsing)
     * `MPP.Expires` — Expiration timestamp helpers (duration offsets, assert!)
     * `MPP.DID` — DID helpers for EVM credential sources
@@ -105,6 +106,7 @@ defmodule MPP do
       MPP.Methods.XRPL,
       MPP.Methods.NearIntents,
       MPP.BodyDigest,
+      MPP.BodyReader,
       MPP.Amount,
       MPP.Expires,
       MPP.DID,

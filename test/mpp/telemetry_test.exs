@@ -228,7 +228,7 @@ defmodule MPP.TelemetryTest do
             request: entry.request,
             expires: future_expires()
           ],
-          "wrong-secret"
+          "wrong-secret-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
         )
 
       credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}

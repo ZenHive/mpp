@@ -70,7 +70,7 @@ defmodule MPP.ChallengeConformanceTest do
           |> maybe_put(:expires, unquote(expires))
           |> maybe_put(:digest, unquote(digest))
 
-        challenge = Challenge.create(params, @secret)
+        challenge = vector_challenge(params, @secret)
 
         assert challenge.id == unquote(expected),
                "challenge-ID divergence from mpp-rs golden vector #{unquote(label)}"
@@ -107,7 +107,7 @@ defmodule MPP.ChallengeConformanceTest do
             unquote(expires)
           )
 
-        challenge = Challenge.create(params, @secret)
+        challenge = vector_challenge(params, @secret)
 
         assert challenge.id == unquote(expected),
                "opaque challenge-ID divergence from mpp-rs golden vector #{unquote(label)}"
@@ -121,7 +121,7 @@ defmodule MPP.ChallengeConformanceTest do
     # draft-01 §HMAC-SHA256 Test Vectors (mpp-specs #362) pins this layout.
     test "Payment-Authorization is inserted before the empty opaque slot" do
       challenge =
-        Challenge.create(
+        vector_challenge(
           [
             realm: "api.example.com",
             method: "tempo",
@@ -140,7 +140,7 @@ defmodule MPP.ChallengeConformanceTest do
     # Third draft-01 vector: header inserted before a present opaque slot.
     test "Payment-Authorization precedes a present opaque slot (draft-01 vector)" do
       challenge =
-        Challenge.create(
+        vector_challenge(
           [
             realm: "api.example.com",
             method: "tempo",
@@ -158,13 +158,13 @@ defmodule MPP.ChallengeConformanceTest do
 
     test "explicit Authorization is omitted and keeps the 0.16.0 id" do
       implicit =
-        Challenge.create(
+        vector_challenge(
           [realm: "api.example.com", method: "tempo", intent: "charge", request: b64(~S({"amount":"1000000"}))],
           @secret
         )
 
       explicit =
-        Challenge.create(
+        vector_challenge(
           [
             realm: "api.example.com",
             method: "tempo",
@@ -201,9 +201,16 @@ defmodule MPP.ChallengeConformanceTest do
 
         changed = Keyword.update!(base, slot, &mutate_slot(slot, &1, suffix))
 
-        refute Challenge.create(base, @secret).id == Challenge.create(changed, @secret).id
+        refute vector_challenge(base, @secret).id == vector_challenge(changed, @secret).id
       end
     end
+  end
+
+  # The published vectors use an 18-byte key, below the minimum `create/2`
+  # accepts, so they go through the id algorithm directly.
+  defp vector_challenge(params, secret) do
+    challenge = struct!(Challenge, Keyword.update(params, :header, nil, &Challenge.advertised_header/1))
+    %{challenge | id: Challenge.compute_id(challenge, secret)}
   end
 
   defp maybe_put(params, _key, nil), do: params

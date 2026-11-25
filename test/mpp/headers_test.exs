@@ -9,7 +9,7 @@ defmodule MPP.HeadersTest do
   alias MPP.Receipt
   alias MPP.Test.MppxChallengeBundle
 
-  @secret "test-secret-key"
+  @secret "test-secret-key-padded-to-32-bytes-xxxxxxxxxxxxxxxx"
 
   defp make_challenge(opts \\ []) do
     defaults = [realm: "api.example.com", method: "stripe", intent: "charge", request: "eyJhbW91bnQiOiIxMDAifQ"]
@@ -157,7 +157,7 @@ defmodule MPP.HeadersTest do
       header = Headers.format_challenge(challenge)
 
       assert header ==
-               ~s(Payment id="HGb2KJqR61oq7-wrzqwk9ASBmADSJg7M7NZPcMYk2qc", realm="api.example.com", method="stripe", ) <>
+               ~s(Payment id="Lnq5JFN3szaFlTpcEVJpdrlxggFIxLJ6F8aIYhtbuy8", realm="api.example.com", method="stripe", ) <>
                  ~s(intent="charge", request="eyJhbW91bnQiOiIxMDAifQ", expires="2025-01-15T12:05:00Z", ) <>
                  ~s(description="ASCII only description")
     end
@@ -782,16 +782,33 @@ defmodule MPP.HeadersTest do
   @max_token_len 16 * 1024
 
   describe "token-size cap before decode (DoS, mpp-rs #299)" do
-    test "rejects over-limit Authorization: Payment token before decode" do
-      token = String.duplicate("A", @max_token_len + 1)
+    # A credential is bounded as a whole field value at 64 KiB (mpp-rs
+    # MAX_AUTHORIZATION_LEN, refs/mpp-rs/src/protocol/core/headers.rs:29,761).
+    test "rejects an Authorization value over 64 KiB before decode" do
+      token = String.duplicate("A", 64 * 1024 - 7)
       assert {:error, :token_too_large} = Headers.parse_credential("Payment #{token}")
     end
 
-    test "at-limit Authorization token passes the size gate and reaches decode" do
-      # 16384 valid base64url chars clear the gate, decode, then fail as non-JSON —
-      # proving the cap let an at-limit token through (it is NOT :token_too_large).
-      token = String.duplicate("A", @max_token_len)
+    test "an Authorization value of 64 KiB passes the size gate and reaches decode" do
+      token = String.duplicate("A", 64 * 1024 - 8)
       assert {:error, :invalid_json} = Headers.parse_credential("Payment #{token}")
+    end
+
+    # mpp-rs `test_authorization_accepts_credential_echoing_request_at_the_limit`
+    # (refs/mpp-rs/src/protocol/core/headers.rs:1381).
+    test "a credential echoing a request at the 16 KiB limit round-trips" do
+      request = %{"data" => String.duplicate("a", 12_277)} |> Jason.encode!() |> Base.url_encode64(padding: false)
+      assert byte_size(request) == @max_token_len
+
+      challenge =
+        Challenge.create([realm: "api.example.com", method: "tempo", intent: "charge", request: request], @secret)
+
+      header = Headers.format_credential(%Credential{challenge: challenge, payload: %{"hash" => "0xabc"}})
+      assert byte_size(header) > @max_token_len
+
+      assert {:ok, ^header} = Headers.select_payment_credential([header], [], "Authorization")
+      assert {:ok, parsed} = Headers.parse_credential(header)
+      assert parsed.challenge.request == request
     end
 
     test "rejects over-limit Payment-Receipt token before decode" do
@@ -910,6 +927,116 @@ defmodule MPP.HeadersTest do
 
     test "absent expires still parses" do
       assert {:ok, %Challenge{expires: nil}} = Headers.parse_challenge(challenge_header([]))
+    end
+  end
+
+  # mpp-rs `select_payment_credential` (refs/mpp-rs/src/protocol/core/headers.rs)
+  # and mppx `countPaymentCredentials` (refs/mppx/src/server/Transport.ts).
+  describe "select_payment_credential/3" do
+    test "returns the credential of the selected field" do
+      assert {:ok, "Payment abc"} = Headers.select_payment_credential(["Payment abc"], [], "Authorization")
+      assert {:ok, "payment\tabc"} = Headers.select_payment_credential(["Bearer x , payment\tabc "], [], "authorization")
+
+      assert {:ok, "Payment abc"} =
+               Headers.select_payment_credential(["Bearer x"], ["Payment abc"], "Payment-Authorization")
+    end
+
+    test "a credential in the other field, a bare scheme and other schemes count as absent" do
+      assert {:ok, nil} = Headers.select_payment_credential([], [], "Authorization")
+      assert {:ok, nil} = Headers.select_payment_credential(["Payment abc"], [], "Payment-Authorization")
+      assert {:ok, nil} = Headers.select_payment_credential([], ["Payment abc"], "Authorization")
+
+      assert {:ok, nil} =
+               Headers.select_payment_credential(["Payment", "Payment ", "Paymentx abc", "Bearer x"], [], "Authorization")
+    end
+
+    test "more than one credential is an error wherever they are" do
+      for {authorization, alternate} <- [
+            {["Payment a", "Payment b"], []},
+            {["Payment a, Payment b"], []},
+            {["Payment a,PAYMENT b"], []},
+            {["Payment a"], ["Payment b"]},
+            {[], ["Payment a", "Payment b"]}
+          ],
+          selected <- ["Authorization", "Payment-Authorization"] do
+        assert {:error, :multiple_credentials} = Headers.select_payment_credential(authorization, alternate, selected)
+      end
+    end
+
+    # mpp-rs reads `Payment` followed by `=` as an auth-param of the scheme
+    # before it (refs/mpp-rs/src/protocol/core/auth_params.rs:232).
+    test "a parameter named Payment is not a credential" do
+      for value <- [
+            ~s(Digest a="1", Payment ="x", Payment abc),
+            "Digest a=1, payment\t= x, Payment abc",
+            "Digest Payment=x, Payment abc"
+          ] do
+        assert {:ok, "Payment abc"} = Headers.select_payment_credential([value], [], "Authorization")
+      end
+
+      assert {:ok, "Payment =abc"} = Headers.select_payment_credential(["Payment =abc"], [], "Authorization")
+    end
+
+    # A credential runs to the next comma whatever it contains (mpp-rs
+    # `Tokenizer::credentials`); an unterminated quoted string in another
+    # scheme ends the scan of that value.
+    test "quotes do not extend a credential, and a broken quoted string ends the scan" do
+      assert {:error, :multiple_credentials} =
+               Headers.select_payment_credential([~s(Payment a"b, Payment c)], [], "Authorization")
+
+      assert {:ok, nil} = Headers.select_payment_credential([~s(Digest a="x, Payment abc)], [], "Authorization")
+
+      assert {:ok, "Payment abc"} =
+               Headers.select_payment_credential([~s(Payment abc, Digest a="x, Payment def)], [], "Authorization")
+    end
+
+    # Only a parameter value that starts with a quote is a quoted string
+    # (refs/mpp-rs/src/protocol/core/auth_params.rs:131-135).
+    test "a stray quote in another scheme does not hide a later credential" do
+      for value <- [~s(Digest a=b"c, Payment abc), ~s(Digest tok"en, Payment abc), ~s(Basic dXNlcg==, Payment abc)] do
+        assert {:ok, "Payment abc"} = Headers.select_payment_credential([value], [], "Authorization")
+      end
+
+      assert {:error, :multiple_credentials} =
+               Headers.select_payment_credential([~s(Payment abc, Digest a=b"c, Payment def)], [], "Authorization")
+    end
+
+    # mpp-rs stops at the first decisive condition
+    # (refs/mpp-rs/src/protocol/core/headers.rs:138-165).
+    test "the first error in request order is the one reported" do
+      full = String.duplicate("a", 64 * 1024)
+
+      assert {:error, :multiple_credentials} =
+               Headers.select_payment_credential(["Payment a", "Payment b", full, full, "x"], [], "Authorization")
+
+      assert {:error, :too_many_credential_values} =
+               Headers.select_payment_credential([full, full, "x", "Payment a", "Payment b"], [], "Authorization")
+    end
+
+    test "commas inside quoted strings do not separate credentials" do
+      value = ~s(Digest realm="a, Payment b", nonce="q\\", Payment c", Payment abc)
+      assert {:ok, "Payment abc"} = Headers.select_payment_credential([value], [], "Authorization")
+    end
+
+    test "a value over 64 KiB carries no credential" do
+      at_limit = "Payment " <> String.duplicate("a", 64 * 1024 - 8)
+      assert {:ok, ^at_limit} = Headers.select_payment_credential([at_limit], [], "Authorization")
+      assert {:ok, nil} = Headers.select_payment_credential([at_limit <> "a"], [], "Authorization")
+      assert {:ok, "Payment b"} = Headers.select_payment_credential([at_limit <> "a", "Payment b"], [], "Authorization")
+    end
+
+    test "more than 32 values or more than 128 KiB to scan is an error" do
+      values = List.duplicate("Bearer x", 16)
+      assert {:ok, nil} = Headers.select_payment_credential(values, values, "Authorization")
+
+      assert {:error, :too_many_credential_values} =
+               Headers.select_payment_credential(values, ["x" | values], "Authorization")
+
+      full = String.duplicate("a", 64 * 1024)
+      assert {:ok, nil} = Headers.select_payment_credential([full], [full], "Authorization")
+
+      assert {:error, :too_many_credential_values} =
+               Headers.select_payment_credential([full, "a"], [full], "Authorization")
     end
   end
 

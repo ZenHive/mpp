@@ -65,6 +65,13 @@ defmodule MPP.Headers do
   # mpp-rs #669 dropped its receipt cap to match mppx; we keep it for receipts too.
   @max_token_len 16 * 1024
 
+  # Limits on the credential field values scanned for Payment credentials
+  # (mpp-rs MAX_AUTHORIZATION_LEN / MAX_AUTHORIZATION_VALUES /
+  # MAX_SCANNED_AUTHORIZATION_LEN, refs/mpp-rs/src/protocol/core/headers.rs:29-37).
+  @max_credential_value_len 64 * 1024
+  @max_credential_values 32
+  @max_scanned_credential_len 128 * 1024
+
   # --- Challenge (WWW-Authenticate: Payment) ---
 
   api(
@@ -228,6 +235,161 @@ defmodule MPP.Headers do
     "#{@payment_scheme} #{Credential.encode(credential)}"
   end
 
+  api(
+    :select_payment_credential,
+    "Find the one Payment credential a request carries, across every `Authorization` and `Payment-Authorization` field value. More than one is an error; a credential outside the selected field counts as absent.",
+    params: [
+      authorization: [kind: :value, description: "All `Authorization` field values of the request"],
+      payment_authorization: [kind: :value, description: "All `Payment-Authorization` field values of the request"],
+      selected: [kind: :value, description: "Field the challenge selects: `Authorization` or `Payment-Authorization`"]
+    ],
+    returns: %{
+      type: :tagged_tuple,
+      description:
+        "`{:ok, \"Payment <token>\"}`, `{:ok, nil}` when the selected field carries none, or `{:error, reason}`"
+    },
+    errors: [:multiple_credentials, :too_many_credential_values],
+    composes_with: [:parse_credential]
+  )
+
+  @doc """
+  Find the one Payment credential a request carries.
+
+  Counts `Payment <token>` credentials across every value of both credential
+  fields, including comma-joined values; commas inside another scheme's quoted
+  parameters do not separate credentials. More than one is
+  `{:error, :multiple_credentials}`, which a server answers with 400 and no
+  challenge. Otherwise the credential is returned when it is in the `selected`
+  field, ready for `parse_credential/1`; a credential in the other field, or a
+  bare `Payment` without a token, counts as absent.
+
+  `Authorization` values are scanned before `Payment-Authorization` values,
+  each in the order given, and the scan stops at the first error.
+  A value longer than 64 KiB carries no credential. More than 32 values, or
+  more than 128 KiB of values at or under that length, is
+  `{:error, :too_many_credential_values}`
+  (mpp-rs `select_payment_credential`, refs/mpp-rs/src/protocol/core/headers.rs;
+  mppx `countPaymentCredentials`, refs/mppx/src/server/Transport.ts).
+  """
+  @spec select_payment_credential([String.t()], [String.t()], String.t()) ::
+          {:ok, String.t() | nil} | {:error, :multiple_credentials | :too_many_credential_values}
+  def select_payment_credential(authorization, payment_authorization, selected)
+      when is_list(authorization) and is_list(payment_authorization) and is_binary(selected) do
+    fields = Stream.concat(Stream.map(authorization, &{false, &1}), Stream.map(payment_authorization, &{true, &1}))
+
+    case Enum.reduce_while(fields, {0, 0, nil}, &scan_credential_field/2) do
+      {:error, _reason} = error ->
+        error
+
+      {_count, _scanned, {alternate?, credential}} ->
+        if alternate? == (String.downcase(selected, :ascii) == "payment-authorization"),
+          do: {:ok, credential},
+          else: {:ok, nil}
+
+      {_count, _scanned, nil} ->
+        {:ok, nil}
+    end
+  end
+
+  # One field value, in request order: the scan stops at the first decisive
+  # condition, as mpp-rs does (refs/mpp-rs/src/protocol/core/headers.rs:138-165).
+  defp scan_credential_field(_field, {count, _scanned, _found}) when count >= @max_credential_values,
+    do: {:halt, {:error, :too_many_credential_values}}
+
+  defp scan_credential_field({_alternate?, value}, {count, scanned, found})
+       when byte_size(value) > @max_credential_value_len, do: {:cont, {count + 1, scanned, found}}
+
+  defp scan_credential_field({_alternate?, value}, {_count, scanned, _found})
+       when scanned + byte_size(value) > @max_scanned_credential_len, do: {:halt, {:error, :too_many_credential_values}}
+
+  defp scan_credential_field({alternate?, value}, {count, scanned, found}) do
+    case {found, payment_credentials(value, true, [])} do
+      {found, []} -> {:cont, {count + 1, scanned + byte_size(value), found}}
+      {nil, [credential]} -> {:cont, {count + 1, scanned + byte_size(value), {alternate?, credential}}}
+      _several -> {:halt, {:error, :multiple_credentials}}
+    end
+  end
+
+  # The `Payment <token>` credentials of one field value. An element whose
+  # first word is the scheme runs to the next comma, since a token68 may end in
+  # `=` (mpp-rs `Tokenizer::credentials`, refs/mpp-rs/src/protocol/core/auth_params.rs:112).
+  # `Payment` followed by `=` is an auth-param of the scheme before it. Other
+  # elements are skipped to their comma; an unterminated quoted parameter
+  # value ends the scan of the value.
+  defp payment_credentials(value, first?, acc) do
+    case skip_list_separators(value) do
+      <<>> -> Enum.reverse(acc)
+      element -> list_element(element, split_word(element, <<>>), first?, acc)
+    end
+  end
+
+  defp list_element(element, {word, rest}, first?, acc) do
+    if payment_scheme?(word, rest, first?) do
+      {text, tail} = split_at_comma(rest, <<>>)
+      credential = String.replace(word <> text, ~r/[ \t]+\z/, "")
+      acc = if byte_size(credential) > byte_size(word), do: [credential | acc], else: acc
+      payment_credentials(tail, false, acc)
+    else
+      case skip_element(element) do
+        {:ok, tail} -> payment_credentials(tail, false, acc)
+        :error -> Enum.reverse(acc)
+      end
+    end
+  end
+
+  defp payment_scheme?(word, rest, first?) do
+    String.downcase(word, :ascii) == "payment" and separator_next?(rest) and
+      (first? or not String.starts_with?(skip_whitespace(rest), "="))
+  end
+
+  defp separator_next?(<<>>), do: true
+  defp separator_next?(<<c, _rest::binary>>), do: c in [?\s, ?\t, ?,]
+
+  defp skip_list_separators(<<c, rest::binary>>) when c in [?\s, ?\t, ?,], do: skip_list_separators(rest)
+  defp skip_list_separators(rest), do: rest
+
+  defp split_word(<<c, _rest::binary>> = rest, word) when c in [?\s, ?\t, ?,, ?=], do: {word, rest}
+  defp split_word(<<c, rest::binary>>, word), do: split_word(rest, <<word::binary, c>>)
+  defp split_word(<<>>, word), do: {word, <<>>}
+
+  defp split_at_comma(<<",", rest::binary>>, text), do: {text, rest}
+  defp split_at_comma(<<c, rest::binary>>, text), do: split_at_comma(rest, <<text::binary, c>>)
+  defp split_at_comma(<<>>, text), do: {text, <<>>}
+
+  # The rest of the value after the element's comma. Words and auth-params are
+  # read as mpp-rs reads them: only a parameter value that starts with a quote
+  # is a quoted string (refs/mpp-rs/src/protocol/core/auth_params.rs:131-135).
+  defp skip_element(input) do
+    case skip_whitespace(input) do
+      <<>> -> {:ok, <<>>}
+      <<",", rest::binary>> -> {:ok, rest}
+      rest -> rest |> split_word(<<>>) |> skip_token()
+    end
+  end
+
+  defp skip_token({_word, rest}) do
+    case skip_whitespace(rest) do
+      <<"=", value::binary>> -> value |> skip_whitespace() |> skip_param_value()
+      rest -> skip_element(rest)
+    end
+  end
+
+  defp skip_param_value(<<"\"", rest::binary>>), do: skip_quoted(rest)
+
+  defp skip_param_value(value) do
+    {_text, rest} = split_word(value, <<>>)
+    # An `=` ends a word but belongs to an unquoted value such as a token68.
+    rest |> skip_equals() |> skip_element()
+  end
+
+  defp skip_equals(<<"=", rest::binary>>), do: skip_equals(rest)
+  defp skip_equals(rest), do: rest
+
+  defp skip_quoted(<<>>), do: :error
+  defp skip_quoted(<<"\\", _c, rest::binary>>), do: skip_quoted(rest)
+  defp skip_quoted(<<"\"", rest::binary>>), do: skip_element(rest)
+  defp skip_quoted(<<_c, rest::binary>>), do: skip_quoted(rest)
+
   api(:parse_credential, "Parse an `Authorization: Payment` header value into a credential struct.",
     params: [
       header: [kind: :value, description: "Raw Authorization header value string"]
@@ -239,10 +401,9 @@ defmodule MPP.Headers do
 
   @spec parse_credential(String.t()) :: {:ok, Credential.t()} | {:error, atom()}
   def parse_credential(header) when is_binary(header) do
-    with {:ok, rest} <- strip_scheme(header),
-         token = String.trim(rest),
-         :ok <- check_token_size(token) do
-      Credential.decode(token)
+    with :ok <- check_credential_size(header),
+         {:ok, rest} <- strip_scheme(header) do
+      rest |> String.trim() |> Credential.decode()
     end
   end
 
@@ -287,6 +448,13 @@ defmodule MPP.Headers do
 
   # Rejects a base64url credential/receipt token that exceeds @max_token_len
   # BEFORE it reaches Base.url_decode64 + Jason.decode. At-limit passes.
+  # A credential echoes its challenge, whose `request` alone may reach
+  # @max_token_len, so the whole field value is bounded instead (mpp-rs
+  # MAX_AUTHORIZATION_LEN, refs/mpp-rs/src/protocol/core/headers.rs:29,761;
+  # mppx refs/mppx/src/Credential.ts).
+  defp check_credential_size(header) when byte_size(header) > @max_credential_value_len, do: {:error, :token_too_large}
+  defp check_credential_size(_header), do: :ok
+
   @spec check_token_size(binary()) :: :ok | {:error, :token_too_large}
   defp check_token_size(token) when byte_size(token) > @max_token_len, do: {:error, :token_too_large}
   defp check_token_size(_token), do: :ok

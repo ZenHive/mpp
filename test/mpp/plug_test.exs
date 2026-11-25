@@ -235,6 +235,12 @@ defmodule MPP.PlugTest do
   end
 
   # Builds a valid credential for the given config's first method entry.
+  defp body_reader_parsers do
+    Plug.Parsers.init(parsers: [:json], json_decoder: Jason, body_reader: {MPP.BodyReader, :read_body, []})
+  end
+
+  defp add_req_header(conn, name, value), do: %{conn | req_headers: conn.req_headers ++ [{name, value}]}
+
   defp build_authorization_header(config, payload \\ %{"proof" => "valid"}) do
     build_authorization_header_for_entry(config, first_entry(config), payload)
   end
@@ -358,12 +364,12 @@ defmodule MPP.PlugTest do
       base = [realm: "x", method: MockMethod, amount: "1", currency: "usd"]
 
       for key <- ["", "x", String.duplicate("k", 31), :not_a_binary] do
-        assert_raise ArgumentError, ~r/:secret_key must be a binary of at least 32 bytes/, fn ->
+        assert_raise ArgumentError, ~r/secret key must be a binary of at least 32 bytes/, fn ->
           PaymentPlug.init([secret_key: key] ++ base)
         end
 
-        assert_raise ArgumentError, ~r/:secret_key/, fn -> MPP.Mcp.init([secret_key: key] ++ base) end
-        assert_raise ArgumentError, ~r/:secret_key/, fn -> JsonRpc.init([secret_key: key] ++ base) end
+        assert_raise ArgumentError, ~r/secret key must be/, fn -> MPP.Mcp.init([secret_key: key] ++ base) end
+        assert_raise ArgumentError, ~r/secret key must be/, fn -> JsonRpc.init([secret_key: key] ++ base) end
       end
 
       key = String.duplicate("k", 32)
@@ -937,9 +943,10 @@ defmodule MPP.PlugTest do
         |> call_plug(config)
 
       assert conn.halted
-      assert conn.status == 402
+      assert conn.status == 400
+      assert Plug.Conn.get_resp_header(conn, "www-authenticate") == []
       body = decode_json_body(conn)
-      assert body["type"] =~ "malformed-credential"
+      assert body["type"] =~ "bad-request"
     end
 
     test "unconfigured Plug still reads Authorization and ignores Payment-Authorization" do
@@ -1266,20 +1273,145 @@ defmodule MPP.PlugTest do
       refute second_conn.halted
     end
 
-    test "accepts credential whose digest matches endpoint config" do
-      digest = "sha-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE"
-      config = init_config(digest: digest)
+    test "accepts credential whose digest matches endpoint config and the request body" do
+      body = ~s({"amount":"1000"})
+      config = init_config(digest: MPP.BodyDigest.compute(body))
       auth_header = build_authorization_header(config)
 
       conn =
-        :get
-        |> Plug.Test.conn("/premium")
+        :post
+        |> Plug.Test.conn("/premium", body)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Conn.put_req_header("authorization", auth_header)
         |> call_plug(config)
 
       refute conn.halted
+      assert conn.private.raw_body == body
+
+      # A parser mounted after the payment plug still gets the body.
+      parsed = Plug.Parsers.call(conn, body_reader_parsers())
+      assert parsed.body_params == %{"amount" => "1000"}
+
       conn = send_success(conn)
-      assert get_resp_header(conn, "payment-receipt")
+      assert [receipt] = Plug.Conn.get_resp_header(conn, "payment-receipt")
+      assert {:ok, %Receipt{status: "success"}} = Headers.parse_receipt(receipt)
+    end
+
+    test "accepts a bodyless request after a parser that read nothing" do
+      config = init_config(digest: MPP.BodyDigest.compute(""))
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+        |> Plug.Parsers.call(body_reader_parsers())
+        |> call_plug(config)
+
+      assert conn.body_params == %{}
+      refute conn.halted
+    end
+
+    test "does not read the body for a challenge this server did not issue" do
+      body = ~s({"amount":"1000"})
+      config = init_config(digest: MPP.BodyDigest.compute(body))
+      forged = %{config | secret_key: String.duplicate("f", 32)}
+
+      conn =
+        :post
+        |> Plug.Test.conn("/premium", body)
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(forged))
+        |> call_plug(config)
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] =~ "invalid-challenge"
+      refute Map.has_key?(conn.private, :raw_body)
+    end
+
+    test "rejects a body something else read directly" do
+      body = ~s({"amount":"1000"})
+      config = init_config(digest: MPP.BodyDigest.compute(""))
+
+      {:ok, ^body, conn} =
+        :post
+        |> Plug.Test.conn("/premium", body)
+        |> Plug.Conn.put_req_header("content-length", "#{byte_size(body)}")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+        |> Plug.Conn.read_body()
+
+      conn = call_plug(conn, config)
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["detail"] =~ "not available"
+    end
+
+    test "accepts a body a parser read through MPP.BodyReader before the plug" do
+      body = ~s({"amount":"1000"})
+      config = init_config(digest: MPP.BodyDigest.compute(body))
+
+      conn =
+        :post
+        |> Plug.Test.conn("/premium", body)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+        |> Plug.Parsers.call(body_reader_parsers())
+        |> call_plug(config)
+
+      refute conn.halted
+      assert conn.body_params == %{"amount" => "1000"}
+    end
+
+    # mppx `matchesBodyDigest` (refs/mppx/src/server/Mppx.ts): a credential
+    # bound to one body does not pay for another.
+    test "rejects a request body that differs from the challenge digest" do
+      config = init_config(digest: MPP.BodyDigest.compute(~s({"amount":"1000"})))
+
+      for {method, body} <- [{:post, ~s({"amount":"9999"})}, {:post, ~s({"amount": "1000"})}, {:get, nil}] do
+        conn =
+          method
+          |> Plug.Test.conn("/premium", body)
+          |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+          |> call_plug(config)
+
+        assert conn.halted
+        assert conn.status == 402
+        assert [_challenge] = Plug.Conn.get_resp_header(conn, "www-authenticate")
+        problem = decode_json_body(conn)
+        assert problem["type"] =~ "invalid-challenge"
+        assert problem["detail"] == "Request body does not match the challenge digest"
+      end
+    end
+
+    test "rejects a body a parser consumed without keeping it" do
+      body = ~s({"amount":"1000"})
+      config = init_config(digest: MPP.BodyDigest.compute(body))
+
+      conn =
+        :post
+        |> Plug.Test.conn("/premium", body)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+        |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+        |> call_plug(config)
+
+      assert conn.halted
+      assert conn.status == 402
+      problem = decode_json_body(conn)
+      assert problem["type"] =~ "invalid-challenge"
+      assert problem["detail"] == "Request body is not available to compare with the challenge digest"
+    end
+
+    test "a route without a digest never reads the body" do
+      config = init_config([])
+
+      conn =
+        :post
+        |> Plug.Test.conn("/premium", "anything")
+        |> Plug.Conn.put_req_header("authorization", build_authorization_header(config))
+        |> call_plug(config)
+
+      refute conn.halted
+      refute Map.has_key?(conn.private, :raw_body)
+      assert {:ok, "anything", _conn} = Plug.Conn.read_body(conn)
     end
 
     test "rejects credential whose digest differs from endpoint config" do
@@ -1519,11 +1651,23 @@ defmodule MPP.PlugTest do
       assert body["type"] =~ "malformed-credential"
     end
 
-    # End-to-end through the plug: an over-16KiB Authorization token is rejected
-    # before any base64url decode (token-size DoS cap, mpp-rs #299) and surfaces
-    # as the standard malformed_credential 402, not a crash or unbounded alloc.
-    test "over-limit Authorization token returns 402 before decode", %{config: config} do
-      oversized = "Payment " <> String.duplicate("A", 16 * 1024 + 1)
+    # A value over 64 KiB carries no credential (mpp-rs
+    # `select_payment_credential`), so the request is answered like one without.
+    test "an Authorization value over 64 KiB is answered as no credential", %{config: config} do
+      oversized = "Payment " <> String.duplicate("A", 64 * 1024)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/premium")
+        |> Plug.Conn.put_req_header("authorization", oversized)
+        |> call_plug(config)
+
+      assert conn.status == 402
+      assert decode_json_body(conn)["type"] =~ "payment-required"
+    end
+
+    test "a large undecodable Authorization token returns 402 malformed-credential", %{config: config} do
+      oversized = "Payment " <> String.duplicate("!", 16 * 1024 + 1)
 
       conn =
         :get
@@ -1534,7 +1678,80 @@ defmodule MPP.PlugTest do
       assert conn.status == 402
       body = decode_json_body(conn)
       assert body["type"] =~ "malformed-credential"
-      assert body["detail"] =~ "token_too_large"
+      assert body["detail"] =~ "invalid_base64"
+    end
+
+    # One request, one Payment credential: mpp-rs `select_payment_credential`
+    # (refs/mpp-rs/src/protocol/core/headers.rs) and mppx
+    # `countPaymentCredentials` (refs/mppx/src/server/Transport.ts) answer more
+    # with 400 and no challenge.
+    test "more than one Payment credential returns 400 without a challenge", %{config: config} do
+      auth_header = build_authorization_header(config)
+      conn = Plug.Test.conn(:get, "/premium")
+
+      requests = [
+        conn |> add_req_header("authorization", auth_header) |> add_req_header("authorization", auth_header),
+        add_req_header(conn, "authorization", auth_header <> ", " <> auth_header),
+        add_req_header(conn, "authorization", "Basic abc, " <> auth_header <> " ,payment other"),
+        conn |> add_req_header("authorization", auth_header) |> add_req_header("payment-authorization", auth_header)
+      ]
+
+      for request <- requests do
+        conn = call_plug(request, config)
+
+        assert conn.halted
+        assert conn.status == 400
+        assert Plug.Conn.get_resp_header(conn, "www-authenticate") == []
+        assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+        problem = decode_json_body(conn)
+        assert problem["type"] =~ "bad-request"
+        assert problem["detail"] == "Request carries more than one Payment credential"
+      end
+    end
+
+    test "one Payment credential beside other schemes is accepted", %{config: config} do
+      auth_header = build_authorization_header(config)
+      conn = Plug.Test.conn(:get, "/premium")
+
+      requests = [
+        add_req_header(conn, "authorization", ~s(Digest realm="a, Payment b", nonce="x\\", Payment c", ) <> auth_header),
+        conn |> add_req_header("authorization", "Bearer token") |> add_req_header("authorization", auth_header),
+        conn |> add_req_header("authorization", "Payment") |> add_req_header("authorization", auth_header),
+        conn
+        |> add_req_header("authorization", auth_header)
+        |> add_req_header("authorization", "Payment " <> String.duplicate("a", 64 * 1024))
+      ]
+
+      for request <- requests do
+        refute call_plug(request, config).halted
+      end
+    end
+
+    test "too many credential field values return 400 without a challenge", %{config: config} do
+      auth_header = build_authorization_header(config)
+      conn = Plug.Test.conn(:get, "/premium")
+
+      at_limit = Enum.reduce(1..31, conn, fn _n, acc -> add_req_header(acc, "authorization", "Bearer t") end)
+      refute call_plug(add_req_header(at_limit, "authorization", auth_header), config).halted
+
+      over_count =
+        at_limit |> add_req_header("payment-authorization", "x") |> add_req_header("authorization", auth_header)
+
+      over_size =
+        conn
+        |> add_req_header("authorization", String.duplicate("a", 64 * 1024))
+        |> add_req_header("authorization", String.duplicate("b", 64 * 1024))
+        |> add_req_header("authorization", auth_header)
+
+      for request <- [over_count, over_size] do
+        conn = call_plug(request, config)
+
+        assert conn.status == 400
+        assert Plug.Conn.get_resp_header(conn, "www-authenticate") == []
+        problem = decode_json_body(conn)
+        assert problem["type"] =~ "bad-request"
+        assert problem["detail"] == "Too many Authorization or Payment-Authorization field values"
+      end
     end
 
     test "tampered challenge returns 402 with invalid_challenge", %{config: config} do
@@ -1543,7 +1760,7 @@ defmodule MPP.PlugTest do
       challenge =
         Challenge.create(
           [realm: config.realm, method: "mock", intent: "charge", request: entry.request],
-          "wrong-secret-key"
+          "wrong-secret-key-of-at-least-32-bytes"
         )
 
       credential = %Credential{challenge: challenge, payload: %{"proof" => "valid"}}

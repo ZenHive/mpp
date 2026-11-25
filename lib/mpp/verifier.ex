@@ -27,13 +27,19 @@ defmodule MPP.Verifier do
 
   ## Options
 
-    * `:secret_key` — (required) HMAC-SHA256 key for challenge verification
+    * `:secret_key` — (required) HMAC-SHA256 key for challenge verification, at
+      least 32 bytes; a shorter key raises `ArgumentError`
     * `:realm` — (required) expected server protection space
     * `:method` — (required) module implementing `MPP.Method`
     * `:charge` — (required) `MPP.Intents.Charge.t()` or `MPP.Intents.Session.t()`
       for this endpoint. `:intent` is accepted as an alias.
     * `:method_config` — (optional) server-only config map, default `%{}`
     * `:digest` — (optional) expected endpoint digest value
+    * `:request_body` — `{:ok, raw_body}`, `:unavailable`, or `:none` for a
+      transport without a request body (MCP, JSON-RPC, WebSocket). When the
+      credential's challenge carries a digest, the body's SHA-256 must match it;
+      `:unavailable`, and leaving the option out, fail that check. A challenge
+      without a digest ignores the option
     * `:opaque` — (optional) expected endpoint opaque value. It is matched as JSON
       without the members reserved for issued challenges (`_mpp_nonce`,
       `_mppx_nonce`, `_mppx_identity`, `_mppx_expiry_grace`); setting one of them
@@ -51,6 +57,7 @@ defmodule MPP.Verifier do
 
   use Descripex, namespace: "/protocol"
 
+  alias MPP.BodyDigest
   alias MPP.Challenge
   alias MPP.Challenge.Meta, as: ChallengeMeta
   alias MPP.Credential
@@ -73,7 +80,7 @@ defmodule MPP.Verifier do
       opts: [
         kind: :value,
         description:
-          "Keyword list: :secret_key (HMAC key), :realm, :method (module), :charge (Charge.t()), :method_config (optional map)"
+          "Keyword list: :secret_key (HMAC key, at least 32 bytes), :realm, :method (module), :charge (Charge.t()), :method_config (optional map), :request_body (`{:ok, raw_body}`, `:unavailable` or `:none`; required when the challenge carries a digest)"
       ]
     ],
     returns: %{type: :tagged_tuple, description: "`{:ok, receipt}` on success, `{:error, %Errors{}}` on failure"},
@@ -92,7 +99,7 @@ defmodule MPP.Verifier do
 
   @spec verify(Credential.t(), keyword()) :: {:ok, Receipt.t()} | {:error, Errors.t()}
   def verify(%Credential{} = credential, opts) when is_list(opts) do
-    secret_key = require_opt!(opts, :secret_key)
+    secret_key = opts |> require_opt!(:secret_key) |> Challenge.validate_secret_key!()
     realm = require_opt!(opts, :realm)
     method = require_opt!(opts, :method)
     charge = Keyword.get(opts, :intent) || require_opt!(opts, :charge)
@@ -115,6 +122,7 @@ defmodule MPP.Verifier do
     result =
       with :ok <- verify_tier1(credential.challenge, secret_key, realm),
            :ok <- verify_pinned_fields(credential.challenge, method, realm, charge, digest, opaque),
+           :ok <- check_body_digest(credential.challenge.digest, Keyword.get(opts, :request_body)),
            :ok <- check_credential_type(credential, method, charge),
            {:ok, receipt} <- verify_payment(method, credential.payload, charge_for_verify) do
         {:ok, receipt}
@@ -159,6 +167,26 @@ defmodule MPP.Verifier do
         Telemetry.verify_fail(credential, charge, start_time, error, %{realm: realm})
         {:error, error}
     end
+  end
+
+  # A digest bound into the challenge must match this request's body (mppx
+  # `matchesBodyDigest`, refs/mppx/src/server/Mppx.ts). A transport without a
+  # request body says so with `:none`; a caller that passes nothing has not
+  # shown the body, which mpp-rs also refuses
+  # (refs/mpp-rs/src/server/mpp/verify.rs).
+  defp check_body_digest(nil, _request_body), do: :ok
+  defp check_body_digest(_digest, :none), do: :ok
+
+  defp check_body_digest(digest, {:ok, body}) when is_binary(body) do
+    if BodyDigest.verify(digest, body) do
+      :ok
+    else
+      {:error, Errors.new(:invalid_challenge, "Request body does not match the challenge digest")}
+    end
+  end
+
+  defp check_body_digest(_digest, _unavailable) do
+    {:error, Errors.new(:invalid_challenge, "Request body is not available to compare with the challenge digest")}
   end
 
   defp verify_payment(method, payload, charge) do
