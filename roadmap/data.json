@@ -7780,7 +7780,7 @@
       "id": "188",
       "phase": 1,
       "bundle": "transport-ws",
-      "status": "pending",
+      "status": "done",
       "title": "Bound the wait for a receipt in the WebSocket client state machine",
       "scores": {
         "d": 3,
@@ -7802,9 +7802,12 @@
         "The timeout event while the deadline is armed ends the attempt without another payment; the existing payment-amplification bound is unchanged",
         "Unit tests for each transition; the caller's obligation to fire the timeout is documented"
       ],
+      "shipped_in": "4538a2f9a6d29655eb837d76865a7faeb6e3bf46",
       "body": "mpp-rs #756 (486b2ec, refs/mpp-rs/crates/alloy-transport-mpp/src/ws.rs) bounds how long its WebSocket client waits after sending a credential: a deadline is armed at send, disarmed by the first data or needVoucher frame, re-armed once by a receipt that does not acknowledge the payment, and also bounds blocked writes. MPP.Client.Transport.WebSocket.Retry is a pure state machine: any receipt clears the awaiting state without checking that it acknowledges the pending challenge, and there is no receipt-deadline state, so a consumer loop that never fires a timeout can be held open by a server that stays silent or sends unrelated receipts. Add the deadline state and an acknowledgement check, keeping the module socket-free.",
       "created_at": "2026-11-24",
+      "done_at": "2026-11-25",
       "scored_at": "2026-11-24",
+      "implemented": "MPP.Client.Transport.WebSocket.Retry carries the mpp-rs receipt deadline: armed at a sent payment credential, disarmed by data or needVoucher, armed once more by a receipt that does not acknowledge the pending payment, :receipt_timeout latches. acknowledges_payment?/2 and {:receipt, body, challenge} check the receipt; the caller owns the timer. Reviewed by Codex, findings applied.",
       "cross_repo": []
     },
     {
