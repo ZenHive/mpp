@@ -75,7 +75,7 @@
 | Task 181 `[P]` | ⬜ | 🎁 **tempo** · Accept Tempo Zone payments on the charge method [D:8/B:5/U:3 → Eff:0.5] ⚠️ |
 | Task 182 `[P]` | ⬜ | 🎁 **session** · Accept TIP-1166 configurable account vouchers on Tempo sessions [D:7/B:4/U:3 → Eff:0.5] ⚠️ |
 | Task 183 `[P]` | ⬜ | 🎁 **evm** · x402 facilitator: read GET /supported and the facilitator-published payTo [D:3/B:3/U:2 → Eff:0.83] ⚠️ |
-| Task 184 `[P]` | ⬜ | 🎁 **core-protocol** · Read and write Payment challenge headers by the core grammar [D:5/B:6/U:5 → Eff:1.1] 📋 |
+| Task 184 `[P]` | ✅ | 🎁 **core-protocol** · Read and write Payment challenge headers by the core grammar [D:5/B:6/U:5 → Eff:1.1] 📋 |
 | Task 185 `[P]` | ⬜ | 🎁 **core-protocol** · Core-spec request checks: one Payment credential, body digest binding, secret length at the library API [D:4/B:5/U:4 → Eff:1.12] 📋 |
 | Task 186 | ⬜ | 🎁 **tempo** · Tempo charge memo rules from the charge draft: memo-less pull, methodDetails.memo on the client, inclusion check before broadcast [D:5/B:4/U:3 → Eff:0.7] ⚠️ |
 | Task 187 `[P]` | ⬜ | 🎁 **client-sdk** · Client payment limits and budgets on the payment transports [D:5/B:6/U:4 → Eff:1.0] 📋 |

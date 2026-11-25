@@ -7637,7 +7637,7 @@
       "id": "184",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "done",
       "title": "Read and write Payment challenge headers by the core grammar",
       "scores": {
         "d": 5,
@@ -7665,9 +7665,12 @@
         "Authorization credential parsing and base64url padding (already at parity, see docs/security-parity.md)",
         "Accept-Payment token syntax beyond what mpp-rs applies"
       ],
+      "shipped_in": "00ea4753344376225fd6e14563c5459d810a4b54",
       "body": "Both reference SDKs now parse and emit Payment challenges by the core spec grammar. mppx #1349 (8a31e2d, refs/mppx/src/Challenge.ts) and mpp-rs #752 (fcd400b, refs/mpp-rs/src/protocol/core/headers.rs) require comma-separated auth-params and token-valued unquoted values. mppx #1341 (ad2a467) and mpp-rs #737 (db8a351, src/protocol/core/types.rs MethodName) restrict method identifiers to lowercase letters (core draft: payment-method-id = 1*LOWERALPHA). mppx #1341 and mpp-rs #755 (af73076, src/protocol/core/auth_params.rs) read quoted-pairs literally, so a backslash-u sequence is plain text, and their clients refuse to pay a challenge whose bound params carry one. Observed 2026-11-25 by running inputs through MPP.Headers: we accept auth-params without commas, non-token unquoted values, and method names such as x402 or a:b (MPP.Challenge.valid_method_name?/1 allows digits, colon, underscore, hyphen); we reject repeated commas that both SDKs accept; we decode backslash-u on parse; and the formatter escapes every non-ASCII code point as backslash-u in bound params too (lib/mpp/headers.ex escape_quoted), so a server with a non-ASCII realm emits challenges the current reference clients decline. MPP.Receipt.decode accepts a non-string method. Decisions: an empty unquoted value is rejected (mppx; mpp-rs still reads it as empty); bound params are limited to HTAB and printable ASCII (the mpp-rs rule, the intersection of both SDKs, which disagree on 0x80-0xFF); switch parsing to literal quoted-pairs only together with the client-side legacy refusal, because our current decoding is what lets us pay older servers that emitted the escape. All built-in method names are already a-z. Verify every rule against both refs before pinning it.",
       "created_at": "2026-11-24",
+      "done_at": "2026-11-25",
       "scored_at": "2026-11-24",
+      "implemented": "Challenge headers follow the core grammar: comma-separated auth-params, token or quoted-string values, literal quoted-pairs, method ids a-z only, bound values limited to HTAB and printable ASCII on write, legacy-escaped challenges flagged on read and never paid or passed on; unknown auth-params ignored; explicit default header rejected. Receipts: string-typed method/reference only, since neither reference SDK checks the method grammar on receipt parse. Cross-validated against mppx at runtime; mpp-rs verdicts cited per vector. Reviewed twice by Codex (not an independent gate run).",
       "cross_repo": []
     },
     {
