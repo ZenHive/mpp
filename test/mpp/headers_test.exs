@@ -998,7 +998,8 @@ defmodule MPP.HeadersTest do
             ~s(Digest tok"en, Payment abc),
             ~s(Basic dXNlcg==, Payment abc),
             ~s(Digest a=b=c=d, Payment abc),
-            ~s(Digest a=b="c, Payment abc)
+            ~s(Digest a=b="c, Payment abc),
+            ~s(Digest a=b=c="x, Payment abc, y")
           ] do
         assert {:ok, "Payment abc"} = Headers.select_payment_credential([value], [], "Authorization")
       end

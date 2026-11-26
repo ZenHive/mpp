@@ -178,7 +178,13 @@ defmodule MPP.BodyReader do
   end
 
   defp decimal(text) do
-    if text != "" and text =~ ~r/\A[0-9]+\z/, do: String.to_integer(text), else: :error
+    # Leading zeros are dropped as text; a length past the size cap is no length.
+    with true <- text =~ ~r/\A[0-9]+\z/,
+         digits when byte_size(digits) <= 8 <- String.replace(text, ~r/\A0+(?=[0-9])/, "") do
+      String.to_integer(digits)
+    else
+      _other -> :error
+    end
   end
 
   # `Plug.Parsers` sets an empty map without reading a body it does not parse.
