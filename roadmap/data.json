@@ -7903,6 +7903,44 @@
       "created_at": "2026-11-24",
       "scored_at": "2026-11-24",
       "cross_repo": []
+    },
+    {
+      "id": "192",
+      "phase": 1,
+      "bundle": "core-protocol",
+      "status": "pending",
+      "title": "Emit the receipt telemetry event only for an accepted payment, with the receipt's own fields",
+      "scores": {
+        "d": 3,
+        "b": 5,
+        "u": 4
+      },
+      "eff": 1.5,
+      "dep_layer": 0,
+      "unlocks": 0,
+      "markers": [
+        "bug"
+      ],
+      "depends_on": [],
+      "assignee": "codex",
+      "model": "gpt-6-astra",
+      "acceptance_criteria": [
+        "A credential that passes verification but loses the single-use claim (replayed, or the dedup store errors) emits no `[:mpp, :receipt]` event on the HTTP Plug, MCP and bare JSON-RPC transports; a regression test per transport attaches a handler and asserts the event is absent while the request is rejected",
+        "An accepted payment emits exactly one `[:mpp, :receipt]` event on each of those transports, and on the WebSocket transport wherever it verifies and claims a credential",
+        "A direct `MPP.Verifier.verify/2` call (no replay store involved) still emits exactly one receipt event on success",
+        "The receipt event metadata carries the receipt's `extensions`, `external_id`, `subscription_id` and `funding_currency` when present; a session-action test asserts `action`, `acceptedCumulative`, `spent`, `units` (and `txHash` when the action has one) are readable from the event",
+        "The metadata stays safe to log: a test asserts no credential payload, signature or proof appears in it",
+        "`MPP.Telemetry` moduledoc states at which point the receipt event fires and lists its metadata keys; CHANGELOG notes the changed emission point"
+      ],
+      "out_of_scope": [
+        "A payment-accepted struct in conn assigns or handler arguments, and any sink / ledger callback",
+        "Exposing the verified payer (Task 157 'Expose the verified payer on payment success')",
+        "Telemetry for the x402 facilitator settle path, subscription renewals, or new session-specific event names"
+      ],
+      "body": "`[:mpp, :receipt]` is documented as \"receipt produced after successful verification\" (`lib/mpp/telemetry.ex`), and consumers read it as \"this payment was accepted\". It fires too early and says too little. Evidence read 2026-11-26 on `542f752`:\n\n1. Emission precedes the single-use claim. `MPP.Verifier.verify/2` emits `verify_ok` and `receipt` itself (`lib/mpp/verifier.ex:162-163`). The transports take the replay claim only afterwards: `lib/mpp/plug.ex:760-761` and `lib/mpp/transports/json_rpc/adapter.ex:103-104` run `Verifier.verify` and then `Replay.mark_used`. When `mark_used` returns an error the request is rejected, but the receipt event has already been emitted. Anything metering or counting revenue from the event counts a payment the server refused.\n\n2. The metadata drops the receipt's content. `MPP.Telemetry.receipt/4` adds only `receipt_method` and `receipt_reference` (`lib/mpp/telemetry.ex:101-114`). For session credentials every action shares the channel id as `reference`, and the facts that distinguish them live in `receipt.extensions` (`lib/mpp/session/actions.ex:993-1009`: `action`, `acceptedCumulative`, `spent`, `units`, `txHash`). The event's `amount` then comes from the session intent, where it is the per-unit rate (`lib/mpp/intents/session.ex`), so a consumer reads the rate as the charged figure with nothing in the event to correct it.\n\nMake the receipt event mean \"accepted\": emit it once the credential is both verified and claimed, on every transport that does both, and keep it firing for callers that use `MPP.Verifier.verify/2` directly without a replay store. Carry the receipt's own fields in the metadata. `[:mpp, :verify, :ok]` keeps its meaning (verification succeeded) and its emission point.\n\nPremise unverified, confirm before building on it: where the WebSocket transport (`lib/mpp/transports/websocket.ex`) verifies and claims a credential, and whether it goes through the JSON-RPC adapter; I did not trace it.\n\nBlast radius: observability only. No change to what is accepted or rejected, to the wire format, or to the order of verification and claim. The existing `test/mpp/telemetry_test.exs` pins current event shapes; added keys are additive, the moved emission point is the intended behavior change.\n",
+      "created_at": "2026-11-26",
+      "scored_at": "2026-11-26",
+      "cross_repo": []
     }
   ]
 }

@@ -83,6 +83,7 @@
 | Task 189 | ⬜ | 🎁 **evm** · x402 exact on Solana, with a solana/charge offer beside it [D:6/B:3/U:2 → Eff:0.42] ⚠️ |
 | Task 190 | ⬜ | 🎁 **additional-methods** · Implement the nearintents/session intent [D:8/B:3/U:2 → Eff:0.31] ⚠️ |
 | Task 191 | ⬜ | 🎁 **core-protocol** · Check the on-chain receipt before reporting a failed Tempo simulation as retryable [D:4/B:5/U:4 → Eff:1.12] 📋 |
+| Task 192 | ⬜ | 🎁 **core-protocol** · 🐛 Emit the receipt telemetry event only for an accepted payment, with the receipt's own fields [D:3/B:5/U:4 → Eff:1.5] 🚀 |
 <!-- TASKS:END -->
 
 ---
