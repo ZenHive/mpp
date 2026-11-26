@@ -7429,7 +7429,7 @@
       "id": "178",
       "phase": 1,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "done",
       "title": "Report an unknown payment outcome when the paid retry fails without a verdict",
       "scores": {
         "d": 4,
@@ -7452,9 +7452,12 @@
       "out_of_scope": [
         "Server-side broadcast outcome handling (shipped in Task 162)"
       ],
+      "shipped_in": "b4881e6f9191bf7576a75920a0cff03af6bba490",
       "body": "mppx #1043 (1e692c3) makes the client raise PaymentOutcomeUnknownError (problem type https://paymentauth.org/problems/payment-outcome-unknown) when the paid retry returns a 5xx or throws: the credential was sent, so the payment may have settled, and the caller must not blindly retry. The error carries the challenge, the serialized credential, and the on-chain transaction hash when the credential lets the client derive it (Tempo transaction and push-hash credentials). MPP.Client.Req returns the 5xx response unchanged today and has no such signal; MPP.Client.MCP and the other client transports likewise. Port the behaviour to the client transports where a paid retry can fail without a verdict, matching mppx's semantics (refs/mppx/src/Errors.ts PaymentOutcomeUnknownError; read the client changes in 1e692c3). Check mpp-rs for an equivalent before settling the shape. The cross-validation test 'error_code/1 matches mppx Mcp.errorCode behaviour' (test/mpp/mcp_test.exs) currently fails because MPP.Errors has no counterpart for this type.",
       "created_at": "2026-11-07",
+      "done_at": "2026-11-26",
       "scored_at": "2026-11-07",
+      "implemented": "MPP.Client.PaymentOutcomeUnknownError from MPP.Client.Req (paid 5xx / failed send, terminal at the adapter, retry off) and MPP.Client.MCP (paid send raises or returns no plain map); payment-outcome-unknown problem type; optional PaymentProvider.transaction_hash/2 with a Tempo implementation",
       "cross_repo": []
     },
     {
