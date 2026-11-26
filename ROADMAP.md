@@ -84,6 +84,8 @@
 | Task 190 | ⬜ | 🎁 **additional-methods** · Implement the nearintents/session intent [D:8/B:3/U:2 → Eff:0.31] ⚠️ |
 | Task 191 | ⬜ | 🎁 **core-protocol** · Check the on-chain receipt before reporting a failed Tempo simulation as retryable [D:4/B:5/U:4 → Eff:1.12] 📋 |
 | Task 192 | ⬜ | 🎁 **core-protocol** · 🐛 Emit the receipt telemetry event only for an accepted payment, with the receipt's own fields [D:3/B:5/U:4 → Eff:1.5] 🚀 |
+| Task 193 | ⬜ | 🎁 **core-protocol** · Hand the protected handler one accepted-payment value with the payment's authoritative terms [D:4/B:6/U:5 → Eff:1.38] 📋 |
+| Task 194 | ⬜ | 🎁 **core-protocol** · Optional payment sink called synchronously wherever a payment is accepted [D:6/B:6/U:4 → Eff:0.83] ⚠️ |
 <!-- TASKS:END -->
 
 ---

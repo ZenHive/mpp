@@ -4949,6 +4949,70 @@ Blast radius: observability only. No change to what is accepted or rejected, to 
 created_at = "2026-11-26"
 scored_at = "2026-11-26"
 
+[[task]]
+id = "193"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Hand the protected handler one accepted-payment value with the payment's authoritative terms"
+scores = { d = 4, b = 6, u = 5 }
+depends_on = [192]
+acceptance_criteria = ["After `MPP.Plug` accepts a native credential the conn carries one documented accepted-payment struct holding the receipt, the parsed credential (echoed challenge included), the server-side intent the route was configured with (charge, session or subscription), the method module, the realm and the transport; a test reads amount, currency, recipient and `method_details` from it without touching the route config", "`conn.assigns.mpp_receipt` is still assigned and equals the struct's receipt", "MCP, bare JSON-RPC and WebSocket handlers can receive the same struct; existing one-argument handlers keep working unchanged (regression test per transport)", "On the x402 path the struct is present too and exposes the matched payment requirements (scheme, network, asset, amount, payTo) and the facilitator settle response; `conn.assigns.x402_settlement` stays as it is", "Nothing is assigned or passed when verification, the single-use claim or the x402 settle fails", "The struct carries no server-only secret: a test with a `method_config` holding a secret key asserts the key is not reachable from it", "Documented in the `MPP.Plug`, `MPP.Mcp` and `MPP.Transports.JsonRpc` moduledocs and the README; CLAUDE.md module map lists the new module"]
+out_of_scope = ["A sink / callback invoked by mpp on acceptance (separate task that depends on this one)", "Deriving the verified payer: that is Task 157 'Expose the verified payer on payment success'. Leave a place for it in the struct and do not populate a payer from the unverified `credential.source` here", "Session and subscription state beyond what the receipt and the intent already carry"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+A handler behind mpp can see that a payment was accepted but not what was paid. Evidence read 2026-11-26 on `542f752`:
+
+- `MPP.Plug` assigns only the receipt (`lib/mpp/plug.ex:763`). `MPP.Receipt` has no amount, currency, recipient or chain (`lib/mpp/receipt.ex:36-45`). The parsed credential and the `entry.charge` the verifier checked against (`lib/mpp/plug.ex:738`) are dropped.
+- The MCP, bare JSON-RPC and WebSocket handlers receive only the request; the receipt is attached to the response after the handler returned (`lib/mpp/transports/json_rpc/adapter.ex:33-39`, `lib/mpp/transports/websocket.ex:405`). A handler on those transports cannot see the payment at all.
+- The x402 path assigns only the facilitator's settle response as `:x402_settlement` (`lib/mpp/x402/plug.ex:161-171`, `:346`). The matched `accepted` requirements, which hold the amount and asset, are not exposed, and no `:mpp_receipt` is assigned.
+
+A consumer that wants to record an accepted payment (metering, invoicing, bookkeeping that books each accepted payment once) therefore has to keep its own copy of every route's pricing and re-parse the Authorization header, and cannot do it at all outside HTTP with a native credential.
+
+Add one accepted-payment struct and hand it to the protected handler on every server transport, built at the point where the payment counts as accepted (verified and claimed; Task 192 "Emit the receipt telemetry event only for an accepted payment, with the receipt's own fields" establishes that point). The intent in it must be the server-side one, never values decoded from the client's echo. Server-only `method_config` values are merged into the intent's `method_details` at verify time (see CLAUDE.md "Server-only method_config"), so the struct must carry the public intent, not the merged one.
+
+Relation to Task 157: 157 adds the verified payer for the handler. Build one success context, not two: whichever of the two lands second extends the other's surface. If 157 has landed, its payer becomes a field of this struct and its assign stays for compatibility.
+
+Blast radius: public API of every server transport (additive), no change to what is accepted or to the wire format. The secret-leak criterion is the one with money-library consequences.
+"""
+created_at = "2026-11-26"
+scored_at = "2026-11-26"
+
+[[task]]
+id = "194"
+phase = 1
+bundle = "core-protocol"
+status = "pending"
+title = "Optional payment sink called synchronously wherever a payment is accepted"
+scores = { d = 6, b = 6, u = 4 }
+depends_on = [193]
+acceptance_criteria = ["A documented behaviour with one callback receives the accepted-payment value of Task 193; it is configured explicitly per route / per call (no `Application.get_env`), and with no sink configured every existing test passes unchanged", "The sink runs exactly once per accepted payment, synchronously and before the protected handler, on the HTTP Plug, MCP, bare JSON-RPC and WebSocket transports and on the x402 settle path; a test per call site counts invocations, including a replayed credential (zero invocations)", "Each session action that changes channel state (open, top-up, voucher, per-request spend, close) invokes the sink with the action and the channel's cumulative figures", "The out-of-request subscription functions invoke it for each newly paid period (`MPP.Methods.Tempo.Subscription.authorize/2` and `renew/2`, `MPP.Methods.Stripe.Subscription.process_invoice/3`), with the period index, and do not invoke it again when the period was already recorded", "Sink failure follows the decision recorded at the top of the body: tests cover a sink that returns an error, one that raises and one that exceeds its time bound, for a pull credential whose transaction mpp already broadcast and for a push credential", "The value passed to the sink carries a stable idempotency key, documented per intent, so a sink can deduplicate a retried delivery", "Moduledoc states the delivery guarantee honestly: what happens when the node dies between payment and sink call, and that mpp does not redeliver"]
+out_of_scope = ["Any ledger, journal, persistence or retry queue inside mpp: the sink is a hook, the consumer owns storage", "The accepted-payment struct itself (Task 193 'Hand the protected handler one accepted-payment value with the payment's authoritative terms')", "Refunds, sponsored-gas cost and provider fees: mpp does not know them today", "Changing `[:mpp, :receipt]` telemetry (Task 192)"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+OPEN DECISION (operator-owned; the orchestrator asks before dispatching): what does mpp do when the sink fails after the payment has moved?
+  (a) Serve and report: the request proceeds, the failure is surfaced through a telemetry event and a log line, the consumer reconciles later.
+  (b) Reject: the request fails with an internal payment error although the payer has paid.
+  (c) Configurable per route, with one of the two as default.
+Default if nobody answers before this is built: (c) with (a) as the default. Reason: for pull credentials mpp has already broadcast the payer's transaction, and for push credentials the single-use claim is taken, so rejecting charges the payer for nothing and they cannot retry with the same credential. Second question inside the same decision: whether a sink may veto BEFORE the payment moves (a pre-acceptance check). Default: no, this task is about recording, not authorization.
+
+What and why. mpp has no hook that tells a consumer "this payment was accepted" in a way it can rely on. Telemetry is fire-and-forget. Task 193 gives the handler the payment's terms, but only inside a request and only when the handler is reached; three kinds of acceptance never reach a handler the consumer controls or are easy to miss:
+- session actions: every transition goes through `MPP.Session.Actions.handle/2` (`lib/mpp/session/actions.ex:162-165`) and all receipts share the channel id as `reference` (`:993-1009`), so today a consumer can only observe them by wrapping the `MPP.Session.Store`;
+- subscription renewals: they run outside any request and return the receipt only to their caller (`lib/mpp/methods/tempo/subscription.ex:150`, `:161`; `lib/mpp/methods/stripe/subscription.ex:179-188`), with no telemetry;
+- the x402 settle path (`lib/mpp/x402/plug.ex:161-171`).
+(Evidence read 2026-11-26 on `542f752`.)
+
+Add an optional sink behaviour that mpp calls synchronously at each of those points and at the request-path acceptance point (verified and claimed, the point Task 192 establishes; `lib/mpp/plug.ex:760-763`, `lib/mpp/transports/json_rpc/adapter.ex:103-104`). The motivating consumer is one that must record each accepted payment exactly once across all methods and intents; today that is achievable for HTTP with a charge intent only. Exactly-once cannot be promised by mpp alone, because payment and sink call are not one transaction: say so in the docs and give the consumer the idempotency key that makes at-least-once safe.
+
+Overlap with Task 167 "Session server accounting features from mppx": 167 adds per-request charge, idempotent charge()/credit() and settlement within spend, which are further acceptance points on the same code. Check its status at pickup. If it has landed, cover its new transitions here; if not, wire the existing actions and say in the delivery which 167 transitions will need the call added.
+
+Blast radius: the verify-and-claim path of every transport and the session and subscription state machines of a money library. A sink that raises or hangs must never leave a channel or subscription record half-updated or a single-use claim in an unknown state; the failure-mode tests in the acceptance criteria are the core of this task, not an add-on.
+"""
+created_at = "2026-11-26"
+scored_at = "2026-11-26"
+
 [bundles.testnet-funding]
 phase = 1
 order = 9
