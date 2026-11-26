@@ -7747,7 +7747,7 @@
       "id": "187",
       "phase": 1,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "done",
       "title": "Client payment limits and budgets on the payment transports",
       "scores": {
         "d": 5,
@@ -7774,9 +7774,12 @@
         "Per-provider Tempo caps (Task 159)",
         "Funding hooks and token lists unless they fall out of the same seam"
       ],
+      "shipped_in": "0f5567820a4989544859f8f431a109ad435a8207",
       "body": "mppx #1355 (4c32b2d) adds client-wide spending controls: maxPayment (a money limit or per-asset atomic amounts), authorize with Budget.create (reserve, then commit or release), funders and tokens (refs/mppx/src/client/Budget.ts, Spend.ts, internal/SpendGate.ts). Limits are checked after challenge selection and before a credential exists, the same gate covers MCP, and sessions and subscriptions are refused while one is set. We have the on_payment_required approval hook (lib/mpp/client/req.ex, lib/mpp/client/mcp.ex via Transport.approve) and the attempt cap; Task 159 adds caps to the Tempo provider only. A consumer can build a cap in the hook today, but a money limit computed from the challenge's own decimals is unsound, which is what the reference guards against. Add the limit and the budget next to Transport.approve so every transport and provider is covered. Check mpp-rs for an equivalent before settling option names.",
       "created_at": "2026-11-24",
+      "done_at": "2026-11-26",
       "scored_at": "2026-11-24",
+      "implemented": "MPP.Client.Spend (max_payment, budget, client-configured tokens), MPP.Client.Budget process (reserve/commit/release), PaymentLimitExceededError; wired into MPP.Client.Req and MPP.Client.MCP before approval and before the provider; Tempo provider pays plain transfers and requires a chain id under limits. Three Codex review rounds, findings fixed.",
       "cross_repo": []
     },
     {
