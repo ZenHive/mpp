@@ -611,6 +611,38 @@ pay again: the payment may have settled. The error holds the
 challenge, the credential and, when the provider can derive it, the
 transaction hash to look up before retrying.
 
+Both clients take spending limits. `:max_payment` bounds one payment, a
+`MPP.Client.Budget` bounds what payments spend in total, and
+`on_payment_required` still decides each payment that fits:
+
+```elixir
+children = [{MPP.Client.Budget, total: {"5", "USD"}, name: MyApp.AgentBudget}]
+
+limits = [
+  max_payment: {"0.50", "USD"},
+  budget: MyApp.AgentBudget,
+  # The assets a money limit may count, with the decimals you vouch for.
+  tokens: [%{network: "eip155:4217", asset: "0x20c0000000000000000000000000000000000000", currency: "USD", decimals: 6}],
+  on_payment_required: fn challenge -> MyApp.Policy.allow?(challenge) end
+]
+
+req = MPP.Client.Req.attach(Req.new(), [provider: my_provider] ++ limits)
+client = MPP.Client.MCP.new([provider: my_provider] ++ limits)
+```
+
+The order per payment: the selected challenge is checked against
+`:max_payment`, the hook is asked, the amount is reserved in the budget, and
+only then is the provider asked for a credential. The reservation is committed
+once a credential exists and released when none was created. A refused payment
+is `{:error, %MPP.Client.PaymentLimitExceededError{}}` whose `:limit`
+(`:max_payment` or `:budget`) and `:reason` (`:amount`, `:asset`, `:intent`,
+`:challenge`) say why. Currency and decimals come from `:tokens`, never from
+the challenge; a payment in an asset `:tokens` does not list is refused, as is
+any `session` or `subscription` challenge while a limit or budget is set.
+Without money, limits are per asset in atomic units:
+`max_payment: [%{network: "eip155:4217", asset: "0x20c0…", amount: 500_000}]`.
+See `MPP.Client.Spend`.
+
 On the server side, `MPP.Mcp.init/1` validates the transport config and
 `MPP.Mcp.call/3` gates tool calls with replay dedup. Merge
 `MPP.Mcp.capabilities(config)` into the `initialize` result to advertise the

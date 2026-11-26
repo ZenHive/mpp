@@ -2,7 +2,9 @@ defmodule MPP.Client.ReqTest do
   use ExUnit.Case, async: true
 
   alias MPP.Challenge
+  alias MPP.Client.Budget
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentLimitExceededError
   alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Tempo
@@ -1286,5 +1288,131 @@ defmodule MPP.Client.ReqTest do
         "result" => "0x" <> Integer.to_string(@chain_id, 16)
       })
     end)
+  end
+
+  describe "spending limits" do
+    # The 402 asks for 1000 units of "usd" on the "tempo" method.
+    defp priced_plug do
+      test_pid = self()
+      header = challenge_header("tempo")
+
+      fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header("www-authenticate", header)
+            |> Plug.Conn.send_resp(402, "pay")
+
+          ["Payment " <> _blob] ->
+            send(test_pid, :served)
+            Plug.Conn.send_resp(conn, 200, "premium")
+        end
+      end
+    end
+
+    defp priced_get(opts) do
+      [plug: priced_plug(), url: "http://good.example/resource"]
+      |> Req.new()
+      |> ClientReq.attach([provider: {TempoProvider, %{test_pid: self()}}] ++ opts)
+      |> Req.get()
+    end
+
+    test "a payment above max_payment is refused before approval and before the provider" do
+      hook = fn _challenge ->
+        send(self(), :asked)
+        true
+      end
+
+      assert {:error, %PaymentLimitExceededError{limit: :max_payment, reason: :amount}} =
+               priced_get(
+                 max_payment: [%{network: "tempo", asset: "usd", amount: 999}],
+                 on_payment_required: hook
+               )
+
+      refute_received :asked
+      refute_received {:paid, _method}
+      refute_received :served
+    end
+
+    test "a money limit refuses an asset the client does not configure" do
+      assert {:error, %PaymentLimitExceededError{limit: :max_payment, reason: :asset}} =
+               priced_get(max_payment: {"100", "USD"})
+
+      refute_received {:paid, _method}
+    end
+
+    test "limit, budget and approval hook run in that order on a payment that fits" do
+      budget = start_supervised!({Budget, total: {"0.0015", "USD"}})
+      test_pid = self()
+
+      hook = fn challenge ->
+        send(test_pid, {:asked, challenge.method, Budget.reserved(budget)})
+        true
+      end
+
+      opts = [
+        max_payment: {"0.001", "USD"},
+        budget: budget,
+        tokens: [%{network: "tempo", asset: "usd", currency: "USD", decimals: 6}],
+        on_payment_required: hook
+      ]
+
+      assert {:ok, %Req.Response{status: 200, body: "premium"}} = priced_get(opts)
+
+      # Nothing is reserved while the hook decides.
+      assert_received {:asked, "tempo", {"0", "USD"}}
+      assert_received {:paid, "tempo"}
+      assert Budget.spent(budget) == {"0.001", "USD"}
+
+      # The second payment fits max_payment but not what the budget has left.
+      assert {:error, %PaymentLimitExceededError{limit: :budget, reason: :amount}} = priced_get(opts)
+      assert_received {:asked, "tempo", _reserved}
+      refute_received {:paid, _method}
+      assert Budget.spent(budget) == {"0.001", "USD"}
+      assert Budget.reserved(budget) == {"0", "USD"}
+    end
+
+    test "a declined approval reserves nothing" do
+      budget = start_supervised!({Budget, total: %{network: "tempo", asset: "usd", amount: 5_000}})
+
+      assert {:error, %ClientReq.Error{reason: :payment_declined}} =
+               priced_get(budget: budget, on_payment_required: fn _challenge -> false end)
+
+      assert Budget.remaining(budget).amount == 5_000
+    end
+
+    test "a session challenge is refused while a limit is set" do
+      header =
+        [realm: "api.example.com", method: "tempo", intent: "session", request: @request]
+        |> Challenge.create(@secret_key)
+        |> Headers.format_challenge()
+
+      plug = fn conn ->
+        conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+      end
+
+      defmodule SessionProvider do
+        @moduledoc false
+        use PaymentProvider
+
+        @impl PaymentProvider
+        def supports?(_method, _intent, _config), do: true
+
+        @impl PaymentProvider
+        def pay(_challenge, _config), do: raise("a refused challenge reached the provider")
+      end
+
+      assert {:error, %PaymentLimitExceededError{limit: :max_payment, reason: :intent}} =
+               [plug: plug, url: "http://good.example/resource"]
+               |> Req.new()
+               |> ClientReq.attach(provider: SessionProvider, max_payment: {"1", "USD"})
+               |> Req.get()
+    end
+
+    test "attach/2 rejects a malformed limit" do
+      assert_raise ArgumentError, ~r/:max_payment must be/, fn ->
+        ClientReq.attach(Req.new(), provider: TempoProvider, max_payment: 5)
+      end
+    end
   end
 end

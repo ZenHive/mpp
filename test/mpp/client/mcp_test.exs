@@ -2,8 +2,10 @@ defmodule MPP.Client.MCPTest do
   use ExUnit.Case, async: true
 
   alias MPP.Challenge
+  alias MPP.Client.Budget
   alias MPP.Client.MCP, as: ClientMCP
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentLimitExceededError
   alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Tempo
@@ -803,5 +805,67 @@ defmodule MPP.Client.MCPTest do
         "result" => "0x" <> Integer.to_string(@chain_id, 16)
       })
     end)
+  end
+
+  describe "spending limits" do
+    # The server asks for 1000 units of "usd" on the "demo" method.
+    test "a payment above max_payment is refused before approval and before the provider" do
+      hook = fn _challenge ->
+        send(self(), :asked)
+        true
+      end
+
+      client =
+        ClientMCP.new(
+          provider: {DemoProvider, %{test_pid: self()}},
+          max_payment: [%{network: "demo", asset: "usd", amount: 999}],
+          on_payment_required: hook
+        )
+
+      assert {:error, %PaymentLimitExceededError{limit: :max_payment, reason: :amount}} =
+               ClientMCP.call(client, json_rpc_request(), local_server())
+
+      refute_received :asked
+      refute_received {:paid, _method, _id}
+      refute_received {:handled, _id}
+    end
+
+    test "a budget is charged per payment and refuses the one that does not fit" do
+      budget = start_supervised!({Budget, total: {"0.0015", "USD"}})
+
+      client =
+        ClientMCP.new(
+          provider: {DemoProvider, %{test_pid: self()}},
+          max_payment: {"0.001", "USD"},
+          budget: budget,
+          tokens: [%{network: "demo", asset: "usd", currency: "USD", decimals: 6}]
+        )
+
+      assert {:ok, %{"result" => _result}} = ClientMCP.call(client, json_rpc_request(), local_server())
+      assert_received {:paid, "demo", _id}
+      assert Budget.spent(budget) == {"0.001", "USD"}
+
+      assert {:error, %PaymentLimitExceededError{limit: :budget, reason: :amount}} =
+               ClientMCP.call(client, json_rpc_request("req-2"), local_server())
+
+      refute_received {:paid, _method, _id}
+      refute_received {:handled, "req-2"}
+      assert Budget.remaining(budget) == {"0.0005", "USD"}
+    end
+
+    test "a provider error releases the reservation" do
+      budget = start_supervised!({Budget, total: %{network: "demo", asset: "usd", amount: 5_000}})
+      client = ClientMCP.new(provider: FailingProvider, budget: budget)
+
+      assert {:error, reason} = ClientMCP.call(client, json_rpc_request(), local_server())
+      refute match?(%PaymentLimitExceededError{}, reason)
+      assert Budget.remaining(budget).amount == 5_000
+    end
+
+    test "new/1 rejects a malformed limit" do
+      assert_raise ArgumentError, ~r/:max_payment must be/, fn ->
+        ClientMCP.new(provider: DemoProvider, max_payment: 5)
+      end
+    end
   end
 end

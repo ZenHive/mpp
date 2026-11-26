@@ -74,6 +74,8 @@ defmodule MPP do
     * `MPP.Client.MCP` — Payment-aware MCP client (select, approve, pay, at most two payment attempts)
     * `MPP.Client.Transport.WebSocket` — WebSocket transport: `challenge`/`needVoucher` frames, `Payment` credential frames, retry/backoff
     * `MPP.Client.AcceptPolicy` — Gate `Accept-Payment` header injection by URL
+    * `MPP.Client.Spend` — Client spending limits: per-payment limit, budget, token metadata
+    * `MPP.Client.Budget` — Spending cap shared by concurrent payments (reserve, commit, release)
     * `MPP.Discovery.OpenApi` — OpenAPI 3.1.0 payment discovery generation
     * `MPP.Discovery.PaymentInfo` — x-payment-info parsing and normalization
 
@@ -122,6 +124,8 @@ defmodule MPP do
       MPP.Client.SelectionPolicy,
       MPP.Client.Req,
       MPP.Client.AcceptPolicy,
+      MPP.Client.Spend,
+      MPP.Client.Budget,
       MPP.X402
     ]
 end

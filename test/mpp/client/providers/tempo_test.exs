@@ -122,6 +122,30 @@ defmodule MPP.Client.Providers.TempoTest do
       assert reason =~ "No matching transfer"
     end
 
+    # refs/mppx/src/tempo/client/Charge.ts: spending limits counted the charge
+    # currency, so the payment debits only that currency, never MACH.
+    test "pays a machineTokenEnabled charge as a plain transfer under client spending limits" do
+      challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
+
+      assert {:ok, credential} = Tempo.pay(challenge, Map.put(provider_config(), :spend_checked, true))
+      assert {:ok, tx} = Transaction.deserialize(credential.payload["signature"])
+
+      assert [%{}] = tx.calls
+      assert {:ok, _call} = Transaction.find_payment_call(tx, @token, amount: "1250", recipient: @recipient)
+      assert MachineToken.match_route(tx.calls, @chain_id, @token, "1250", @recipient, nil) == :error
+    end
+
+    test "refuses a charge that names no chain under client spending limits" do
+      chainless = challenge(method_details: %{})
+      checked = Map.put(provider_config(), :spend_checked, true)
+
+      for details <- [%{}, %{"chainId" => nil}, %{"chainId" => 0}, %{"chainId" => "#{@chain_id}"}] do
+        assert Tempo.pay(challenge(method_details: details), checked) == {:error, :chain_id_required}
+      end
+
+      assert {:ok, _credential} = Tempo.pay(chainless, provider_config())
+    end
+
     test "reports a MACH shortfall on Tempo mainnet before signing" do
       stub_mainnet_mach_balance(500)
       challenge = challenge(method_details: %{"chainId" => 4217, "machineTokenEnabled" => true})

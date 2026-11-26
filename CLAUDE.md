@@ -162,6 +162,9 @@ MPP.Client.Transport.HTTP  — HTTP transport over Req: 402 detection, WWW-Authe
 MPP.Client.Transport.MCP   — MCP/JSON-RPC transport: -32042 detection, error.data.challenges, params._meta credential attach
 MPP.Client.Transport.JsonRpc — Bare JSON-RPC transport: -32042 detection, root-level `_meta` credential attach
 MPP.Client.Transport.WebSocket — WS transport: challenge frames, Payment credential frames, retry/backoff (no payment amplification)
+MPP.Client.Spend           — Client spending limits checked before a credential is created: max_payment, budget, client-configured token metadata (new/1, check/2, pay/4)
+MPP.Client.Budget          — Budget process shared by concurrent payments: reserve, commit, release; money or single-asset total
+MPP.Client.PaymentLimitExceededError — A spending limit refused a payment: limit (:max_payment / :budget) and reason (:amount / :asset / :intent / :challenge)
 MPP.Client.MCP             — Payment-aware MCP client: SelectionPolicy, approval hook, MultiProvider pay, at most two payment attempts (-32042 plus one -32043 re-challenge)
 MPP.Client.AcceptPolicy    — Gates Accept-Payment header injection on outgoing requests
 MPP.Discovery.OpenApi      — OpenAPI 3.1.0 discovery document generation (x-payment-info, 402 responses, route parameters, response schemas; mix mpp.openapi)
@@ -173,7 +176,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Challenge.Meta`, `MPP.InstanceLocal`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Req.PaidSend`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Challenge.Meta`, `MPP.InstanceLocal`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Req.PaidSend`, `MPP.Client.Budget.Server`, `MPP.Client.Spend.Units`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 

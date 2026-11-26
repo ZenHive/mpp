@@ -100,8 +100,10 @@ defmodule MPP.Client.Req do
 
   alias MPP.Client.AcceptPolicy
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentLimitExceededError
   alias MPP.Client.Req.PaidSend
   alias MPP.Client.SelectionPolicy
+  alias MPP.Client.Spend
   alias MPP.Client.Transport
   alias MPP.Client.Transport.HTTP
 
@@ -157,6 +159,12 @@ defmodule MPP.Client.Req do
     * `:on_payment_required` — `(MPP.Challenge.t() -> boolean())` invoked after
       a challenge is selected and before `pay/2`. The hook fires on every
       payment. `nil` (default) skips approval.
+    * `:max_payment`, `:budget`, `:tokens` — spending limits, see
+      `MPP.Client.Spend`. A selected challenge is checked against
+      `:max_payment` before the approval hook runs, and its amount is reserved
+      in the `:budget` before the provider is asked for a credential. A
+      refused payment is `{:error, %MPP.Client.PaymentLimitExceededError{}}`.
+      While either is set, only `charge` challenges are paid.
   """
   @spec attach(Req.Request.t(), keyword()) :: Req.Request.t()
   def attach(%Req.Request{} = request, opts) when is_list(opts) do
@@ -185,7 +193,8 @@ defmodule MPP.Client.Req do
       accept_payment: accept_payment,
       accept_policy: Keyword.get(opts, :accept_policy, AcceptPolicy.default()),
       max_retries: max_retries,
-      on_payment_required: approval_from_opts(opts)
+      on_payment_required: approval_from_opts(opts),
+      spend: Spend.new(opts)
     }
   end
 
@@ -276,8 +285,9 @@ defmodule MPP.Client.Req do
          :ok <- ensure_not_redirected(request),
          {:ok, challenges} <- fetch_challenges(request, response, retries),
          {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
+         {:ok, _requirement} <- Spend.check(config.spend, challenge),
          :ok <- Transport.approve(challenge, config.on_payment_required),
-         {:ok, credential} <- MultiProvider.pay(config.provider, challenge, %{request_url: request.url}) do
+         {:ok, credential} <- Spend.pay(config.spend, config.provider, challenge, %{request_url: request.url}) do
       paid =
         request
         |> HTTP.set_credential(credential)
@@ -293,6 +303,9 @@ defmodule MPP.Client.Req do
     else
       {:passthrough, passthrough_response} ->
         {request, passthrough_response}
+
+      {:error, %PaymentLimitExceededError{} = refused} ->
+        Req.Request.halt(request, refused)
 
       {:error, reason} ->
         Req.Request.halt(request, %Error{reason: reason, message: error_message(reason)})
@@ -407,6 +420,8 @@ defmodule MPP.Client.Req do
     do: "refusing to pay for a non-GET/HEAD request after Req followed a redirect for it"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
+
+  defp error_message(:challenge_expired), do: "refusing to pay an expired challenge under a spending limit"
 
   defp error_message({:untrusted_proof_realm, realm, origin}) do
     "refusing to sign a Tempo proof for realm #{inspect(realm)} from #{origin}; " <>

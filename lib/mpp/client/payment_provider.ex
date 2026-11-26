@@ -72,7 +72,13 @@ defmodule MPP.Client.PaymentProvider do
     * `challenge` — the `MPP.Challenge` struct from the 402 response
     * `config` — provider-specific configuration (API keys, RPC URLs, etc.).
       When paid through `MPP.Client.MultiProvider.pay/3`, transport context
-      such as `:request_url` is merged in.
+      such as `:request_url` is merged in. Under client spending limits
+      (`MPP.Client.Spend`) it holds `spend_checked: true`: debit the
+      challenge's currency on the chain the challenge names and nothing else.
+
+  A provider that moves funds here and then cannot build the credential
+  returns `{:error, %MPP.Client.PaymentOutcomeUnknownError{}}`, so a budget
+  keeps counting the payment.
 
   ## Returns
 

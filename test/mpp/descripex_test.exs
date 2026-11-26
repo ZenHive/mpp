@@ -50,6 +50,8 @@ defmodule MPP.DescripexTest do
     MPP.Client.SelectionPolicy,
     MPP.Client.Req,
     MPP.Client.AcceptPolicy,
+    MPP.Client.Spend,
+    MPP.Client.Budget,
     MPP.X402
   ]
 

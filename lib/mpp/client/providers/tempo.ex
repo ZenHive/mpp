@@ -70,6 +70,13 @@ defmodule MPP.Client.Providers.Tempo do
   `presenterBinding`, since it signs the same proof. Other non-zero charges
   are unaffected.
 
+  Under client spending limits (`MPP.Client.Spend`, which pays with
+  `spend_checked: true`), a `machineTokenEnabled` charge is paid as a plain
+  transfer of the charge currency: the limit counted that currency, and the
+  machine-token route would debit MACH. A charge whose `methodDetails` name no
+  `chainId` is refused as `{:error, :chain_id_required}`: the limit counts an
+  asset on the chain the challenge names.
+
   ## MACH shortfall
 
   On Tempo mainnet, a charge that advertises `machineTokenEnabled` and is paid
@@ -163,10 +170,12 @@ defmodule MPP.Client.Providers.Tempo do
     with {:ok, charge} <- Shared.parse_charge(challenge, "tempo"),
          {:ok, provider} <- parse_config(config),
          {:ok, details} <- method_details(charge),
+         details = debit_charge_currency(details, config),
          {:ok, amount} <- parse_amount(charge.amount),
          :ok <- ensure_pull_supported(amount, details),
          :ok <- ensure_proof_realm(challenge, amount, details, config[:request_url], provider.trusted_proof_realms),
          :ok <- pin_recipients(charge, details, provider.expected_recipients),
+         :ok <- ensure_counted_chain(details, config),
          {:ok, chain_id} <- resolve_chain_id(details, provider.expected_chain_id),
          :ok <- pin_rpc_chain(chain_id, provider),
          {:ok, address} <- Signer.address_from_key(provider.private_key) do
@@ -175,6 +184,19 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   def pay(%Challenge{}, _config), do: {:error, {:invalid_config, :expected_map}}
+
+  # Spending limits counted the charge currency, so the payment debits only
+  # that: never MACH (mppx tempo/client/Charge.ts).
+  defp debit_charge_currency(details, %{spend_checked: true}), do: Map.delete(details, "machineTokenEnabled")
+  defp debit_charge_currency(details, _config), do: details
+
+  # A limit counts an asset on the chain the challenge names; `:chain_id`
+  # alone would pay on a chain the limit never saw.
+  defp ensure_counted_chain(%{"chainId" => chain_id}, %{spend_checked: true}) when is_integer(chain_id) and chain_id > 0,
+    do: :ok
+
+  defp ensure_counted_chain(_details, %{spend_checked: true}), do: {:error, :chain_id_required}
+  defp ensure_counted_chain(_details, _config), do: :ok
 
   # A push credential carries the broadcast hash. A pull credential's hash is
   # final only for a sender-signed 0x76 transaction in canonical bytes that no

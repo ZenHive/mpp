@@ -35,6 +35,7 @@ defmodule MPP.Client.MCP do
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.SelectionPolicy
+  alias MPP.Client.Spend
   alias MPP.Client.Transport
   alias MPP.Client.Transport.MCP, as: MCPTransport
 
@@ -47,11 +48,12 @@ defmodule MPP.Client.MCP do
   @type t :: %__MODULE__{
           provider: MultiProvider.t(),
           selection: SelectionPolicy.t(),
-          on_payment_required: approval() | nil
+          on_payment_required: approval() | nil,
+          spend: Spend.t() | nil
         }
 
   @enforce_keys [:provider]
-  defstruct provider: nil, selection: SelectionPolicy.default(), on_payment_required: nil
+  defstruct provider: nil, selection: SelectionPolicy.default(), on_payment_required: nil, spend: nil
 
   api(:new, "Build a payment-aware MCP client from provider and policy options.",
     params: [
@@ -76,13 +78,20 @@ defmodule MPP.Client.MCP do
     * `:accept_payment` — preference entries used as the default ranking policy
     * `:on_payment_required` — `(MPP.Challenge.t() -> boolean())` invoked after
       challenge selection and before payment. Omitted or `nil` auto-approves.
+    * `:max_payment`, `:budget`, `:tokens` — spending limits, see
+      `MPP.Client.Spend`. A selected challenge is checked against
+      `:max_payment` before the approval hook runs, and its amount is reserved
+      in the `:budget` before the provider is asked for a credential. A
+      refused payment is `{:error, %MPP.Client.PaymentLimitExceededError{}}`.
+      While either is set, only `charge` challenges are paid.
   """
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
     %__MODULE__{
       provider: normalize_provider!(Keyword.get(opts, :provider)),
       selection: selection_from_opts(opts),
-      on_payment_required: approval_from_opts(opts, :new)
+      on_payment_required: approval_from_opts(opts, :new),
+      spend: Spend.new(opts)
     }
   end
 
@@ -168,8 +177,9 @@ defmodule MPP.Client.MCP do
   defp pay_and_continue(client, request, response, send_fun, hook, payments_made) do
     with {:ok, challenges} <- MCPTransport.get_challenges(response),
          {:ok, challenge} <- Transport.select_challenge(challenges, client.provider, selection: client.selection),
+         {:ok, _requirement} <- Spend.check(client.spend, challenge),
          :ok <- Transport.approve(challenge, hook),
-         {:ok, credential} <- MultiProvider.pay(client.provider, challenge, %{request_url: nil}) do
+         {:ok, credential} <- Spend.pay(client.spend, client.provider, challenge, %{request_url: nil}) do
       case send_paid(request, credential, send_fun) do
         {:ok, next} -> handle_response(client, request, next, send_fun, hook, payments_made + 1, true)
         {:failed, cause} -> {:error, PaymentOutcomeUnknownError.new(client.provider, credential, cause: cause)}
