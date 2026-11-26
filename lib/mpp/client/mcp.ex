@@ -33,6 +33,7 @@ defmodule MPP.Client.MCP do
 
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.SelectionPolicy
   alias MPP.Client.Transport
   alias MPP.Client.Transport.MCP, as: MCPTransport
@@ -123,6 +124,12 @@ defmodule MPP.Client.MCP do
   pass `nil` to bypass it (mppx `onPaymentRequired: null`). The approval hook
   fires on every payment. After two payment attempts the terminal response is
   returned as-is.
+
+  When the send that carries a credential this client created raises, exits,
+  throws or returns something other than a plain response map, the result is
+  `{:error, %MPP.Client.PaymentOutcomeUnknownError{}}` with the challenge, the
+  credential, the transaction hash when the provider can derive it, and the
+  cause: the payment may have settled, and no further payment is made.
   """
   @spec call(t(), map(), (map() -> term()), keyword()) :: {:ok, map()} | {:error, term()}
   def call(%__MODULE__{} = client, %{} = request, send_fun, opts \\ []) when is_function(send_fun, 1) and is_list(opts) do
@@ -163,14 +170,29 @@ defmodule MPP.Client.MCP do
          {:ok, challenge} <- Transport.select_challenge(challenges, client.provider, selection: client.selection),
          :ok <- Transport.approve(challenge, hook),
          {:ok, credential} <- MultiProvider.pay(client.provider, challenge, %{request_url: nil}) do
-      case request |> MCPTransport.set_credential(credential) |> send_fun.() do
-        next when is_map(next) ->
-          handle_response(client, request, next, send_fun, hook, payments_made + 1, true)
-
-        _other ->
-          {:error, :malformed_envelope}
+      case send_paid(request, credential, send_fun) do
+        {:ok, next} -> handle_response(client, request, next, send_fun, hook, payments_made + 1, true)
+        {:failed, cause} -> {:error, PaymentOutcomeUnknownError.new(client.provider, credential, cause: cause)}
       end
     end
+  end
+
+  # The credential leaves here. A send that raises, exits, throws or returns
+  # something that is no response leaves open whether the server settled it.
+  defp send_paid(request, credential, send_fun) do
+    request |> MCPTransport.set_credential(credential) |> sent(send_fun)
+  end
+
+  # A struct is a transport's own response or error, never a JSON-RPC response.
+  defp sent(paid, send_fun) do
+    case send_fun.(paid) do
+      next when is_map(next) and not is_struct(next) -> {:ok, next}
+      other -> {:failed, other}
+    end
+  rescue
+    error -> {:failed, error}
+  catch
+    kind, value -> {:failed, {kind, value}}
   end
 
   defp approval_for_call(client, opts) do

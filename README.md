@@ -603,6 +603,14 @@ a deliberate divergence from mppx `maxPaymentAttempts = 3` so a malicious
 server cannot drain a wallet through repeated re-challenges. A `-32043`
 without challenges is returned immediately.
 
+When the request that carried a credential the client created fails without a
+verdict — a 5xx answer or no response for `MPP.Client.Req`, a send that raises
+or returns something other than a plain map for `MPP.Client.MCP` — the result is
+`{:error, %MPP.Client.PaymentOutcomeUnknownError{}}` and the client does not
+pay again: the payment may have settled. The error holds the
+challenge, the credential and, when the provider can derive it, the
+transaction hash to look up before retrying.
+
 On the server side, `MPP.Mcp.init/1` validates the transport config and
 `MPP.Mcp.call/3` gates tool calls with replay dedup. Merge
 `MPP.Mcp.capabilities(config)` into the `initialize` result to advertise the

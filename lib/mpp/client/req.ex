@@ -1,3 +1,59 @@
+defmodule MPP.Client.Req.PaidSend do
+  @moduledoc false
+  # Req adapter around the adapter of a request that carries a credential.
+  # A send that ends without a verdict ends the request: no later step may
+  # turn it into something that is paid again or reads as an answer.
+
+  alias MPP.Client.PaymentOutcomeUnknownError
+
+  @doc false
+  @spec run(Req.Request.t()) :: {Req.Request.t(), Req.Response.t() | Exception.t()}
+  def run(%Req.Request{} = request) do
+    adapter = Req.Request.get_private(request, :mpp_adapter)
+    answered = {__MODULE__, make_ref()}
+
+    {request, result} =
+      try do
+        send_with(adapter, watch_into(request, answered))
+      rescue
+        error -> if Process.get(answered), do: reraise(error, __STACKTRACE__), else: {request, error}
+      catch
+        kind, value ->
+          if Process.get(answered), do: :erlang.raise(kind, value, __STACKTRACE__), else: {request, {kind, value}}
+      after
+        Process.delete(answered)
+      end
+
+    case result do
+      %Req.Response{status: status} = response when status >= 500 -> unknown(request, response: response)
+      %Req.Response{} = response -> {request, response}
+      cause -> unknown(request, cause: cause)
+    end
+  end
+
+  # A streaming callback runs inside the adapter, in this process. Once it was
+  # handed an answer below 500, a failure is the consumer's, not the send's.
+  defp watch_into(%Req.Request{into: into} = request, answered) when is_function(into, 2) do
+    watched = fn chunk, {_request, response} = acc ->
+      if match?(%Req.Response{status: status} when status < 500, response), do: Process.put(answered, true)
+      into.(chunk, acc)
+    end
+
+    %{request | into: watched}
+  end
+
+  defp watch_into(request, _answered), do: request
+
+  defp send_with(adapter, request) when is_atom(adapter), do: adapter.run(request)
+  defp send_with(adapter, request) when is_function(adapter, 1), do: adapter.(request)
+
+  defp unknown(request, fields) do
+    {provider, credential} = Req.Request.get_private(request, :mpp_paid_send)
+    error = PaymentOutcomeUnknownError.new(provider, credential, fields)
+    {%{request | response_steps: [], error_steps: []}, error}
+  end
+end
+
 defmodule MPP.Client.Req do
   @moduledoc """
   Payment-aware Req plugin.
@@ -24,6 +80,16 @@ defmodule MPP.Client.Req do
   3xx answer to the paid retry is returned to the caller as-is, whichever header
   holds the credential (mppx `redirect: 'manual'`, mpp-rs redirect-safe client).
 
+  When the request that carries the credential is answered 5xx, or fails
+  without a response, the result is `{:error, %MPP.Client.PaymentOutcomeUnknownError{}}`
+  with the challenge, the credential, the transaction hash when the provider
+  can derive it, and the response or the cause. The payment may have settled,
+  and the plugin does not pay again. Req's `:retry` is off for that request,
+  and no response or error step runs on such a result: the response is the
+  one the adapter returned. mppx reports the
+  same condition to `payment.failed` observers and hands the caller the 5xx
+  response.
+
   The request URL is passed to the provider as `:request_url` (see
   `MPP.Client.MultiProvider.pay/3`), so a zero-amount Tempo proof is signed
   only for a realm the requested server owns
@@ -34,6 +100,7 @@ defmodule MPP.Client.Req do
 
   alias MPP.Client.AcceptPolicy
   alias MPP.Client.MultiProvider
+  alias MPP.Client.Req.PaidSend
   alias MPP.Client.SelectionPolicy
   alias MPP.Client.Transport
   alias MPP.Client.Transport.HTTP
@@ -215,7 +282,11 @@ defmodule MPP.Client.Req do
         request
         |> HTTP.set_credential(credential)
         |> disable_redirects()
+        # A resend could be answered with a fresh challenge and be paid again.
+        |> Req.Request.put_option(:retry, false)
         |> Req.Request.put_private(:mpp_payment_retries, retries + 1)
+        |> Req.Request.put_private(:mpp_paid_send, {config.provider, credential})
+        |> observe_paid_send_last()
 
       {paid, result} = Req.Request.run_request(%{paid | halted: false})
       Req.Request.halt(paid, result)
@@ -226,6 +297,17 @@ defmodule MPP.Client.Req do
       {:error, reason} ->
         Req.Request.halt(request, %Error{reason: reason, message: error_message(reason)})
     end
+  end
+
+  # After every other request step, so that it wraps the adapter they chose.
+  defp observe_paid_send_last(%Req.Request{request_steps: steps} = request) do
+    %{request | request_steps: Keyword.delete(steps, :mpp_paid_send) ++ [mpp_paid_send: &observe_paid_send/1]}
+  end
+
+  defp observe_paid_send(%Req.Request{adapter: PaidSend} = request), do: request
+
+  defp observe_paid_send(%Req.Request{adapter: adapter} = request) do
+    %{Req.Request.put_private(request, :mpp_adapter, adapter) | adapter: PaidSend}
   end
 
   # Req's redirect step lets the legacy `:follow_redirects` option override

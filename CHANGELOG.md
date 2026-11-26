@@ -6,6 +6,19 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **A paid request that ends without a verdict is `MPP.Client.PaymentOutcomeUnknownError`** (mppx #1043). `MPP.Client.Req` returns `{:error, %MPP.Client.PaymentOutcomeUnknownError{}}` when the request that carried the credential is answered 5xx or fails without a response; it returned the 5xx response or the transport error, and Req's `:retry` could resend the credential. `:retry` is now off for that request. `MPP.Client.MCP.call/4` returns the same error when the send that carried the credential raises, exits, throws or returns something other than a plain response map; it raised or returned `:malformed_envelope`. The error carries the challenge, the credential, the transaction hash when the provider can derive it, and the response or the cause. Neither client pays again. mppx hands the caller the 5xx response and reports the error to `payment.failed` observers.
+
+### Added
+
+- `MPP.Errors` problem type `:payment_outcome_unknown` (`https://paymentauth.org/problems/payment-outcome-unknown`).
+- Optional callback `c:MPP.Client.PaymentProvider.transaction_hash/2` and `MPP.Client.MultiProvider.transaction_hash/2`. `MPP.Client.Providers.Tempo` implements it for push credentials and for sender-signed transactions that no fee payer has to co-sign.
+
+---
+
 ## [0.25.0] — 2026-11-26
 
 ### Changed

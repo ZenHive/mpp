@@ -26,6 +26,8 @@ defmodule MPP.Errors do
     * `:settlement_failed` — verified payment reached a non-success terminal settlement (402)
     * `:settlement_unavailable` — settlement backend or required origin RPC is unavailable (503)
     * `:settlement_timeout` — settlement did not reach a terminal state before the server deadline (504)
+    * `:payment_outcome_unknown` — a credential was sent and the request ended without a verdict (402);
+      raised client-side as `MPP.Client.PaymentOutcomeUnknownError`
 
   ### Session
 
@@ -84,6 +86,7 @@ defmodule MPP.Errors do
       status: 503
     },
     settlement_timeout: %{suffix: "server-error", title: "Settlement Timeout", status: 504},
+    payment_outcome_unknown: %{suffix: "payment-outcome-unknown", title: "Payment Outcome Unknown", status: 402},
     # Session error types (Phase 10)
     insufficient_balance: %{
       suffix: "session/insufficient-balance",
@@ -127,6 +130,7 @@ defmodule MPP.Errors do
           | :settlement_failed
           | :settlement_unavailable
           | :settlement_timeout
+          | :payment_outcome_unknown
           | :insufficient_balance
           | :invalid_signature
           | :signer_mismatch

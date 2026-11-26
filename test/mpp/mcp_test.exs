@@ -315,6 +315,7 @@ defmodule MPP.McpTest do
     settlement_failed: -32_043,
     settlement_unavailable: -32_043,
     settlement_timeout: -32_043,
+    payment_outcome_unknown: -32_043,
     insufficient_balance: -32_043,
     invalid_signature: -32_043,
     signer_mismatch: -32_043,

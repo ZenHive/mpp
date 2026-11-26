@@ -3,6 +3,7 @@ defmodule MPP.Client.ReqTest do
 
   alias MPP.Challenge
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Tempo
   alias MPP.Client.Req, as: ClientReq
@@ -32,6 +33,30 @@ defmodule MPP.Client.ReqTest do
          source: nil
        }}
     end
+  end
+
+  defmodule HashProvider do
+    @moduledoc false
+    use PaymentProvider
+
+    @impl PaymentProvider
+    def supports?(method, intent, _config), do: method == "tempo" and intent == "charge"
+
+    @impl PaymentProvider
+    def pay(challenge, config), do: MPP.Client.ReqTest.TempoProvider.pay(challenge, config)
+
+    @impl PaymentProvider
+    def transaction_hash(%Credential{payload: %{"hash" => hash}}, _config), do: hash
+  end
+
+  defmodule DownAdapter do
+    @moduledoc false
+    def run(request), do: {request, Req.Response.new(status: 502)}
+  end
+
+  defmodule ExitingAdapter do
+    @moduledoc false
+    def run(_request), do: exit(:noproc)
   end
 
   defmodule StripeProvider do
@@ -448,6 +473,222 @@ defmodule MPP.Client.ReqTest do
                Req.get(req, url: "http://example.com/resource")
 
       assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    # refs/mppx/src/client/internal/Fetch.ts `unknownOutcome` (#1043).
+    test "a 5xx answer to the paid request is an unknown payment outcome and is not paid again" do
+      header = challenge_header("tempo")
+
+      test_pid = self()
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] ->
+            conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+
+          _credential ->
+            send(test_pid, :paid_request)
+            Plug.Conn.send_resp(conn, 503, "down")
+        end
+      end
+
+      req = client(plug, provider: {HashProvider, %{test_pid: self()}})
+
+      # Req's default `:retry` would resend a GET answered 503.
+      assert {:error, %PaymentOutcomeUnknownError{} = error} = Req.get(req, url: "http://example.com/resource")
+      assert_received :paid_request
+      refute_received :paid_request
+
+      assert error.reason == :payment_outcome_unknown
+      assert %Challenge{method: "tempo"} = error.challenge
+      assert error.credential.challenge == error.challenge
+      assert error.transaction_hash == "0xabc"
+      assert %Req.Response{status: 503, body: "down"} = error.response
+      assert error.cause == nil
+      assert Exception.message(error) =~ "0xabc"
+
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    test "a paid request that fails in transport is an unknown payment outcome" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+          _credential -> Req.Test.transport_error(conn, :closed)
+        end
+      end
+
+      # A later step that turns the failure into a response does not settle it.
+      req =
+        plug
+        |> client(provider: {TempoProvider, %{test_pid: self()}})
+        |> Req.Request.append_error_steps(recover: fn {request, _error} -> {request, Req.Response.new(status: 200)} end)
+
+      assert {:error, %PaymentOutcomeUnknownError{} = error} = Req.get(req, url: "http://example.com/resource")
+
+      assert %Req.TransportError{reason: :closed} = error.cause
+      assert error.response == nil
+      # This provider cannot derive a hash.
+      assert error.transaction_hash == nil
+      assert Exception.message(error) =~ "Do not blindly retry"
+
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, _}
+    end
+
+    test "a 4xx or 2xx answer to the paid request is returned as before" do
+      header = challenge_header("tempo")
+
+      for {status, body} <- [{403, "forbidden"}, {200, "ok"}, {404, "gone"}] do
+        plug = fn conn ->
+          case Plug.Conn.get_req_header(conn, "authorization") do
+            [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+            _credential -> Plug.Conn.send_resp(conn, status, body)
+          end
+        end
+
+        req = client(plug, provider: TempoProvider)
+
+        assert {:ok, %Req.Response{status: ^status, body: ^body}} =
+                 Req.get(req, url: "http://example.com/resource", retry: false)
+      end
+    end
+
+    test "a send that raises after the credential left is an unknown payment outcome" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+          _credential -> raise "socket gone"
+        end
+      end
+
+      req = client(plug, provider: TempoProvider)
+
+      assert {:error, %PaymentOutcomeUnknownError{cause: %RuntimeError{message: "socket gone"}}} =
+               Req.get(req, url: "http://example.com/resource")
+    end
+
+    test "no later step sees a paid 5xx: it cannot be paid again, replaced or lost" do
+      header = challenge_header("tempo")
+      test_pid = self()
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+          _credential -> Plug.Conn.send_resp(conn, 503, "down")
+        end
+      end
+
+      payable = fn
+        {request, %Req.Response{status: 503} = response} ->
+          send(test_pid, :step_saw_503)
+          {request, %{Req.Response.put_header(response, "www-authenticate", header) | status: 402}}
+
+        other ->
+          other
+      end
+
+      raising = fn
+        {_request, %Req.Response{status: 503}} -> raise "step failed"
+        other -> other
+      end
+
+      for step <- [payable, raising] do
+        req =
+          plug
+          |> client(provider: {TempoProvider, %{test_pid: self()}})
+          |> Req.Request.prepend_response_steps(odd: step)
+
+        assert {:error, %PaymentOutcomeUnknownError{response: %Req.Response{status: 503}}} =
+                 Req.get(req, url: "http://example.com/resource")
+
+        assert_received {:paid, "tempo"}
+        refute_received {:paid, _}
+        refute_received :step_saw_503
+      end
+    end
+
+    test "the paid send is observed on an adapter a later request step installs" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+      end
+
+      for {adapter, expected?} <- [
+            {MPP.Client.ReqTest.DownAdapter, &match?(%{response: %Req.Response{status: 502}}, &1)},
+            {MPP.Client.ReqTest.ExitingAdapter, &match?(%{cause: {:exit, :noproc}}, &1)}
+          ] do
+        swap = fn request ->
+          if Req.Request.get_header(request, "authorization") == [],
+            do: request,
+            else: %{request | adapter: adapter}
+        end
+
+        req = plug |> client(provider: TempoProvider) |> Req.Request.append_request_steps(swap: swap)
+
+        assert {:error, %PaymentOutcomeUnknownError{} = error} = Req.get(req, url: "http://example.com/resource")
+        assert expected?.(error)
+      end
+    end
+
+    test "a streaming callback that fails on an answered paid request keeps its own failure" do
+      header = challenge_header("tempo")
+
+      plug = fn status ->
+        fn conn ->
+          case Plug.Conn.get_req_header(conn, "authorization") do
+            [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+            _credential -> Plug.Conn.send_resp(conn, status, "body")
+          end
+        end
+      end
+
+      into = fn {:data, _data}, {request, response} ->
+        if response.status == 402, do: {:cont, {request, response}}, else: raise("consumer failed")
+      end
+
+      answered = client(plug.(200), provider: TempoProvider)
+      assert_raise RuntimeError, "consumer failed", fn -> Req.get(answered, url: "http://example.com/r", into: into) end
+
+      # While the server answers 5xx the outcome stays open.
+      failed = client(plug.(503), provider: TempoProvider)
+
+      assert {:error, %PaymentOutcomeUnknownError{cause: %RuntimeError{message: "consumer failed"}}} =
+               Req.get(failed, url: "http://example.com/r", into: into)
+    end
+
+    test "a step that fails on an answered paid request is not an unknown payment outcome" do
+      header = challenge_header("tempo")
+
+      plug = fn conn ->
+        case Plug.Conn.get_req_header(conn, "authorization") do
+          [] -> conn |> Plug.Conn.put_resp_header("www-authenticate", header) |> Plug.Conn.send_resp(402, "pay")
+          _credential -> Plug.Conn.send_resp(conn, 200, "ok")
+        end
+      end
+
+      broken = fn
+        {request, %Req.Response{status: 200}} -> {request, %RuntimeError{message: "cannot decode"}}
+        other -> other
+      end
+
+      req = plug |> client(provider: TempoProvider) |> Req.Request.prepend_response_steps(broken: broken)
+
+      assert {:error, %RuntimeError{message: "cannot decode"}} = Req.get(req, url: "http://example.com/resource")
+    end
+
+    test "a 5xx answer to a request that carried no credential is returned as before" do
+      plug = fn conn -> Plug.Conn.send_resp(conn, 500, "boom") end
+      req = client(plug, provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:ok, %Req.Response{status: 500}} = Req.get(req, url: "http://example.com/resource", retry: false)
       refute_received {:paid, _}
     end
 

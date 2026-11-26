@@ -66,6 +66,35 @@ defmodule MPP.Client.Providers.TempoTest do
       assert nonce == fingerprint(@challenge_id, 7)
     end
 
+    # refs/mppx/src/tempo/client/Charge.ts `transactionHash`.
+    test "transaction_hash/2 is the hash of a sender-signed transaction and nil while a fee payer must sign" do
+      assert {:ok, credential} = Tempo.pay(challenge(), provider_config())
+      raw = credential.payload["signature"]
+      assert {:ok, tx} = Transaction.deserialize(raw)
+      assert {:ok, hash} = Transaction.hash(tx)
+
+      assert Tempo.transaction_hash(credential, provider_config()) == "0x" <> Base.encode16(hash, case: :lower)
+
+      # Bytes after the transaction never identify an on-chain transaction.
+      padded = %{credential | payload: %{credential.payload | "signature" => raw <> "00"}}
+      assert Tempo.transaction_hash(padded, provider_config()) == nil
+
+      sponsored = challenge(method_details: %{"chainId" => @chain_id, "feePayer" => true})
+      assert {:ok, awaiting} = Tempo.pay(sponsored, provider_config())
+      assert Tempo.transaction_hash(awaiting, provider_config()) == nil
+
+      pushed_hash = "0x" <> String.duplicate("aB", 32)
+      pushed = %{credential | payload: %{"type" => "hash", "hash" => pushed_hash}}
+      assert Tempo.transaction_hash(pushed, provider_config()) == pushed_hash
+
+      # refs/mppx/src/tempo/Methods.ts: the payload schema is `z.hash()`.
+      for malformed <- ["0xfeed", "0x" <> String.duplicate("zz", 32), String.duplicate("ab", 33)] do
+        assert Tempo.transaction_hash(%{pushed | payload: %{"type" => "hash", "hash" => malformed}}, %{}) == nil
+      end
+
+      assert Tempo.transaction_hash(%{credential | payload: %{"type" => "proof", "signature" => "0x00"}}, %{}) == nil
+    end
+
     test "builds approve + swapTo when the challenge advertises machineTokenEnabled" do
       challenge = challenge(method_details: %{"chainId" => @chain_id, "machineTokenEnabled" => true})
 

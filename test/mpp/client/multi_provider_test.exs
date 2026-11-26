@@ -49,6 +49,42 @@ defmodule MPP.Client.MultiProviderTest do
     end
   end
 
+  defmodule HashingProvider do
+    @moduledoc false
+    use PaymentProvider
+
+    @impl PaymentProvider
+    def supports?(method, _intent, _config), do: method == "tempo"
+
+    @impl PaymentProvider
+    def pay(challenge, _config), do: {:ok, %Credential{challenge: challenge, payload: %{}, source: nil}}
+
+    @impl PaymentProvider
+    def transaction_hash(_credential, %{hash: hash}) when is_function(hash, 0), do: hash.()
+    def transaction_hash(_credential, %{hash: hash}), do: hash
+  end
+
+  describe "transaction_hash/2" do
+    test "asks the provider that pays the credential's challenge" do
+      credential = %Credential{challenge: challenge(), payload: %{}, source: nil}
+      multi = MultiProvider.new([{HashingProvider, %{hash: "0xabc"}}])
+
+      assert MultiProvider.transaction_hash(multi, credential) == "0xabc"
+    end
+
+    test "is nil without the callback, without a provider, and when the provider fails" do
+      credential = %Credential{challenge: challenge(), payload: %{}, source: nil}
+
+      assert MultiProvider.transaction_hash(MultiProvider.new([{AlwaysProvider, %{provider_id: "a"}}]), credential) == nil
+      assert MultiProvider.transaction_hash(MultiProvider.new([]), credential) == nil
+
+      for hash <- [nil, 42, fn -> raise "boom" end, fn -> throw(:boom) end, fn -> exit(:boom) end] do
+        multi = MultiProvider.new([{HashingProvider, %{hash: hash}}])
+        assert MultiProvider.transaction_hash(multi, credential) == nil
+      end
+    end
+  end
+
   describe "new/1 and add/3" do
     test "creates an empty provider list by default" do
       assert %MultiProvider{providers: []} = MultiProvider.new()

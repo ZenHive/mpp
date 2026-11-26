@@ -102,6 +102,7 @@ defmodule MPP.Client.Providers.Tempo do
   alias Onchain.Signer
   alias Onchain.Signer.Secp256k1
   alias Onchain.Tempo.TIP20
+  alias Onchain.Tempo.Transaction
   alias Onchain.Tempo.Transaction.Builder
 
   @attribution_version 1
@@ -174,6 +175,29 @@ defmodule MPP.Client.Providers.Tempo do
   end
 
   def pay(%Challenge{}, _config), do: {:error, {:invalid_config, :expected_map}}
+
+  # A push credential carries the broadcast hash. A pull credential's hash is
+  # final only for a sender-signed 0x76 transaction in canonical bytes that no
+  # fee payer still has to co-sign (mppx `tempo/client/Charge.ts` `transactionHash`).
+  @impl PaymentProvider
+  def transaction_hash(%Credential{payload: %{"type" => "hash", "hash" => "0x" <> digits = hash}}, _config)
+      when byte_size(digits) == 64 do
+    if MPP.Hex.hex_string?(digits), do: hash
+  end
+
+  def transaction_hash(%Credential{payload: %{"type" => "transaction", "signature" => "0x76" <> _rest = raw}}, _config) do
+    with {:ok, %Transaction{signature: signature} = tx} when not is_nil(signature) <- Transaction.deserialize(raw),
+         false <- Transaction.has_fee_payer_placeholder?(tx),
+         {:ok, canonical} <- Transaction.serialize(tx),
+         true <- String.downcase(canonical) == String.downcase(raw),
+         {:ok, bytes} <- Base.decode16(binary_part(raw, 2, byte_size(raw) - 2), case: :mixed) do
+      "0x" <> Base.encode16(Onchain.Hash.keccak(bytes), case: :lower)
+    else
+      _other -> nil
+    end
+  end
+
+  def transaction_hash(%Credential{}, _config), do: nil
 
   defp machine_token_deployment(name) when name in [nil, :mach, :machine_usd], do: :ok
   defp machine_token_deployment(_name), do: {:error, {:invalid_config, :machine_token_deployment}}

@@ -20,6 +20,7 @@ defmodule MPP.ErrorsTest do
     {:settlement_failed, 402, "Settlement Failed"},
     {:settlement_unavailable, 503, "Settlement Backend Unavailable"},
     {:settlement_timeout, 504, "Settlement Timeout"},
+    {:payment_outcome_unknown, 402, "Payment Outcome Unknown"},
     # Session
     {:insufficient_balance, 402, "Insufficient Balance"},
     {:invalid_signature, 402, "Invalid Signature"},
@@ -206,10 +207,10 @@ defmodule MPP.ErrorsTest do
       end
     end
 
-    test "returns all 23 problem types" do
+    test "returns all 24 problem types" do
       types = Errors.types()
 
-      assert Enum.count(types) == 23
+      assert Enum.count(types) == 24
       assert :payment_required in types
       assert :malformed_credential in types
       assert :internal_payment_error in types
@@ -222,6 +223,7 @@ defmodule MPP.ErrorsTest do
       assert :settlement_failed in types
       assert :settlement_unavailable in types
       assert :settlement_timeout in types
+      assert :payment_outcome_unknown in types
     end
   end
 end

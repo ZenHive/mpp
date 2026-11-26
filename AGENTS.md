@@ -575,6 +575,7 @@ MPP.Transports.JsonRpc     — Bare JSON-RPC transport: root-level `_meta` crede
 MPP.Transports.WebSocket   — WS adapter: handshake challenge, credential/receipt frames, JSON-RPC message frames (library-agnostic)
 MPP.Client.PaymentProvider — Behaviour for client-side payment providers (supports?/3, pay/2)
 MPP.Client.MultiProvider   — Multi-provider dispatch: wraps [{module, config}], routes to first match
+MPP.Client.PaymentOutcomeUnknownError — Paid request ended without a verdict (5xx / transport failure): challenge, credential, transaction hash
 MPP.Client.Providers.Tempo — Built-in Tempo charge provider: chain-pinned, attribution-bound TIP-20 payments
 MPP.Client.Providers.Stripe — Built-in Stripe charge provider: Shared Payment Token creation
 MPP.Client.SelectionPolicy — Transport-neutral challenge selection/ordering (default: server offer order)
@@ -595,7 +596,7 @@ MPP.Demo.Method            — Toy payment method accepting "demo-token" (for mi
 MPP.Demo.Router            — Plug.Router demo server with protected /resource endpoint
 ```
 
-Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Challenge.Meta`, `MPP.InstanceLocal`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Transport.WebSocket.Retry`.
+Also in `lib/` and intentionally undocumented above (`@moduledoc false` internals — listed so a gap-analysis pass doesn't re-file them as missing): `MPP.Application`, `MPP.Challenge.Meta`, `MPP.InstanceLocal`, `MPP.Intents.Shared`, `MPP.Headers.SchemeSplitter`, `MPP.Methods.EVM.Permit2.Settlement`, `MPP.Methods.Tempo.{AccessKey, Broadcast, EnvelopeFields, ProofSignature, SignatureEnvelope, SponsoredSimulation, SubscriptionTransaction}`, `MPP.Methods.Solana.Ristretto255`, `MPP.Methods.Stellar.{RPC, Envelope}`, `MPP.Methods.NearIntents.{OneClick, Origin}`, `MPP.Methods.XRPL.{RPC, Wallet}`, `MPP.X402.Replay`, `MPP.Transports.JsonRpc.{Adapter, Plug}`, `MPP.Transports.WebSocket.{Frame, Session}`, `MPP.Client.Providers.Shared`, `MPP.Client.Req.PaidSend`, `MPP.Client.Transport.WebSocket.Retry`.
 
 ### Design decisions
 

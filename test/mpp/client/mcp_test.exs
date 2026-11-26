@@ -4,8 +4,10 @@ defmodule MPP.Client.MCPTest do
   alias MPP.Challenge
   alias MPP.Client.MCP, as: ClientMCP
   alias MPP.Client.MultiProvider
+  alias MPP.Client.PaymentOutcomeUnknownError
   alias MPP.Client.PaymentProvider
   alias MPP.Client.Providers.Tempo
+  alias MPP.Client.Transport.MCP, as: ClientTransportMCP
   alias MPP.Credential
   alias MPP.Demo.Method, as: DemoMethod
   alias MPP.Intents.Charge
@@ -370,6 +372,63 @@ defmodule MPP.Client.MCPTest do
       assert {:error, :payment_failed} = ClientMCP.call(client, json_rpc_request(), send_fun)
     end
 
+    # The credential was sent, so the payment may have settled (mppx #1043).
+    test "a paid send that fails without a response is an unknown payment outcome" do
+      error = Mcp.payment_required_error(make_challenge("tempo"))
+
+      failures = [
+        {fn -> raise "socket closed" end, &match?(%RuntimeError{message: "socket closed"}, &1)},
+        {fn -> exit(:timeout) end, &(&1 == {:exit, :timeout})},
+        {fn -> throw(:gone) end, &(&1 == {:throw, :gone})},
+        {fn -> {:error, :closed} end, &(&1 == {:error, :closed})},
+        {fn -> %RuntimeError{message: "returned"} end, &match?(%RuntimeError{message: "returned"}, &1)}
+      ]
+
+      for {fail, expected?} <- failures do
+        send_fun = fn request ->
+          if ClientTransportMCP.credential?(request),
+            do: fail.(),
+            else: %{"jsonrpc" => "2.0", "id" => request["id"], "error" => error}
+        end
+
+        client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+        assert {:error, %PaymentOutcomeUnknownError{} = unknown} = ClientMCP.call(client, json_rpc_request(), send_fun)
+        assert unknown.challenge.method == "tempo"
+        assert unknown.credential.challenge == unknown.challenge
+        assert unknown.transaction_hash == nil
+        assert expected?.(unknown.cause)
+
+        assert_received {:paid, "tempo"}
+        refute_received {:paid, _}
+      end
+    end
+
+    test "a credential that cannot be attached was never sent" do
+      error = Mcp.payment_required_error(make_challenge("tempo"))
+      request = put_in(json_rpc_request(), ["params", "_meta"], "not-a-map")
+      test_pid = self()
+
+      send_fun = fn request ->
+        send(test_pid, :sent)
+        %{"jsonrpc" => "2.0", "id" => request["id"], "error" => error}
+      end
+
+      client = ClientMCP.new(provider: TempoProvider)
+
+      assert_raise BadMapError, fn -> ClientMCP.call(client, request, send_fun) end
+      assert_received :sent
+      refute_received :sent
+    end
+
+    test "a first send that fails stays the caller's failure" do
+      client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
+
+      assert {:error, :malformed_envelope} = ClientMCP.call(client, json_rpc_request(), fn _request -> :closed end)
+      assert_raise RuntimeError, "down", fn -> ClientMCP.call(client, json_rpc_request(), fn _ -> raise "down" end) end
+      refute_received {:paid, _}
+    end
+
     test "returns :no_challenges for a -32042 envelope with no challenge list" do
       send_fun = fn request ->
         %{
@@ -384,7 +443,7 @@ defmodule MPP.Client.MCPTest do
       assert {:error, :no_challenges} = ClientMCP.call(client, json_rpc_request(), send_fun)
     end
 
-    test "returns :malformed_envelope when the first or retry response is not a JSON-RPC map" do
+    test "a first response that is not a JSON-RPC map is :malformed_envelope; after a payment the outcome is unknown" do
       client = ClientMCP.new(provider: {TempoProvider, %{test_pid: self()}})
 
       assert {:error, :malformed_envelope} =
@@ -400,7 +459,9 @@ defmodule MPP.Client.MCPTest do
         end
       end
 
-      assert {:error, :malformed_envelope} = ClientMCP.call(client, json_rpc_request(), send_fun)
+      assert {:error, %PaymentOutcomeUnknownError{cause: :not_a_map}} =
+               ClientMCP.call(client, json_rpc_request(), send_fun)
+
       assert_received {:paid, "tempo"}
     end
 

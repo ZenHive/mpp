@@ -92,7 +92,17 @@ defmodule MPP.Client.PaymentProvider do
   """
   @callback supports_challenge?(challenge :: Challenge.t(), config :: map()) :: boolean()
 
-  @optional_callbacks supports_challenge?: 2
+  @doc """
+  Optional: the on-chain transaction hash a credential's payment has if it
+  settles, when that hash is final before settlement.
+
+  Used to fill `MPP.Client.PaymentOutcomeUnknownError`. Return `nil` when the
+  hash cannot be known from the credential, e.g. a transaction that a fee
+  payer still has to co-sign.
+  """
+  @callback transaction_hash(credential :: MPP.Credential.t(), config :: map()) :: String.t() | nil
+
+  @optional_callbacks supports_challenge?: 2, transaction_hash: 2
 
   api(:supports?, "Check if a provider module supports the given method and intent.",
     params: [

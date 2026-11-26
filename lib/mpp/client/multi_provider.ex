@@ -155,6 +155,36 @@ defmodule MPP.Client.MultiProvider do
     end
   end
 
+  api(:transaction_hash, "The on-chain hash a credential's payment has if it settles, when derivable.",
+    params: [
+      multi: [kind: :value, description: "MultiProvider struct"],
+      credential: [kind: :value, description: "Credential returned by pay/3"]
+    ],
+    returns: %{type: :string, description: "Transaction hash, or nil when it cannot be derived"}
+  )
+
+  @doc """
+  The on-chain hash `credential`'s payment has if it settles, from the
+  provider that pays its challenge
+  (`c:MPP.Client.PaymentProvider.transaction_hash/2`). `nil` when that provider
+  has no such callback, cannot derive the hash, or fails doing so.
+  """
+  @spec transaction_hash(t(), MPP.Credential.t()) :: String.t() | nil
+  def transaction_hash(%__MODULE__{providers: providers}, %MPP.Credential{challenge: challenge} = credential) do
+    with {mod, cfg} <- Enum.find(providers, fn {mod, cfg} -> provider_supports_challenge?(mod, cfg, challenge) end),
+         true <- function_exported?(mod, :transaction_hash, 2),
+         hash when is_binary(hash) <- mod.transaction_hash(credential, cfg) do
+      hash
+    else
+      _other -> nil
+    end
+  rescue
+    # The hash is reconciliation metadata; deriving it must not hide the outcome.
+    _error -> nil
+  catch
+    _kind, _value -> nil
+  end
+
   defp provider_supports_challenge?(mod, cfg, challenge) do
     Code.ensure_loaded(mod)
 
