@@ -609,6 +609,16 @@ defmodule MPP.HeadersTest do
       assert {:error, :invalid_method} = Headers.parse_challenges(raw_header(method: "x402"))
     end
 
+    # A bare scheme ends the Payment offer wherever the header ends after it
+    # (cross-validated against mppx in "other schemes in the same header").
+    test "a bare scheme after the Payment offer does not join it" do
+      for suffix <- [", Basic, Digest realm=other", ", Bearer", ", Bearer ", ", Basic\t, Digest realm=other"] do
+        header = raw_header(id: "good") <> suffix
+
+        assert {:ok, [%Challenge{id: "good", description: nil}]} = Headers.parse_challenges(header), suffix
+      end
+    end
+
     test "skips an offer with a grammar error and keeps a legacy-escaped one flagged" do
       header =
         ~s(Payment id="abc" realm="x", method="tempo", intent="charge", request="eyJhIjoxfQ", ) <>

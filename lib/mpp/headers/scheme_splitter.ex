@@ -107,8 +107,8 @@ defmodule MPP.Headers.SchemeSplitter do
     end
   end
 
-  defp extract_scheme_token(bin, len) when len > 0 and len == byte_size(bin), do: {:ok, bin, len}
-  defp extract_scheme_token(_bin, _len), do: :not_scheme
+  # The header ends inside the token; the caller matched its first letter.
+  defp extract_scheme_token(bin, len), do: {:ok, bin, len}
 
   defp tchar?(c), do: c in ?A..?Z or c in ?a..?z or c in ?0..?9 or c in ~c"!#$%&'*+-.^_`|~"
 
