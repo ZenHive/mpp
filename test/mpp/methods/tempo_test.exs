@@ -11,6 +11,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Intents.Charge
   alias MPP.Methods.Tempo
   alias MPP.Methods.Tempo.FeePayerPolicy
+  alias MPP.Methods.Tempo.HostedFeePayer
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
@@ -5886,7 +5887,52 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
-    test "a raising fee payer request releases the transaction and its sponsor reservation", %{charge: charge} do
+    test "application-wide Req defaults cannot retarget, re-encode or redirect the fill", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+      test_pid = self()
+      previous = Application.fetch_env(:req, :default_options)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, options} -> Application.put_env(:req, :default_options, options)
+          :error -> Application.delete_env(:req, :default_options)
+        end
+      end)
+
+      Req.default_options(
+        follow_redirects: true,
+        form: [method: "eth_sendRawTransaction"],
+        params: [account: "attacker"],
+        retry: :transient,
+        max_retries: 2,
+        retry_delay: 0
+      )
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:fill_request, conn.host, conn.method, conn.query_string, body})
+
+        if conn.host == "redirect.example",
+          do: Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1}),
+          else:
+            conn
+            |> Plug.Conn.put_resp_header("location", "https://redirect.example/fill")
+            |> Plug.Conn.send_resp(307, "")
+      end)
+
+      assert {:error, "hosted fee payer request failed with status 307"} =
+               HostedFeePayer.fill(tx, charge.method_details["fee_payer_url"],
+                 req_options: charge.method_details["fee_payer_req_options"]
+               )
+
+      assert_received {:fill_request, "sponsor.moderato.tempo.xyz", "POST", "", body}
+      assert %{"method" => "eth_fillTransaction", "params" => [%{"feePayer" => true}]} = Jason.decode!(body)
+      refute_received {:fill_request, _host, _method, _query, _body}
+    end
+
+    test "a failing fee payer request releases the transaction and its sponsor reservation", %{charge: charge} do
       {:ok, tx_hex} = build_hosted_client_tx()
       {ConCacheStore, store_opts} = charge.method_details["store"]
       test_pid = self()
@@ -5906,7 +5952,9 @@ defmodule MPP.Methods.TempoTest do
       for options <- [
             [plug: {Req.Test, Tempo}, http_errors: :raise],
             [plug: {Req.Test, Tempo}, not_a_req_option: true],
-            [plug: fn conn -> raise "plug exploded at #{conn.host}" end]
+            [plug: fn conn -> raise "plug exploded at #{conn.host}" end],
+            [plug: fn conn -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "error" => "boom", "id" => 1}) end],
+            [adapter: fn _request -> exit(:adapter_down) end]
           ] do
         charge = put_in(charge.method_details["fee_payer_req_options"], options)
         payload = %{"type" => "transaction", "signature" => tx_hex}

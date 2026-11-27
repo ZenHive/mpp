@@ -149,6 +149,24 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     refute_received :fill_attempt
   end
 
+  test "fill sends the configured query string unchanged whatever the caller's params" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    test_pid = self()
+
+    Req.Test.stub(Tempo, fn conn ->
+      send(test_pid, {:fill_query, conn.query_string})
+      Req.Test.json(conn, %{"jsonrpc" => "2.0", "error" => %{"message" => "policy rejected"}, "id" => 1})
+    end)
+
+    req_options = [plug: {Req.Test, Tempo}, params: [account: "attacker", extra: "1"]]
+
+    assert {:error, "policy rejected"} =
+             HostedFeePayer.fill(tx, @hosted_url <> "/rpc?account=ours", req_options: req_options)
+
+    assert_received {:fill_query, "account=ours"}
+  end
+
   test "fill rejects invalid feeToken address" do
     {:ok, tx_hex} = build_unsigned_fee_payer_tx()
     {:ok, tx} = Transaction.deserialize(tx_hex)

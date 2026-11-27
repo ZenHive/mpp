@@ -15,17 +15,24 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   @default_fill_error "hosted fee payer failed to sponsor transaction"
   @fill_request_failed_detail "hosted fee payer request failed"
-  @pinned_request_options [
+  # Dropped from the caller's options and again from the built request, which
+  # carries application-wide Req defaults: these would retarget, re-encode or
+  # re-send the fill (Req reads the legacy :follow_redirects before :redirect,
+  # and :form / :form_multipart / :body before or instead of :json).
+  @dropped_request_options [
     :url,
     :method,
     :json,
     :body,
     :form,
     :form_multipart,
+    :params,
+    :path_params,
     :redirect,
     :follow_redirects,
     :retry,
-    :http_errors
+    :http_errors,
+    :into
   ]
 
   @doc """
@@ -123,31 +130,39 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     end
   end
 
-  # The request target, body and delivery policy are pinned over the caller's
-  # options: a redirect would carry the fee-payer headers to another host, and a
-  # retry could re-send a sign request the sponsor already acted on (mpp-rs builds
-  # its client with no redirects or retries). Req reads the legacy
-  # :follow_redirects before :redirect, and :form / :form_multipart / :body
-  # before or instead of :json, so those are dropped rather than overridden.
+  # The target, body and delivery policy are pinned on the built request, after
+  # Req has merged its application-wide defaults: a redirect would carry the
+  # fee-payer headers to another host, and a retry could re-send a sign request
+  # the sponsor already acted on (mpp-rs builds its client with no redirects or
+  # retries).
   defp send_fill(url, body, caller_options) do
-    caller_options
-    |> Keyword.drop(@pinned_request_options)
-    |> Req.request(url: url, method: :post, json: body, redirect: false, retry: false, http_errors: :return)
+    request =
+      caller_options
+      |> Keyword.drop(@dropped_request_options)
+      |> Req.new()
+      |> Req.merge(url: url, method: :post)
+
+    pinned_options =
+      request.options
+      |> Map.drop(@dropped_request_options)
+      |> Map.merge(%{json: body, redirect: false, retry: false, http_errors: :return})
+
+    Req.request(%{request | body: nil, into: nil, options: pinned_options})
   rescue
-    # A caller option, step or adapter that raises must still end in an error
-    # tuple, so the caller releases what it reserved for this fill. Only the
-    # exception module is logged: the message can carry the request headers.
+    # A caller option, step or adapter that raises or exits must still end in
+    # an error tuple, so the caller releases what it reserved for this fill.
+    # Only the exception module is logged: the message can carry the headers.
     exception ->
       Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction raised #{inspect(exception.__struct__)}")
       {:error, :raised}
+  catch
+    :exit, _reason ->
+      Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction exited")
+      {:error, :exited}
   end
 
   defp parse_fill_response(%{"error" => %{"message" => message}}) when is_binary(message), do: {:error, message}
-
   defp parse_fill_response(%{"result" => %{"tx" => tx}}) when is_map(tx), do: {:ok, tx}
-
-  defp parse_fill_response(%{} = body), do: {:error, get_in(body, ["error", "message"]) || @default_fill_error}
-
   defp parse_fill_response(_body), do: {:error, @default_fill_error}
 
   defp require_fee_token(%{"feeToken" => fee_token}) when is_binary(fee_token) and fee_token != "" do
@@ -210,7 +225,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   defp validate_recovery_id(n) when n in [0, 1], do: {:ok, n}
   defp validate_recovery_id(_), do: {:error, :invalid}
 
-  defp decode_quantity("0x" <> hex) do
+  # At most 32 bytes: a signature component or recovery id, never more.
+  defp decode_quantity("0x" <> hex) when byte_size(hex) <= 64 do
     hex = if rem(byte_size(hex), 2) == 1, do: "0" <> hex, else: hex
 
     case hex do
@@ -224,4 +240,6 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
         end
     end
   end
+
+  defp decode_quantity(_value), do: {:error, :invalid}
 end
