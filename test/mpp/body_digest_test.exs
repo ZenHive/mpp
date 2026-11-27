@@ -43,6 +43,38 @@ defmodule MPP.BodyDigestTest do
       end
     end
 
+    # Vectors from refs/mppx/src/BodyDigest.test.ts:4-14,44-75 and
+    # refs/mpp-rs/src/body_digest.rs:80-125.
+    test "verify/2 accepts the reference SDKs' digests" do
+      assert BodyDigest.compute(~s({"amount":"1000"})) == "sha-256=Bxp4xJtbVfsB9npD5AEWUnIk76Cuv8Au4ECDA+F0biY="
+      assert BodyDigest.verify("sha-256=Bxp4xJtbVfsB9npD5AEWUnIk76Cuv8Au4ECDA+F0biY=", ~s({"amount":"1000"}))
+      assert BodyDigest.verify("sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:", "")
+      assert BodyDigest.verify("sha-256=:LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=:", "hello")
+      assert BodyDigest.verify("sha-256=:LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ:", "hello")
+    end
+
+    test "verify/2 rejects the reference SDKs' malformed byte sequences" do
+      hash = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+
+      for digest <- [
+            "sha-256=:#{hash}",
+            "sha-256=#{hash}:",
+            "sha-256=::#{hash}::",
+            "sha-256=:#{hash}::",
+            "sha-256=::#{hash}:",
+            "SHA-256=:#{hash}:",
+            "sha-512=:#{hash}:",
+            " sha-256=:#{hash}:",
+            "sha-256=:#{hash}: ",
+            "sha-256=#{hash} ",
+            "sha-256=:#{hash}:;param=1",
+            "sha-256=:#{hash}:, sha-512=:#{hash}:",
+            "sha-256=::"
+          ] do
+        refute BodyDigest.verify(digest, "hello"), "accepted #{inspect(digest)}"
+      end
+    end
+
     test "verify/2 refuses a digest that is not a sha-256 hash" do
       hash = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
 
