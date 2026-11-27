@@ -5587,6 +5587,31 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
+    test "accepts a keyword list of fee_payer_req_options" do
+      assert :ok =
+               Tempo.validate_config!(%{
+                 "rpc_url" => @rpc_url,
+                 "fee_payer_url" => @hosted_url,
+                 "fee_payer_req_options" => [headers: [{"authorization", "Bearer sponsor"}]],
+                 "sponsor_budget_id" => "Hosted-Wallet",
+                 "store" => ConCacheStore
+               })
+    end
+
+    test "raises when fee_payer_req_options is not a keyword list" do
+      for bad <- [%{"headers" => []}, "authorization: x", [{"headers", []}]] do
+        assert_raise ArgumentError, ~r/fee_payer_req_options must be a keyword list/, fn ->
+          Tempo.validate_config!(%{
+            "rpc_url" => @rpc_url,
+            "fee_payer_url" => @hosted_url,
+            "fee_payer_req_options" => bad,
+            "sponsor_budget_id" => "Hosted-Wallet",
+            "store" => ConCacheStore
+          })
+        end
+      end
+    end
+
     test "raises on invalid fee_payer_url scheme" do
       assert_raise ArgumentError, ~r/fee_payer_url must be an http or https URL/, fn ->
         Tempo.validate_config!(%{
@@ -5610,6 +5635,7 @@ defmodule MPP.Methods.TempoTest do
         | method_details:
             Map.merge(charge.method_details, %{
               "fee_payer_url" => @hosted_url,
+              "fee_payer_req_options" => [plug: {Req.Test, Tempo}],
               "sponsor_budget_id" => "hosted-wallet",
               "store" => start_sponsor_store()
             })
@@ -5693,6 +5719,108 @@ defmodule MPP.Methods.TempoTest do
                "s" => String.downcase(s),
                "yParity" => "0x#{y_parity}"
              }
+    end
+
+    test "chain RPC and fee payer requests each carry only their own req options", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+      test_pid = self()
+
+      charge =
+        update_in(
+          charge.method_details,
+          &Map.merge(&1, %{
+            "req_options" => [plug: {Req.Test, Tempo}, auth: {:bearer, "rpc-secret"}],
+            "fee_payer_req_options" => [plug: {Req.Test, Tempo}, headers: [{"x-fee-payer-auth", "sponsor-secret"}]]
+          })
+        )
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+
+        send(
+          test_pid,
+          {:request, request["method"], conn.host, Plug.Conn.get_req_header(conn, "authorization"),
+           Plug.Conn.get_req_header(conn, "x-fee-payer-auth")}
+        )
+
+        response =
+          case request["method"] do
+            "eth_getTransactionReceipt" -> %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+            "eth_fillTransaction" -> %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+            "eth_call" -> eth_call_success_body()
+            _ -> %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]}
+          end
+
+        Req.Test.json(conn, response)
+      end)
+
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+      assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
+
+      {fills, rpc_requests} = Enum.split_with(collect_requests([]), &(elem(&1, 0) == "eth_fillTransaction"))
+      assert [{"eth_fillTransaction", "sponsor.moderato.tempo.xyz", [], ["sponsor-secret"]}] = fills
+
+      rpc_methods = Enum.map(rpc_requests, &elem(&1, 0))
+      assert "eth_call" in rpc_methods
+      assert "eth_sendRawTransactionSync" in rpc_methods
+      rpc_host = URI.parse(@rpc_url).host
+
+      for {method, host, rpc, fee} <- rpc_requests do
+        assert {method, host, rpc, fee} == {method, rpc_host, ["Bearer rpc-secret"], []}
+      end
+    end
+
+    test "a redirecting fee payer is not followed and the payment fails", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      fill_tx = hosted_fill_tx_map(tx)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      test_pid = self()
+
+      # A caller asking for redirects does not get them.
+      charge =
+        put_in(charge.method_details["fee_payer_req_options"], plug: {Req.Test, Tempo}, redirect: true, max_redirects: 3)
+
+      for status <- [302, 307] do
+        Req.Test.stub(Tempo, fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+          if conn.host == "redirect.example" do
+            send(test_pid, {:redirect_followed, status})
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => 1})
+          else
+            request = Jason.decode!(body)
+            send(test_pid, {:rpc_call, request["method"]})
+
+            case request["method"] do
+              "eth_fillTransaction" ->
+                conn
+                |> Plug.Conn.put_resp_header("location", "https://redirect.example/fill")
+                |> Plug.Conn.send_resp(status, "")
+
+              "eth_getTransactionReceipt" ->
+                Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
+              "eth_call" ->
+                Req.Test.json(conn, eth_call_success_body())
+            end
+          end
+        end)
+
+        payload = %{"type" => "transaction", "signature" => tx_hex}
+
+        assert {:error, %Errors{type: type, detail: "An internal payment error occurred."}} =
+                 TempoTestHelpers.verify_nonced(payload, charge)
+
+        assert type =~ "internal-payment-error"
+        assert_received {:rpc_call, "eth_fillTransaction"}
+        refute_received {:redirect_followed, ^status}
+        refute_received {:rpc_call, "eth_sendRawTransactionSync"}
+        assert :not_found = ConCacheStore.get("mpp:charge:" <> keccak256_hex(tx_hex), store_opts)
+      end
     end
 
     test "two encodings of the same hosted tx reserve one slot with no duplicate fill or broadcast", %{
@@ -6204,6 +6332,14 @@ defmodule MPP.Methods.TempoTest do
 
     test "challenge_method_details reports feePayer true for hosted config", %{charge: charge} do
       assert %{"feePayer" => true} = Tempo.challenge_method_details(charge)
+    end
+  end
+
+  defp collect_requests(acc) do
+    receive do
+      {:request, method, host, rpc, fee} -> collect_requests([{method, host, rpc, fee} | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 

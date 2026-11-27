@@ -38,6 +38,11 @@ defmodule MPP.Methods.Tempo do
       `eth_fillTransaction`. When set, the server delegates co-signing to the remote
       endpoint instead of using `"fee_payer_private_key"`. Mutually exclusive with the
       local key path.
+    * `"fee_payer_req_options"` — (optional) keyword list of `Req` options used only
+      for requests to `"fee_payer_url"`, such as an `Authorization` header for the
+      hosted service. `"req_options"` applies to the chain RPC only and never reaches
+      the fee payer, and these options never reach the RPC. Hosted fee-payer requests
+      never follow redirects and are never retried, whatever these options say.
     * `"sponsor_budget_id"` — required with `"fee_payer_url"`; stable identity shared
       by every endpoint using the same hosted sponsor wallet. It is normalized before
       use and should normally be that wallet's address.
@@ -306,6 +311,7 @@ defmodule MPP.Methods.Tempo do
     reject_static_memo!(config)
     validate_store!(config["store"])
     validate_fee_payer!(config)
+    validate_fee_payer_req_options!(config["fee_payer_req_options"])
     validate_sponsor_budget!(config)
     validate_fee_payer_allowed_tokens!(config)
     validate_presenter_binding!(config["require_presenter_binding"])
@@ -658,6 +664,17 @@ defmodule MPP.Methods.Tempo do
   end
 
   defp validate_fee_payer!(_config), do: :ok
+
+  defp validate_fee_payer_req_options!(nil), do: :ok
+
+  defp validate_fee_payer_req_options!(opts) do
+    if !Keyword.keyword?(opts) do
+      raise ArgumentError,
+            "MPP.Methods.Tempo fee_payer_req_options must be a keyword list; got: #{inspect(opts)}"
+    end
+
+    :ok
+  end
 
   defp validate_sponsor_budget!(config) do
     if fee_payer_enabled?(config) do
@@ -2326,12 +2343,7 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp hosted_req_options(config) do
-    case config["req_options"] do
-      nil -> []
-      opts -> [req_options: opts]
-    end
-  end
+  defp hosted_req_options(config), do: [req_options: config["fee_payer_req_options"] || []]
 
   defp rpc_fetch_receipt(hash, rpc_url, opts) do
     case RPC.fetch_receipt(hash, rpc_url, opts) do

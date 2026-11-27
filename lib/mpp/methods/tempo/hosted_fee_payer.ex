@@ -19,6 +19,9 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   @doc """
   Co-signs a client transaction via a hosted `eth_fillTransaction` endpoint.
 
+  `opts[:req_options]` is merged into the request; `redirect` and `retry` are
+  always off.
+
   Returns `{:ok, tx}` re-decoded from the filled envelope, or `{:error, reason}`.
   """
   @spec fill(Transaction.t(), String.t(), keyword()) :: {:ok, Transaction.t()} | {:error, String.t()}
@@ -93,7 +96,13 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   defp post_fill(url, request, opts) do
     body = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_fillTransaction", "params" => [request]}
-    req_opts = Keyword.merge([json: body], Keyword.get(opts, :req_options, []))
+    # Forced after the caller's options: a redirect would carry the fee-payer
+    # headers to another host, and a retry could re-send a sign request that the
+    # sponsor already acted on (mpp-rs builds its client with no redirects or retries).
+    req_opts =
+      [json: body]
+      |> Keyword.merge(Keyword.get(opts, :req_options, []))
+      |> Keyword.merge(redirect: false, retry: false)
 
     case Req.post(url, req_opts) do
       {:ok, %{status: status, body: response_body}} when status in 200..299 ->

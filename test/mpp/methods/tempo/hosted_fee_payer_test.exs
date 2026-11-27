@@ -130,6 +130,25 @@ defmodule MPP.Methods.Tempo.HostedFeePayerTest do
     refute to_string(reason) =~ "econnrefused"
   end
 
+  test "fill sends the sign request once even when the caller asks for retries" do
+    {:ok, tx_hex} = build_unsigned_fee_payer_tx()
+    {:ok, tx} = Transaction.deserialize(tx_hex)
+    test_pid = self()
+
+    Req.Test.stub(Tempo, fn conn ->
+      send(test_pid, :fill_attempt)
+      Plug.Conn.send_resp(conn, 503, "")
+    end)
+
+    req_options = [plug: {Req.Test, Tempo}, retry: fn _request, _response -> true end, max_retries: 2, retry_delay: 0]
+
+    assert {:error, "hosted fee payer request failed with status 503"} =
+             HostedFeePayer.fill(tx, @hosted_url, req_options: req_options)
+
+    assert_received :fill_attempt
+    refute_received :fill_attempt
+  end
+
   test "fill rejects invalid feeToken address" do
     {:ok, tx_hex} = build_unsigned_fee_payer_tx()
     {:ok, tx} = Transaction.deserialize(tx_hex)
