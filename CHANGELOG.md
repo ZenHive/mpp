@@ -8,6 +8,8 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-11-27
+
 ### Changed
 
 - **Tempo charges follow the charge draft's memo rules** (mpp-specs #403, mppx #1273). A `type="transaction"` payment may be a plain `transfer` or carry a memo that is not in attribution format; it was rejected. An attribution memo for another realm or challenge is rejected before anything is signed or sent, and a receipt in which any matching transfer carries one is not accepted, even beside a bound transfer. A `type="hash"` payment still needs this challenge's attribution memo.

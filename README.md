@@ -687,7 +687,7 @@ no timer: start one on `{:arm_receipt_deadline, ms}` and feed `:receipt_timeout`
 ```elixir
 def deps do
   [
-    {:mpp, "~> 0.25.0"}
+    {:mpp, "~> 0.26.0"}
   ]
 end
 ```
