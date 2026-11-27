@@ -58,6 +58,50 @@ defmodule MPP.Methods.Tempo.ProofTest do
     end
   end
 
+  # viem 2.57.1 fixture from mpp-rs #664 (75a0538),
+  # refs/mpp-rs/src/protocol/methods/tempo/proof.rs:424-500: the proof typed
+  # data for root key 0x11..11, signed by that key and as a Keychain V2
+  # envelope by access key 0x22..22.
+  describe "viem keychain V2 vector (mpp-rs proof.rs)" do
+    @viem_proof_hash "0x2db9f3ad46355ef4479f0b322396221c624618117d42cfa3ddcce707682ab155"
+    @viem_signature "0x3baf02ba159042829a9bcaa17774cecb25b0194cccff0dd076db7474befcaa2b26592fc409ed59c24888f9d3b276debe61696c86793e9a35632cbff79c3496d01c"
+    @viem_keychain_signature "0x0419e7e376e7c213b7e7e7e46cc70a5dd086daff2aa64ad10a15b8ed2c208c147daf58f5ec3989b4de18173565f10d3acad84fc1cf3ccc20181099d57723b7b9f9ed3821442c44f641e0eb4e8a4f2965d15be9e8621c"
+
+    defp fixture_address(byte) do
+      {:ok, address} = Secp256k1.get_address(:binary.copy(<<byte>>, 32))
+      "0x" <> Base.encode16(address, case: :lower)
+    end
+
+    defp viem_params do
+      %{
+        account: fixture_address(0x11),
+        chain_id: 42_431,
+        challenge_id: "kM9xPqWvT2nJrHsY4aDfEb",
+        realm: "api.example.com"
+      }
+    end
+
+    test "the proof hash and the root signature match viem" do
+      assert viem_params() |> Proof.hash() |> to_hex() |> String.downcase() == @viem_proof_hash
+      assert :ok = Proof.verify_signature(viem_params(), @viem_signature, fixture_address(0x11))
+    end
+
+    test "the keychain V2 envelope recovers the access key for its own user only" do
+      root = fixture_address(0x11)
+      access = fixture_address(0x22)
+
+      assert {:ok, signer} = Proof.recover_authorized_proof_signer(viem_params(), @viem_keychain_signature, root)
+      assert Onchain.Address.equal?(signer, access)
+
+      assert {:error, "proof signature recovery failed"} =
+               Proof.recover_authorized_proof_signer(
+                 %{viem_params() | account: fixture_address(0x33)},
+                 @viem_keychain_signature,
+                 fixture_address(0x33)
+               )
+    end
+  end
+
   describe "access-key proof signer recovery (mppx Charge.test.ts)" do
     @root_private_key "01" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
     @access_private_key "02" |> String.duplicate(32) |> Base.decode16!(case: :mixed)
