@@ -7714,7 +7714,7 @@
       "id": "186",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Tempo charge memo rules from the charge draft: memo-less pull, methodDetails.memo on the client, inclusion check before broadcast",
       "scores": {
         "d": 5,
@@ -7738,9 +7738,12 @@
       "out_of_scope": [
         "Presenter binding for hash credentials (Task 75)"
       ],
+      "shipped_in": "88a528fd725eed531dfb7e85a8a90a227ace137c",
       "body": "mpp-specs #403 (aeaeb83, specs/methods/tempo/draft-tempo-charge-00.md, Memo Requirements by Credential Type and Transaction Verification) defines the attribution memo, requires it for push charges, and says servers MUST accept a plain transfer or a non-attribution memo on pull while rejecting an attribution memo bound elsewhere. mppx #1273 (54fc48d) implements it (push-memo-required and charge-own-broadcast-retry changesets), including a broadcast record written before replay claims are released so a retry that overlaps an unknown broadcast outcome recovers the server's own transaction. We require the challenge-bound memo on pull as well (lib/mpp/methods/tempo.ex check_matched_memo_binding and the receipt check), so a third-party client that sends a plain transfer is refused before broadcast; our memo layout matches the spec vector byte for byte (checked 2026-11-25). Accepting memo-less pull removes the memo as the binding between payment and challenge on that path, so port the reference servers' replay and own-broadcast handling with it rather than only relaxing the check; read both before designing. The draft also says a client MUST send exactly methodDetails.memo when present; MPP.Client.Providers.Tempo ignores it. The draft's pre-broadcast inclusion lookup is not implemented: lib/mpp/methods/tempo/broadcast.ex settles an already-included resend by its receipt without a pending record.",
       "created_at": "2026-11-24",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-24",
+      "implemented": "Pull credentials accept plain or non-attribution memos and reject foreign attribution memos (any foreign counted transfer fails, mppx isChallengeBound); hash credentials keep the bound memo; static memo config raises at startup; the client sends methodDetails.memo; a pre-send inclusion check rejects already-included transactions unless this challenge holds its broadcast record (mpp:charge:broadcast:<hash>), recorded hosted fills settle only for their owner, an unreadable record is an internal error, and a refused send whose record cannot be removed keeps its reservation. Codex-reviewed twice; send-answer hash binding and context-free hash verification moved to Task 195.",
       "cross_repo": []
     },
     {
