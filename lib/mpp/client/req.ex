@@ -132,7 +132,12 @@ defmodule MPP.Client.Req do
   instead).
 
   The header that counts is the one handed to the adapter, after every request
-  step ran; a response step that changes it afterwards does not. A header
+  step ran; a response step that changes it afterwards does not. A request
+  step appended after this plugin's that replaces the adapter hides that
+  header, and the 402 is not paid:
+  `{:error, %MPP.Client.Req.Error{reason: :unrecorded_accept_payment}}`.
+  `:accept_payment` entries that do not format to a header `MPP.AcceptPayment.parse/1`
+  reads back raise `ArgumentError` in `attach/2`. A header
   equal to the one this plugin injected from `:accept_payment` is read as the
   injection: the `:selection` orders the offers, but an offer that header does
   not accept (unlisted or `q=0`) is never paid, also under `:server_order` or
@@ -232,7 +237,7 @@ defmodule MPP.Client.Req do
   end
 
   defp build_config(opts) do
-    accept_payment = Keyword.get(opts, :accept_payment, [])
+    accept_payment = opts |> Keyword.get(:accept_payment, []) |> validate_accept_payment()
     max_retries = Keyword.get(opts, :max_payment_retries, @default_max_payment_retries)
 
     if !(is_integer(max_retries) and max_retries >= 0) do
@@ -248,6 +253,21 @@ defmodule MPP.Client.Req do
       on_payment_required: approval_from_opts(opts),
       spend: Spend.new(opts)
     }
+  end
+
+  # The injected header is read back at selection time, so it must parse: an
+  # entry outside the token grammar or a header over the parse limit would
+  # otherwise be sent and then refuse every payment.
+  defp validate_accept_payment([]), do: []
+
+  defp validate_accept_payment(entries) when is_list(entries) do
+    if AcceptPayment.parse(AcceptPayment.format(entries)) == [] do
+      raise ArgumentError,
+            "MPP.Client.Req.attach/2 :accept_payment does not format to a parseable Accept-Payment header " <>
+              "(lowercase method and intent tokens, at most 16 KiB)"
+    end
+
+    entries
   end
 
   defp normalize_provider(%MultiProvider{} = multi), do: multi
@@ -304,12 +324,12 @@ defmodule MPP.Client.Req do
   # A later request step can still change the header, or replace it on a
   # reused request, and a response step can change it after the answer, so
   # selection reads what `RecordSend` saw at the adapter. A later step that
-  # replaced the adapter leaves no record; the request then holds the best
-  # account of what was sent.
+  # replaced the adapter leaves no record, and then what the server was sent is
+  # unknown: nothing is paid.
   defp sent_accept_payment(request) do
     case Req.Request.get_private(request, :mpp_sent_accept_payment) do
-      {:sent, header} -> header
-      nil -> RecordSend.header(request)
+      {:sent, header} -> {:ok, header}
+      nil -> {:error, :unrecorded_accept_payment}
     end
   end
 
@@ -323,17 +343,19 @@ defmodule MPP.Client.Req do
   # caller's broken header was meant to exclude.
   defp selection_for(request, config) do
     case sent_accept_payment(request) do
-      nil ->
+      {:ok, nil} ->
         {:ok, config.selection}
 
-      sent ->
+      {:ok, sent} ->
         injected? = sent == Req.Request.get_private(request, :mpp_injected_accept_payment)
 
-        case {AcceptPayment.parse(sent), injected?} do
-          {[], true} -> {:ok, config.selection}
-          {[], false} -> {:error, :invalid_accept_payment}
-          {entries, injected?} -> {:ok, header_selection(entries, config.selection, injected?)}
+        case AcceptPayment.parse(sent) do
+          [] -> {:error, :invalid_accept_payment}
+          entries -> {:ok, header_selection(entries, config.selection, injected?)}
         end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -549,6 +571,9 @@ defmodule MPP.Client.Req do
 
   defp error_message(:invalid_accept_payment),
     do: "refusing to pay: the request's Accept-Payment header is empty or malformed"
+
+  defp error_message(:unrecorded_accept_payment),
+    do: "refusing to pay: the Accept-Payment header sent is unknown because a later request step replaced the adapter"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
 

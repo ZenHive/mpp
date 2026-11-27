@@ -1435,6 +1435,40 @@ defmodule MPP.Client.ReqTest do
       refute_received {:paid, "tempo"}
     end
 
+    test "a later request step that replaces the adapter leaves the sent header unknown and pays nothing" do
+      challenge = challenge_header("tempo")
+
+      answer_402 = fn request ->
+        send(self(), {:request, Req.Request.get_header(request, "accept-payment"), false})
+        {request, Req.Response.new(status: 402, headers: [{"www-authenticate", challenge}])}
+      end
+
+      req =
+        tempo_and_stripe_plug()
+        |> client(provider: both_providers(), accept_payment: [{"tempo", "charge", 1.0}])
+        |> Req.Request.append_request_steps(swap_adapter: &%{&1 | adapter: answer_402})
+
+      assert {:error, %ClientReq.Error{reason: :unrecorded_accept_payment} = error} =
+               Req.get(req, url: "http://example.com/resource")
+
+      assert Exception.message(error) =~ "replaced the adapter"
+      assert_received {:request, ["tempo/charge"], false}
+      refute_received {:paid, _method}
+    end
+
+    test "attach/2 rejects :accept_payment that would inject a header it cannot read back" do
+      oversized = List.duplicate({"tempo", "charge", 1.0}, 1300)
+      assert byte_size(MPP.AcceptPayment.format(oversized)) > 16 * 1024
+
+      for entries <- [oversized, [{"Tempo", "charge", 1.0}], [{"tempo", "charge rides", 1.0}]] do
+        assert_raise ArgumentError, ~r/:accept_payment does not format to a parseable Accept-Payment header/, fn ->
+          client(tempo_and_stripe_plug(), provider: both_providers(), accept_payment: entries)
+        end
+      end
+
+      refute_received {:request, _accept, _paid?}
+    end
+
     test "a :selection function cannot pay an offer the caller's header excluded" do
       excluded = make_challenge("tempo")
 
