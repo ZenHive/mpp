@@ -8,6 +8,10 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 ## [Unreleased]
 
+### Changed
+
+- **A challenge may carry any non-empty intent without `|`** (mpp-rs #670, mppx `intent: z.string()`). `MPP.Headers.parse_challenge/1` and `parse_challenges/1` keep a challenge advertising a custom intent such as `"payment plan"` instead of dropping it; `format_challenge/1` escapes quotes and backslashes in it and still refuses CR or LF. A route still accepts only the intent it is configured for.
+
 ## [0.26.0] — 2026-11-27
 
 ### Changed

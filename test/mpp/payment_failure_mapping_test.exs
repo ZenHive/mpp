@@ -84,7 +84,6 @@ defmodule MPP.PaymentFailureMappingTest do
   test "both parse paths reject malformed bound fields with distinct errors" do
     fields = [
       {:intent, "charge|extra", :invalid_intent},
-      {:intent, "charge.now", :invalid_intent},
       {:intent, "", :invalid_intent},
       {:opaque, "a|b", :invalid_opaque},
       {:opaque, "%%%", :invalid_opaque},

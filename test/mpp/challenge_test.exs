@@ -256,6 +256,30 @@ defmodule MPP.ChallengeTest do
       assert :ok = Challenge.validate_fields(valid_challenge())
     end
 
+    test "a custom intent parses unless it is empty or holds the HMAC separator" do
+      for intent <- ["payment plan", "charge.now", ~s(say "hi" \\ there)] do
+        challenge = Challenge.create(Keyword.put(@base_params, :intent, intent), @secret_key)
+        assert :ok = Challenge.validate_fields(challenge)
+        assert {:ok, parsed} = challenge |> MPP.Headers.format_challenge() |> MPP.Headers.parse_challenge()
+        assert parsed.intent == intent
+        assert parsed.id == challenge.id
+      end
+
+      for intent <- ["", "charge|extra"] do
+        assert {:error, :invalid_intent} = Challenge.validate_fields(%{valid_challenge() | intent: intent})
+      end
+    end
+
+    test "a custom intent is escaped on the wire and refused with CR or LF" do
+      challenge = Challenge.create(Keyword.put(@base_params, :intent, ~s(a"b\\c)), @secret_key)
+      assert MPP.Headers.format_challenge(challenge) =~ ~s(intent="a\\"b\\\\c")
+
+      for intent <- ["pay\r\nX-Injected: 1", "pay\nplan"] do
+        challenge = %{valid_challenge() | intent: intent}
+        assert_raise ArgumentError, ~r/CR\/LF/, fn -> MPP.Headers.format_challenge(challenge) end
+      end
+    end
+
     test "rejects non-string intent, opaque and credential header fields" do
       for value <- [123, [], %{}] do
         assert {:error, :invalid_intent} = Challenge.validate_fields(%{valid_challenge() | intent: value})

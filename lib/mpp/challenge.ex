@@ -163,7 +163,7 @@ defmodule MPP.Challenge do
 
   api(
     :validate_fields,
-    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z]+`, intent `[A-Za-z0-9_-]+`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent, empty, Authorization or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
+    "Validate the field shapes of a parsed challenge (id non-empty, method `[a-z]+`, intent non-empty without `|`, request base64url-JSON object, opaque base64url, digest `sha-256=…`, expires RFC 3339, header absent, empty, Authorization or Payment-Authorization). Returns distinct error atoms so a malformed field is rejected at parse time rather than deferring to a downstream mismatch.",
     params: [
       challenge: [
         kind: :value,
@@ -277,11 +277,12 @@ defmodule MPP.Challenge do
 
   defp validate_request(_request), do: {:error, :invalid_request}
 
-  # Spec grammar `1*( ALPHA / DIGIT / "-" )`, plus `_`, which mppx accepts in
-  # custom intents (mpp-rs #496 `is_valid_intent_name`). `|` stays excluded so
-  # it cannot shift an HMAC slot.
-  defp validate_intent(intent) when is_binary(intent) do
-    if Regex.match?(~r/\A[A-Za-z0-9_-]+\z/, intent), do: :ok, else: {:error, :invalid_intent}
+  # Any non-empty intent without `|`, so a custom one such as "payment plan"
+  # parses (mppx `intent: z.string()`, refs/mppx/src/Challenge.ts:76; mpp-rs
+  # #670 `is_valid_intent_name`, refs/mpp-rs/src/protocol/core/headers.rs:281-286).
+  # `|` would shift an HMAC slot. A route still pins the intent it expects.
+  defp validate_intent(intent) when is_binary(intent) and intent != "" do
+    if String.contains?(intent, "|"), do: {:error, :invalid_intent}, else: :ok
   end
 
   defp validate_intent(_intent), do: {:error, :invalid_intent}
