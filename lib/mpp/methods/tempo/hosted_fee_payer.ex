@@ -15,12 +15,25 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   @default_fill_error "hosted fee payer failed to sponsor transaction"
   @fill_request_failed_detail "hosted fee payer request failed"
+  @pinned_request_options [
+    :url,
+    :method,
+    :json,
+    :body,
+    :form,
+    :form_multipart,
+    :redirect,
+    :follow_redirects,
+    :retry,
+    :http_errors
+  ]
 
   @doc """
   Co-signs a client transaction via a hosted `eth_fillTransaction` endpoint.
 
-  `opts[:req_options]` is merged into the request; `redirect` and `retry` are
-  always off.
+  `opts[:req_options]` is merged into the request. The URL, method and JSON body
+  are always the fill request, and redirects, retries and raising on HTTP errors
+  are always off; a raising option or step returns `{:error, reason}`.
 
   Returns `{:ok, tx}` re-decoded from the filled envelope, or `{:error, reason}`.
   """
@@ -96,15 +109,8 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
 
   defp post_fill(url, request, opts) do
     body = %{"jsonrpc" => "2.0", "id" => 1, "method" => "eth_fillTransaction", "params" => [request]}
-    # Forced after the caller's options: a redirect would carry the fee-payer
-    # headers to another host, and a retry could re-send a sign request that the
-    # sponsor already acted on (mpp-rs builds its client with no redirects or retries).
-    req_opts =
-      [json: body]
-      |> Keyword.merge(Keyword.get(opts, :req_options, []))
-      |> Keyword.merge(redirect: false, retry: false)
 
-    case Req.post(url, req_opts) do
+    case send_fill(url, body, Keyword.get(opts, :req_options, [])) do
       {:ok, %{status: status, body: response_body}} when status in 200..299 ->
         parse_fill_response(response_body)
 
@@ -115,6 +121,25 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
         Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction failed: #{inspect(reason)}")
         {:error, @fill_request_failed_detail}
     end
+  end
+
+  # The request target, body and delivery policy are pinned over the caller's
+  # options: a redirect would carry the fee-payer headers to another host, and a
+  # retry could re-send a sign request the sponsor already acted on (mpp-rs builds
+  # its client with no redirects or retries). Req reads the legacy
+  # :follow_redirects before :redirect, and :form / :form_multipart / :body
+  # before or instead of :json, so those are dropped rather than overridden.
+  defp send_fill(url, body, caller_options) do
+    caller_options
+    |> Keyword.drop(@pinned_request_options)
+    |> Req.request(url: url, method: :post, json: body, redirect: false, retry: false, http_errors: :return)
+  rescue
+    # A caller option, step or adapter that raises must still end in an error
+    # tuple, so the caller releases what it reserved for this fill. Only the
+    # exception module is logged: the message can carry the request headers.
+    exception ->
+      Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction raised #{inspect(exception.__struct__)}")
+      {:error, :raised}
   end
 
   defp parse_fill_response(%{"error" => %{"message" => message}}) when is_binary(message), do: {:error, message}

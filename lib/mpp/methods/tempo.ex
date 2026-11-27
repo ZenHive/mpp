@@ -42,7 +42,8 @@ defmodule MPP.Methods.Tempo do
       for requests to `"fee_payer_url"`, such as an `Authorization` header for the
       hosted service. `"req_options"` applies to the chain RPC only and never reaches
       the fee payer, and these options never reach the RPC. Hosted fee-payer requests
-      never follow redirects and are never retried, whatever these options say.
+      never follow redirects, are never retried and always post the fill request to
+      `"fee_payer_url"`, whatever these options say.
     * `"sponsor_budget_id"` — required with `"fee_payer_url"`; stable identity shared
       by every endpoint using the same hosted sponsor wallet. It is normalized before
       use and should normally be that wallet's address.
@@ -667,10 +668,11 @@ defmodule MPP.Methods.Tempo do
 
   defp validate_fee_payer_req_options!(nil), do: :ok
 
+  # The rejected value is not echoed: it may hold the sponsor's auth headers.
   defp validate_fee_payer_req_options!(opts) do
     if !Keyword.keyword?(opts) do
       raise ArgumentError,
-            "MPP.Methods.Tempo fee_payer_req_options must be a keyword list; got: #{inspect(opts)}"
+            "MPP.Methods.Tempo fee_payer_req_options must be a keyword list of Req options"
     end
 
     :ok
