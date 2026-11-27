@@ -7308,7 +7308,7 @@
       "id": "174",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "done",
       "title": "Accept custom challenge intent values on the client parser",
       "scores": {
         "d": 2,
@@ -7329,9 +7329,12 @@
         "format_www_authenticate escapes quote and backslash and still rejects CR/LF in the intent (tests)",
         "Server-side intent pinning is unchanged (regression test)"
       ],
+      "shipped_in": "75cd7e942f7842bcae1651e5393cb6e9072548d5",
       "body": "mpp-rs #670 (0e5290a) relaxed intent validation to match mppx (refs/mppx/src/Challenge.ts:36, refs/mpp-rs/src/protocol/core/headers.rs:138-143). MPP.Challenge still requires [A-Za-z0-9_-]+, so our client drops challenges advertising other intents.",
       "created_at": "2026-11-04",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-04",
+      "implemented": "Challenge.validate_fields accepts any non-empty intent without '|' (mppx Challenge.ts:76, mpp-rs headers.rs:281-286); parse/format round-trip tests for 'payment plan' and quoted/backslashed intents, CR/LF refused on format, intent pinning covered by verifier_test 'verify/2 intent mismatch'.",
       "cross_repo": []
     },
     {
@@ -7368,7 +7371,7 @@
       "id": "176",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Add the reference keychain-V2 proof signature as a cross-implementation vector",
       "scores": {
         "d": 1,
@@ -7388,9 +7391,12 @@
         "A test verifies the viem-generated keychain V2 proof signature from mpp-rs #664 tests (VIEM_KEYCHAIN_SIGNATURE) through MPP.Methods.Tempo.Proof",
         "The vector's source commit and path are cited in the test"
       ],
+      "shipped_in": "1dbd9be125b43a7e5f46950d4964d5a9ce4d43e1",
       "body": "Our keychain V2 proof payload keccak(0x04||digest||user) agrees with mppx and tempo-primitives, but our V2 test fixture is self-built. mpp-rs #664 (75a0538) adds a viem-generated vector; port it as an independent oracle.",
       "created_at": "2026-11-04",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-04",
+      "implemented": "proof_test.exs verifies the viem 2.57.1 fixture from mpp-rs #664 (refs/mpp-rs/src/protocol/methods/tempo/proof.rs:424-500): proof hash and root signature match, the Keychain V2 envelope recovers access key 0x22..22 for root 0x11..11 and fails for another user.",
       "cross_repo": []
     },
     {

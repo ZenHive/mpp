@@ -15,7 +15,7 @@
 
 **Last shipped:** no recent shipments
 
-**Up next:** Task 176 — Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯
+**Up next:** Task 157 — Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -65,9 +65,9 @@
 | Task 171 `[P]` | ✅ | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
 | Task 172 `[P]` | ✅ | 🎁 **utilities** · Accept RFC 9530 digest forms in BodyDigest.verify [D:2/B:5/U:4 → Eff:2.25] 🎯 |
 | Task 173 `[P]` | ⬜ | 🎁 **client-sdk** · Honor a caller-set Accept-Payment header in MPP.Client.Req challenge selection [D:3/B:4/U:3 → Eff:1.17] 📋 |
-| Task 174 `[P]` | ⬜ | 🎁 **core-protocol** · Accept custom challenge intent values on the client parser [D:2/B:3/U:2 → Eff:1.25] 📋 |
+| Task 174 `[P]` | ✅ | 🎁 **core-protocol** · Accept custom challenge intent values on the client parser [D:2/B:3/U:2 → Eff:1.25] 📋 |
 | Task 175 `[P]` | ⬜ | 🎁 **tempo** · Give hosted fee-payer requests their own Req options with redirects disabled [D:2/B:3/U:3 → Eff:1.5] 🚀 |
-| Task 176 `[P]` | ⬜ | 🎁 **tempo** · Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯 |
+| Task 176 `[P]` | ✅ | 🎁 **tempo** · Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯 |
 | Task 177 | ✅ | 🎁 **tempo** · Simulate sponsored Tempo transactions with the fee payer signature [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 178 | ✅ | 🎁 **client-sdk** · Report an unknown payment outcome when the paid retry fails without a verdict [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 179 | ✅ | 🎁 **tempo** · Refuse the default in-node replay store on a multi-instance runtime (mppx #1249) [D:4/B:7/U:6 → Eff:1.62] 🚀 |
