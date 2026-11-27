@@ -265,7 +265,7 @@ defmodule MPP.ChallengeTest do
         assert parsed.id == challenge.id
       end
 
-      for intent <- ["", "charge|extra"] do
+      for intent <- ["", "charge|extra", <<0xFF, 0xFE>>] do
         assert {:error, :invalid_intent} = Challenge.validate_fields(%{valid_challenge() | intent: intent})
       end
     end

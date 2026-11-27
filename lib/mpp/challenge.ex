@@ -280,9 +280,10 @@ defmodule MPP.Challenge do
   # Any non-empty intent without `|`, so a custom one such as "payment plan"
   # parses (mppx `intent: z.string()`, refs/mppx/src/Challenge.ts:76; mpp-rs
   # #670 `is_valid_intent_name`, refs/mpp-rs/src/protocol/core/headers.rs:281-286).
-  # `|` would shift an HMAC slot. A route still pins the intent it expects.
+  # `|` would shift an HMAC slot, and invalid UTF-8 could not be echoed in a
+  # JSON credential. A route still pins the intent it expects.
   defp validate_intent(intent) when is_binary(intent) and intent != "" do
-    if String.contains?(intent, "|"), do: {:error, :invalid_intent}, else: :ok
+    if String.valid?(intent) and not String.contains?(intent, "|"), do: :ok, else: {:error, :invalid_intent}
   end
 
   defp validate_intent(_intent), do: {:error, :invalid_intent}
