@@ -157,6 +157,7 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     # A caller option, step or adapter that raises or exits must still end in
     # an error tuple, so the caller releases what it reserved for this fill.
     # Only the exception module is logged: the message can carry the headers.
+    # reach:disable-next-line bare_rescue
     exception ->
       Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction raised #{inspect(exception.__struct__)}")
       {:error, :raised}
