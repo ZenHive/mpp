@@ -1214,6 +1214,155 @@ defmodule MPP.Client.ReqTest do
     end
   end
 
+  describe "caller-set Accept-Payment header" do
+    # Offers tempo then stripe; reports each request's Accept-Payment header and
+    # whether it carried a credential.
+    defp tempo_and_stripe_plug do
+      test_pid = self()
+
+      fn conn ->
+        authorization = Plug.Conn.get_req_header(conn, "authorization")
+        send(test_pid, {:request, Plug.Conn.get_req_header(conn, "accept-payment"), authorization != []})
+
+        case authorization do
+          [] ->
+            conn
+            |> Plug.Conn.put_resp_header(
+              "www-authenticate",
+              challenge_header("tempo") <> ", " <> challenge_header("stripe")
+            )
+            |> Plug.Conn.send_resp(402, "pay")
+
+          _auth ->
+            Plug.Conn.send_resp(conn, 200, "paid")
+        end
+      end
+    end
+
+    defp both_providers do
+      MultiProvider.new([{TempoProvider, %{test_pid: self()}}, {StripeProvider, %{test_pid: self()}}])
+    end
+
+    defp get_with_accept(req, value) do
+      Req.get(req, url: "http://example.com/resource", headers: [{"accept-payment", value}])
+    end
+
+    test "ranks challenges by the caller's header instead of :accept_payment and keeps it on the wire" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          accept_payment: [{"tempo", "charge", 1.0}, {"stripe", "charge", 0.1}]
+        )
+
+      header = "stripe/charge, tempo/charge;q=0.1"
+
+      assert {:ok, %Req.Response{status: 200, body: "paid"}} = get_with_accept(req, header)
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+      assert_received {:request, [^header], false}
+      assert_received {:request, [^header], true}
+    end
+
+    test "ranks by the caller's header over an explicit :server_order selection" do
+      req = client(tempo_and_stripe_plug(), provider: both_providers(), selection: :server_order)
+
+      assert {:ok, %Req.Response{status: 200}} = get_with_accept(req, "tempo/charge;q=0.2, stripe/charge;q=0.9")
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "q=0 in the caller's header excludes an offer the config would pay" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          accept_payment: [{"tempo", "charge", 1.0}, {"stripe", "charge", 0.5}]
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = get_with_accept(req, "tempo/charge;q=0, */*")
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "a caller's header that excludes every offer pays nothing" do
+      req = client(tempo_and_stripe_plug(), provider: both_providers())
+
+      assert {:error, %ClientReq.Error{reason: :no_supported_challenge}} =
+               get_with_accept(req, "tempo/charge;q=0, stripe/charge;q=0")
+
+      refute_received {:paid, _method}
+      refute_received {:request, _accept, true}
+    end
+
+    test "a :selection function orders the offers the caller's header left" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          selection: &Enum.reverse/1
+        )
+
+      # The header ranks stripe before tempo; the function then reverses that order.
+      assert {:ok, %Req.Response{status: 200}} = get_with_accept(req, "stripe/charge, tempo/charge;q=0.5")
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, "stripe"}
+    end
+
+    test "an empty, malformed or oversized caller header refuses to pay" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          accept_payment: [{"tempo", "charge", 1.0}]
+        )
+
+      oversized = String.duplicate("tempo/charge, ", 1200) <> "tempo/charge"
+
+      for value <- ["", " , ", "tempo charge", "tempo/charge;q=2", "Tempo/charge", oversized] do
+        assert {:error, %ClientReq.Error{reason: :invalid_accept_payment} = error} = get_with_accept(req, value)
+
+        assert Exception.message(error) ==
+                 "refusing to pay: the request's Accept-Payment header is empty or malformed"
+
+        assert_received {:request, [^value], false}
+        refute_received {:paid, _method}
+        refute_received {:request, _accept, true}
+      end
+    end
+
+    test "repeated caller header lines are read as one list" do
+      req = client(tempo_and_stripe_plug(), provider: both_providers())
+
+      assert {:ok, %Req.Response{status: 200}} =
+               Req.get(req,
+                 url: "http://example.com/resource",
+                 headers: [{"accept-payment", "tempo/charge;q=0"}, {"accept-payment", "stripe/charge"}]
+               )
+
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "without a caller header the attach/2 config selects and is advertised" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          accept_payment: [{"stripe", "charge", 1.0}, {"tempo", "charge", 0.1}]
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+      assert_received {:request, ["stripe/charge, tempo/charge;q=0.1"], false}
+    end
+
+    test "without a caller header or config the first supported offer is paid" do
+      req = client(tempo_and_stripe_plug(), provider: both_providers())
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:paid, "tempo"}
+      refute_received {:paid, "stripe"}
+      assert_received {:request, [], false}
+    end
+  end
+
   describe "mix mpp.demo server" do
     test "pays the demo challenge and retrieves /resource" do
       req =

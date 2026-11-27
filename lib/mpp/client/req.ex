@@ -92,6 +92,15 @@ defmodule MPP.Client.Req do
   same condition to `payment.failed` observers and hands the caller the 5xx
   response.
 
+  An `Accept-Payment` header the caller set on the request is sent as is and
+  chooses the challenge: it ranks the offers and excludes those it matches only
+  with `q=0`, in place of `:accept_payment` and an `:accept_payment` or
+  `:server_order` `:selection`. A `:selection` function then orders the offers
+  the header left. A request whose own header is empty or malformed is not paid:
+  the result is `{:error, %MPP.Client.Req.Error{reason: :invalid_accept_payment}}`
+  (as mpp-rs, which refuses to pay; mppx would select by the attach/2 config
+  instead). Without a caller header, selection uses the attach/2 config.
+
   The request URL is passed to the provider as `:request_url` (see
   `MPP.Client.MultiProvider.pay/3`), so a zero-amount Tempo proof is signed
   only for a realm the requested server owns
@@ -100,6 +109,7 @@ defmodule MPP.Client.Req do
 
   use Descripex, namespace: "/client"
 
+  alias MPP.AcceptPayment
   alias MPP.Client.AcceptPolicy
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentLimitExceededError
@@ -245,11 +255,43 @@ defmodule MPP.Client.Req do
         request
         |> Req.Request.put_private(:mpp_request_origin, origin(request.url))
         |> Req.Request.put_private(:mpp_request_target, {request.method, redirect_count(request)})
+        |> Req.Request.put_private(:mpp_caller_accept_payment, caller_accept_payment(request))
 
       _existing ->
         request
     end
   end
+
+  # Runs before `put_accept_payment/1`, so a header found here is the caller's.
+  # Repeated field lines combine into one list (RFC 9110 §5.3).
+  defp caller_accept_payment(request) do
+    case Req.Request.get_header(request, "accept-payment") do
+      [] -> nil
+      values -> Enum.join(values, ", ")
+    end
+  end
+
+  # A caller-set header ranks and excludes (q=0) the offers instead of the
+  # attach/2 config, as in refs/mpp-rs/src/client/flow.rs:207 and
+  # refs/mppx/src/client/internal/Fetch.ts:1377-1395. An empty or malformed one
+  # refuses payment, as mpp-rs does (flow.rs:181-189 `payment_allowed`); mppx
+  # falls back to the config (Fetch.ts:1391), which could pay an offer the
+  # caller's broken header was meant to exclude.
+  defp selection_for(request, config) do
+    case Req.Request.get_private(request, :mpp_caller_accept_payment) do
+      nil ->
+        {:ok, config.selection}
+
+      header ->
+        case AcceptPayment.parse(header) do
+          [] -> {:error, :invalid_accept_payment}
+          entries -> {:ok, caller_selection(entries, config.selection)}
+        end
+    end
+  end
+
+  defp caller_selection(entries, fun) when is_function(fun, 1), do: &(&1 |> AcceptPayment.rank(entries) |> fun.())
+  defp caller_selection(entries, _config_selection), do: {:accept_payment, entries}
 
   defp put_accept_payment(request) do
     config = Req.Request.get_private(request, :mpp_client)
@@ -285,8 +327,9 @@ defmodule MPP.Client.Req do
   defp pay_and_retry(request, response, config, retries) do
     with :ok <- ensure_same_origin(request),
          :ok <- ensure_not_redirected(request),
+         {:ok, selection} <- selection_for(request, config),
          {:ok, challenges} <- fetch_challenges(request, response, retries),
-         {:ok, challenge} <- select_or_passthrough(challenges, config, retries, response),
+         {:ok, challenge} <- select_or_passthrough(challenges, config.provider, selection, retries, response),
          {:ok, _requirement} <- Spend.check(config.spend, challenge),
          :ok <- Transport.approve(challenge, config.on_payment_required),
          {:ok, credential} <- Spend.pay(config.spend, config.provider, challenge, %{request_url: request.url}) do
@@ -403,8 +446,8 @@ defmodule MPP.Client.Req do
     end
   end
 
-  defp select_or_passthrough(challenges, config, retries, response) do
-    case SelectionPolicy.select(challenges, config.provider, config.selection) do
+  defp select_or_passthrough(challenges, provider, selection, retries, response) do
+    case SelectionPolicy.select(challenges, provider, selection) do
       {:ok, challenge} -> {:ok, challenge}
       {:error, :no_supported_challenge} when retries > 0 -> {:passthrough, response}
       {:error, reason} -> {:error, reason}
@@ -420,6 +463,9 @@ defmodule MPP.Client.Req do
 
   defp error_message(:redirected_request),
     do: "refusing to pay for a non-GET/HEAD request after Req followed a redirect for it"
+
+  defp error_message(:invalid_accept_payment),
+    do: "refusing to pay: the request's Accept-Payment header is empty or malformed"
 
   defp error_message(:payment_declined), do: "payment was declined by on_payment_required"
 
