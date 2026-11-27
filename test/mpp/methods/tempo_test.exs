@@ -5932,6 +5932,48 @@ defmodule MPP.Methods.TempoTest do
       refute_received {:fill_request, _host, _method, _query, _body}
     end
 
+    test "credentials from application-wide Req defaults never reach the fee payer", %{charge: charge} do
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      test_pid = self()
+      previous = Application.fetch_env(:req, :default_options)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, options} -> Application.put_env(:req, :default_options, options)
+          :error -> Application.delete_env(:req, :default_options)
+        end
+      end)
+
+      Req.Test.stub(Tempo, fn conn ->
+        send(test_pid, {:fill_auth, conn.host, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "error" => %{"message" => "policy rejected"}, "id" => 1})
+      end)
+
+      fill = fn req_options ->
+        HostedFeePayer.fill(tx, charge.method_details["fee_payer_url"], req_options: req_options)
+      end
+
+      for defaults <- [[url: "https://user:secret@rpc.example"], [auth: {:bearer, "rpc-secret"}]] do
+        Req.default_options(defaults)
+        assert {:error, "policy rejected"} = fill.(plug: {Req.Test, Tempo})
+        assert_received {:fill_auth, "sponsor.moderato.tempo.xyz", []}, inspect(defaults)
+      end
+
+      # The fee payer's own credentials still go out.
+      Req.default_options(auth: {:bearer, "rpc-secret"})
+      assert {:error, "policy rejected"} = fill.(plug: {Req.Test, Tempo}, auth: {:bearer, "sponsor-secret"})
+      assert_received {:fill_auth, "sponsor.moderato.tempo.xyz", ["Bearer sponsor-secret"]}
+
+      assert {:error, "policy rejected"} =
+               HostedFeePayer.fill(tx, "https://fp:sponsor-pass@sponsor.moderato.tempo.xyz",
+                 req_options: [plug: {Req.Test, Tempo}]
+               )
+
+      assert_received {:fill_auth, "sponsor.moderato.tempo.xyz", ["Basic " <> encoded]}
+      assert Base.decode64!(encoded) == "fp:sponsor-pass"
+    end
+
     test "a failing fee payer request releases the transaction and its sponsor reservation", %{charge: charge} do
       {:ok, tx_hex} = build_hosted_client_tx()
       {ConCacheStore, store_opts} = charge.method_details["store"]

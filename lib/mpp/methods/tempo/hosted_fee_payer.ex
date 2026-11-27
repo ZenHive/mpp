@@ -136,16 +136,21 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
   # the sponsor already acted on (mpp-rs builds its client with no redirects or
   # retries).
   defp send_fill(url, body, caller_options) do
+    # The URL goes in at construction so a default URL is never parsed, and the
+    # only credentials kept are the caller's :auth or the sponsor URL's own
+    # userinfo: an inherited :auth (or one Req derived from a default URL's
+    # userinfo) belongs to another host.
     request =
       caller_options
       |> Keyword.drop(@dropped_request_options)
+      |> Keyword.merge(url: url, method: :post)
       |> Req.new()
-      |> Req.merge(url: url, method: :post)
 
     pinned_options =
       request.options
-      |> Map.drop(@dropped_request_options)
+      |> Map.drop([:auth | @dropped_request_options])
       |> Map.merge(%{json: body, redirect: false, retry: false, http_errors: :return})
+      |> put_fee_payer_auth(Keyword.get(caller_options, :auth) || url_auth(url))
 
     Req.request(%{request | body: nil, into: nil, options: pinned_options})
   rescue
@@ -159,6 +164,16 @@ defmodule MPP.Methods.Tempo.HostedFeePayer do
     :exit, _reason ->
       Logger.warning("MPP.Methods.Tempo.HostedFeePayer: eth_fillTransaction exited")
       {:error, :exited}
+  end
+
+  defp put_fee_payer_auth(options, nil), do: options
+  defp put_fee_payer_auth(options, auth), do: Map.put(options, :auth, auth)
+
+  defp url_auth(url) do
+    case URI.parse(url) do
+      %URI{userinfo: userinfo} when is_binary(userinfo) -> {:basic, userinfo}
+      _ -> nil
+    end
   end
 
   defp parse_fill_response(%{"error" => %{"message" => message}}) when is_binary(message), do: {:error, message}
