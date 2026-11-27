@@ -1379,6 +1379,62 @@ defmodule MPP.Client.ReqTest do
       refute_received {:paid, "tempo"}
     end
 
+    test "a response step that removes the header after the 402 does not change the selection" do
+      req =
+        tempo_and_stripe_plug()
+        |> client(provider: both_providers())
+        |> Req.Request.prepend_response_steps(
+          drop_accept: fn {request, response} -> {Req.Request.delete_header(request, "accept-payment"), response} end
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = get_with_accept(req, "stripe/charge")
+      assert_received {:request, ["stripe/charge"], false}
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "the injected header's exclusions bind under :server_order" do
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          accept_payment: [{"stripe", "charge", 1.0}],
+          selection: :server_order
+        )
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:request, ["stripe/charge"], false}
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "a caller header identical to the injected one on a reused request still excludes" do
+      paywall = tempo_and_stripe_plug()
+
+      plug = fn conn ->
+        case conn.request_path do
+          "/free" -> Plug.Conn.send_resp(conn, 200, "free")
+          "/resource" -> paywall.(conn)
+        end
+      end
+
+      req =
+        client(plug,
+          provider: both_providers(),
+          accept_payment: [{"stripe", "charge", 1.0}],
+          selection: :server_order
+        )
+
+      {executed, %Req.Response{status: 200, body: "free"}} = Req.run(req, url: "http://example.com/free")
+      reused = Req.Request.put_header(executed, "accept-payment", "stripe/charge")
+
+      assert {_request, %Req.Response{status: 200, body: "paid"}} =
+               Req.run(reused, url: "http://example.com/resource")
+
+      assert_received {:request, ["stripe/charge"], false}
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
     test "a :selection function cannot pay an offer the caller's header excluded" do
       excluded = make_challenge("tempo")
 

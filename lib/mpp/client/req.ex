@@ -56,6 +56,36 @@ defmodule MPP.Client.Req.PaidSend do
   end
 end
 
+defmodule MPP.Client.Req.RecordSend do
+  @moduledoc false
+  # Req adapter that records the Accept-Payment header of the request as it is
+  # handed to the adapter that sends it, after every request step ran.
+
+  @doc false
+  @spec run(Req.Request.t()) :: {Req.Request.t(), Req.Response.t() | Exception.t()}
+  def run(%Req.Request{} = request) do
+    sent = {:sent, header(request)}
+    adapter = Req.Request.get_private(request, :mpp_send_adapter)
+
+    # Recorded on the request the adapter returns, which response steps receive.
+    {request, result} = send_with(adapter, request)
+    {Req.Request.put_private(request, :mpp_sent_accept_payment, sent), result}
+  end
+
+  # Repeated field lines combine into one list (RFC 9110 §5.3).
+  @doc false
+  @spec header(Req.Request.t()) :: String.t() | nil
+  def header(%Req.Request{} = request) do
+    case Req.Request.get_header(request, "accept-payment") do
+      [] -> nil
+      values -> Enum.join(values, ", ")
+    end
+  end
+
+  defp send_with(adapter, request) when is_atom(adapter), do: adapter.run(request)
+  defp send_with(adapter, request) when is_function(adapter, 1), do: adapter.(request)
+end
+
 defmodule MPP.Client.Req do
   @moduledoc """
   Payment-aware Req plugin.
@@ -99,7 +129,15 @@ defmodule MPP.Client.Req do
   the header left. A request whose own header is empty or malformed is not paid:
   the result is `{:error, %MPP.Client.Req.Error{reason: :invalid_accept_payment}}`
   (as mpp-rs, which refuses to pay; mppx would select by the attach/2 config
-  instead). Without a caller header, selection uses the attach/2 config.
+  instead).
+
+  The header that counts is the one handed to the adapter, after every request
+  step ran; a response step that changes it afterwards does not. A header
+  equal to the one this plugin injected from `:accept_payment` is read as the
+  injection: the `:selection` orders the offers, but an offer that header does
+  not accept (unlisted or `q=0`) is never paid, also under `:server_order` or
+  a `:selection` function. With no header sent, selection uses the attach/2
+  config.
 
   The request URL is passed to the provider as `:request_url` (see
   `MPP.Client.MultiProvider.pay/3`), so a zero-amount Tempo proof is signed
@@ -114,6 +152,7 @@ defmodule MPP.Client.Req do
   alias MPP.Client.MultiProvider
   alias MPP.Client.PaymentLimitExceededError
   alias MPP.Client.Req.PaidSend
+  alias MPP.Client.Req.RecordSend
   alias MPP.Client.SelectionPolicy
   alias MPP.Client.Spend
   alias MPP.Client.Transport
@@ -186,7 +225,8 @@ defmodule MPP.Client.Req do
     |> Req.Request.put_private(:mpp_client, config)
     |> Req.Request.append_request_steps(
       mpp_origin: &snapshot_origin/1,
-      mpp_accept_payment: &put_accept_payment/1
+      mpp_accept_payment: &put_accept_payment/1,
+      mpp_record_send: &record_send/1
     )
     |> Req.Request.append_response_steps(mpp_payment: &handle_payment/1)
   end
@@ -261,55 +301,65 @@ defmodule MPP.Client.Req do
     end
   end
 
-  # The header on the request that was answered 402 is what the server saw, so
-  # selection reads it there: a later request step or a reused request may have
-  # replaced it after `put_accept_payment/1`. Repeated field lines combine into
-  # one list (RFC 9110 §5.3).
+  # A later request step can still change the header, or replace it on a
+  # reused request, and a response step can change it after the answer, so
+  # selection reads what `RecordSend` saw at the adapter. A later step that
+  # replaced the adapter leaves no record; the request then holds the best
+  # account of what was sent.
   defp sent_accept_payment(request) do
-    case Req.Request.get_header(request, "accept-payment") do
-      [] -> nil
-      values -> Enum.join(values, ", ")
+    case Req.Request.get_private(request, :mpp_sent_accept_payment) do
+      {:sent, header} -> header
+      nil -> RecordSend.header(request)
     end
   end
 
-  # A header other than the one this plugin injected is the caller's, and it
-  # ranks and excludes (q=0) the offers instead of the attach/2 config, as in
+  # Whatever header was sent, its exclusions bind: the server read it. A header
+  # other than the one this plugin injected is the caller's and also orders the
+  # offers in place of the attach/2 config, as in
   # refs/mpp-rs/src/client/flow.rs:207 and
   # refs/mppx/src/client/internal/Fetch.ts:1377-1395. An empty or malformed one
   # refuses payment, as mpp-rs does (flow.rs:181-189 `payment_allowed`); mppx
   # falls back to the config (Fetch.ts:1391), which could pay an offer the
   # caller's broken header was meant to exclude.
   defp selection_for(request, config) do
-    sent = sent_accept_payment(request)
+    case sent_accept_payment(request) do
+      nil ->
+        {:ok, config.selection}
 
-    if is_nil(sent) or sent == Req.Request.get_private(request, :mpp_injected_accept_payment) do
-      {:ok, config.selection}
-    else
-      case AcceptPayment.parse(sent) do
-        [] -> {:error, :invalid_accept_payment}
-        entries -> {:ok, caller_selection(entries, config.selection)}
-      end
+      sent ->
+        injected? = sent == Req.Request.get_private(request, :mpp_injected_accept_payment)
+
+        case {AcceptPayment.parse(sent), injected?} do
+          {[], true} -> {:ok, config.selection}
+          {[], false} -> {:error, :invalid_accept_payment}
+          {entries, injected?} -> {:ok, header_selection(entries, config.selection, injected?)}
+        end
     end
   end
 
-  # The function sees only what the header left, and may return only that.
-  defp caller_selection(entries, fun) when is_function(fun, 1) do
+  defp header_selection(entries, selection, injected?) do
     fn supported ->
-      left = AcceptPayment.rank(supported, entries)
-
-      case fun.(left) do
-        ordered when is_list(ordered) -> Enum.filter(ordered, &(&1 in left))
-        _other -> []
-      end
+      ranked = AcceptPayment.rank(supported, entries)
+      left = if injected?, do: Enum.filter(supported, &(&1 in ranked)), else: ranked
+      order_left(left, selection, injected?)
     end
   end
 
-  defp caller_selection(entries, _config_selection), do: {:accept_payment, entries}
+  # A function sees only what the header left, and may return only that.
+  defp order_left(left, fun, _injected?) when is_function(fun, 1) do
+    case fun.(left) do
+      ordered when is_list(ordered) -> Enum.filter(ordered, &(&1 in left))
+      _other -> []
+    end
+  end
+
+  defp order_left(left, {:accept_payment, [_ | _] = entries}, true), do: AcceptPayment.rank(left, entries)
+  defp order_left(left, _selection, _injected?), do: left
 
   defp put_accept_payment(request) do
     config = Req.Request.get_private(request, :mpp_client)
 
-    if config.accept_payment == [] or sent_accept_payment(request) != nil or
+    if config.accept_payment == [] or RecordSend.header(request) != nil or
          not AcceptPolicy.allows?(config.accept_policy, request.url) do
       request
     else
@@ -319,6 +369,21 @@ defmodule MPP.Client.Req do
       |> Req.Request.put_header("accept-payment", value)
       |> Req.Request.put_private(:mpp_injected_accept_payment, value)
     end
+  end
+
+  # Request steps rerun on redirect hops and on the paid retry; the adapter is
+  # wrapped once, and `PaidSend` wraps this wrapper.
+  defp record_send(%Req.Request{adapter: adapter} = request) when adapter in [RecordSend, PaidSend] do
+    Req.Request.put_private(request, :mpp_sent_accept_payment, nil)
+  end
+
+  defp record_send(%Req.Request{adapter: adapter} = request) do
+    recording =
+      request
+      |> Req.Request.put_private(:mpp_send_adapter, adapter)
+      |> Req.Request.put_private(:mpp_sent_accept_payment, nil)
+
+    %{recording | adapter: RecordSend}
   end
 
   defp handle_payment({request, response}) do
