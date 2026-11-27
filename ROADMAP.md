@@ -15,7 +15,7 @@
 
 **Last shipped:** no recent shipments
 
-**Up next:** Task 160 — Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯
+**Up next:** Task 176 — Add the reference keychain-V2 proof signature as a cross-implementation vector [D:1/B:3/U:2 → Eff:2.5] 🎯
 <!-- FOCUS:END -->
 
 ---
@@ -51,7 +51,7 @@
 | Task 157 `[P]` | ⬜ | 🎁 **core-protocol** · Expose the verified payer on payment success [D:2/B:5/U:3 → Eff:2.0] 🎯 |
 | Task 158 `[P]` | ⬜ | 🎁 **stripe** · Standardize Stripe PaymentIntent analytics metadata [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 159 `[P]` | ⬜ | 🎁 **client-sdk** · Tempo client provider: spending caps, expiry rounding and MACH gas token [D:4/B:6/U:4 → Eff:1.25] 📋 |
-| Task 160 `[P]` | ⬜ | 🎁 **core-protocol** · Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯 |
+| Task 160 `[P]` | ✅ | 🎁 **core-protocol** · Raise the credential token cap to the reference SDKs' 64 KiB [D:1/B:4/U:4 → Eff:4.0] 🎯 |
 | Task 161 `[P]` | ⬜ | 🎁 **tempo** · Accept sponsored Tempo swaps that acquire only the shortfall [D:2/B:4/U:3 → Eff:1.75] 🚀 |
 | Task 162 | ✅ | 🎁 **tempo** · Recover confirmed Tempo charges after ambiguous broadcast errors [D:4/B:6/U:4 → Eff:1.25] 📋 |
 | Task 163 `[P]` | ⛔ | 🎁 **mcp** · MCP client pays the next supported challenge when the preferred one fails [D:2/B:3/U:2 → Eff:1.25] 📋 |
@@ -63,7 +63,7 @@
 | Task 169 | ✅ | 🎁 **session** · Harden session voucher and metering acceptance (see private advisory GHSA-fqv7-fp33-2mxq) [D:6/B:8/U:9 → Eff:1.42] 📋 |
 | Task 170 | ✅ | 🎁 **session** · Harden cooperative session close authorization (see private advisory GHSA-2grw-xqfc-q2x9) [D:5/B:7/U:8 → Eff:1.5] 🚀 |
 | Task 171 `[P]` | ✅ | 🎁 **transport-ws** · Harden WebSocket client payment retry (see private advisory GHSA-4rf9-cqhr-4924) [D:3/B:7/U:8 → Eff:2.5] 🎯 |
-| Task 172 `[P]` | ⬜ | 🎁 **utilities** · Accept RFC 9530 digest forms in BodyDigest.verify [D:2/B:5/U:4 → Eff:2.25] 🎯 |
+| Task 172 `[P]` | ✅ | 🎁 **utilities** · Accept RFC 9530 digest forms in BodyDigest.verify [D:2/B:5/U:4 → Eff:2.25] 🎯 |
 | Task 173 `[P]` | ⬜ | 🎁 **client-sdk** · Honor a caller-set Accept-Payment header in MPP.Client.Req challenge selection [D:3/B:4/U:3 → Eff:1.17] 📋 |
 | Task 174 `[P]` | ⬜ | 🎁 **core-protocol** · Accept custom challenge intent values on the client parser [D:2/B:3/U:2 → Eff:1.25] 📋 |
 | Task 175 `[P]` | ⬜ | 🎁 **tempo** · Give hosted fee-payer requests their own Req options with redirects disabled [D:2/B:3/U:3 → Eff:1.5] 🚀 |

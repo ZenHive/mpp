@@ -6831,7 +6831,7 @@
       "id": "160",
       "phase": 1,
       "bundle": "core-protocol",
-      "status": "pending",
+      "status": "done",
       "title": "Raise the credential token cap to the reference SDKs' 64 KiB",
       "scores": {
         "d": 1,
@@ -6852,9 +6852,12 @@
         "The bound is cited against refs/mppx and refs/mpp-rs",
         "MCP/JSON-RPC credential paths use the same bound"
       ],
+      "shipped_in": "2a7363aeaed4d6067c59d9b1c57bddf97eed68fe",
       "body": "MPP.Headers caps the Authorization credential token at 16 KiB; mppx (src/Credential.ts) and mpp-rs (src/protocol/core/headers.rs, #611 12bf82a) both bound the Authorization value at 64 KiB before extraction. Credentials echoing a large request/opaque are rejected by us but accepted by both SDKs. Align the bound (still applied before any decoding).",
       "created_at": "2026-10-31",
+      "done_at": "2026-11-27",
       "scored_at": "2026-10-31",
+      "implemented": "Already shipped in 2a7363a: MPP.Headers bounds the whole Authorization credential value at 64 KiB before decode (mppx Credential.ts:8 maxAuthorizationLength, mpp-rs headers.rs:29 MAX_AUTHORIZATION_LEN), tested at both boundaries in test/mpp/headers_test.exs. MCP and JSON-RPC credentials arrive as JSON the host has already decoded, so no pre-decode bound applies; mppx's mcp() transport bounds none either (refs/mppx/src/server/Transport.ts:334-341).",
       "cross_repo": []
     },
     {
@@ -7241,7 +7244,7 @@
       "id": "172",
       "phase": 1,
       "bundle": "utilities",
-      "status": "pending",
+      "status": "done",
       "title": "Accept RFC 9530 digest forms in BodyDigest.verify",
       "scores": {
         "d": 2,
@@ -7263,9 +7266,12 @@
         "Digests produced by mppx and mpp-rs for a fixed body verify (vectors taken from refs/mppx/src/BodyDigest.test.ts and refs/mpp-rs/src/body_digest.rs)",
         "The task states whether compute/1 switches to padded output to match both refs, and the CHANGELOG says so if it does"
       ],
+      "shipped_in": "0fb3112b80fd03a60be1235e1ca6bb72a700a1b5",
       "body": "mppx #1154 (ed76e8e) and mpp-rs #672 (7f09efd) normalize RFC 9530 byte-sequence digests in BodyDigest.verify; both refs emit padded bare base64. MPP.BodyDigest.verify/2 is an exact string compare against our own unpadded compute/1 output, so it rejects the refs' padded form and the spec's structured form (refs/mpp-specs/specs/core/draft-httpauth-payment-01.md digest examples). Challenge-side digest parsing already accepts both shapes; only verify is off. Interop gap, fails closed.",
       "created_at": "2026-11-04",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-04",
+      "implemented": "verify/2 already accepted bare padded/unpadded and the RFC 9530 :<b64>: form and compute/1 writes padded base64 (shipped in 2a7363a, CHANGELOG 0.25.0). Added the mppx and mpp-rs vectors (BodyDigest.test.ts, body_digest.rs) and their malformed set: doubled or one-sided colons, leading/trailing whitespace, parameters, uppercase SHA-256, sha-512, lists, empty ::.",
       "cross_repo": []
     },
     {
