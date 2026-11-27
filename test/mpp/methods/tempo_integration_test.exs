@@ -486,6 +486,78 @@ defmodule MPP.Methods.TempoIntegrationTest do
     end
   end
 
+  describe "memo rules of the charge draft on Moderato" do
+    test "a pull payment with a plain transfer settles once and is a replay afterwards", %{
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = FaucetWallet.tempo!(rpc_url)
+      start_supervised!(TempoMemoryStore)
+      config = tempo_config(recipient_address, rpc_url, %{"store" => TempoMemoryStore})
+      challenge = request_challenge!(config)
+
+      {:ok, signed_tx} =
+        TempoTxBuilder.build_signed_transfer(
+          private_key: sender.private_key,
+          token: @path_usd,
+          recipient: recipient_address,
+          amount: @transfer_amount,
+          chain_id: @chain_id,
+          rpc_url: rpc_url,
+          fee_token: @path_usd,
+          nonce: 0
+        )
+
+      payload = %{"type" => "transaction", "signature" => signed_tx}
+      conn = submit_credential_conn(config, challenge, payload)
+      assert conn.status == nil, "A plain transfer should pay a pull credential, got: #{inspect(conn.resp_body)}"
+      assert %Receipt{status: "success", reference: tx_hash} = conn.assigns[:mpp_receipt]
+
+      # The settled transfer carries no memo at all.
+      assert [] = logged_memos!(tx_hash, recipient_address, rpc_url)
+
+      # The same signed transaction is spent: under its own challenge and under a fresh one.
+      for replay <- [challenge, request_challenge!(config)] do
+        body = submit_credential!(config, replay, payload)
+        assert body["type"] =~ "invalid-challenge"
+        assert body["detail"] =~ "already used"
+      end
+
+      # A server that never saw it finds it included on Moderato and refuses it before sending.
+      stop_supervised!(TempoMemoryStore)
+      start_supervised!(TempoMemoryStore)
+      body = submit_credential!(config, payload)
+      assert body["type"] =~ "invalid-challenge"
+      assert body["detail"] =~ "already used"
+
+      # Presented by hash it has no challenge-bound memo.
+      body = submit_credential!(tempo_config(recipient_address, rpc_url, %{}), %{"type" => "hash", "hash" => tx_hash})
+      assert body["type"] =~ "verification-failed"
+    end
+
+    test "the built-in provider sends exactly methodDetails.memo, and Moderato emits it", %{
+      config: config,
+      recipient: recipient_address,
+      rpc_url: rpc_url
+    } do
+      sender = FaucetWallet.tempo!(rpc_url)
+      memo = "0x" <> Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+
+      request = config |> request_challenge!() |> challenge_request() |> put_in(["methodDetails", "memo"], memo)
+      challenge = %{request_challenge!(config) | request: request |> Jason.encode!() |> Base.url_encode64(padding: false)}
+
+      assert {:ok, credential} =
+               TempoProvider.pay(challenge, %{
+                 private_key: sender.private_key,
+                 rpc_url: rpc_url,
+                 expected_chain_id: @chain_id
+               })
+
+      tx_hash = broadcast_raw_transaction_sync!(credential.payload["signature"], rpc_url)
+      assert [memo] == logged_memos!(tx_hash, recipient_address, rpc_url)
+    end
+  end
+
   describe "challenge details" do
     test "challenge contains Tempo method details", %{config: config} do
       challenge = request_challenge!(config)
@@ -892,10 +964,11 @@ defmodule MPP.Methods.TempoIntegrationTest do
              ]
            )}
         ] do
-      test "a transaction already included before the server sends it settles by its receipt (#{label} nonce)", %{
-        recipient: recipient_address,
-        rpc_url: rpc_url
-      } do
+      test "a transaction already included before the server sends it is a replay, and pays by its hash (#{label} nonce)",
+           %{
+             recipient: recipient_address,
+             rpc_url: rpc_url
+           } do
         sender = FaucetWallet.tempo!(rpc_url)
         start_supervised!(TempoMemoryStore)
 
@@ -906,13 +979,18 @@ defmodule MPP.Methods.TempoIntegrationTest do
           build_bound_signed_tx(sender, recipient_address, @transfer_amount, rpc_url, challenge, unquote(nonce_opts))
 
         tx_hash = broadcast_raw_transaction_sync!(signed_tx, rpc_url)
-        payload = %{"type" => "transaction", "signature" => signed_tx}
 
-        conn = submit_credential_conn(config, challenge, payload)
-        assert conn.status == nil, "Expected the included transaction to settle, got #{inspect(conn.resp_body)}"
+        # The server did not send it, so the signed transaction is a replayed credential.
+        body = submit_credential!(config, challenge, %{"type" => "transaction", "signature" => signed_tx})
+        assert body["type"] =~ "invalid-challenge"
+        assert body["detail"] =~ "already used"
+
+        # Its transfer carries this challenge's memo, so the client pays with the hash.
+        conn = submit_credential_conn(config, challenge, %{"type" => "hash", "hash" => tx_hash})
+        assert conn.status == nil, "Expected the bound transfer to pay by hash, got #{inspect(conn.resp_body)}"
         assert %Receipt{reference: ^tx_hash} = conn.assigns[:mpp_receipt]
 
-        body = submit_credential!(config, challenge, payload)
+        body = submit_credential!(config, challenge, %{"type" => "hash", "hash" => tx_hash})
         assert body["type"] =~ "invalid-challenge"
         assert body["detail"] =~ "already used"
       end
@@ -1905,6 +1983,20 @@ defmodule MPP.Methods.TempoIntegrationTest do
   defp fresh_fee_payer_hex!(rpc_url) do
     wallet = FaucetWallet.tempo!(rpc_url)
     Base.encode16(wallet.private_key, case: :lower)
+  end
+
+  # The memo topics of the TransferWithMemo logs paying `recipient_address` in a mined transaction.
+  defp logged_memos!(tx_hash, recipient_address, rpc_url) do
+    body = %{"jsonrpc" => "2.0", "method" => "eth_getTransactionReceipt", "params" => [tx_hash], "id" => 1}
+    padded = String.downcase("0x" <> String.duplicate("0", 24) <> String.trim_leading(recipient_address, "0x"))
+
+    case Req.post(rpc_url, json: body) do
+      {:ok, %Req.Response{status: 200, body: %{"result" => %{"status" => "0x1", "logs" => logs}}}} ->
+        for %{"topics" => [_topic, _from, to, memo]} <- logs, String.downcase(to) == padded, do: String.downcase(memo)
+
+      other ->
+        flunk("No successful receipt for #{tx_hash} on #{rpc_url}: #{inspect(other)}")
+    end
   end
 
   # Broadcasts a prebuilt signed Tempo transaction via the sync RPC and returns its tx hash.

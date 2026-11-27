@@ -123,3 +123,36 @@ defmodule MPP.Test.HostedRecordFaultStore do
 
   def delete(key, expected), do: ConCacheStore.delete(key, expected, @opts)
 end
+
+defmodule MPP.Test.BroadcastRecordFaultStore do
+  @moduledoc """
+  `MPP.Test.TempoMemoryStore` whose broadcast-record reads fail while the
+  calling process has `:broadcast_read_fault` set, and whose broadcast-record
+  deletes fail while it has `:broadcast_delete_fault` set.
+  """
+  @behaviour MPP.Tempo.Store
+
+  alias MPP.Test.TempoMemoryStore
+
+  @broadcast_prefix "mpp:charge:broadcast:"
+
+  @impl true
+  def get(@broadcast_prefix <> _hash = key) do
+    if Process.get(:broadcast_read_fault), do: {:error, :unavailable}, else: TempoMemoryStore.get(key)
+  end
+
+  def get(key), do: TempoMemoryStore.get(key)
+
+  @impl true
+  def put(key, value), do: TempoMemoryStore.put(key, value)
+
+  @impl true
+  def check_and_mark(key, value), do: TempoMemoryStore.check_and_mark(key, value)
+
+  @impl true
+  def delete(@broadcast_prefix <> _hash = key, expected) do
+    if Process.get(:broadcast_delete_fault), do: {:error, :unavailable}, else: TempoMemoryStore.delete(key, expected)
+  end
+
+  def delete(key, expected), do: TempoMemoryStore.delete(key, expected)
+end

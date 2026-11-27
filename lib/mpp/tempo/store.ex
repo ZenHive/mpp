@@ -64,7 +64,10 @@ defmodule MPP.Tempo.Store do
 
   Keys are formatted as `"mpp:charge:<lowercase_hex_value>"` where the value is
   the transaction hash (for `type="hash"`) or the full serialized transaction
-  hex (for `type="transaction"`).
+  hex (for `type="transaction"`). `MPP.Methods.Tempo` also writes
+  `"mpp:charge:broadcast:<transaction_hash>"` for a send whose outcome is open;
+  its value is the id of the challenge that sent it, and it is removed once
+  the send is settled or rejected.
 
   ## Multi-tenant key prefixes
 

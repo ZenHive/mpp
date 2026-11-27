@@ -64,8 +64,9 @@ defmodule MPP.Methods.Tempo.BroadcastTest do
       assert {:error, :rejected} = Broadcast.send_sync(@raw, @hash, @rpc_url, opts())
       assert lookups() == 1
 
+      # The node did not take this send: the receipt belongs to an earlier one.
       stub(rpc_error(-32_000, "nonce too low"), fn -> @receipt end)
-      assert {:ok, @hash, _receipt} = Broadcast.send_sync(@raw, @hash, @rpc_url, opts())
+      assert {:duplicate, @hash, _receipt} = Broadcast.send_sync(@raw, @hash, @rpc_url, opts())
     end
 
     test "an ambiguous answer polls until the confirmation budget ends" do
@@ -152,11 +153,46 @@ defmodule MPP.Methods.Tempo.BroadcastTest do
 
     test "an ambiguous answer makes one lookup" do
       stub(rpc_error(-32_000, "expiring nonce transaction already included"))
-      assert {:error, :unresolved} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
+      assert {:error, :duplicate_unresolved} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
       assert lookups() == 1
+
+      stub(rpc_error(-32_000, "already known"), fn -> @receipt end)
+      assert {:duplicate, @hash, %{status: _}} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
 
       stub(rpc_error(4, "timeout"), fn -> @receipt end)
       assert {:ok, @hash, %{status: _}} = Broadcast.send_async(@raw, @hash, @rpc_url, opts())
+    end
+  end
+
+  describe "included/3" do
+    test "reports a receipt, an absent transaction, and a lookup it cannot trust" do
+      stub(rpc_error(-32_000, "unused"), fn -> @receipt end)
+      assert {:ok, %{status: 1}} = Broadcast.included(@hash, @rpc_url, opts())
+
+      stub(rpc_error(-32_000, "unused"))
+      assert :not_found = Broadcast.included(@hash, @rpc_url, opts())
+      assert lookups() == 2
+
+      for answer <- [
+            rpc_error(-32_000, "busy"),
+            &Req.Test.transport_error(&1, :timeout),
+            &(&1 |> Plug.Conn.put_status(502) |> Plug.Conn.send_resp(502, "bad gateway")),
+            &Req.Test.json(&1, %{"jsonrpc" => "2.0", "result" => "0x1", "id" => 1})
+          ] do
+        Req.Test.stub(__MODULE__, answer)
+        assert :error = Broadcast.included(@hash, @rpc_url, opts())
+      end
+    end
+
+    test "a lookup slower than its share of the budget is an error, not an absent transaction" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        Process.sleep(300)
+        Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+      end)
+
+      started = System.monotonic_time(:millisecond)
+      assert :error = Broadcast.included(@hash, @rpc_url, opts())
+      assert System.monotonic_time(:millisecond) - started < 250
     end
   end
 

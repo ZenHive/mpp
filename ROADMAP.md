@@ -86,6 +86,7 @@
 | Task 192 | ⬜ | 🎁 **core-protocol** · 🐛 Emit the receipt telemetry event only for an accepted payment, with the receipt's own fields [D:3/B:5/U:4 → Eff:1.5] 🚀 |
 | Task 193 | ⬜ | 🎁 **core-protocol** · Hand the protected handler one accepted-payment value with the payment's authoritative terms [D:4/B:6/U:5 → Eff:1.38] 📋 |
 | Task 194 | ⬜ | 🎁 **core-protocol** · Optional payment sink called synchronously wherever a payment is accepted [D:6/B:6/U:4 → Eff:0.83] ⚠️ |
+| Task 195 | ⬜ | 🎁 **tempo** · Tie Tempo charge settlement to the signed transaction's own hash and to a challenge [D:4/B:3/U:2 → Eff:0.62] ⚠️ |
 <!-- TASKS:END -->
 
 ---

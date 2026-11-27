@@ -266,6 +266,10 @@ defmodule MPP.Methods.TempoFullFlowTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -463,6 +467,10 @@ defmodule MPP.Methods.TempoFullFlowTest do
       request = Jason.decode!(body)
 
       case request["method"] do
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
         "eth_simulateV1" ->
           Req.Test.json(conn, simulate_success_body())
 

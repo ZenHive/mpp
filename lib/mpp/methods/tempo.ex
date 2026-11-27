@@ -76,9 +76,8 @@ defmodule MPP.Methods.Tempo do
     * `"sponsor_budget_reconcile"` — (optional, defaults to `false`) when `true`, an
       at-capacity request checks a bounded set of pending async transaction receipts
       before rejecting.
-    * `"memo"` — removed. Configuring a static memo raises at startup (`MPP.Plug.init/1`).
-      Every Tempo charge must carry a challenge-bound attribution memo; that check is
-      already the default verification path (mppx #904 / mpp-rs #421).
+    * `"memo"` — removed. Configuring a static memo raises at startup (`MPP.Plug.init/1`),
+      so a challenge never carries `methodDetails.memo`. See *Memo rules* below.
     * `"wait_for_confirmation"` — (optional) when `false`, broadcasts without waiting
       for on-chain confirmation. Pre-simulates the transaction first (same guard as the
       default path: `eth_simulateV1` of the full transaction, or for a sponsored one an
@@ -95,12 +94,13 @@ defmodule MPP.Methods.Tempo do
       wait makes one lookup instead. An outcome that stays open fails with an
       `internal_payment_error` whose detail names the transaction hash and
       `validBefore` (clients receive the fixed internal-error text). A failed
-      settlement does not consume the credential: resending it resends the same
-      signed transaction and recovers its receipt, and a settled one is rejected
-      as already used.
+      settlement does not consume the credential: resending it under the same
+      challenge settles the transaction this server sent, by its receipt or by
+      sending it again, and a settled one is rejected as already used.
     * `"receipt_poll_interval_ms"` — (optional, default `1_000`) the interval of that
       receipt polling.
-    * `"store"` — (optional) replay-dedup store. **On by default** — when absent, the
+    * `"store"` — (optional) replay-dedup store. It also holds the record of a
+      send whose outcome is open (see *Memo rules*). **On by default** — when absent, the
       app-started `MPP.Tempo.ConCacheStore` is used so replay protection is enabled out of
       the box (issue #7). Pass a module implementing `MPP.Tempo.Store` (Redis,
       Postgres, etc. — for multi-node deployments) or `{MPP.Tempo.ConCacheStore, opts}` to
@@ -145,6 +145,35 @@ defmodule MPP.Methods.Tempo do
   `"challenge_nonce" => true`; a caller of `verify/2` that issues its own
   challenges creates them with `MPP.Challenge.create/2` and `nonce: true` and
   passes the same key.
+
+  ## Memo rules
+
+  The charge draft's memo rules (draft-tempo-charge-00, mppx #1273):
+
+    * `type="hash"` — the counted transfer must carry this challenge's
+      attribution memo (`TransferWithMemo`). That memo is what ties a transfer
+      the client broadcast to one challenge.
+    * `type="transaction"` — the memo is optional. A plain `transfer`, or a
+      memo that is not in attribution format, pays the challenge. An
+      attribution memo for another realm or challenge does not, and is rejected
+      before anything is signed or sent.
+
+  Before sending a `type="transaction"` credential the server looks up the
+  transaction's hash. One that is already included was not sent by this
+  server and is rejected as a used hash, whatever its memo; a failed lookup
+  stops the payment before the send. The exception is the server's own send
+  whose outcome stayed open: it is recorded in the store under
+  `mpp:charge:broadcast:<hash>` for the challenge that sent it, and a retry
+  under that challenge settles by its receipt, as does a recorded hosted
+  fee-payer fill. The same transaction presented for another challenge while
+  that record exists is rejected as used. A definitive rejection of the send
+  ends the record; when the store cannot remove it, the transaction's
+  reservation stays held until it expires, so the record never settles it.
+  A caller of `verify/2` without a `"challenge_id"` keeps no record. When
+  the node answers the send
+  with "already known", the transaction came from elsewhere and its transfer
+  must carry this challenge's memo, unless the server co-signed it as fee
+  payer.
 
   ## Recurring subscriptions
 
@@ -234,6 +263,8 @@ defmodule MPP.Methods.Tempo do
   @attribution_nonce_length 7
   @store_key_prefix "mpp:charge:"
   @hosted_fill_key_prefix "mpp:charge:hosted:"
+  @broadcast_key_prefix "mpp:charge:broadcast:"
+  @max_unix_seconds 253_402_300_799
   @default_confirmation_timeout_ms 30_000
   @default_receipt_poll_interval_ms 1_000
   @proof_store_key_prefix "mpp:proof:"
@@ -388,7 +419,7 @@ defmodule MPP.Methods.Tempo do
          {:ok, receipt} <- rpc_fetch_receipt(hash, rpc_url, rpc_options(config)),
          :ok <- Shared.check_receipt_status(receipt),
          {:ok, sender_policy} <- hash_sender_policy(hash, rpc_url, config),
-         {:ok, transfer} <- find_matching_transfer(receipt, charge, source, sender_policy),
+         {:ok, transfer} <- find_matching_transfer(receipt, charge, source, sender_policy, :required),
          :ok <- commit_hash_used(store, hash, config) do
       {:ok,
        Receipt.new(
@@ -581,13 +612,13 @@ defmodule MPP.Methods.Tempo do
 
   # --- Fee payer helpers ---
 
-  # mppx #904 / mpp-rs #421: the primary charge memo is always the challenge-bound
-  # attribution memo. A configured static value cannot be that nonce, so it is rejected
-  # rather than advertised or used as a verification bypass. `nil` is not a memo.
+  # mppx #904 / mpp-rs #421: a configured static value is never this
+  # challenge's attribution memo, so it is rejected rather than advertised or
+  # used as a verification bypass. `nil` is not a memo.
   defp reject_static_memo!(%{"memo" => memo}) when not is_nil(memo) do
     raise ArgumentError,
           "MPP.Methods.Tempo: the static \"memo\" option was removed. " <>
-            "Tempo charges require a challenge-bound attribution memo, which is already the default path. " <>
+            "A hash credential is bound by the challenge's attribution memo, which needs no configuration. " <>
             "Omit \"memo\" from method_config."
   end
 
@@ -1365,7 +1396,7 @@ defmodule MPP.Methods.Tempo do
   defp prepare_sponsored_transaction(tx, payment, config, store) do
     with {:ok, tx, hash} <- canonicalize_transaction(tx),
          :ok <- maybe_validate_fee_payer_envelope(tx, config),
-         {:ok, _payment} <- check_matched_memo_binding(payment, config),
+         :ok <- check_call_memo(payment, config),
          {:ok, token} <- reserve_hash_atomic(store, hash, config) do
       finish_reserved_transaction(tx, config, store, hash, token)
     end
@@ -1421,8 +1452,7 @@ defmodule MPP.Methods.Tempo do
         # verdict, as on the broadcast path (mppx Charge.ts:979-980).
         {:ok, receipt} ->
           settle_recorded_budget(config, filled_hash)
-          funding_currency = transaction_funding_currency(filled, payment, charge, config)
-          settle_recorded_fill(filled, receipt, hash, charge, config, store, funding_currency)
+          settle_own_recorded_fill(filled, receipt, hash, payment, charge, config, store)
 
         :not_found ->
           {:continue, filled_hash}
@@ -1435,11 +1465,33 @@ defmodule MPP.Methods.Tempo do
 
   defp recover_recorded_fill(_tx, _payment, _charge, _config, _store), do: {:continue, nil}
 
+  # The recorded fill settles only for the challenge whose send it was, as an
+  # included transaction does on the broadcast path.
+  defp settle_own_recorded_fill(filled, receipt, hash, payment, charge, config, store) do
+    case broadcast_state(store, transaction_hash(filled), config) do
+      :own ->
+        funding_currency = transaction_funding_currency(filled, payment, charge, config)
+        settle_recorded_fill(filled, receipt, hash, charge, config, store, funding_currency)
+
+      :none ->
+        {:error, Errors.new(:invalid_challenge, "Transaction hash already used")}
+
+      :fault ->
+        {:error, Errors.new(:internal_payment_error, @internal_payment_error_detail)}
+    end
+  end
+
   defp settle_recorded_fill(filled, receipt, hash, charge, config, store, funding_currency) do
     with {:ok, token} <- reserve_hash_atomic(store, hash, config) do
-      with {:ok, tx_hash} <- verify_settled_receipt(filled, transaction_hash(filled), receipt, charge, config),
+      filled_hash = transaction_hash(filled)
+
+      with {:ok, tx_hash} <-
+             filled
+             |> verify_settled_receipt(filled_hash, receipt, charge, config, :optional)
+             |> close_own_broadcast(store, filled, config),
            :ok <- claim_settled_hash(store, tx_hash, hash, config) do
         drop_hosted_fill(store, hash, filled, config)
+        drop_own_broadcast(store, filled, config)
 
         {:ok,
          Receipt.new(
@@ -1539,10 +1591,13 @@ defmodule MPP.Methods.Tempo do
        }) do
     with :ok <- begin_budget_broadcast(budget),
          :ok <- check_send_boundary(tx, config),
+         {:ok, inclusion} <- check_inclusion(tx, rpc_url, config, store),
          :ok <- record_hosted_fill(store, reserved_hash, tx, config),
-         {:ok, tx_hash} <- broadcast_with_budget(tx, rpc_url, config, charge, wait?, budget),
+         pending = %{budget: budget, store: store},
+         {:ok, tx_hash} <- settle_or_send(inclusion, tx, rpc_url, config, charge, wait?, pending),
          :ok <- claim_settled_hash(store, tx_hash, reserved_hash, config) do
       drop_hosted_fill(store, reserved_hash, tx, config)
+      drop_own_broadcast(store, tx, config)
 
       {:ok,
        Receipt.new(
@@ -1563,19 +1618,204 @@ defmodule MPP.Methods.Tempo do
         safe_dedup_release(store, reserved_hash, token)
         {:error, reason}
 
+      # The node refused the send, but its broadcast record could not be
+      # removed: the reservation stays held until it expires, so the record
+      # cannot settle the transaction (draft-tempo-charge-00 "Transaction
+      # Verification": no record is kept after a definitive rejection).
+      {:error, {:record_kept, reason}} ->
+        safe_budget_pending(budget, transaction_hash(tx))
+        {:error, reason}
+
       # Sent but not settled. The sponsor budget stays held, as pending on the
       # sent transaction's hash, until a reconciled receipt or its expiry
-      # settles it; the reservation is released, so a retry of the same signed
-      # transaction resends it and recovers its receipt. A signed transaction
-      # is included at most once, and it is accepted only while this
-      # reservation is held, so a released one cannot be accepted twice
-      # (mppx Charge.ts:1024-1037, mpp-rs transaction_credential.rs:606-617).
+      # settles it; the reservation is released, so a retry of the same
+      # credential settles the transaction through this server's broadcast
+      # record. A signed transaction is included at most once, and it is
+      # accepted only while this reservation is held, so a released one cannot
+      # be accepted twice (mppx Charge.ts:1066-1101,1166-1184).
       {:error, _reason} = error ->
         safe_budget_pending(budget, transaction_hash(tx))
         safe_dedup_release(store, reserved_hash, token)
         error
     end
   end
+
+  # A transaction that is already included is a replayed credential, whatever
+  # its memo, unless this server recorded its own pending broadcast of it for
+  # this challenge (draft-tempo-charge-00 "Transaction Verification"). The
+  # record is read before the lookup, so one written by this attempt never
+  # counts as an earlier broadcast.
+  # A record that cannot be read leaves open whose broadcast it was, so it
+  # never yields the replay verdict.
+  defp check_inclusion(tx, rpc_url, config, store) do
+    hash = transaction_hash(tx)
+    state = broadcast_state(store, hash, config)
+
+    case {Broadcast.included(hash, rpc_url, broadcast_options(tx, config)), state} do
+      {:not_found, state} ->
+        {:ok, {:pending, state}}
+
+      {{:ok, receipt}, :own} ->
+        {:ok, {:included, receipt}}
+
+      {{:ok, _receipt}, :none} ->
+        {:error, {:pre_broadcast, Errors.new(:invalid_challenge, "Transaction hash already used")}}
+
+      # A resend of this server's own broadcast is safe either way: the node
+      # answers a duplicate, which settles by the receipt.
+      {:error, :own} ->
+        {:ok, {:pending, :own}}
+
+      {_failed_or_unread, _state} ->
+        {:error, {:pre_broadcast, Errors.new(:internal_payment_error, @internal_payment_error_detail)}}
+    end
+  end
+
+  defp settle_or_send({:included, receipt}, tx, _rpc_url, config, charge, _wait?, %{budget: budget, store: store}) do
+    tx_hash = transaction_hash(tx)
+    safe_budget_settle(budget, tx_hash)
+    tx |> verify_settled_receipt(tx_hash, receipt, charge, config, :optional) |> close_own_broadcast(store, tx, config)
+  end
+
+  defp settle_or_send({:pending, state}, tx, rpc_url, config, charge, wait?, %{budget: budget, store: store}) do
+    with :ok <- record_own_broadcast(store, tx, config, state) do
+      broadcast_with_budget(tx, rpc_url, config, charge, wait?, %{budget: budget, store: store, own?: state == :own})
+    end
+  end
+
+  # `:own` when this challenge holds the broadcast record, `:none` when it does
+  # not, `:fault` when the record could not be read.
+  defp broadcast_state(nil, _hash, _config), do: :none
+
+  defp broadcast_state(store, hash, config) do
+    case broadcast_owner(config) do
+      nil -> :none
+      owner -> read_broadcast_record(store, hash, owner)
+    end
+  end
+
+  defp read_broadcast_record(store, hash, owner) do
+    case store_get(store, broadcast_key(hash)) do
+      {:ok, ^owner} -> :own
+      {:ok, _other} -> :none
+      :not_found -> :none
+      {:error, _reason} -> :fault
+    end
+  rescue
+    # reach:disable-next-line bare_rescue
+    _exception -> :fault
+  catch
+    :exit, _reason -> :fault
+  end
+
+  # The challenge the broadcast is for. A caller that verifies without a
+  # challenge has nothing to bind a record to, so none is kept.
+  defp broadcast_owner(%{"challenge_id" => challenge_id}) when is_binary(challenge_id), do: challenge_id
+  defp broadcast_owner(_config), do: nil
+
+  # Written before the send and kept while its outcome is open, so a retry of
+  # the same credential settles the transaction this server submitted. A
+  # record another challenge holds means this server already sent the
+  # transaction for that challenge, so it does not pay this one.
+  defp record_own_broadcast(store, tx, %{"challenge_id" => owner} = config, state)
+       when not is_nil(store) and is_binary(owner) and state in [:none, :fault] do
+    store
+    |> Store.check_and_mark(broadcast_key(transaction_hash(tx)), owner,
+      challenge_expires: broadcast_record_expires(config, tx)
+    )
+    |> case do
+      :ok ->
+        :ok
+
+      {:error, :already_exists} when state == :none ->
+        {:error, {:pre_broadcast, Errors.new(:invalid_challenge, "Transaction hash already used")}}
+
+      {:error, :already_exists} ->
+        own_broadcast_fault("a record exists that could not be read")
+
+      {:error, reason} ->
+        own_broadcast_fault(inspect(reason))
+    end
+  rescue
+    # reach:disable-next-line bare_rescue
+    exception -> own_broadcast_fault(Exception.message(exception))
+  catch
+    :exit, reason -> own_broadcast_fault(inspect(reason))
+  end
+
+  defp record_own_broadcast(_store, _tx, _config, _state), do: :ok
+
+  defp own_broadcast_fault(reason) do
+    Logger.warning("MPP.Methods.Tempo: broadcast record store failed: #{reason}")
+    {:error, {:pre_broadcast, Errors.new(:internal_payment_error, @internal_payment_error_detail)}}
+  end
+
+  # The record ends once the transaction can no longer be included for this
+  # challenge: after the later of the challenge expiry and `validBefore`.
+  defp broadcast_record_expires(config, %Transaction{valid_before: valid_before}) do
+    challenge =
+      case DateTime.from_iso8601(config["challenge_expires"] || "") do
+        {:ok, expires, _offset} -> expires
+        {:error, _reason} -> nil
+      end
+
+    validity = if valid_before in 1..@max_unix_seconds, do: DateTime.from_unix!(valid_before)
+
+    case Enum.reject([challenge, validity], &is_nil/1) do
+      [] -> nil
+      times -> times |> Enum.max(DateTime) |> DateTime.to_iso8601()
+    end
+  end
+
+  defp drop_own_broadcast(nil, _tx, _config), do: :ok
+
+  # `:kept` when the record could not be removed.
+  defp drop_own_broadcast(store, tx, %{"challenge_id" => owner}) when is_binary(owner) do
+    case Store.delete(store, broadcast_key(transaction_hash(tx)), owner) do
+      :ok -> :ok
+      {:error, reason} -> broadcast_record_kept(inspect(reason))
+    end
+  rescue
+    # reach:disable-next-line bare_rescue
+    exception -> broadcast_record_kept(Exception.message(exception))
+  catch
+    :exit, reason -> broadcast_record_kept(inspect(reason))
+  end
+
+  defp drop_own_broadcast(_store, _tx, _config), do: :ok
+
+  defp broadcast_record_kept(reason) do
+    Logger.warning("MPP.Methods.Tempo: broadcast record removal failed: #{reason}")
+    :kept
+  end
+
+  defp broadcast_key(hash), do: @broadcast_key_prefix <> String.downcase(hash)
+
+  # A receipt that does not pay this charge is final, so the record ends with
+  # it: a retry must not settle the same receipt as this server's own.
+  defp close_own_broadcast({:ok, _tx_hash} = settled, _store, _tx, _config), do: settled
+
+  defp close_own_broadcast(failed, store, tx, config) do
+    drop_own_broadcast(store, tx, config)
+    failed
+  end
+
+  # A definitive rejection ends the record. So does a duplicate answer with no
+  # receipt on the attempt that wrote it: the transaction was submitted
+  # elsewhere, and a retry must not settle it as this server's own.
+  defp forget_own_broadcast(:rejected, tx, config, %{store: store}), do: drop_own_broadcast(store, tx, config)
+
+  defp forget_own_broadcast(:duplicate_unresolved, tx, config, %{store: store, own?: false}),
+    do: drop_own_broadcast(store, tx, config)
+
+  defp forget_own_broadcast(_outcome, _tx, _config, _pending), do: :ok
+
+  # A transaction submitted elsewhere counts only when a counted transfer
+  # carries this challenge's attribution memo. A sponsored transaction carries
+  # this server's fee-payer signature, so nobody else can have built it
+  # (mppx Charge.ts:1104-1114).
+  defp duplicate_memo_policy(%{own?: true}, _config), do: :optional
+  defp duplicate_memo_policy(_pending, config), do: if(fee_payer_enabled?(config), do: :optional, else: :required)
 
   defp begin_budget_broadcast(nil), do: :ok
   defp begin_budget_broadcast(%{adopted_hash: _hash}), do: :ok
@@ -1587,36 +1827,40 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, true, budget) do
-    case Broadcast.send_sync(raw_hex, transaction_hash(tx), rpc_url, broadcast_options(tx, config)) do
-      {:ok, tx_hash, receipt} ->
-        safe_budget_settle(budget, tx_hash)
-        verify_settled_receipt(tx, tx_hash, receipt, charge, config)
+  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, wait?, %{budget: budget} = pending) do
+    send = if wait?, do: &Broadcast.send_sync/4, else: &Broadcast.send_async/4
 
-      {:error, outcome} ->
-        {:error, broadcast_error(outcome, tx)}
-    end
-  end
-
-  defp broadcast_with_budget(%Transaction{raw: raw_hex} = tx, rpc_url, config, charge, false, budget) do
-    case Broadcast.send_async(raw_hex, transaction_hash(tx), rpc_url, broadcast_options(tx, config)) do
+    case send.(raw_hex, transaction_hash(tx), rpc_url, broadcast_options(tx, config)) do
       {:ok, tx_hash} ->
         safe_budget_pending(budget, tx_hash)
         {:ok, tx_hash}
 
       {:ok, tx_hash, receipt} ->
         safe_budget_settle(budget, tx_hash)
-        verify_settled_receipt(tx, tx_hash, receipt, charge, config)
+
+        tx
+        |> verify_settled_receipt(tx_hash, receipt, charge, config, :optional)
+        |> close_own_broadcast(pending.store, tx, config)
+
+      {:duplicate, tx_hash, receipt} ->
+        safe_budget_settle(budget, tx_hash)
+
+        tx
+        |> verify_settled_receipt(tx_hash, receipt, charge, config, duplicate_memo_policy(pending, config))
+        |> close_own_broadcast(pending.store, tx, config)
 
       {:error, outcome} ->
-        {:error, broadcast_error(outcome, tx)}
+        case forget_own_broadcast(outcome, tx, config, pending) do
+          :ok -> {:error, broadcast_error(outcome, tx)}
+          :kept -> {:error, {:record_kept, broadcast_error(outcome, tx)}}
+        end
     end
   end
 
-  defp verify_settled_receipt(tx, tx_hash, receipt, charge, config) do
+  defp verify_settled_receipt(tx, tx_hash, receipt, charge, config, memo_policy) do
     with :ok <- Shared.check_receipt_status(receipt),
          {:ok, sender_policy} <- transaction_sender_policy(tx, config),
-         {:ok, _transfer} <- find_matching_transfer(receipt, charge, nil, sender_policy) do
+         {:ok, _transfer} <- find_matching_transfer(receipt, charge, nil, sender_policy, memo_policy) do
       {:ok, tx_hash}
     end
   end
@@ -1636,7 +1880,7 @@ defmodule MPP.Methods.Tempo do
   # `MPP.Errors.client_detail/1` logs this detail when it renders the error.
   # Once `validBefore` has passed, one receipt lookup is final (mppx #1199 /
   # #1213 `BroadcastOutcomeUnknownError`).
-  defp broadcast_error(:unresolved, tx) do
+  defp broadcast_error(outcome, tx) when outcome in [:unresolved, :duplicate_unresolved] do
     tx_hash = transaction_hash(tx)
     valid_before = if is_nil(tx.valid_before), do: "none", else: Integer.to_string(tx.valid_before)
 
@@ -2096,29 +2340,33 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  # Finds a matching transfer. When the charge carries a challenge id and realm, a
-  # TransferWithMemo must be bound to that pair; a plain Transfer is rejected. A
-  # configured static memo is not consulted (mppx #904 / mpp-rs #421).
-  # Spec: draft-tempo-charge-00.md §Transaction Verification, lines 395-399.
+  # Finds the counted transfer under the charge draft's memo rules
+  # (draft-tempo-charge-00 "Memo Requirements by Credential Type"; mppx
+  # `isChallengeBound`, refs/mppx/src/tempo/server/Charge.ts:2098-2110).
+  # `:required` (hash credentials, and a pull transaction submitted elsewhere)
+  # counts only a transfer carrying this challenge's attribution memo.
+  # `:optional` (pull) also counts a plain transfer or a memo that is not in
+  # attribution format, but never while a matching transfer carries another
+  # challenge's attribution memo. A configured static memo is not consulted
+  # (mppx #904 / mpp-rs #421).
   # `sender_policy` is the mpp-rs ReceiptSenderPolicy: when machine tokens are
   # enabled, a transfer `from` either canonical swapper is accepted if the
   # transaction sender equals the expected payer.
-  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, source, sender_policy) do
+  defp find_matching_transfer(%{logs: logs}, %Charge{} = charge, source, sender_policy, memo_policy) do
     with {:ok, amount_int} <- Shared.parse_charge_amount(charge.amount),
          {:ok, transfers} <- Onchain.Transfer.parse_logs(logs) do
       # Also check TransferWithMemo events (onchain only parses standard Transfer)
       memo_transfers = Transfer.parse_transfer_with_memo_logs(logs)
 
-      match =
-        Enum.find(memo_transfers ++ transfers, fn transfer ->
+      counted =
+        Enum.filter(memo_transfers ++ transfers, fn transfer ->
           Onchain.Address.equal?(transfer.token, charge.currency) and
             Onchain.Address.equal?(transfer.to, charge.recipient) and
             transfer.amount == amount_int and
-            transfer_sender_allowed?(transfer, source, sender_policy) and
-            transfer_memo_bound?(transfer, charge)
+            transfer_sender_allowed?(transfer, source, sender_policy)
         end)
 
-      case match do
+      case select_counted_transfer(counted, charge.method_details || %{}, memo_policy) do
         nil -> {:error, Errors.new(:verification_failed, "No matching Transfer event found in transaction")}
         transfer -> {:ok, transfer}
       end
@@ -2248,47 +2496,50 @@ defmodule MPP.Methods.Tempo do
     end
   end
 
-  defp transfer_memo_bound?(transfer, %Charge{method_details: config}) do
-    case {Map.has_key?(transfer, :memo), config || %{}} do
-      {true, %{"challenge_id" => challenge_id, "realm" => realm}} ->
-        attribution_memo_bound?(transfer.memo, realm, challenge_id)
+  defp select_counted_transfer(counted, config, memo_policy) do
+    counted
+    |> Enum.reduce_while(nil, fn transfer, bound ->
+      case memo_binding(Map.fetch(transfer, :memo), config) do
+        :foreign -> {:halt, :foreign}
+        :bound -> {:cont, bound || transfer}
+        _unbound -> {:cont, bound}
+      end
+    end)
+    |> selected_transfer(counted, memo_policy)
+  end
 
-      {true, _config} ->
-        true
+  defp selected_transfer(:foreign, _counted, _memo_policy), do: nil
+  defp selected_transfer(nil, counted, :optional), do: List.first(counted)
+  defp selected_transfer(selected, _counted, _memo_policy), do: selected
 
-      {false, %{"challenge_id" => _challenge_id, "realm" => _realm}} ->
-        false
-
-      {false, _config} ->
-        true
+  # The payment call of a pull transaction, checked before anything is signed
+  # or sent: its memo is optional, but an attribution memo for another realm
+  # or challenge does not pay this one.
+  defp check_call_memo(payment, config) do
+    case memo_binding(Map.fetch(payment, :memo), config) do
+      :foreign -> {:error, Errors.new(:verification_failed, "Payment memo is not bound to this challenge")}
+      _bound_or_none -> :ok
     end
   end
 
-  defp check_matched_memo_binding(match, %{"challenge_id" => challenge_id, "realm" => realm}) do
-    case Map.fetch(match, :memo) do
-      {:ok, memo} ->
-        if attribution_memo_bound?(memo, realm, challenge_id) do
-          {:ok, match}
-        else
-          {:error, Errors.new(:verification_failed, "Payment memo is not bound to this challenge")}
-        end
-
-      :error ->
-        {:error, Errors.new(:verification_failed, "Payment memo is not bound to this challenge")}
-    end
-  end
-
-  defp check_matched_memo_binding(match, _config), do: {:ok, match}
-
-  defp attribution_memo_bound?(memo, realm, challenge_id) do
+  # `:bound` is this challenge's attribution memo, `:foreign` an attribution
+  # memo for another realm or challenge, `:none` no memo or one that is not in
+  # attribution format. Without a challenge to bind to, every transfer counts.
+  defp memo_binding({:ok, memo}, %{"challenge_id" => challenge_id, "realm" => realm}) do
     with {:ok, bytes} <- decode_memo(memo),
          {:ok, server, nonce} <- decode_attribution_parts(bytes) do
-      server == binary_part(Onchain.Hash.keccak(realm), 0, @attribution_server_fingerprint_length) and
-        nonce == binary_part(Onchain.Hash.keccak(challenge_id), 0, @attribution_nonce_length)
+      bound? =
+        server == binary_part(Onchain.Hash.keccak(realm), 0, @attribution_server_fingerprint_length) and
+          nonce == binary_part(Onchain.Hash.keccak(challenge_id), 0, @attribution_nonce_length)
+
+      if bound?, do: :bound, else: :foreign
     else
-      _ -> false
+      _not_attribution -> :none
     end
   end
+
+  defp memo_binding(:error, %{"challenge_id" => _challenge_id, "realm" => _realm}), do: :none
+  defp memo_binding(_memo, _config), do: :bound
 
   defp decode_attribution_parts(<<@attribution_tag, @attribution_version, rest::binary>>) do
     server = binary_part(rest, 0, @attribution_server_fingerprint_length)

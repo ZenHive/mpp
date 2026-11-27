@@ -17,6 +17,14 @@ defmodule MPP.Methods.Tempo.Broadcast do
   # says some transaction used the nonce, so one receipt lookup tells whether
   # it was this one. Every other answer is a definitive rejection.
   #
+  # An answer saying the node already holds or included the transaction means
+  # this send was not the one that submitted it. A receipt recovered after such
+  # an answer is reported as `:duplicate`, and a missing one as
+  # `:duplicate_unresolved`, so the caller can tell its own broadcast from a
+  # transaction submitted elsewhere (draft-tempo-charge-00 "Transaction
+  # Verification"; mppx `isDuplicateBroadcastError`,
+  # refs/mppx/src/tempo/server/Charge.ts:2013-2024).
+  #
   # The sync send gets at most two thirds of the confirmation budget; receipt
   # polling runs until the budget ends, or until 2 s after `validBefore` and
   # then one final lookup, because an expired transaction can no longer be
@@ -38,7 +46,9 @@ defmodule MPP.Methods.Tempo.Broadcast do
 
   @doc false
   @spec send_sync(String.t(), String.t(), String.t(), [option()]) ::
-          {:ok, String.t(), map()} | {:error, :rejected | :unresolved}
+          {:ok, String.t(), map()}
+          | {:duplicate, String.t(), map()}
+          | {:error, :rejected | :unresolved | :duplicate_unresolved}
   def send_sync(raw_hex, tx_hash, rpc_url, opts) do
     start = System.monotonic_time(:millisecond)
     timeout = Keyword.fetch!(opts, :timeout_ms)
@@ -47,7 +57,8 @@ defmodule MPP.Methods.Tempo.Broadcast do
       {:ok, %{} = receipt} -> {:ok, receipt["transactionHash"] || tx_hash, RPC.parse_receipt(receipt)}
       {:ok, _malformed} -> poll(tx_hash, rpc_url, opts, start + timeout)
       {:error, :ambiguous} -> poll(tx_hash, rpc_url, opts, start + timeout)
-      {:error, :nonce_used} -> lookup_once(tx_hash, rpc_url, opts, :rejected)
+      {:error, :held} -> tx_hash |> poll(rpc_url, opts, start + timeout) |> duplicate()
+      {:error, :nonce_used} -> tx_hash |> lookup_once(rpc_url, opts, :rejected) |> duplicate()
       {:error, :rejected} -> {:error, :rejected}
     end
   end
@@ -56,14 +67,38 @@ defmodule MPP.Methods.Tempo.Broadcast do
   # settles a resend of a transaction that is already included.
   @doc false
   @spec send_async(String.t(), String.t(), String.t(), [option()]) ::
-          {:ok, String.t()} | {:ok, String.t(), map()} | {:error, :rejected | :unresolved}
+          {:ok, String.t()}
+          | {:ok, String.t(), map()}
+          | {:duplicate, String.t(), map()}
+          | {:error, :rejected | :unresolved | :duplicate_unresolved}
   def send_async(raw_hex, tx_hash, rpc_url, opts) do
     case rpc("eth_sendRawTransaction", raw_hex, rpc_url, opts[:req_options] || [], Keyword.fetch!(opts, :timeout_ms)) do
       {:ok, hash} when is_binary(hash) -> {:ok, hash}
       {:ok, _malformed} -> lookup_once(tx_hash, rpc_url, opts, :unresolved)
       {:error, :ambiguous} -> lookup_once(tx_hash, rpc_url, opts, :unresolved)
-      {:error, :nonce_used} -> lookup_once(tx_hash, rpc_url, opts, :rejected)
+      {:error, :held} -> tx_hash |> lookup_once(rpc_url, opts, :unresolved) |> duplicate()
+      {:error, :nonce_used} -> tx_hash |> lookup_once(rpc_url, opts, :rejected) |> duplicate()
       {:error, :rejected} -> {:error, :rejected}
+    end
+  end
+
+  # Whether the transaction is included, asked before it is sent. Unlike the
+  # recovery lookups, a failed or late lookup is an error here: the caller
+  # must not send without knowing.
+  @doc false
+  @spec included(String.t(), String.t(), [option()]) :: {:ok, map()} | :not_found | :error
+  def included(tx_hash, rpc_url, opts) do
+    budget_ms = max(div(Keyword.fetch!(opts, :timeout_ms), 3), 1)
+
+    case request("eth_getTransactionReceipt", tx_hash, rpc_url, opts[:req_options] || [], budget_ms) do
+      {:ok, {:ok, %Req.Response{status: status, body: %{"result" => nil}}}} when status in 200..299 ->
+        :not_found
+
+      {:ok, {:ok, %Req.Response{status: status, body: %{"result" => %{} = receipt}}}} when status in 200..299 ->
+        {:ok, RPC.parse_receipt(receipt)}
+
+      _failed_or_late ->
+        :error
     end
   end
 
@@ -79,6 +114,10 @@ defmodule MPP.Methods.Tempo.Broadcast do
   @doc false
   @spec already_held?(String.t()) :: boolean()
   def already_held?(message) when is_binary(message), do: Regex.match?(@ambiguous_message, message)
+
+  defp duplicate({:ok, tx_hash, receipt}), do: {:duplicate, tx_hash, receipt}
+  defp duplicate({:error, :unresolved}), do: {:error, :duplicate_unresolved}
+  defp duplicate({:error, :rejected}), do: {:error, :rejected}
 
   defp poll(tx_hash, rpc_url, opts, deadline) do
     valid_until = valid_until(opts)
@@ -169,14 +208,18 @@ defmodule MPP.Methods.Tempo.Broadcast do
   # The send is never retried: a resend after a lost answer is the caller's
   # receipt recovery, not a transport retry.
   defp rpc(method, raw_hex, rpc_url, req_options, budget_ms) do
-    body = Jason.encode!(%{"jsonrpc" => "2.0", "method" => method, "params" => [raw_hex], "id" => 1})
-    http = [url: rpc_url, method: :post, headers: [{"content-type", "application/json"}], body: body]
-    req_options = Keyword.merge(req_options, receive_timeout: budget_ms, retry: false)
-
-    case within(budget_ms, fn -> Req.request(http, req_options) end) do
+    case request(method, raw_hex, rpc_url, req_options, budget_ms) do
       {:ok, response} -> classify_response(response)
       :timeout -> {:error, :ambiguous}
     end
+  end
+
+  defp request(method, param, rpc_url, req_options, budget_ms) do
+    body = Jason.encode!(%{"jsonrpc" => "2.0", "method" => method, "params" => [param], "id" => 1})
+    http = [url: rpc_url, method: :post, headers: [{"content-type", "application/json"}], body: body]
+    req_options = Keyword.merge(req_options, receive_timeout: budget_ms, retry: false)
+
+    within(budget_ms, fn -> Req.request(http, req_options) end)
   end
 
   defp classify_response(response) do
@@ -194,7 +237,7 @@ defmodule MPP.Methods.Tempo.Broadcast do
 
   defp classify(%{"message" => message}) when is_binary(message) do
     cond do
-      already_held?(message) -> :ambiguous
+      already_held?(message) -> :held
       Regex.match?(@nonce_used_message, message) -> :nonce_used
       true -> :rejected
     end

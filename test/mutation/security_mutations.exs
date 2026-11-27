@@ -128,14 +128,30 @@ defmodule MPP.Test.SecurityMutations do
         "lib/mpp/methods/tempo.ex",
         """
                     transfer.amount == amount_int and
-                    transfer_sender_allowed?(transfer, source, sender_policy) and
-                    transfer_memo_bound?(transfer, charge)
+                    transfer_sender_allowed?(transfer, source, sender_policy)
         """,
         """
                     is_integer(amount_int) and
-                    transfer_sender_allowed?(transfer, source, sender_policy) and
-                    transfer_memo_bound?(transfer, charge)
+                    transfer_sender_allowed?(transfer, source, sender_policy)
         """,
+        ["test/mpp/methods/tempo_test.exs"],
+        false
+      ),
+      mutation(
+        "tempo-duplicate-memo-optional",
+        "tempo-memo-binding",
+        "lib/mpp/methods/tempo.ex",
+        "  defp duplicate_memo_policy(_pending, config), do: if(fee_payer_enabled?(config), do: :optional, else: :required)\n",
+        "  defp duplicate_memo_policy(_pending, _config), do: :optional\n",
+        ["test/mpp/methods/tempo_test.exs"],
+        false
+      ),
+      mutation(
+        "tempo-included-transaction-accepted",
+        "tempo-memo-binding",
+        "lib/mpp/methods/tempo.ex",
+        "      {{:ok, _receipt}, :none} ->\n        {:error, {:pre_broadcast, Errors.new(:invalid_challenge, \"Transaction hash already used\")}}\n",
+        "      {{:ok, receipt}, :none} ->\n        {:ok, {:included, receipt}}\n",
         ["test/mpp/methods/tempo_test.exs"],
         false
       ),

@@ -458,7 +458,7 @@ The server can offer multiple payment methods in a single 402 response. The agen
 
 **Tempo capabilities:** Local or hosted fee-payer co-signing (server sponsors gas), fee-token allowlists, optimistic broadcast (respond before block inclusion), challenge-bound attribution memos, zero-amount proof credentials, delegated access-key proof authorization, opt-in presenter-identity binding for hash/transaction credentials, first-party machine-token (MACH and machineUSD) charge payments via `"machine_token_enabled"`, and pluggable dedup stores with a built-in ETS+TTL option via ConCache, including per-store key prefixes for shared-cache tenancy.
 
-**Tempo security note:** Challenges expire by default. Tempo payments must use challenge-bound attribution metadata; a static `"memo"` in `method_config` is rejected at startup, and plain transfers are rejected by the verifier. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast. Setting `"require_presenter_binding" => true` in the Tempo `method_config` additionally requires hash/transaction credential presenters to prove control of the transfer sender's wallet with a `"presenterSignature"` (the proof path's EIP-712 envelope, signed by the sender wallet or an authorized access key; the client signs `MPP.Methods.Tempo.Proof.hash/1` typed data) — closing the front-running residual documented in GHSA-34g7-vx6g-82mq. The requirement is advertised as `"presenterBinding": true` in the 402 method details. Opt-in because neither reference SDK binds the presenter on the hash path.
+**Tempo security note:** Challenges expire by default. A `type="hash"` payment must carry the challenge-bound attribution memo; a `type="transaction"` payment may be a plain transfer, and one whose attribution memo names another realm or challenge is rejected. A transaction that is already included when the server would send it is rejected as a used hash. A static `"memo"` in `method_config` is rejected at startup. Sponsored transactions are bounded by fee-payer gas policy and returned hosted fee tokens are checked against the sponsor allowlist before broadcast. Setting `"require_presenter_binding" => true` in the Tempo `method_config` additionally requires hash/transaction credential presenters to prove control of the transfer sender's wallet with a `"presenterSignature"` (the proof path's EIP-712 envelope, signed by the sender wallet or an authorized access key; the client signs `MPP.Methods.Tempo.Proof.hash/1` typed data) — closing the front-running residual documented in GHSA-34g7-vx6g-82mq. The requirement is advertised as `"presenterBinding": true` in the 402 method details. Opt-in because neither reference SDK binds the presenter on the hash path.
 
 **Tempo networks:** [Mainnet](https://docs.tempo.xyz/quickstart/connection-details#mainnet) (chain ID `4217`, `rpc.tempo.xyz`) | [Testnet (Moderato)](https://docs.tempo.xyz/quickstart/connection-details#testnet) (chain ID `42431`, `rpc.moderato.tempo.xyz`)
 
@@ -570,8 +570,9 @@ Req.new()
 `MPP.Client.Req` intercepts HTTP 402, pays, and retries with `Authorization: Payment`.
 Provider credentials and endpoints are passed explicitly; the providers do not read
 application configuration or environment variables. The Tempo provider verifies that
-the RPC serves the challenge's advertised chain before signing and always creates
-the challenge-bound attribution memo. A `memo` advertised by the server is ignored.
+the RPC serves the challenge's advertised chain before signing. It sends the
+`methodDetails.memo` a challenge sets, and the challenge-bound attribution memo
+when the challenge sets none.
 Machine-token payments use MACH by default; set `machine_token_deployment: :machine_usd`
 for a server that accepts only machineUSD. The advertised `machineTokenEnabled`
 flag does not distinguish deployments.

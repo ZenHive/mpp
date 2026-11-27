@@ -14,6 +14,7 @@ defmodule MPP.Methods.TempoTest do
   alias MPP.Methods.Tempo.MachineToken
   alias MPP.Receipt
   alias MPP.Tempo.ConCacheStore
+  alias MPP.Test.BroadcastRecordFaultStore
   alias MPP.Test.FailingPutStore
   alias MPP.Test.FaultyDeleteStore
   alias MPP.Test.HostedRecordFaultStore
@@ -185,8 +186,8 @@ defmodule MPP.Methods.TempoTest do
       end
     end
 
-    test "Plug.init rejects a static memo and names challenge-bound attribution" do
-      assert_raise ArgumentError, ~r/challenge-bound attribution/, fn ->
+    test "Plug.init rejects a static memo and names the challenge's attribution memo" do
+      assert_raise ArgumentError, ~r/bound by the challenge's attribution memo/, fn ->
         MPP.Plug.init(
           secret_key: String.duplicate("k", 32),
           realm: @realm,
@@ -821,10 +822,8 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "No matching Transfer"
     end
 
-    test "rejects a transaction call that carries only the static memo, before broadcast", %{charge: charge} do
-      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
-      tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
-
+    test "rejects a transaction call whose attribution memo is for another challenge or realm, before any RPC",
+         %{charge: charge} do
       test_pid = self()
 
       Req.Test.stub(Tempo, fn conn ->
@@ -833,16 +832,111 @@ defmodule MPP.Methods.TempoTest do
         Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
       end)
 
-      assert {:error, %Errors{} = error} =
-               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      for memo <- [attribution_memo(@realm, "another-challenge"), attribution_memo("other.example", @challenge_id)] do
+        calldata = transfer_with_memo_calldata(@recipient, 1_000_000, memo)
+        tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
 
-      assert error.detail =~ "not bound to this challenge"
+        assert {:error, %Errors{} = error} =
+                 TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+        assert error.type =~ "verification-failed"
+        assert error.detail =~ "not bound to this challenge"
+      end
+
       refute_received {:rpc, _}
     end
 
-    test "rejects a machine-token route whose swap memo is only the static value", %{charge: charge} do
+    test "a pull transaction pays with a plain transfer, a memo not in attribution format, or the bound memo",
+         %{charge: charge} do
+      bound = attribution_memo(@realm, @challenge_id)
+      # Version byte 0x02 is not the attribution format.
+      other_version = "0x" <> binary_part(strip_0x(bound), 0, 8) <> "02" <> binary_part(strip_0x(bound), 10, 54)
+
+      cases = [
+        {transfer_calldata(@recipient, 1_000_000), [transfer_log(from: test_sender_address())]},
+        {transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo),
+         [transfer_with_memo_log(from: test_sender_address(), memo: @test_memo)]},
+        {transfer_with_memo_calldata(@recipient, 1_000_000, other_version),
+         [transfer_with_memo_log(from: test_sender_address(), memo: other_version)]},
+        {transfer_with_memo_calldata(@recipient, 1_000_000, bound),
+         [transfer_with_memo_log(from: test_sender_address(), memo: bound)]}
+      ]
+
+      for {calldata, logs} <- cases do
+        tx_hex = build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431)
+        stub_broadcast_and_receipt(success_receipt(logs: logs))
+
+        assert {:ok, %Receipt{}} =
+                 TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+      end
+    end
+
+    test "a settled pull receipt whose counted transfer carries another challenge's memo is not accepted",
+         %{charge: charge} do
+      foreign = attribution_memo(@realm, "another-challenge")
+
+      tx_hex =
+        build_tempo_tx(calls: [build_call(@token_address, transfer_calldata(@recipient, 1_000_000))], chain_id: 42_431)
+
+      stub_broadcast_and_receipt(
+        success_receipt(
+          logs: [
+            transfer_log(from: test_sender_address()),
+            transfer_with_memo_log(from: test_sender_address(), memo: foreign)
+          ]
+        )
+      )
+
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "a bound transfer does not pay while another counted transfer carries another challenge's memo",
+         %{charge: charge} do
+      bound = attribution_memo(@realm, @challenge_id)
+      foreign = attribution_memo(@realm, "another-challenge")
+
+      stub_receipt(
+        success_receipt(
+          logs: [
+            transfer_with_memo_log(memo: bound),
+            transfer_with_memo_log(memo: foreign)
+          ]
+        )
+      )
+
+      assert {:error, %Errors{} = error} =
+               TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
+
+      assert error.detail =~ "No matching Transfer"
+    end
+
+    test "a hash credential needs the bound memo: a memo not in attribution format or for another challenge fails",
+         %{charge: charge} do
+      for memo <- [
+            @test_memo,
+            attribution_memo(@realm, "another-challenge"),
+            attribution_memo("other.example", @challenge_id)
+          ] do
+        stub_receipt(success_receipt(logs: [transfer_with_memo_log(memo: memo)]))
+
+        assert {:error, %Errors{} = error} =
+                 TempoTestHelpers.verify_nonced(%{"type" => "hash", "hash" => @tx_hash}, charge)
+
+        assert error.type =~ "verification-failed"
+      end
+    end
+
+    test "rejects a machine-token route whose swap memo is bound to another challenge", %{charge: charge} do
       charge = enable_machine_token(charge)
-      tx_hex = build_tempo_tx(calls: machine_token_calls(1_000_000, @test_memo), chain_id: 42_431)
+
+      tx_hex =
+        build_tempo_tx(
+          calls: machine_token_calls(1_000_000, attribution_memo(@realm, "another-challenge")),
+          chain_id: 42_431
+        )
 
       assert {:error, %Errors{} = error} =
                TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
@@ -850,7 +944,7 @@ defmodule MPP.Methods.TempoTest do
       assert error.detail =~ "not bound to this challenge"
     end
 
-    test "fee-payer pre-cosign rejects a static memo before broadcast", %{charge: charge} do
+    test "fee-payer pre-cosign rejects another challenge's memo before broadcast", %{charge: charge} do
       start_supervised!(TempoMemoryStore)
 
       charge = %{
@@ -864,7 +958,7 @@ defmodule MPP.Methods.TempoTest do
             })
       }
 
-      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, @test_memo)
+      calldata = transfer_with_memo_calldata(@recipient, 1_000_000, attribution_memo(@realm, "another-challenge"))
 
       tx_hex =
         build_tempo_tx(calls: [build_call(@token_address, calldata)], chain_id: 42_431, fee_payer: true)
@@ -1238,6 +1332,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1255,7 +1353,9 @@ defmodule MPP.Methods.TempoTest do
       assert_received {:rpc_call, "eth_sendRawTransactionSync", [sent_hex]}
       assert sent_hex == tx_hex
 
-      # Verify NO separate receipt fetch was made (sync returns receipt directly)
+      # One receipt lookup, ahead of the send; the sync send returns the receipt itself.
+      assert_received {:rpc_call, "eth_getTransactionReceipt", [looked_up]}
+      assert looked_up == keccak256_hex(tx_hex)
       refute_received {:rpc_call, "eth_getTransactionReceipt", _}
     end
 
@@ -1340,6 +1440,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             # Underfunded gas → the call runs out of gas on-chain → status 0x0.
             # This is the drain vector: without this gate the fee payer broadcasts,
@@ -1415,6 +1519,10 @@ defmodule MPP.Methods.TempoTest do
       send(test_pid, {:rpc_call, request["method"], request["params"]})
 
       case request["method"] do
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
         "eth_simulateV1" ->
           Req.Test.json(conn, %{
             "jsonrpc" => "2.0",
@@ -1475,6 +1583,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             # Simulation reports the transaction would revert (the gas-drain DoS guard)
             Req.Test.json(conn, %{
@@ -1534,6 +1646,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1637,6 +1753,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1681,7 +1801,8 @@ defmodule MPP.Methods.TempoTest do
 
       for {memo, expected} <- [
             {attribution_memo(@realm, @challenge_id), :ok},
-            {"0x" <> String.duplicate("ff", 32), :error}
+            {"0x" <> String.duplicate("ff", 32), :ok},
+            {attribution_memo(@realm, "another-challenge"), :error}
           ] do
         calls = [
           build_call(mach.token, approve_calldata(mach.swapper, 1_000_000)),
@@ -1808,6 +1929,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1853,6 +1978,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -1972,6 +2101,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -2014,6 +2147,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -2104,6 +2241,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, %{
               "jsonrpc" => "2.0",
@@ -2138,6 +2279,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             TempoMemoryStore.put(expected_key, later_token)
 
@@ -2343,6 +2488,7 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "a retry after an unresolved send recovers the receipt, and only once", %{charge: charge} do
+      charge = bind_challenge(charge)
       {payload, expected_key} = plain_transaction_payload()
       {:ok, mined?} = Agent.start_link(fn -> false end)
       test_pid = self()
@@ -2370,9 +2516,12 @@ defmodule MPP.Methods.TempoTest do
       # Only a settled payment consumes the credential.
       assert :not_found = TempoMemoryStore.get(expected_key)
 
+      # The retry finds the transaction included and settles it as this
+      # server's own broadcast, without sending it again.
       Agent.update(mined?, fn _ -> true end)
       assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
       assert {:ok, _} = TempoMemoryStore.get(expected_key)
+      assert :not_found = TempoMemoryStore.get("mpp:charge:broadcast:" <> keccak256_hex(payload["signature"]))
 
       # A settled transaction is never accepted again, whether resent or presented by hash.
       assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
@@ -2382,7 +2531,6 @@ defmodule MPP.Methods.TempoTest do
       assert {:error, %Errors{detail: "Transaction hash already used"}} =
                TempoTestHelpers.verify_nonced(hash_payload, charge)
 
-      assert_received :broadcast_issued
       assert_received :broadcast_issued
       refute_received :broadcast_issued
     end
@@ -2411,14 +2559,17 @@ defmodule MPP.Methods.TempoTest do
       assert {:ok, %Receipt{}} = Task.await(first, to_timeout(second: 5))
     end
 
-    test "an already-included transaction passes simulation and settles by its receipt", %{charge: charge} do
-      {payload, _key} = plain_transaction_payload()
+    test "a transaction that is already included is a replayed credential and is not sent", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
+      test_pid = self()
 
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
 
         case Jason.decode!(body)["method"] do
           method when method in ["eth_simulateV1", "eth_sendRawTransactionSync"] ->
+            send(test_pid, {:rpc, method})
+
             Req.Test.json(conn, %{
               "jsonrpc" => "2.0",
               "error" => %{"code" => -32_003, "message" => "expiring nonce transaction already included"},
@@ -2430,7 +2581,257 @@ defmodule MPP.Methods.TempoTest do
         end
       end)
 
+      assert {:error, %Errors{detail: "Transaction hash already used"} = error} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      assert error.type =~ "invalid-challenge"
+      refute_received {:rpc, "eth_sendRawTransactionSync"}
+      assert :not_found = TempoMemoryStore.get(expected_key)
+    end
+
+    test "a transaction another party submitted counts only with this challenge's memo", %{charge: charge} do
+      charge = bind_challenge(charge)
+      bound = attribution_memo(@realm, @challenge_id)
+      duplicate = fn conn, _method -> Req.Test.json(conn, already_known_body()) end
+
+      # No memo: the node holds it already, so it was not this server's send.
+      {payload, key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      stub_send_outcome(duplicate, fn -> success_receipt(logs: [transfer_log(from: test_sender_address())]) end)
+
+      assert {:error, %Errors{} = error} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert error.type =~ "verification-failed"
+      assert :not_found = TempoMemoryStore.get(key)
+      assert :not_found = TempoMemoryStore.get(record)
+
+      # A retry finds it included and holds no record of its own for it.
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
+
+      call = build_call(@token_address, transfer_with_memo_calldata(@recipient, 1_000_000, bound))
+      tx_hex = build_tempo_tx(calls: [call], chain_id: 42_431)
+
+      stub_send_outcome(duplicate, fn ->
+        success_receipt(logs: [transfer_with_memo_log(from: test_sender_address(), memo: bound)])
+      end)
+
+      assert {:ok, %Receipt{}} =
+               TempoTestHelpers.verify_nonced(%{"type" => "transaction", "signature" => tx_hex}, charge)
+    end
+
+    test "a duplicate answer without a receipt leaves nothing a retry could settle as its own", %{charge: charge} do
+      charge = charge |> bind_challenge() |> put_in([Access.key(:method_details), "wait_for_confirmation"], false)
+      {payload, key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+
+      stub_send_outcome(
+        fn conn, "eth_sendRawTransaction" -> Req.Test.json(conn, already_known_body()) end,
+        fn -> if Agent.get(mined?, & &1), do: success_receipt(logs: [transfer_log(from: test_sender_address())]) end
+      )
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      assert :not_found = TempoMemoryStore.get(record)
+
+      Agent.update(mined?, fn _ -> true end)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert :not_found = TempoMemoryStore.get(key)
+    end
+
+    test "the broadcast record belongs to one challenge and ends with a definitive rejection", %{charge: charge} do
+      charge = bind_challenge(charge)
+      {payload, _key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+
+      stub_send_outcome(
+        fn conn, _method -> Req.Test.transport_error(conn, :timeout) end,
+        fn -> if Agent.get(mined?, & &1), do: success_receipt(logs: [transfer_log(from: test_sender_address())]) end
+      )
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      assert {:ok, @challenge_id} = TempoMemoryStore.get(record)
+
+      # Another challenge presenting the same signed transaction is a replay once it is included.
+      Agent.update(mined?, fn _ -> true end)
+      other = put_in(charge.method_details["challenge_id"], "another-challenge")
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, other)
+      assert {:ok, @challenge_id} = TempoMemoryStore.get(record)
+
+      # The challenge that sent it settles it, once.
       assert {:ok, %Receipt{}} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert :not_found = TempoMemoryStore.get(record)
+      assert {:error, %Errors{detail: "Transaction hash already used"}} = TempoTestHelpers.verify_nonced(payload, charge)
+
+      {rejected, _key} = plain_transaction_payload(gas_limit: 22_000)
+      rejected_record = "mpp:charge:broadcast:" <> keccak256_hex(rejected["signature"])
+
+      stub_send_outcome(
+        fn conn, _method ->
+          Req.Test.json(conn, %{
+            "jsonrpc" => "2.0",
+            "error" => %{"code" => -32_003, "message" => "insufficient funds"},
+            "id" => 1
+          })
+        end,
+        fn -> nil end
+      )
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(rejected, charge)
+
+      assert :not_found = TempoMemoryStore.get(rejected_record)
+    end
+
+    test "a pending broadcast another challenge holds is not sent for this one", %{charge: charge} do
+      charge = bind_challenge(charge)
+      {payload, expected_key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      test_pid = self()
+
+      stub_send_outcome(
+        fn conn, method ->
+          send(test_pid, {:sent, method})
+          Req.Test.transport_error(conn, :timeout)
+        end,
+        fn -> nil end
+      )
+
+      other = put_in(charge.method_details["challenge_id"], "another-challenge")
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, other)
+
+      assert_received {:sent, "eth_sendRawTransactionSync"}
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      refute_received {:sent, _method}
+      assert {:ok, "another-challenge"} = TempoMemoryStore.get(record)
+      assert :not_found = TempoMemoryStore.get(expected_key)
+    end
+
+    test "an unreadable broadcast record is a store fault, never a used hash", %{charge: charge} do
+      charge = charge |> bind_challenge() |> put_in([Access.key(:method_details), "store"], BroadcastRecordFaultStore)
+      {payload, expected_key} = plain_transaction_payload()
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+
+          method ->
+            send(test_pid, {:sent, method})
+            Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      Process.put(:broadcast_read_fault, true)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      Process.delete(:broadcast_read_fault)
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      refute_received {:sent, _method}
+      assert :not_found = TempoMemoryStore.get(expected_key)
+    end
+
+    test "a refused send whose broadcast record cannot be removed keeps its reservation", %{charge: charge} do
+      charge = charge |> bind_challenge() |> put_in([Access.key(:method_details), "store"], BroadcastRecordFaultStore)
+      {payload, expected_key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+
+      stub_send_outcome(
+        fn conn, _method ->
+          Req.Test.json(conn, %{
+            "jsonrpc" => "2.0",
+            "error" => %{"code" => -32_003, "message" => "insufficient funds"},
+            "id" => 1
+          })
+        end,
+        fn -> if Agent.get(mined?, & &1), do: success_receipt(logs: [transfer_log(from: test_sender_address())]) end
+      )
+
+      Process.put(:broadcast_delete_fault, true)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+                   TempoTestHelpers.verify_nonced(payload, charge)
+        end)
+
+      assert log =~ "broadcast record removal failed"
+      assert {:ok, @challenge_id} = TempoMemoryStore.get(record)
+      assert {:ok, _token} = TempoMemoryStore.get(expected_key)
+
+      # Included later, the transaction does not settle through the kept record.
+      Agent.update(mined?, fn _ -> true end)
+
+      assert {:error, %Errors{detail: detail}} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert detail =~ "already used"
+    end
+
+    test "a send without a challenge keeps no broadcast record", %{charge: charge} do
+      {payload, _key} = plain_transaction_payload()
+      record = "mpp:charge:broadcast:" <> keccak256_hex(payload["signature"])
+      {:ok, mined?} = Agent.start_link(fn -> false end)
+
+      stub_send_outcome(
+        fn conn, _method -> Req.Test.transport_error(conn, :timeout) end,
+        fn -> if Agent.get(mined?, & &1), do: success_receipt() end
+      )
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      assert :not_found = TempoMemoryStore.get(record)
+
+      Agent.update(mined?, fn _ -> true end)
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+    end
+
+    test "a failed receipt lookup ahead of the send stops the payment before anything is sent", %{charge: charge} do
+      {payload, expected_key} = plain_transaction_payload()
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_simulateV1" ->
+            Req.Test.json(conn, simulate_success_body())
+
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "busy"}, "id" => 1})
+
+          method ->
+            send(test_pid, {:rpc, method})
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
+        end
+      end)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      refute_received {:rpc, _}
+      assert :not_found = TempoMemoryStore.get(expected_key)
     end
 
     test "a recovered receipt that reverted is not accepted", %{charge: charge} do
@@ -2477,6 +2878,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             send(parent, {:simulate_entered, self()})
 
@@ -2566,6 +2971,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -2638,6 +3047,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, simulate_success_body())
 
@@ -2924,6 +3337,10 @@ defmodule MPP.Methods.TempoTest do
         request = Jason.decode!(body)
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             # Malformed: no "result" or "error" key
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "unexpected" => "field", "id" => 1})
@@ -3431,6 +3848,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_call" ->
             Req.Test.json(conn, eth_call_success_body())
 
@@ -3477,6 +3898,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_call" ->
             Req.Test.json(conn, eth_call_success_body())
 
@@ -3537,6 +3962,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_call" ->
             # The transaction would revert on-chain → JSON-RPC code 3.
             Req.Test.json(conn, %{
@@ -3573,6 +4002,7 @@ defmodule MPP.Methods.TempoTest do
         case {request["method"], request["params"]} do
           {"eth_call", [%{"feePayerSignature" => _}, _]} -> sponsored_response.(conn)
           {"eth_call", _} -> sender_response.(conn)
+          {"eth_getTransactionReceipt", _} -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
           _ -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
         end
       end)
@@ -3859,6 +4289,7 @@ defmodule MPP.Methods.TempoTest do
     } do
       charge = %{charge | method_details: Map.put(charge.method_details, "wait_for_confirmation", false)}
       {:ok, tx_hex} = build_sponsored_client_tx(nonce: 11)
+      sent = :atomics.new(1, [])
 
       Req.Test.stub(Tempo, fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -3870,15 +4301,18 @@ defmodule MPP.Methods.TempoTest do
           "eth_call" ->
             Req.Test.json(conn, eth_call_success_body())
 
+          "eth_getTransactionReceipt" ->
+            result = if :atomics.get(sent, 1) == 1, do: success_receipt()
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => result, "id" => 1})
+
           "eth_sendRawTransaction" ->
+            :atomics.put(sent, 1, 1)
+
             Req.Test.json(conn, %{
               "jsonrpc" => "2.0",
               "error" => %{"code" => -32_000, "message" => "already known"},
               "id" => 1
             })
-
-          "eth_getTransactionReceipt" ->
-            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => 1})
         end
       end)
 
@@ -4338,6 +4772,10 @@ defmodule MPP.Methods.TempoTest do
         send(test_pid, {:rpc_call, request["method"], request["params"]})
 
         case request["method"] do
+          # Asked before the send: the chain does not hold the transaction yet.
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
           "eth_simulateV1" ->
             Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => [%{"calls" => [%{"status" => "0x0"}]}], "id" => 1})
 
@@ -4432,6 +4870,10 @@ defmodule MPP.Methods.TempoTest do
       request = Jason.decode!(body)
 
       case request["method"] do
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
         "eth_simulateV1" ->
           Req.Test.json(conn, simulate_success_body())
 
@@ -4460,6 +4902,14 @@ defmodule MPP.Methods.TempoTest do
     end)
   end
 
+  defp bind_challenge(charge) do
+    update_in(charge.method_details, &Map.merge(&1, %{"challenge_id" => @challenge_id, "realm" => @realm}))
+  end
+
+  defp already_known_body do
+    %{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "already known"}, "id" => 1}
+  end
+
   defp plain_transaction_payload(opts \\ []) do
     call = build_call(@token_address, transfer_calldata(@recipient, 1_000_000))
     tx_hex = build_tempo_tx(Keyword.merge([calls: [call], chain_id: 42_431], opts))
@@ -4468,17 +4918,33 @@ defmodule MPP.Methods.TempoTest do
 
   # Simulation passes, the send answers with `send.(conn, method)`, and each
   # receipt lookup answers with `receipt.()` (nil while the transaction is unknown).
+  # Before the first send the chain does not hold the transaction, so the
+  # lookup the server makes ahead of the send finds nothing.
   defp stub_send_outcome(send, receipt) do
+    sent = :atomics.new(1, [])
+
     Req.Test.stub(Tempo, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
 
       case Jason.decode!(body)["method"] do
-        "eth_simulateV1" -> Req.Test.json(conn, simulate_success_body())
-        "eth_call" -> Req.Test.json(conn, eth_call_success_body())
-        "eth_getTransactionReceipt" -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt.(), "id" => 1})
-        method -> send.(conn, method)
+        "eth_simulateV1" ->
+          Req.Test.json(conn, simulate_success_body())
+
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_success_body())
+
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => receipt_once_sent(sent, receipt), "id" => 1})
+
+        method ->
+          :atomics.put(sent, 1, 1)
+          send.(conn, method)
       end
     end)
+  end
+
+  defp receipt_once_sent(sent, receipt) do
+    if :atomics.get(sent, 1) == 1, do: receipt.()
   end
 
   defp unresolved_detail(hash, valid_before) do
@@ -4494,6 +4960,10 @@ defmodule MPP.Methods.TempoTest do
       request = Jason.decode!(body)
 
       case request["method"] do
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
         "eth_simulateV1" ->
           Req.Test.json(conn, simulate_success_body())
 
@@ -4523,6 +4993,10 @@ defmodule MPP.Methods.TempoTest do
       request = Jason.decode!(body)
 
       case request["method"] do
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
         "eth_simulateV1" ->
           Req.Test.json(conn, %{
             "jsonrpc" => "2.0",
@@ -5184,6 +5658,10 @@ defmodule MPP.Methods.TempoTest do
 
         response =
           case request["method"] do
+            # Asked before the send: the chain does not hold the transaction yet.
+            "eth_getTransactionReceipt" ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
@@ -5236,6 +5714,10 @@ defmodule MPP.Methods.TempoTest do
 
         response =
           case request["method"] do
+            # Asked before the send: the chain does not hold the transaction yet.
+            "eth_getTransactionReceipt" ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
@@ -5269,6 +5751,7 @@ defmodule MPP.Methods.TempoTest do
     test "a retry after an unresolved hosted broadcast settles by the recorded fill's receipt", %{
       charge: charge
     } do
+      charge = bind_challenge(charge)
       {:ok, tx_hex} = build_hosted_client_tx()
       {:ok, tx} = Transaction.deserialize(tx_hex)
       fill_tx = hosted_fill_tx_map(tx)
@@ -5453,6 +5936,7 @@ defmodule MPP.Methods.TempoTest do
     test "unresolved resends of a recorded fill share one sponsor reservation that its receipt releases", %{
       charge: charge
     } do
+      charge = bind_challenge(charge)
       charge = put_in(charge.method_details["fee_payer_policy"], %{"max_in_flight_reservations" => 1})
       {ConCacheStore, store_opts} = charge.method_details["store"]
       {:ok, tx_hex} = build_hosted_client_tx()
@@ -5487,18 +5971,62 @@ defmodule MPP.Methods.TempoTest do
 
       sent_hash = Agent.get(chain, & &1.sent_hash)
 
-      # A retry under another challenge adopts the reservation, then fails the memo binding.
+      # A retry under another challenge adopts the reservation. It holds no
+      # broadcast record of its own, so a failed receipt lookup stops it before sending.
       rebound =
         update_in(charge.method_details, &Map.merge(&1, %{"challenge_id" => "another-challenge", "realm" => "api.test"}))
 
-      assert {:error, %Errors{detail: "Payment memo is not bound to this challenge"}} =
+      test_pid = self()
+
+      Req.Test.stub(Tempo, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case Jason.decode!(body)["method"] do
+          "eth_getTransactionReceipt" ->
+            Req.Test.json(conn, %{"jsonrpc" => "2.0", "error" => %{"code" => -32_000, "message" => "busy"}, "id" => 1})
+
+          "eth_call" ->
+            Req.Test.json(conn, eth_call_success_body())
+
+          method ->
+            send(test_pid, {:rpc, method})
+            Req.Test.transport_error(conn, :timeout)
+        end
+      end)
+
+      assert {:error, %Errors{detail: "An internal payment error occurred."}} =
                TempoTestHelpers.verify_nonced(payload, rebound)
+
+      refute_received {:rpc, "eth_sendRawTransactionSync"}
 
       assert {:ok, state} = ConCacheStore.get(@hosted_budget_key, store_opts)
       assert [%{phase: :pending, tx_hash: ^sent_hash}] = Map.values(state.reservations)
     end
 
+    test "an included recorded fill settles only for the challenge that sent it", %{charge: charge} do
+      charge = bind_challenge(charge)
+      {ConCacheStore, store_opts} = charge.method_details["store"]
+      {:ok, tx_hex} = build_hosted_client_tx()
+      {:ok, tx} = Transaction.deserialize(tx_hex)
+      chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
+      payload = %{"type" => "transaction", "signature" => tx_hex}
+
+      assert {:error, %Errors{detail: "Broadcast outcome is unknown" <> _}} =
+               TempoTestHelpers.verify_nonced(payload, charge)
+
+      Agent.update(chain, &%{&1 | mined?: true})
+      sent_hash = Agent.get(chain, & &1.sent_hash)
+      rebound = put_in(charge.method_details["challenge_id"], "another-challenge")
+
+      assert {:error, %Errors{detail: "Transaction hash already used"}} =
+               TempoTestHelpers.verify_nonced(payload, rebound)
+
+      assert {:ok, %Receipt{reference: ^sent_hash}} = TempoTestHelpers.verify_nonced(payload, charge)
+      assert :not_found = ConCacheStore.get("mpp:charge:broadcast:" <> sent_hash, store_opts)
+    end
+
     test "a reverted receipt of a recorded fill frees its sponsor reservation and is not accepted", %{charge: charge} do
+      charge = bind_challenge(charge)
       {ConCacheStore, store_opts} = charge.method_details["store"]
       {:ok, tx_hex} = build_hosted_client_tx()
       {:ok, tx} = Transaction.deserialize(tx_hex)
@@ -5524,6 +6052,7 @@ defmodule MPP.Methods.TempoTest do
     end
 
     test "the receipt lookup of a recorded fill is bounded by the confirmation budget", %{charge: charge} do
+      charge = bind_challenge(charge)
       {:ok, tx_hex} = build_hosted_client_tx()
       {:ok, tx} = Transaction.deserialize(tx_hex)
       chain = stub_hosted_chain(hosted_fill_tx_map(tx), mined: false)
@@ -5559,6 +6088,7 @@ defmodule MPP.Methods.TempoTest do
     test "a recorded hosted fill settles by its receipt after the signing-validity floor has passed", %{
       charge: charge
     } do
+      charge = bind_challenge(charge)
       valid_before = FeePayerPolicy.ceil_now() + 600
       {clock, set_clock} = fake_clock()
       charge = put_in(charge.method_details["clock"], clock)
@@ -5591,6 +6121,10 @@ defmodule MPP.Methods.TempoTest do
 
         response =
           case request["method"] do
+            # Asked before the send: the chain does not hold the transaction yet.
+            "eth_getTransactionReceipt" ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+
             "eth_fillTransaction" ->
               %{
                 "jsonrpc" => "2.0",
@@ -5615,6 +6149,10 @@ defmodule MPP.Methods.TempoTest do
 
         response =
           case request["method"] do
+            # Asked before the send: the chain does not hold the transaction yet.
+            "eth_getTransactionReceipt" ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+
             "eth_fillTransaction" ->
               %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
 
@@ -5645,8 +6183,15 @@ defmodule MPP.Methods.TempoTest do
 
         response =
           case request["method"] do
-            "eth_fillTransaction" -> %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
-            "eth_call" -> eth_call_success_body()
+            # Asked before the send: the chain does not hold the transaction yet.
+            "eth_getTransactionReceipt" ->
+              %{"jsonrpc" => "2.0", "result" => nil, "id" => request["id"]}
+
+            "eth_fillTransaction" ->
+              %{"jsonrpc" => "2.0", "result" => %{"tx" => fill_tx}, "id" => request["id"]}
+
+            "eth_call" ->
+              eth_call_success_body()
           end
 
         Req.Test.json(conn, response)
@@ -5690,8 +6235,15 @@ defmodule MPP.Methods.TempoTest do
       send(test_pid, {:rpc_call, request["method"]})
 
       case request["method"] do
-        "eth_call" -> Req.Test.json(conn, eth_call_success_body())
-        _ -> Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]})
+        # Asked before the send: the chain does not hold the transaction yet.
+        "eth_getTransactionReceipt" ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => nil, "id" => 1})
+
+        "eth_call" ->
+          Req.Test.json(conn, eth_call_success_body())
+
+        _ ->
+          Req.Test.json(conn, %{"jsonrpc" => "2.0", "result" => success_receipt(), "id" => request["id"]})
       end
     end)
   end
@@ -5758,7 +6310,9 @@ defmodule MPP.Methods.TempoTest do
   defp hosted_send_answer(conn, true = _mined?), do: Req.Test.json(conn, already_included_body())
   defp hosted_send_answer(conn, false), do: Req.Test.transport_error(conn, :timeout)
 
-  defp hosted_receipt(%{mined?: true, sent_hash: hash}), do: %{success_receipt() | "transactionHash" => hash}
+  defp hosted_receipt(%{mined?: true, sent_hash: hash}) when is_binary(hash),
+    do: %{success_receipt() | "transactionHash" => hash}
+
   defp hosted_receipt(_state), do: nil
 
   defp already_included_body do

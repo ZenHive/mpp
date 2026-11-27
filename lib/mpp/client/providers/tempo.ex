@@ -38,8 +38,9 @@ defmodule MPP.Client.Providers.Tempo do
   A challenge whose `methodDetails.supportedModes` is present and does not
   list `"pull"` is declined before any RPC or signing (mpp-rs #455 / #470).
   Zero-amount charges use `type="proof"` and ignore `supportedModes`.
-  The payment memo is always the challenge-bound attribution memo. A `memo`
-  advertised in method details is ignored (mppx #904 / mpp-rs #421).
+  The payment memo is `methodDetails.memo` when the challenge sets one (a
+  `0x`-prefixed 32-byte hex value; anything else is `{:error, :invalid_memo}`),
+  and the attribution memo for the challenge otherwise.
 
   ## Zero-amount proof realm
 
@@ -114,6 +115,7 @@ defmodule MPP.Client.Providers.Tempo do
 
   @attribution_version 1
   @tag_bytes 4
+  @memo_bytes 32
   @server_fingerprint_bytes 10
   @client_fingerprint_bytes 10
   @challenge_nonce_bytes 7
@@ -360,6 +362,19 @@ defmodule MPP.Client.Providers.Tempo do
 
   defp transaction_payload(signature, _challenge, _details, _chain_id, _address, _private_key) do
     {:ok, %{"type" => "transaction", "signature" => signature}}
+  end
+
+  # A challenge that sets `methodDetails.memo` is paid with exactly that memo
+  # (draft-tempo-charge-00 "Memo Requirements by Credential Type"; mppx
+  # tempo/client/Charge.ts:238-260). Otherwise the transfer carries the
+  # attribution memo for this challenge.
+  defp payment_memo(_challenge, %{"memo" => memo}, _client_id) when not is_nil(memo) do
+    with "0x" <> digits when byte_size(digits) == 2 * @memo_bytes <- memo,
+         {:ok, bytes} <- Base.decode16(digits, case: :mixed) do
+      {:ok, bytes}
+    else
+      _invalid -> {:error, :invalid_memo}
+    end
   end
 
   defp payment_memo(challenge, _details, client_id) do

@@ -40,7 +40,7 @@
       "tempo-proof-single-use-bypassed"
     ],
     "command": "mix mutation.security",
-    "fingerprint_sha256": "96068f1e1f4889f96cf6096a085f666ede17dab9ba21fb7c2f3bb74d4c6e24ba",
+    "fingerprint_sha256": "f9ce389ff59984c3b919fa636e6ff6d1f6de335d408cefb9241ec5ac08a5d537",
     "isolation": "Each mutant is compiled and tested in a disposable copy of the tracked working tree; production sources are never overwritten.",
     "mutations": [
       {
@@ -135,6 +135,20 @@
         "status": "killed"
       },
       {
+        "class": "tempo-memo-binding",
+        "classification": "non-equivalent; counts a transaction another party submitted without this challenge's memo",
+        "evidence": "a duplicate send answer for a memo-less transfer is rejected, and settles only with the bound memo",
+        "id": "tempo-duplicate-memo-optional",
+        "status": "killed"
+      },
+      {
+        "class": "tempo-memo-binding",
+        "classification": "non-equivalent; settles an already included transaction this server did not send",
+        "evidence": "a transaction included before the send is rejected as a used hash unless this challenge holds its broadcast record",
+        "id": "tempo-included-transaction-accepted",
+        "status": "killed"
+      },
+      {
         "class": "tempo-chain-authorization",
         "classification": "non-equivalent; authorizes the wrong chain",
         "evidence": "generated signed Tempo transactions on non-Moderato chains are rejected",
@@ -178,33 +192,33 @@
       }
     ],
     "observation": {
-      "baseline": "09:13:25.618 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => 3, \"message\" => \"execution reverted\"}\n.\n09:13:25.619 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => -32003, \"message\" => \"out of gas: gas exhausted during precompiled contract execution: 45000\"}\n.\n09:13:25.620 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => -32003, \"message\" => \"insufficient fee token balance: required 8929, but only have 0\"}\n..\n09:13:25.623 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => 3, \"message\" => \"out of gas\"}\n.....\n09:13:25.830 [warning] MPP.Methods.Tempo: sponsor budget pending transition failed: :incompatible_state\n.......\n09:13:25.842 [warning] MPP.Methods.Tempo: sponsor budget settle failed: :store_unavailable\n\n09:13:25.843 [warning] MPP.Methods.Tempo: sponsor budget pending transition failed: :store_unavailable\n...............................................................\n09:13:26.253 [warning] MPP.Methods.Tempo: hosted fill record removal failed: :unavailable\n............\nFinished in 8.1 seconds (4.4s async, 3.6s sync)\n\nResult: 612 passed (5 doctests, 12 properties, 595 tests)\n",
+      "baseline": "11:38:54.546 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => 3, \"message\" => \"execution reverted\"}\n.\n11:38:54.546 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => -32003, \"message\" => \"out of gas: gas exhausted during precompiled contract execution: 45000\"}\n.\n11:38:54.547 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => -32003, \"message\" => \"insufficient fee token balance: required 8929, but only have 0\"}\n..\n11:38:54.550 [warning] MPP.Methods.Tempo: sponsored transaction rejected in pre-broadcast simulation: %{\"code\" => 3, \"message\" => \"out of gas\"}\n.....\n11:38:54.754 [warning] MPP.Methods.Tempo: sponsor budget pending transition failed: :incompatible_state\n.......\n11:38:54.763 [warning] MPP.Methods.Tempo: sponsor budget settle failed: :store_unavailable\n\n11:38:54.764 [warning] MPP.Methods.Tempo: sponsor budget pending transition failed: :store_unavailable\n...............................................................\n11:38:55.166 [warning] MPP.Methods.Tempo: hosted fill record removal failed: :unavailable\n.............\nFinished in 9.4 seconds (5.0s async, 4.4s sync)\n\nResult: 625 passed (5 doctests, 12 properties, 608 tests)\n",
       "command": "MIX_ENV=test mix mutation.security --refresh",
       "elixir": "1.20.4",
       "erlang_otp": "29",
-      "recorded_at": "2026-11-25T01:14:37.913375Z",
+      "recorded_at": "2026-11-27T03:40:27.018282Z",
       "results": [
         {
           "id": "jcs-descending-key-order",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n..................\n\n  1) test canonicalize/1 objects keys sorted alphabetically (MPP.JCSTest)\n     test/mpp/jcs_test.exs:92\n     Assertion with == failed\n     code:  assert JCS.canonicalize(%{\"b\" => 1, \"a\" => 2}) == ~S({\"a\":2,\"b\":1})\n     left:  \"{\\\"b\\\":1,\\\"a\\\":2}\"\n     right: \"{\\\"a\\\":2,\\\"b\\\":1}\"\n     stacktrace:\n       test/mpp/jcs_test.exs:93: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.04 seconds (0.04s async, 0.00s sync)\n\nResult: 18/19 passed\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n..................\n\n  1) test canonicalize/1 objects keys sorted alphabetically (MPP.JCSTest)\n     test/mpp/jcs_test.exs:92\n     Assertion with == failed\n     code:  assert JCS.canonicalize(%{\"b\" => 1, \"a\" => 2}) == ~S({\"a\":2,\"b\":1})\n     left:  \"{\\\"b\\\":1,\\\"a\\\":2}\"\n     right: \"{\\\"a\\\":2,\\\"b\\\":1}\"\n     stacktrace:\n       test/mpp/jcs_test.exs:93: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.05 seconds (0.05s async, 0.00s sync)\n\nResult: 18/19 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": true
         },
         {
           "id": "hmac-request-slot-omitted",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n\n\n  1) test HMAC challenge-ID golden vectors (refs/mpp-rs test_golden_vectors) required fields only (MPP.ChallengeConformanceTest)\n     test/mpp/challenge_conformance_test.exs:62\n     challenge-ID divergence from mpp-rs golden vector required fields only\n     code: assert challenge.id == unquote(expected),\n     stacktrace:\n       test/mpp/challenge_conformance_test.exs:75: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.06 seconds (0.06s async, 0.00s sync)\n\nResult: 0/1 passed\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n\n\n  1) test HMAC challenge-ID golden vectors (refs/mpp-rs test_golden_vectors) required fields only (MPP.ChallengeConformanceTest)\n     test/mpp/challenge_conformance_test.exs:62\n     challenge-ID divergence from mpp-rs golden vector required fields only\n     code: assert challenge.id == unquote(expected),\n     stacktrace:\n       test/mpp/challenge_conformance_test.exs:75: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.05 seconds (0.05s async, 0.00s sync)\n\nResult: 0/1 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "hmac-digest-slot-omitted",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n..\n\n  1) test HMAC challenge-ID golden vectors (refs/mpp-rs test_golden_vectors) with digest (MPP.ChallengeConformanceTest)\n     test/mpp/challenge_conformance_test.exs:62\n     challenge-ID divergence from mpp-rs golden vector with digest\n     code: assert challenge.id == unquote(expected),\n     stacktrace:\n       test/mpp/challenge_conformance_test.exs:75: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.06 seconds (0.06s async, 0.00s sync)\n\nResult: 2/3 passed\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n..\n\n  1) test HMAC challenge-ID golden vectors (refs/mpp-rs test_golden_vectors) with digest (MPP.ChallengeConformanceTest)\n     test/mpp/challenge_conformance_test.exs:62\n     challenge-ID divergence from mpp-rs golden vector with digest\n     code: assert challenge.id == unquote(expected),\n     stacktrace:\n       test/mpp/challenge_conformance_test.exs:75: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.07 seconds (0.07s async, 0.00s sync)\n\nResult: 2/3 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "verifier-request-pin-bypassed",
-          "output": "               method: \"mock\",\n               timestamp: \"2026-11-25T01:13:36.151458Z\",\n               reference: \"ref_ok\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/verifier_pinned_property_test.exs:157: anonymous fn/3 in MPP.VerifierPinnedPropertyTest.\"property property: pinned-field divergence yields invalid_challenge when HMAC re-signed wrong amount in request (re-signed) returns invalid_challenge\"/1\n       (stream_data 1.4.0) lib/stream_data.ex:2585: StreamData.shrink_failure/5\n       (stream_data 1.4.0) lib/stream_data.ex:2551: StreamData.check_all/7\n       test/mpp/verifier_pinned_property_test.exs:133: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.09 seconds (0.09s async, 0.00s sync)\n\nResult: 15/16 passed (3/4 properties, 12/12 tests)\nFailed: 1 property\n",
+          "output": "               method: \"mock\",\n               timestamp: \"2026-11-27T03:39:06.047464Z\",\n               reference: \"ref_ok\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/verifier_pinned_property_test.exs:157: anonymous fn/3 in MPP.VerifierPinnedPropertyTest.\"property property: pinned-field divergence yields invalid_challenge when HMAC re-signed wrong amount in request (re-signed) returns invalid_challenge\"/1\n       (stream_data 1.4.0) lib/stream_data.ex:2585: StreamData.shrink_failure/5\n       (stream_data 1.4.0) lib/stream_data.ex:2551: StreamData.check_all/7\n       test/mpp/verifier_pinned_property_test.exs:133: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.1 seconds (0.1s async, 0.00s sync)\n\nResult: 15/16 passed (3/4 properties, 12/12 tests)\nFailed: 1 property\n",
           "status": "killed",
           "canary": true
         },
@@ -216,7 +230,7 @@
         },
         {
           "id": "verifier-expiry-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"mock\",\n               timestamp: \"2026-11-25T01:13:39.839381Z\",\n               reference: \"ref_1000\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/verifier_test.exs:365: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 10/11 passed\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"mock\",\n               timestamp: \"2026-11-27T03:39:10.096980Z\",\n               reference: \"ref_1000\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/verifier_test.exs:365: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 10/11 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
@@ -228,13 +242,13 @@
         },
         {
           "id": "evm-recipient-match-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-25T01:13:43.675191Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:473: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 29/30 passed\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-27T03:39:14.421281Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:473: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 29/30 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "evm-amount-match-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-25T01:13:45.623316Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:488: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 30/31 passed\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-27T03:39:16.359448Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:488: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.2 seconds (0.2s async, 0.00s sync)\n\nResult: 30/31 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
@@ -246,7 +260,7 @@
         },
         {
           "id": "evm-authorization-from-match-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-25T01:13:49.639795Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:780: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.3 seconds (0.3s async, 0.00s sync)\n\nResult: 48/49 passed (1/1 property, 47/48 tests)\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"evm\",\n               timestamp: \"2026-11-27T03:39:20.417919Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/evm_test.exs:780: (test)\n\n--max-failures reached, aborting test suite\nFinished in 0.3 seconds (0.3s async, 0.00s sync)\n\nResult: 48/49 passed (1/1 property, 47/48 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
@@ -258,48 +272,60 @@
         },
         {
           "id": "tempo-amount-match-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-25T01:13:59.005936Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:639: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.3 seconds (0.00s async, 4.3s sync)\n\nResult: 49/50 passed\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-27T03:39:29.674829Z\",\n               reference: \"0xabababababababababababababababababababababababababababababababab\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:640: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.8 seconds (0.00s async, 4.8s sync)\n\nResult: 49/50 passed\nFailed: 1 test\n",
+          "status": "killed",
+          "canary": false
+        },
+        {
+          "id": "tempo-duplicate-memo-optional",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-27T03:39:37.530494Z\",\n               reference: \"0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: \"0x20C0000000000000000000000000000000000000\",\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:2602: (test)\n\n--max-failures reached, aborting test suite\nFinished in 6.1 seconds (0.00s async, 6.1s sync)\n\nResult: 142/143 passed (3/3 properties, 139/140 tests)\nFailed: 1 test\n",
+          "status": "killed",
+          "canary": false
+        },
+        {
+          "id": "tempo-included-transaction-accepted",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-27T03:39:45.106579Z\",\n               reference: \"0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: \"0x20C0000000000000000000000000000000000000\",\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:2584: (test)\n\n--max-failures reached, aborting test suite\nFinished in 5.8 seconds (0.00s async, 5.8s sync)\n\nResult: 141/142 passed (3/3 properties, 138/139 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "tempo-chain-match-bypassed",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n.....................................................................................\n\n  1) test verify/2 — transaction credential returns error on chain_id mismatch (MPP.Methods.TempoTest)\n     test/mpp/methods/tempo_test.exs:1134\n     Chain ID mismatch: must reject before simulation or any RPC call\n     code: refute_received {:rpc_call, _method}, \"Chain ID mismatch: must reject before simulation or any RPC call\"\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:1145: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.5 seconds (0.00s async, 4.5s sync)\n\nResult: 85/86 passed (2/2 properties, 83/84 tests)\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n.........................................................................................\n\n  1) test verify/2 — transaction credential returns error on chain_id mismatch (MPP.Methods.TempoTest)\n     test/mpp/methods/tempo_test.exs:1228\n     Chain ID mismatch: must reject before simulation or any RPC call\n     code: refute_received {:rpc_call, _method}, \"Chain ID mismatch: must reject before simulation or any RPC call\"\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:1239: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.6 seconds (0.00s async, 4.6s sync)\n\nResult: 89/90 passed (2/2 properties, 87/88 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "tempo-unknown-dispatch-accepted",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-25T01:14:11.777669Z\",\n               reference: \"mutant\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:605: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.5 seconds (0.00s async, 4.5s sync)\n\nResult: 45/46 passed\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-27T03:39:58.310774Z\",\n               reference: \"mutant\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:606: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.8 seconds (0.00s async, 4.8s sync)\n\nResult: 45/46 passed\nFailed: 1 test\n",
           "status": "killed",
           "canary": true
         },
         {
           "id": "tempo-authorization-list-check-bypassed",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n.........................................................\n\n  1) test validate/2 — authorization list rejects a transaction with a single-entry authorization list (MPP.Methods.Tempo.FeePayerPolicyTest)\n     test/mpp/methods/tempo/fee_payer_policy_test.exs:475\n     match (=) failed\n     code:  assert {:error, reason} = FeePayerPolicy.validate(tx, policy)\n     left:  {:error, reason}\n     right: :ok\n     stacktrace:\n       test/mpp/methods/tempo/fee_payer_policy_test.exs:479: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.3 seconds (4.3s async, 0.00s sync)\n\nResult: 57/58 passed (5/5 doctests, 52/53 tests)\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n.........................................................\n\n  1) test validate/2 — authorization list rejects a transaction with a single-entry authorization list (MPP.Methods.Tempo.FeePayerPolicyTest)\n     test/mpp/methods/tempo/fee_payer_policy_test.exs:475\n     match (=) failed\n     code:  assert {:error, reason} = FeePayerPolicy.validate(tx, policy)\n     left:  {:error, reason}\n     right: :ok\n     stacktrace:\n       test/mpp/methods/tempo/fee_payer_policy_test.exs:479: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.7 seconds (4.7s async, 0.00s sync)\n\nResult: 57/58 passed (5/5 doctests, 52/53 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "tempo-key-authorization-check-bypassed",
-          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n............................................................\n\n  1) test validate/3 — key authorization pinning rejects a transaction carrying a key authorization by default (MPP.Methods.Tempo.FeePayerPolicyTest)\n     test/mpp/methods/tempo/fee_payer_policy_test.exs:509\n     match (=) failed\n     code:  assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)\n     left:  {:error, reason}\n     right: :ok\n     stacktrace:\n       test/mpp/methods/tempo/fee_payer_policy_test.exs:514: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.3 seconds (4.3s async, 0.00s sync)\n\nResult: 60/61 passed (5/5 doctests, 55/56 tests)\nFailed: 1 test\n",
+          "output": "Running ExUnit with seed: 0, max_cases: 28\nExcluding tags: [:integration, :cross_validation]\n\n............................................................\n\n  1) test validate/3 — key authorization pinning rejects a transaction carrying a key authorization by default (MPP.Methods.Tempo.FeePayerPolicyTest)\n     test/mpp/methods/tempo/fee_payer_policy_test.exs:509\n     match (=) failed\n     code:  assert {:error, reason} = FeePayerPolicy.validate(tx, policy, @now)\n     left:  {:error, reason}\n     right: :ok\n     stacktrace:\n       test/mpp/methods/tempo/fee_payer_policy_test.exs:514: (test)\n\n--max-failures reached, aborting test suite\nFinished in 5.0 seconds (5.0s async, 0.00s sync)\n\nResult: 60/61 passed (5/5 doctests, 55/56 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": false
         },
         {
           "id": "tempo-reserve-key-caller-bytes",
-          "output": "09:14:30.334 [error] MPP internal payment error: Broadcast outcome is unknown for transaction 0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e (validBefore: none). Look up its receipt before retrying.\n.\n09:14:30.335 [error] MPP internal payment error: Broadcast outcome is unknown for transaction 0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e (validBefore: none). Look up its receipt before retrying.\n.........\n\n  1) test verify/2 — dedup store two encodings of the same signed tx reserve one slot and yield one receipt (MPP.Methods.TempoTest)\n     test/mpp/methods/tempo_test.exs:1792\n     Assertion with == failed\n     code:  assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)\n     left:  \"0x76f8b382a5bf8080825208f85ef85c9420c000000000000000000000000000000000000080b844a9059cbb0000000000000000000000001234567890abcdef1234567890abcdef1234567800000000000000000000000000000000000000000000000000000000000f4240c0808080808080c0b841180c27bd575f66d65bd71799a6d452538d60ecae893bfff2c466081fd7500ff45266fcecefa3cf707b5e65a6496eaf79ea2bb4e6c36489e16bf184338a498a9e01\"\n     right: \"0x76f8b382a5bf8080825208f85ef85c9420c000000000000000000000000000000000000080b844a9059cbb0000000000000000000000001234567890abcdef1234567890abcdef1234567800000000000000000000000000000000000000000000000000000000000f4240c0808080808080c0b841180c27bd575f66d65bd71799a6d452538d60ecae893bfff2c466081fd7500ff45266fcecefa3cf707b5e65a6496eaf79ea2bb4e6c36489e16bf184338a498a9e1c\"\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:1824: (test)\n\n--max-failures reached, aborting test suite\nFinished in 4.7 seconds (0.00s async, 4.7s sync)\n\nResult: 113/114 passed (3/3 properties, 110/111 tests)\nFailed: 1 test\n",
+          "output": "11:40:18.471 [error] MPP internal payment error: Broadcast outcome is unknown for transaction 0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e (validBefore: none). Look up its receipt before retrying.\n.\n11:40:18.473 [error] MPP internal payment error: Broadcast outcome is unknown for transaction 0xd8a04e45da1b8ded06d31944ea306deaba61176e383ed995a31fcda5465c5d2e (validBefore: none). Look up its receipt before retrying.\n.........\n\n  1) test verify/2 — dedup store two encodings of the same signed tx reserve one slot and yield one receipt (MPP.Methods.TempoTest)\n     test/mpp/methods/tempo_test.exs:1913\n     Assertion with == failed\n     code:  assert String.downcase(broadcast_hex) == String.downcase(canonical_hex)\n     left:  \"0x76f8b382a5bf8080825208f85ef85c9420c000000000000000000000000000000000000080b844a9059cbb0000000000000000000000001234567890abcdef1234567890abcdef1234567800000000000000000000000000000000000000000000000000000000000f4240c0808080808080c0b841180c27bd575f66d65bd71799a6d452538d60ecae893bfff2c466081fd7500ff45266fcecefa3cf707b5e65a6496eaf79ea2bb4e6c36489e16bf184338a498a9e01\"\n     right: \"0x76f8b382a5bf8080825208f85ef85c9420c000000000000000000000000000000000000080b844a9059cbb0000000000000000000000001234567890abcdef1234567890abcdef1234567800000000000000000000000000000000000000000000000000000000000f4240c0808080808080c0b841180c27bd575f66d65bd71799a6d452538d60ecae893bfff2c466081fd7500ff45266fcecefa3cf707b5e65a6496eaf79ea2bb4e6c36489e16bf184338a498a9e1c\"\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:1949: (test)\n\n--max-failures reached, aborting test suite\nFinished in 5.2 seconds (0.00s async, 5.2s sync)\n\nResult: 117/118 passed (3/3 properties, 114/115 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": true
         },
         {
           "id": "tempo-proof-single-use-bypassed",
-          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-25T01:14:37.893243Z\",\n               reference: \"kM9xPqWvT2nJrHsY4aDfEb\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:4598: (test)\n\n--max-failures reached, aborting test suite\nFinished in 5.8 seconds (0.00s async, 5.8s sync)\n\nResult: 227/228 passed (3/3 properties, 224/225 tests)\nFailed: 1 test\n",
+          "output": "     right: {:ok,\n             %MPP.Receipt{\n               status: \"success\",\n               method: \"tempo\",\n               timestamp: \"2026-11-27T03:40:26.991731Z\",\n               reference: \"kM9xPqWvT2nJrHsY4aDfEb\",\n               external_id: nil,\n               subscription_id: nil,\n               funding_currency: nil,\n               extensions: %{}\n             }}\n     stacktrace:\n       test/mpp/methods/tempo_test.exs:5072: (test)\n\n--max-failures reached, aborting test suite\nFinished in 6.8 seconds (0.00s async, 6.8s sync)\n\nResult: 239/240 passed (3/3 properties, 236/237 tests)\nFailed: 1 test\n",
           "status": "killed",
           "canary": true
         }
       ],
-      "revision": "d5bf4319320174632aece58d8a62a857670f1c3a"
+      "revision": "73917ac26936af0f01ab324f63ef48dec2e1f7ef"
     },
     "reviewed_survivors": [
       {

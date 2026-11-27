@@ -5024,6 +5024,28 @@ Blast radius: the verify-and-claim path of every transport and the session and s
 created_at = "2026-11-26"
 scored_at = "2026-11-26"
 
+[[task]]
+id = "195"
+phase = 1
+bundle = "tempo"
+status = "pending"
+title = "Tie Tempo charge settlement to the signed transaction's own hash and to a challenge"
+scores = { d = 4, b = 3, u = 2 }
+acceptance_criteria = ["A sync or async send answer naming another hash never becomes the receipt reference or a claimed hash; the chosen behaviour (reject, or look up by the computed hash) is tested for both send modes", "A type=hash credential verified without challenge_id and realm is rejected with a specific error before any RPC call", "Unit stubs answer receipts for the hash of the transaction they were sent; no test relies on a receipt hash that differs from the signed transaction unless it tests that mismatch", "Mutation ledger refreshed (MIX_ENV=test mix mutation.security --refresh) and the default suite is green"]
+out_of_scope = ["The Task 186 memo rules and broadcast record, which are done"]
+files_to_modify = ["lib/mpp/methods/tempo.ex", "lib/mpp/methods/tempo/broadcast.ex", "test/mpp/methods/tempo_test.exs", "test/mpp/methods/tempo/broadcast_test.exs", "test/mpp/methods/tempo_full_flow_test.exs"]
+assignee = "codex"
+model = "gpt-6-astra"
+body = """
+Two settlement inputs in MPP.Methods.Tempo are still taken on trust. Both came up in the Task 186 review and were left out of it because they need fixture rework across roughly 80 unit tests.
+
+1. Send answers. `MPP.Methods.Tempo.Broadcast.send_sync/4` takes the receipt's `transactionHash` over the locally computed hash, and `send_async/4` returns whatever hash the node answers. The method then claims and reports that hash. mppx rejects an answer whose hash is not the signed transaction's (refs/mppx/src/tempo/server/Charge.ts, "Broadcast transaction hash does not match the signed transaction", in both the sync and the optimistic path). Decide between rejecting like mppx and treating a mismatch as an open outcome to be looked up by the computed hash; the computed hash is the one the pre-send inclusion check used. The current tests "post-broadcast dedup records on-chain hash when it differs from input" and siblings pin the old behaviour and must be rewritten, not deleted. Most unit stubs answer `success_receipt()` with a fixed `@tx_hash`; they need to echo the hash of the raw transaction they were sent.
+
+2. Challenge context. Without `"challenge_id"` and `"realm"` in method_details, `memo_binding/2` treats every memo as bound, so a direct `verify/2` caller that omits them accepts a hash credential with any transfer. `MPP.Verifier` always passes both. A hash credential already needs `"challenge_nonce" => true`; require `"challenge_id"` and `"realm"` alongside it, and give the unit tests that verify hashes directly a bound memo for the helper's challenge.
+"""
+created_at = "2026-11-27"
+scored_at = "2026-11-27"
+
 [bundles.testnet-funding]
 phase = 1
 order = 9
