@@ -7278,7 +7278,7 @@
       "id": "173",
       "phase": 1,
       "bundle": "client-sdk",
-      "status": "pending",
+      "status": "done",
       "title": "Honor a caller-set Accept-Payment header in MPP.Client.Req challenge selection",
       "scores": {
         "d": 3,
@@ -7299,9 +7299,12 @@
         "Behavior for a present but empty or unparseable caller header is chosen (mpp-rs refuses to pay; mppx falls back to config) and documented",
         "Requests without a caller header keep current behavior (regression test)"
       ],
+      "shipped_in": "c205a7383093a2e101062e08d8854a491922274d",
       "body": "mpp-rs #671 (da7c974) makes its MCP client honor caller Accept-Payment preferences; both SDKs' HTTP clients already let the caller's header win for ranking and exclusions (refs/mpp-rs/src/client/flow.rs:153-185, refs/mppx/src/client/internal/Fetch.ts:1175-1193). MPP.Client.Req keeps the caller's header on the wire but selects using only the attach/2 config.",
       "created_at": "2026-11-04",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-04",
+      "implemented": "MPP.Client.Req selects by the Accept-Payment header recorded at send time (RecordSend adapter): its q=0 exclusions always apply, a caller header also orders, an empty/unparseable/unrecorded header refuses payment (mpp-rs flow.rs:181-207); attach/2 rejects an :accept_payment that does not parse back; SelectionPolicy function results restricted to their input. Codex-reviewed over four rounds, last round no findings.",
       "cross_repo": []
     },
     {
@@ -7341,7 +7344,7 @@
       "id": "175",
       "phase": 1,
       "bundle": "tempo",
-      "status": "pending",
+      "status": "done",
       "title": "Give hosted fee-payer requests their own Req options with redirects disabled",
       "scores": {
         "d": 2,
@@ -7362,9 +7365,12 @@
         "Hosted fee-payer calls do not follow redirects (test with a redirecting stub)",
         "Existing hosted fee-payer :integration path stays green or flunks loudly without credentials"
       ],
+      "shipped_in": "c205a7383093a2e101062e08d8854a491922274d",
       "body": "mpp-rs #664 (75a0538, src/protocol/methods/tempo/hosted_fee_payer.rs) disables redirects and scopes headers to the fee-payer host. Our config req_options are shared between rpc_url and fee_payer_url and use Req's redirect defaults. Hardening of operator-configured hosts.",
       "created_at": "2026-11-04",
+      "done_at": "2026-11-27",
       "scored_at": "2026-11-04",
+      "implemented": "Hosted fee-payer fill uses its own \"fee_payer_req_options\"; the request is pinned after Req defaults merge (url/method/json/params, redirect/follow_redirects/retry off, http_errors: :return, inherited auth dropped), raises/exits/malformed responses become error tuples so reservations are released; config error never prints the value (mpp-rs hosted_fee_payer.rs:60-120). Codex-reviewed over four rounds, last round no findings.",
       "cross_repo": []
     },
     {
