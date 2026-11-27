@@ -42,6 +42,10 @@ defmodule MPP.Client.Spend.Units do
     raise ArgumentError, ~s(#{name} must be {"<decimal>", "<currency>"}, got: #{inspect(other)})
   end
 
+  @doc "An amount of one asset on a network, in atomic units: the shape `t:MPP.Client.Spend.asset_limit/0` names."
+  @spec asset_amount(String.t(), String.t(), non_neg_integer()) :: Spend.asset_limit()
+  def asset_amount(network, asset, amount), do: %{network: network, asset: asset, amount: amount}
+
   @doc "Validate an amount of one asset in atomic units."
   @spec asset_limit!(term(), String.t()) :: Spend.asset_limit()
   def asset_limit!(%{network: network, asset: asset, amount: amount} = limit, _name)

@@ -200,6 +200,8 @@ defmodule MPP.Client.MCP do
       other -> {:failed, other}
     end
   rescue
+    # Any failure of the send leaves the payment outcome open; it is reported, not raised.
+    # reach:disable-next-line bare_rescue
     error -> {:failed, error}
   catch
     kind, value -> {:failed, {kind, value}}

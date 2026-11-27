@@ -180,6 +180,7 @@ defmodule MPP.Client.MultiProvider do
     end
   rescue
     # The hash is reconciliation metadata; deriving it must not hide the outcome.
+    # reach:disable-next-line bare_rescue
     _error -> nil
   catch
     _kind, _value -> nil

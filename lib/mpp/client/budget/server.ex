@@ -113,7 +113,7 @@ defmodule MPP.Client.Budget.Server do
     }
   end
 
-  defp format(%{kind: {:asset, network, asset}}, value), do: %{network: network, asset: asset, amount: value}
+  defp format(%{kind: {:asset, network, asset}}, value), do: Units.asset_amount(network, asset, value)
   defp format(%{kind: {:money, currency}, scale: scale}, value), do: {format_units(value, scale), currency}
 
   # An integer at `decimals` places as a decimal string without trailing zeros.

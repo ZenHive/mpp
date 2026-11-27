@@ -277,7 +277,7 @@ defmodule MPP.Client.Spend do
   defp x402_fields(challenge) do
     with {:ok, %{"network" => network, "asset" => asset, "amount" => amount}} <- X402.exact_request(challenge),
          {:ok, amount} <- atomic_amount(amount) do
-      {:ok, %{network: network, asset: asset, amount: amount}}
+      {:ok, Units.asset_amount(network, asset, amount)}
     else
       _unreadable -> {:error, :challenge}
     end
@@ -295,7 +295,7 @@ defmodule MPP.Client.Spend do
          asset when is_binary(asset) and asset != "" <- request["currency"],
          {:ok, amount} <- atomic_amount(request["amount"]) do
       network = if chain_id, do: "eip155:#{chain_id}", else: challenge.method
-      {:ok, %{network: network, asset: asset, amount: amount}}
+      {:ok, Units.asset_amount(network, asset, amount)}
     else
       _unreadable -> {:error, :challenge}
     end

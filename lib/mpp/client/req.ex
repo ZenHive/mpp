@@ -16,6 +16,8 @@ defmodule MPP.Client.Req.PaidSend do
       try do
         send_with(adapter, watch_into(request, answered))
       rescue
+        # A failure before the server answered leaves the payment outcome open.
+        # reach:disable-next-line bare_rescue
         error -> if Process.get(answered), do: reraise(error, __STACKTRACE__), else: {request, error}
       catch
         kind, value ->
