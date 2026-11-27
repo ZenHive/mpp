@@ -12,6 +12,7 @@ Per-task history (acceptance criteria, scoring, decision notes) lives in `roadma
 
 - **A challenge may carry any non-empty intent without `|`** (mpp-rs #670, mppx `intent: z.string()`). `MPP.Headers.parse_challenge/1` and `parse_challenges/1` keep a challenge advertising a custom intent such as `"payment plan"` instead of dropping it; `format_challenge/1` escapes quotes and backslashes in it and still refuses CR or LF. A route still accepts only the intent it is configured for.
 - **A caller-set `Accept-Payment` header chooses the challenge in `MPP.Client.Req`** (mpp-rs `client/flow.rs`, mppx `client/internal/Fetch.ts`). The header was sent but selection used only the `attach/2` config. It now ranks the offers and excludes those it matches only with `q=0`, in place of `:accept_payment` and an `:accept_payment` or `:server_order` `:selection`; a `:selection` function orders the offers the header left. An empty or malformed caller header is not paid: `{:error, %MPP.Client.Req.Error{reason: :invalid_accept_payment}}`, as mpp-rs refuses to pay (mppx falls back to the config). Requests without the header select as before. `MPP.Client.MCP` is unchanged: it carries no caller HTTP headers.
+- **A `MPP.Client.SelectionPolicy` function selects only from the challenges it was given.** A challenge it returns that was not in its input (unsupported, or excluded by `Accept-Payment`) is dropped; it could be paid. Applies to `MPP.Client.Req` and `MPP.Client.MCP`.
 
 ## [0.26.0] — 2026-11-27
 

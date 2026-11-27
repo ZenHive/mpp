@@ -1330,14 +1330,69 @@ defmodule MPP.Client.ReqTest do
     test "repeated caller header lines are read as one list" do
       req = client(tempo_and_stripe_plug(), provider: both_providers())
 
+      # The last line alone ranks tempo first (*/* q=1); the first line alone
+      # leaves no offer. Only both together pay stripe.
       assert {:ok, %Req.Response{status: 200}} =
                Req.get(req,
                  url: "http://example.com/resource",
-                 headers: [{"accept-payment", "tempo/charge;q=0"}, {"accept-payment", "stripe/charge"}]
+                 headers: [{"accept-payment", "tempo/charge;q=0"}, {"accept-payment", "stripe/charge;q=0.5, */*"}]
                )
 
       assert_received {:paid, "stripe"}
       refute_received {:paid, "tempo"}
+    end
+
+    test "a header set by a later request step is the one that selects" do
+      req =
+        tempo_and_stripe_plug()
+        |> client(provider: both_providers(), accept_payment: [{"tempo", "charge", 1.0}])
+        |> Req.Request.append_request_steps(caller_accept: &Req.Request.put_header(&1, "accept-payment", "stripe/charge"))
+
+      assert {:ok, %Req.Response{status: 200}} = Req.get(req, url: "http://example.com/resource")
+      assert_received {:request, ["stripe/charge"], false}
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "a header the caller sets on a reused executed request is the one that selects" do
+      paywall = tempo_and_stripe_plug()
+
+      plug = fn conn ->
+        case conn.request_path do
+          "/free" -> Plug.Conn.send_resp(conn, 200, "free")
+          "/resource" -> paywall.(conn)
+        end
+      end
+
+      req = client(plug, provider: both_providers(), accept_payment: [{"tempo", "charge", 1.0}])
+
+      {executed, %Req.Response{status: 200, body: "free"}} = Req.run(req, url: "http://example.com/free")
+      assert Req.Request.get_header(executed, "accept-payment") == ["tempo/charge"]
+
+      reused = Req.Request.put_header(executed, "accept-payment", "tempo/charge;q=0, stripe/charge")
+
+      assert {_request, %Req.Response{status: 200, body: "paid"}} =
+               Req.run(reused, url: "http://example.com/resource")
+
+      assert_received {:request, ["tempo/charge;q=0, stripe/charge"], false}
+      assert_received {:paid, "stripe"}
+      refute_received {:paid, "tempo"}
+    end
+
+    test "a :selection function cannot pay an offer the caller's header excluded" do
+      excluded = make_challenge("tempo")
+
+      req =
+        client(tempo_and_stripe_plug(),
+          provider: both_providers(),
+          selection: fn _left -> [excluded] end
+        )
+
+      assert {:error, %ClientReq.Error{reason: :no_supported_challenge}} =
+               get_with_accept(req, "tempo/charge;q=0, */*")
+
+      refute_received {:paid, _method}
+      refute_received {:request, _accept, true}
     end
 
     test "without a caller header the attach/2 config selects and is advertised" do

@@ -13,7 +13,8 @@ defmodule MPP.Client.SelectionPolicy do
     * `:server_order` — keep the server's offer order (default)
     * `{:accept_payment, entries}` — reorder by `Accept-Payment` preferences
     * an arity-1 function — receives the supported challenges and returns them
-      filtered/reordered; the first remaining challenge is selected
+      filtered/reordered; the first remaining challenge is selected. A returned
+      challenge that was not in the list it received is dropped
   """
 
   use Descripex, namespace: "/client"
@@ -89,7 +90,9 @@ defmodule MPP.Client.SelectionPolicy do
 
   defp order(challenges, fun) when is_function(fun, 1) do
     case fun.(challenges) do
-      ordered when is_list(ordered) -> ordered
+      # Only a challenge it was given may come back: the input is what support
+      # checks and Accept-Payment exclusions left.
+      ordered when is_list(ordered) -> Enum.filter(ordered, &(&1 in challenges))
       _other -> []
     end
   end

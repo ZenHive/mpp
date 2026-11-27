@@ -133,6 +133,18 @@ defmodule MPP.Client.SelectionPolicyTest do
                SelectionPolicy.select(challenges, multi, fn _supported -> [] end)
     end
 
+    test "custom function cannot select a challenge it was not given" do
+      tempo = make_challenge("tempo")
+      stripe = make_challenge("stripe")
+      multi = MultiProvider.new([{TempoProvider, %{}}])
+
+      # stripe is unsupported, so the function only receives tempo.
+      assert {:error, :no_supported_challenge} =
+               SelectionPolicy.select([stripe], multi, fn _supported -> [tempo] end)
+
+      assert {:ok, ^tempo} = SelectionPolicy.select([tempo, stripe], multi, fn _supported -> [stripe, tempo] end)
+    end
+
     test "non-list function result is treated as no match" do
       challenges = [make_challenge("tempo")]
       multi = MultiProvider.new([{TempoProvider, %{}}])

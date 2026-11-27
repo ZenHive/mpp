@@ -255,51 +255,69 @@ defmodule MPP.Client.Req do
         request
         |> Req.Request.put_private(:mpp_request_origin, origin(request.url))
         |> Req.Request.put_private(:mpp_request_target, {request.method, redirect_count(request)})
-        |> Req.Request.put_private(:mpp_caller_accept_payment, caller_accept_payment(request))
 
       _existing ->
         request
     end
   end
 
-  # Runs before `put_accept_payment/1`, so a header found here is the caller's.
-  # Repeated field lines combine into one list (RFC 9110 §5.3).
-  defp caller_accept_payment(request) do
+  # The header on the request that was answered 402 is what the server saw, so
+  # selection reads it there: a later request step or a reused request may have
+  # replaced it after `put_accept_payment/1`. Repeated field lines combine into
+  # one list (RFC 9110 §5.3).
+  defp sent_accept_payment(request) do
     case Req.Request.get_header(request, "accept-payment") do
       [] -> nil
       values -> Enum.join(values, ", ")
     end
   end
 
-  # A caller-set header ranks and excludes (q=0) the offers instead of the
-  # attach/2 config, as in refs/mpp-rs/src/client/flow.rs:207 and
+  # A header other than the one this plugin injected is the caller's, and it
+  # ranks and excludes (q=0) the offers instead of the attach/2 config, as in
+  # refs/mpp-rs/src/client/flow.rs:207 and
   # refs/mppx/src/client/internal/Fetch.ts:1377-1395. An empty or malformed one
   # refuses payment, as mpp-rs does (flow.rs:181-189 `payment_allowed`); mppx
   # falls back to the config (Fetch.ts:1391), which could pay an offer the
   # caller's broken header was meant to exclude.
   defp selection_for(request, config) do
-    case Req.Request.get_private(request, :mpp_caller_accept_payment) do
-      nil ->
-        {:ok, config.selection}
+    sent = sent_accept_payment(request)
 
-      header ->
-        case AcceptPayment.parse(header) do
-          [] -> {:error, :invalid_accept_payment}
-          entries -> {:ok, caller_selection(entries, config.selection)}
-        end
+    if is_nil(sent) or sent == Req.Request.get_private(request, :mpp_injected_accept_payment) do
+      {:ok, config.selection}
+    else
+      case AcceptPayment.parse(sent) do
+        [] -> {:error, :invalid_accept_payment}
+        entries -> {:ok, caller_selection(entries, config.selection)}
+      end
     end
   end
 
-  defp caller_selection(entries, fun) when is_function(fun, 1), do: &(&1 |> AcceptPayment.rank(entries) |> fun.())
+  # The function sees only what the header left, and may return only that.
+  defp caller_selection(entries, fun) when is_function(fun, 1) do
+    fn supported ->
+      left = AcceptPayment.rank(supported, entries)
+
+      case fun.(left) do
+        ordered when is_list(ordered) -> Enum.filter(ordered, &(&1 in left))
+        _other -> []
+      end
+    end
+  end
+
   defp caller_selection(entries, _config_selection), do: {:accept_payment, entries}
 
   defp put_accept_payment(request) do
     config = Req.Request.get_private(request, :mpp_client)
 
-    if config.accept_payment == [] or not AcceptPolicy.allows?(config.accept_policy, request.url) do
+    if config.accept_payment == [] or sent_accept_payment(request) != nil or
+         not AcceptPolicy.allows?(config.accept_policy, request.url) do
       request
     else
-      HTTP.set_accept_payment(request, config.accept_payment)
+      value = AcceptPayment.format(config.accept_payment)
+
+      request
+      |> Req.Request.put_header("accept-payment", value)
+      |> Req.Request.put_private(:mpp_injected_accept_payment, value)
     end
   end
 
