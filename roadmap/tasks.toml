@@ -5067,6 +5067,20 @@ Two settlement inputs in MPP.Methods.Tempo are still taken on trust. Both came u
 created_at = "2026-11-27"
 scored_at = "2026-11-27"
 
+[[task]]
+id = "196"
+phase = 13
+bundle = "discovery"
+status = "pending"
+title = "Accept custom intents in x-payment-info discovery offers"
+scores = { d = 2, b = 4, u = 4 }
+acceptance_criteria = ['An x-payment-info offer with intent "subscribe" or "payment plan" parses and keeps the intent', "Empty, non-string, non-UTF-8 or `|`-containing intents are still rejected with :invalid_intent", "OpenAPI generation succeeds for a route offering a custom intent", 'test/mpp/discovery/payment_info_test.exs no longer asserts "subscribe" is invalid']
+assignee = "codex"
+model = "gpt-6-astra"
+body = """MPP.Discovery.PaymentInfo accepts only "charge" and "session" as an offer intent (@supported_intents in lib/mpp/discovery/payment_info.ex), so an x-payment-info offer for our own subscription intent, or any custom intent, fails to parse and fails OpenAPI generation (MPP.Discovery.OpenApi). Both reference SDKs take any string: mppx `intent: z.optional(z.string())` (refs/mppx/src/discovery/Discovery.ts:16) with an explicit 'accepts custom intents' test using "subscribe" (refs/mppx/src/discovery/Discovery.test.ts:36-44), and mpp-rs `pub intent: String` (refs/mpp-rs/src/proxy/service.rs:99-100). The discovery draft's field table only names charge/session as examples (refs/mpp-specs/specs/extensions/draft-payment-discovery-01.md:244). Since Task 174 the challenge parser accepts any non-empty UTF-8 intent without `|`; discovery should apply the same rule (reuse the challenge-side check rather than a second definition)."""
+created_at = "2026-11-27"
+scored_at = "2026-11-27"
+
 [bundles.testnet-funding]
 phase = 1
 order = 9
